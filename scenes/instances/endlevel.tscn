@@ -1,0 +1,39 @@
+[gd_scene format=3 uid="uid://be1o7dnsml0ms"]
+
+[ext_resource type="Script" uid="uid://cu6t8sn2knjnx" path="res://scripts/instances/levelend1(right).gd" id="1_mstem"]
+[ext_resource type="Script" uid="uid://3utt1r8now0q" path="res://scripts/instances/levelend2(left).gd" id="2_614kp"]
+[ext_resource type="Script" uid="uid://bdygt3jyc1tb7" path="res://scripts/instances/levelend3(up).gd" id="3_meksl"]
+[ext_resource type="Script" uid="uid://dy8l4ud355k1h" path="res://scripts/instances/levelend4(down).gd" id="4_7lnou"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_ojf42"]
+
+[node name="Node2D" type="Node2D" unique_id=868340670]
+
+[node name="level end 1 right" type="Area2D" parent="." unique_id=936904849]
+script = ExtResource("1_mstem")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="level end 1 right" unique_id=160480045]
+shape = SubResource("RectangleShape2D_ojf42")
+
+[node name="level end 2 left" type="Area2D" parent="." unique_id=1010537104]
+script = ExtResource("2_614kp")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="level end 2 left" unique_id=1662384487]
+shape = SubResource("RectangleShape2D_ojf42")
+
+[node name="level end 3 up" type="Area2D" parent="." unique_id=453544270]
+script = ExtResource("3_meksl")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="level end 3 up" unique_id=2011649576]
+shape = SubResource("RectangleShape2D_ojf42")
+
+[node name="level end 4 down" type="Area2D" parent="." unique_id=1793815550]
+script = ExtResource("4_7lnou")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="level end 4 down" unique_id=940541237]
+shape = SubResource("RectangleShape2D_ojf42")
+
+[connection signal="body_entered" from="level end 1 right" to="level end 1 right" method="_on_body_entered"]
+[connection signal="body_entered" from="level end 2 left" to="level end 2 left" method="_on_body_entered"]
+[connection signal="body_entered" from="level end 3 up" to="level end 3 up" method="_on_body_entered"]
+[connection signal="body_entered" from="level end 4 down" to="level end 4 down" method="_on_body_entered"]

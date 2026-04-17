@@ -1,0 +1,12 @@
+[gd_scene format=3 uid="uid://nlara1y8sm8h"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_y32ns"]
+
+[node name="Node2D" type="Node2D" unique_id=332322145]
+
+[node name="CharacterBody2D" type="CharacterBody2D" parent="." unique_id=1315422868]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="CharacterBody2D" unique_id=22889570]
+shape = SubResource("RectangleShape2D_y32ns")
+
+[node name="Camera2D" type="Camera2D" parent="CharacterBody2D" unique_id=611673009]
