@@ -1,47 +1,48 @@
-class_name PlayerAttack3 extends PlayerState
-
-@export var attack_duration: float = 0.4
-@export var deceleration_rate : float = 1
-
-var attack_timer: float = 0.0
+class_name Attack_3 extends Area2D
 
 
-func init() -> void:
-	print("init ", name)
+@export var damage : float = 2
+
+# when scene starts, set monitoring and visible to false until further notice
+func _ready() -> void:
+	body_entered.connect(_on_body_entered)
+	area_entered.connect(_on_body_entered)
+	visible =false
+	monitorable = false
+	monitoring = true
+	pass 
 
 
-func enter() -> void:
-	print("enter ", name)
+#if meet damage_area (area that can be damaged) do something.
+func _on_body_entered (body : Node2D) ->void:
+	print("body entered", body.name)
+	if body is Damage_Area:
+		body.take_damage(self)
+		print("Damage!!!")
+	pass
+	
 
-	attack_timer = attack_duration
-	next_state = null
+#setting active by passing attack duration into this as a float
+func activate(duration:float=0.1) ->void:
+	set_active()
+	await get_tree().create_timer(duration).timeout
+	set_active(false)
+	pass
+	
+	
 
-	do_attack()
-
-
-func exit() -> void:
-	print("exit ", name)
-
-
-func handle_input(_event: InputEvent) -> PlayerState:
-	# Last attack: ignore attack/jump/crouch input while locked.
-	return null
-
-
-func process(delta: float) -> PlayerState:
-	attack_timer -= delta
-
-	if attack_timer > 0.0:
-		return null
-
-	return idle
-
-
-func physics_process(_delta: float) -> PlayerState:
-	player.velocity.x = player.direction.x * player.move_speed
-	return null
-
-
-func do_attack() -> void:
-	player.attack_3.activate()
-	player.animation_player.play("attack_3")
+#making the area visible and monitorable.
+func set_active(value: bool = true) -> void:
+	monitoring = value
+	visible = value
+	pass
+	
+#flip attack when facing left.
+func flip(direction_x: float) -> void:
+	if direction_x >0:
+		scale.x = 1
+	elif direction_x <0:
+		scale.x = -1
+	
+	pass
+	

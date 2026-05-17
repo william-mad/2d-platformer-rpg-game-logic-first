@@ -1,72 +1,48 @@
-class_name PlayerAttack2 extends PlayerState
-
-@export var deceleration_rate : float = 1
-@export var attack_duration: float = 0.4
-@export var combo_time_window: float = 0.2
-@export var speed: float = 150.0
-
-var attack_timer: float = 0.0
-var combo_timer: float = 0.0
-var combo_requested: bool = false
+class_name Attack_2 extends Area2D
 
 
-func init() -> void:
-	print("init ", name)
+@export var damage : float = 3
+
+# when scene starts, set monitoring and visible to false until further notice
+func _ready() -> void:
+	body_entered.connect(_on_body_entered)
+	area_entered.connect(_on_body_entered)
+	visible =false
+	monitorable = false
+	monitoring = true
+	pass 
 
 
-func enter() -> void:
-	print("enter ", name)
+#if meet damage_area (area that can be damaged) do something.
+func _on_body_entered (body : Node2D) ->void:
+	print("body entered", body.name)
+	if body is Damage_Area:
+		body.take_damage(self)
+		print("Damage!!!")
+	pass
+	
 
-	# Reset state values every time this state starts.
-	attack_timer = attack_duration
-	combo_timer = 0.0
-	combo_requested = false
-	next_state = null
+#setting active by passing attack duration into this as a float
+func activate(duration:float=0.1) ->void:
+	set_active()
+	await get_tree().create_timer(duration).timeout
+	set_active(false)
+	pass
+	
+	
 
-	do_attack()
-
-
-func exit() -> void:
-	print("exit ", name)
-
-	# Optional: make sure attack hitbox turns off when leaving.
-
-
-func handle_input(_event: InputEvent) -> PlayerState:
-	# Allow attack input to queue the next combo attack.
-	if _event.is_action_pressed("attack"):
-		combo_requested = true
-		combo_timer = combo_time_window
-
-	# Lock the player in this attack state.
-	# Jump and crouch are ignored while attacking.
-	return null
-
-
-func process(delta: float) -> PlayerState:
-	attack_timer -= delta
-
-	if combo_timer > 0.0:
-		combo_timer -= delta
-
-	# While the attack timer is active, stay in this state.
-	if attack_timer > 0.0:
-		return null
-
-	# Attack duration is finished, so choose the next state.
-	if combo_requested and combo_timer > 0.0:
-		return attack_3
-
-	return idle
-
-
-func physics_process(_delta: float) -> PlayerState:
-	# Optional: reduce/control movement during attack.
-	player.velocity.x = player.direction.x * player.move_speed
-	# Stay in this state unless process() changes it.
-	return null
-
-
-func do_attack() -> void:
-	player.attack_2.activate()
-	player.animation_player.play("attack_2")
+#making the area visible and monitorable.
+func set_active(value: bool = true) -> void:
+	monitoring = value
+	visible = value
+	pass
+	
+#flip attack when facing left.
+func flip(direction_x: float) -> void:
+	if direction_x >0:
+		scale.x = 1
+	elif direction_x <0:
+		scale.x = -1
+	
+	pass
+	

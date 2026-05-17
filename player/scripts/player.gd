@@ -11,6 +11,8 @@ class_name Player extends CharacterBody2D
 @onready var attack_2: Attack_2 = %Attack_2
 @onready var attack_3: Attack_3 = %Attack_3
 @onready var mana: TextureProgressBar = %mana
+@onready var rope: Rope = $rope
+@onready var rope_detector: Area2D = %RopeDetector
 
 
 
@@ -31,8 +33,12 @@ var previous_state : PlayerState:
 var direction : Vector2 = Vector2.ZERO
 var gravity : float = 1500.0
 var gravity_multiplier : float = 1.0
+var nearby_attachables: Array[Node2D] = []
+var current_rope_target: Node2D = null
 
 func _ready() -> void:
+	rope_detector.body_entered.connect(_on_rope_detector_body_entered)
+	rope_detector.body_exited.connect(_on_rope_detector_body_exited)
 	#initialize states
 	initialize_states()
 	pass
@@ -40,6 +46,9 @@ func _ready() -> void:
 func _unhandled_input( event: InputEvent) -> void:
 	change_state(current_state.handle_input( event ))
 	#REMOVEEEEE later for propper attack state.
+	if event.is_action_pressed("attach_rope"):
+		toggle_rope()
+
 	
 	pass
 
@@ -117,4 +126,52 @@ func update_direction()->void:
 			
 	pass
 	
-	
+
+func toggle_rope() -> void:
+	# If rope is already attached, detach it.
+	if rope.active:
+		rope.detach()
+		current_rope_target = null
+		return
+
+	# Find the closest valid target.
+	var target := get_closest_attachable()
+
+	if target == null:
+		print("No rope target nearby.")
+		return
+
+	current_rope_target = target
+	rope.attach(self, current_rope_target)
+	print("Attached rope to: ", current_rope_target.name)
+
+
+func get_closest_attachable() -> Node2D:
+	var closest: Node2D = null
+	var closest_distance := INF
+
+	for body in nearby_attachables:
+		if body == null:
+			continue
+
+		if not is_instance_valid(body):
+			continue
+
+		var distance := global_position.distance_to(body.global_position)
+
+		if distance < closest_distance:
+			closest_distance = distance
+			closest = body
+
+	return closest
+
+
+func _on_rope_detector_body_entered(body: Node2D) -> void:
+	if body.is_in_group("rope_attachable"):
+		if not nearby_attachables.has(body):
+			nearby_attachables.append(body)
+
+
+func _on_rope_detector_body_exited(body: Node2D) -> void:
+	if nearby_attachables.has(body):
+		nearby_attachables.erase(body)
