@@ -23,6 +23,10 @@ func exit() -> void:
 
 
 func handle_input(_event : InputEvent) -> PlayerState:
+	
+	if _event.is_action_pressed("attack"):
+		return attack_1
+		
 	if _event.is_action_released("jump"):
 		player.velocity.y *= 0.5
 		

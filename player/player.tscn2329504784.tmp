@@ -176,7 +176,6 @@ colors = PackedColorArray(0.09411765, 0.16078432, 1, 1, 0.50411516, 0.66422695, 
 
 [sub_resource type="GradientTexture2D" id="GradientTexture2D_kb6p2"]
 gradient = SubResource("Gradient_yllr7")
-width = 100
 height = 20
 fill_from = Vector2(0, 0.5321285)
 fill_to = Vector2(1, 0.3995984)
@@ -289,9 +288,9 @@ debug_color = Color(1, 0, 0, 0.41960785)
 
 [node name="mana" type="TextureProgressBar" parent="." unique_id=1601591476]
 unique_name_in_owner = true
-offset_left = -41.0
-offset_top = -155.0
-offset_right = 59.0
-offset_bottom = -135.0
-max_value = 1000.0
+offset_left = -125.0
+offset_top = -161.0
+offset_right = 131.0
+offset_bottom = -139.0
+value = 40.0
 texture_progress = SubResource("GradientTexture2D_kb6p2")

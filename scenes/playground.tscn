@@ -6,6 +6,7 @@
 [ext_resource type="Texture2D" uid="uid://buf1alc21l0cv" path="res://images/backgrounds/bg based on gpt1.png" id="2_mm0a5"]
 [ext_resource type="Texture2D" uid="uid://b37a3pkkgvjqn" path="res://images/backgrounds/bg based on gpt2.png" id="3_o6wi6"]
 [ext_resource type="Script" uid="uid://dxg732h3lcbxt" path="res://player/scripts/damage_area.gd" id="3_q8s1k"]
+[ext_resource type="Script" uid="uid://cwysihsaqiyhs" path="res://scenes/line_2d.gd" id="7_emj6c"]
 
 [sub_resource type="Gradient" id="Gradient_kddj0"]
 offsets = PackedFloat32Array(0, 0.5150376, 0.8834587)
@@ -176,6 +177,11 @@ limit_left = -4445
 limit_top = -800
 limit_right = 2800
 limit_bottom = 400
+
+[node name="Line2D" type="Line2D" parent="Player" unique_id=1944585206]
+points = PackedVector2Array(362, -49, 177, -52, 3, -50)
+default_color = Color(0, 0, 0, 1)
+script = ExtResource("7_emj6c")
 
 [node name="Damage_Area" type="Area2D" parent="." unique_id=150656767]
 position = Vector2(0, -50)

@@ -170,16 +170,10 @@ size = Vector2(49.9375, 96)
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_ebec5"]
 size = Vector2(115.96875, 23.90625)
 
-[sub_resource type="Gradient" id="Gradient_yllr7"]
-offsets = PackedFloat32Array(0.0147929, 0.7307692)
-colors = PackedColorArray(0.09411765, 0.16078432, 1, 1, 0.50411516, 0.66422695, 1, 1)
+[sub_resource type="Gradient" id="Gradient_ebec5"]
 
-[sub_resource type="GradientTexture2D" id="GradientTexture2D_kb6p2"]
-gradient = SubResource("Gradient_yllr7")
-width = 100
-height = 20
-fill_from = Vector2(0, 0.5321285)
-fill_to = Vector2(1, 0.3995984)
+[sub_resource type="GradientTexture1D" id="GradientTexture1D_yllr7"]
+gradient = SubResource("Gradient_ebec5")
 
 [node name="Player" type="CharacterBody2D" unique_id=500096349 groups=["player"]]
 collision_layer = 2
@@ -259,7 +253,7 @@ script = ExtResource("8_hg6s5")
 metadata/_custom_type_script = "uid://d0nt3tk0ba3gc"
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Attack_1" unique_id=107625655]
-position = Vector2(23, -84)
+position = Vector2(34, -83)
 shape = SubResource("RectangleShape2D_8t03j")
 debug_color = Color(1, 0, 0, 0.41960785)
 
@@ -271,7 +265,7 @@ script = ExtResource("12_yllr7")
 metadata/_custom_type_script = "uid://d0nt3tk0ba3gc"
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Attack_2" unique_id=64835051]
-position = Vector2(28, -56)
+position = Vector2(39, -56)
 shape = SubResource("RectangleShape2D_2ieo8")
 debug_color = Color(1, 0, 0, 0.41960785)
 
@@ -283,15 +277,13 @@ script = ExtResource("13_kb6p2")
 metadata/_custom_type_script = "uid://d0nt3tk0ba3gc"
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Attack_3" unique_id=1563731121]
-position = Vector2(63, -57)
+position = Vector2(72, -57)
 shape = SubResource("RectangleShape2D_ebec5")
 debug_color = Color(1, 0, 0, 0.41960785)
 
-[node name="mana" type="TextureProgressBar" parent="." unique_id=1601591476]
-unique_name_in_owner = true
-offset_left = -41.0
-offset_top = -155.0
-offset_right = 59.0
-offset_bottom = -135.0
-max_value = 1000.0
-texture_progress = SubResource("GradientTexture2D_kb6p2")
+[node name="TextureProgressBar" type="TextureProgressBar" parent="." unique_id=1601591476]
+offset_left = -61.0
+offset_top = -140.0
+offset_right = 195.0
+offset_bottom = -129.0
+texture_progress = SubResource("GradientTexture1D_yllr7")

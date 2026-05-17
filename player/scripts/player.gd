@@ -8,6 +8,9 @@ class_name Player extends CharacterBody2D
 @onready var small_platform_detection: RayCast2D = $"small platform detection"
 @onready var animation_player: AnimationPlayer = $AnimationPlayer
 @onready var attack_1: Attack_1 = %Attack_1
+@onready var attack_2: Attack_2 = %Attack_2
+@onready var attack_3: Attack_3 = %Attack_3
+@onready var mana: TextureProgressBar = %mana
 
 
 
@@ -37,8 +40,7 @@ func _ready() -> void:
 func _unhandled_input( event: InputEvent) -> void:
 	change_state(current_state.handle_input( event ))
 	#REMOVEEEEE later for propper attack state.
-	if event.is_action_pressed("attack"):
-		attack_1.activate()
+	
 	pass
 
 
@@ -106,6 +108,8 @@ func update_direction()->void:
 	
 	if previous_direction.x != direction.x:
 		attack_1.flip(direction.x)
+		attack_2.flip(direction.x)
+		attack_3.flip(direction.x)
 		if direction.x < 0:
 			sprite_2d.flip_h = true
 		elif direction.x > 0:
