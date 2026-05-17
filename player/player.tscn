@@ -190,9 +190,13 @@ fill_to = Vector2(1, 0.3995984)
 collision_layer = 2
 collision_mask = 89
 script = ExtResource("1_yw30f")
+move_speed = null
 
-[node name="rope" parent="." unique_id=163704369 node_paths=PackedStringArray("start_node") instance=ExtResource("2_kb6p2")]
-start_node = NodePath("..")
+[node name="rope" parent="." unique_id=163704369 instance=ExtResource("2_kb6p2")]
+
+[node name="RopeOrigin" type="Marker2D" parent="." unique_id=591490636]
+unique_name_in_owner = true
+position = Vector2(1, -50)
 
 [node name="RopeDetector" type="Area2D" parent="." unique_id=1547712304]
 unique_name_in_owner = true

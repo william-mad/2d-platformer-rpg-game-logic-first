@@ -11,8 +11,11 @@ class_name Player extends CharacterBody2D
 @onready var attack_2: Attack_2 = %Attack_2
 @onready var attack_3: Attack_3 = %Attack_3
 @onready var mana: TextureProgressBar = %mana
+
+#rope mechanics:
 @onready var rope: Rope = $rope
 @onready var rope_detector: Area2D = %RopeDetector
+@onready var rope_origin: Marker2D = %RopeOrigin
 
 
 
@@ -128,13 +131,11 @@ func update_direction()->void:
 	
 
 func toggle_rope() -> void:
-	# If rope is already attached, detach it.
 	if rope.active:
 		rope.detach()
 		current_rope_target = null
 		return
 
-	# Find the closest valid target.
 	var target := get_closest_attachable()
 
 	if target == null:
@@ -142,9 +143,20 @@ func toggle_rope() -> void:
 		return
 
 	current_rope_target = target
-	rope.attach(self, current_rope_target)
-	print("Attached rope to: ", current_rope_target.name)
 
+	var target_attach_point: Node2D = target
+
+	if target.has_method("get_rope_attach_point"):
+		target_attach_point = target.get_rope_attach_point()
+
+	rope.attach(
+		self,
+		current_rope_target,
+		rope_origin,
+		target_attach_point
+	)
+
+	print("Attached rope to: ", current_rope_target.name)
 
 func get_closest_attachable() -> Node2D:
 	var closest: Node2D = null
