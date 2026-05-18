@@ -9,6 +9,7 @@ func init() -> void:
 
 func enter() -> void:
 	player.animation_player.play("run")
+	player.ledgegrabcolider.disabled = true
 	print("enter", name)
 	pass
 

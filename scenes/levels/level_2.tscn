@@ -2,6 +2,7 @@
 
 [ext_resource type="Texture2D" uid="uid://b4rtlr8qecj53" path="res://images/sprites/tilesets/sprite sheet try 1.png" id="1_j2425"]
 [ext_resource type="PackedScene" uid="uid://by1aphre1t601" path="res://player/player.tscn" id="2_g2h2n"]
+[ext_resource type="PackedScene" uid="uid://cpbq0rrj6i6pp" path="res://scenes/creatures/creature1.tscn" id="3_ra442"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_g2h2n"]
 texture = ExtResource("1_j2425")
@@ -108,3 +109,6 @@ layer_0/tile_data = PackedInt32Array(1507337, 458753, 5, 1507338, 458753, 5, 150
 position = Vector2(202, 306)
 
 [node name="Camera2D" type="Camera2D" parent="Player" unique_id=748539145]
+
+[node name="creature1" parent="." unique_id=672300065 groups=["rope_attachable"] instance=ExtResource("3_ra442")]
+position = Vector2(485, 261)

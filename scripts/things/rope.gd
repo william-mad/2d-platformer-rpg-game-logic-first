@@ -7,20 +7,14 @@ class_name Rope
 @export var start_visual_point: Node2D
 @export var end_visual_point: Node2D
 
-@export_category("Rope Length")
-@export var max_length: float = 600.0
-@export var tug_start_ratio: float = 0.75
-@export var hard_limit_enabled: bool = true
-
-@export_category("Tug Feel")
-@export var tug_strength: float = 900.0
-@export var max_tug_speed: float = 450.0
-@export var pull_player_too: bool = false
-@export var player_pull_multiplier: float = 0.35
+@export_category("Rope Feel")
+@export var max_length: float = 200.0
+@export var pull_strength: float = 1800.0
+@export var max_pull_speed: float = 500.0
 
 @export_category("Visuals")
 @export var use_sag: bool = true
-@export var sag_amount: float = 45.0
+@export var sag_amount: float = 35.0
 @export var rope_width: float = 1.0
 @export var rope_points: int = 8
 
@@ -33,11 +27,6 @@ class_name Rope
 func _ready() -> void:
 	line.width = rope_width
 	line.visible = active
-
-	line.clear_points()
-
-	for i in range(rope_points):
-		line.add_point(Vector2.ZERO)
 
 
 func _physics_process(delta: float) -> void:
@@ -55,7 +44,7 @@ func _physics_process(delta: float) -> void:
 
 	line.visible = true
 
-	_apply_rope_mechanics(delta)
+	_apply_rope_pull(delta)
 	_update_rope_visual()
 
 
@@ -85,7 +74,7 @@ func detach() -> void:
 	end_visual_point = null
 
 
-func _apply_rope_mechanics(delta: float) -> void:
+func _apply_rope_pull(delta: float) -> void:
 	var start_pos := start_body.global_position
 	var end_pos := end_body.global_position
 
@@ -96,48 +85,46 @@ func _apply_rope_mechanics(delta: float) -> void:
 		return
 
 	var direction_from_start_to_end := offset.normalized()
-	var direction_from_end_to_start := -direction_from_start_to_end
+	var direction_to_player := -direction_from_start_to_end
 
-	var tug_start_distance := max_length * tug_start_ratio
+	var tug_start_distance := max_length * 0.85
 
-	if distance < tug_start_distance:
-		return
+	# Soft tug near the end of the rope.
+	if distance > tug_start_distance and distance <= max_length:
+		var pull_ratio := inverse_lerp(tug_start_distance, max_length, distance)
+		pull_ratio = clampf(pull_ratio, 0.0, 1.0)
 
-	var stretch_ratio := inverse_lerp(tug_start_distance, max_length, distance)
-	stretch_ratio = clampf(stretch_ratio, 0.0, 1.0)
+		var target_speed := max_pull_speed * pull_ratio
+		_apply_soft_pull(end_body, direction_to_player, target_speed, delta)
 
-	var tug_speed := tug_strength * stretch_ratio * delta
-	tug_speed = min(tug_speed, max_tug_speed * delta)
-
-	_apply_pull_to_body(end_body, direction_from_end_to_start, tug_speed)
-
-	if pull_player_too:
-		_apply_pull_to_body(
-			start_body,
-			direction_from_start_to_end,
-			tug_speed * player_pull_multiplier
-		)
-
-	if hard_limit_enabled and distance > max_length:
-		var limited_position := start_pos + direction_from_start_to_end * max_length
-		end_body.global_position = limited_position
+	# Hard cap past max length.
+	if distance > max_length:
+		end_body.global_position = start_pos + direction_from_start_to_end * max_length
+		_remove_velocity_away_from_player(end_body, direction_from_start_to_end)
 
 
-func _apply_pull_to_body(body: Node2D, direction: Vector2, amount: float) -> void:
+func _apply_pull_to_body(body: Node2D, direction: Vector2, target_speed: float, delta: float) -> void:
 	if body is CharacterBody2D:
 		var character := body as CharacterBody2D
 
-		character.velocity += direction * amount * 60.0
+		var current_rope_speed := character.velocity.dot(direction)
+		var desired_rope_speed := target_speed
 
-		if character.velocity.length() > max_tug_speed:
-			character.velocity = character.velocity.normalized() * max_tug_speed
+		var new_rope_speed := move_toward(
+			current_rope_speed,
+			desired_rope_speed,
+			pull_strength * delta
+		)
+
+		var speed_change := new_rope_speed - current_rope_speed
+		character.velocity += direction * speed_change
 
 	elif body is RigidBody2D:
 		var rigid := body as RigidBody2D
-		rigid.apply_central_impulse(direction * amount * 20.0)
+		rigid.apply_central_force(direction * target_speed * pull_strength)
 
 	else:
-		body.global_position += direction * amount
+		body.global_position += direction * target_speed * delta
 
 
 func _update_rope_visual() -> void:
@@ -147,22 +134,57 @@ func _update_rope_visual() -> void:
 	var distance := start_pos.distance_to(end_pos)
 	var stretch_ratio := clampf(distance / max_length, 0.0, 1.0)
 
-	# More sag when loose, less sag when stretched.
 	var sag := 0.0
 	if use_sag:
 		sag = sag_amount * (1.0 - stretch_ratio)
 
+	line.width = rope_width
 	line.clear_points()
 
-	for i in range(rope_points):
-		var t := float(i) / float(rope_points - 1)
+	var point_count: int = maxi(rope_points, 2)
 
+	for i in range(point_count):
+		var t := float(i) / float(point_count - 1)
 		var point := start_pos.lerp(end_pos, t)
 
-		# Parabola shape:
-		# 0 at ends, strongest in the middle.
 		var curve := sin(t * PI)
-
 		point += Vector2.DOWN * sag * curve
 
 		line.add_point(line.to_local(point))
+
+func _remove_velocity_away_from_player(body: Node2D, away_direction: Vector2) -> void:
+	if body is CharacterBody2D:
+		var character := body as CharacterBody2D
+		var speed_away := character.velocity.dot(away_direction)
+
+		if speed_away > 0.0:
+			character.velocity -= away_direction * speed_away
+
+	elif body is RigidBody2D:
+		var rigid := body as RigidBody2D
+		var speed_away := rigid.linear_velocity.dot(away_direction)
+
+		if speed_away > 0.0:
+			rigid.linear_velocity -= away_direction * speed_away
+
+
+func _apply_soft_pull(body: Node2D, direction: Vector2, target_speed: float, delta: float) -> void:
+	if body is CharacterBody2D:
+		var character := body as CharacterBody2D
+
+		var current_speed := character.velocity.dot(direction)
+		var new_speed := move_toward(
+			current_speed,
+			target_speed,
+			pull_strength * delta
+		)
+
+		var speed_change := new_speed - current_speed
+		character.velocity += direction * speed_change
+
+	elif body is RigidBody2D:
+		var rigid := body as RigidBody2D
+		rigid.apply_central_force(direction * target_speed * pull_strength)
+
+	else:
+		body.global_position += direction * target_speed * delta

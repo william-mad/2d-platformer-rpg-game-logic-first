@@ -5,12 +5,15 @@ class_name Player extends CharacterBody2D
 @onready var sprite_2d: Sprite2D = $Sprite2D
 @onready var colider_stand: CollisionShape2D = $colider_stand
 @onready var colider_crouch: CollisionShape2D = $colider_crouch
+@onready var ongrounddetection: RayCast2D = $ongrounddetection
 @onready var small_platform_detection: RayCast2D = $"small platform detection"
+@onready var ledgegrabcolider: CollisionShape2D = %ledgegrabcolider
 @onready var animation_player: AnimationPlayer = $AnimationPlayer
 @onready var attack_1: Attack_1 = %Attack_1
 @onready var attack_2: Attack_2 = %Attack_2
 @onready var attack_3: Attack_3 = %Attack_3
 @onready var mana: TextureProgressBar = %mana
+@onready var ledgedetec: RayCast2D = %ledgedetec
 
 #rope mechanics:
 @onready var rope: Rope = $rope
@@ -123,9 +126,15 @@ func update_direction()->void:
 		attack_2.flip(direction.x)
 		attack_3.flip(direction.x)
 		if direction.x < 0:
+			ledgedetec.position.x = -abs(ledgedetec.position.x)
+			ledgedetec.target_position.x = -abs(ledgedetec.target_position.x)
+			ledgegrabcolider.scale.x = -1
 			sprite_2d.flip_h = true
 		elif direction.x > 0:
 			sprite_2d.flip_h = false
+			ledgedetec.position.x = abs(ledgedetec.position.x)
+			ledgedetec.target_position.x = abs(ledgedetec.target_position.x)
+			ledgegrabcolider.scale.x = 1
 			
 	pass
 	

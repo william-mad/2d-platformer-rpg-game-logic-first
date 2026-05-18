@@ -7,7 +7,7 @@
 radius = 18.0
 height = 118.0
 
-[node name="creature1" type="CharacterBody2D" unique_id=672300065]
+[node name="creature1" type="CharacterBody2D" unique_id=672300065 groups=["rope_attachable"]]
 collision_layer = 4
 collision_mask = 161
 script = ExtResource("1_iipxu")

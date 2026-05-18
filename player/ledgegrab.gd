@@ -1,4 +1,4 @@
-class_name PlayerStateIdle extends PlayerState
+class_name PlayerStateLedgeGrab extends PlayerState
 
 
 func init() -> void:
@@ -8,34 +8,34 @@ func init() -> void:
 
 
 func enter() -> void:
-	player.ledgegrabcolider.disabled = true
 	player.animation_player.play( "idle" )
+	player.ledgegrabcolider.disabled = false
 	print("enter", name)
 	pass
 
 
 
 func exit() -> void:
+	player.ledgegrabcolider.disabled = true
 	print("exit", name)
 	pass
 
 
 func handle_input( _event : InputEvent) -> PlayerState:
-	if _event.is_action_pressed("attack"):
-		return attack_1
 	
 	if _event.is_action_pressed( "jump" ):
 		print("trying to jump")
 		return jump
 	if _event.is_action_pressed("crouch"):
-		return crouch
+		player.position.y += 4
+		return fall
 	print(next_state)
 	return next_state
 
 
 func process(_delta: float) -> PlayerState:
-	if player.direction.x != 0:
-		return run
+	if player.ongrounddetection.is_colliding():
+		return idle
 	return next_state
 
 

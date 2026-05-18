@@ -10,6 +10,7 @@ func init() -> void:
 
 
 func enter() -> void:
+	player.ledgegrabcolider.disabled = true
 	player.animation_player.play("crouch")
 	player.colider_stand.disabled = true
 	player.colider_crouch.disabled = false

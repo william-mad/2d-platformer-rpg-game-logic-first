@@ -9,6 +9,7 @@ func init() -> void:
 
 
 func enter() -> void:
+	player.ledgedetec.enabled = true
 	player.animation_player.play("jump")
 	player.animation_player.pause()
 	print("enter", name)
@@ -18,6 +19,7 @@ func enter() -> void:
 
 
 func exit() -> void:
+	player.ledgedetec.enabled = false
 	print("exit", name)
 	pass
 
@@ -33,18 +35,26 @@ func handle_input(_event : InputEvent) -> PlayerState:
 	#if press down, go down 5x faster
 	if _event.is_action_pressed("crouch"):
 		player.gravity_multiplier = player.gravity_multiplier * 5
+		player.ledgedetec.enabled = false
 		return fall
 	return next_state
 
 
 func process(_delta: float) -> PlayerState:
+	if player.ledgedetec.is_colliding() == true:
+		player.ledgegrabcolider.disabled = false
+	else:
+		player.ledgegrabcolider.disabled = true
 	set_jump_frame()
 	return next_state
 
 func physics_process(_delta: float) -> PlayerState:
 	#player on the floor, is idle:
 	if player.is_on_floor():
-		return idle
+		if player.ongrounddetection.is_colliding():
+			return ledge_grab
+		else:
+			return idle
 	#player going down is falling:
 	if player.velocity.y >= 0:
 		return fall

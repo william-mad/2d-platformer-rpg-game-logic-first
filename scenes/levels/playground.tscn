@@ -180,7 +180,7 @@ limit_bottom = 400
 
 [node name="Damage_Area" type="Area2D" parent="." unique_id=150656767]
 position = Vector2(0, -50)
-collision_layer = 134
+collision_layer = 128
 collision_mask = 0
 script = ExtResource("7_0qlaq")
 metadata/_custom_type_script = "uid://dxg732h3lcbxt"
@@ -189,5 +189,5 @@ metadata/_custom_type_script = "uid://dxg732h3lcbxt"
 position = Vector2(806, 330)
 shape = SubResource("RectangleShape2D_kddj0")
 
-[node name="creature1" parent="." unique_id=672300065 groups=["rope_attachable"] instance=ExtResource("7_i1gjs")]
+[node name="creature1" parent="." unique_id=672300065 instance=ExtResource("7_i1gjs")]
 position = Vector2(660, 361)

@@ -3,6 +3,8 @@ extends CharacterBody2D
 
 @export var gravity: float = 1200.0
 @export var friction: float = 900.0
+@export var rope_anchor_strength: float = 1.0
+@export var rope_weight: float = 0.1
 
 @onready var sprite_2d: Sprite2D = %Sprite2D
 @onready var rope_attach_point: Marker2D = %RopeAttachPoint

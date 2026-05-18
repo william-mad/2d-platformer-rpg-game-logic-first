@@ -2,12 +2,13 @@
 
 [ext_resource type="Script" uid="uid://bda5vp1binny7" path="res://player/scripts/player.gd" id="1_yw30f"]
 [ext_resource type="PackedScene" uid="uid://bg32w4t03pt45" path="res://scenes/things/rope.tscn" id="2_kb6p2"]
-[ext_resource type="Texture2D" uid="uid://b2k4kwhhcesek" path="res://images/sprites/characters/player/walking with reference blank.png" id="2_qjkh3"]
+[ext_resource type="Texture2D" uid="uid://bf71w7k5dpcbs" path="res://images/sprites/characters/player/walking with reference blank1.png" id="3_wodsf"]
 [ext_resource type="Script" uid="uid://cygujhdr066hh" path="res://player/states/attack_1.gd" id="4_hg6s5"]
 [ext_resource type="Script" uid="uid://daav47am8xp04" path="res://player/states/idle.gd" id="4_qjkh3"]
 [ext_resource type="Script" uid="uid://dpqlkt65cmi33" path="res://player/states/attack_3.gd" id="5_2ieo8"]
 [ext_resource type="Script" uid="uid://dt3xncwh77pf4" path="res://player/states/attack_2.gd" id="5_8t03j"]
 [ext_resource type="Script" uid="uid://dcjdfodiahfuh" path="res://player/states/run.gd" id="5_g6k8r"]
+[ext_resource type="Script" uid="uid://cyonuy37qgnrc" path="res://player/ledgegrab.gd" id="5_wodsf"]
 [ext_resource type="Script" uid="uid://bnq1lutm6blp7" path="res://player/states/jump.gd" id="6_boad6"]
 [ext_resource type="Script" uid="uid://0y68bl6ivw4c" path="res://player/states/fall.gd" id="7_rgyib"]
 [ext_resource type="Script" uid="uid://d0nt3tk0ba3gc" path="res://player/scripts/attack_1.gd" id="8_hg6s5"]
@@ -44,7 +45,7 @@ tracks/0/keys = {
 
 [sub_resource type="Animation" id="Animation_ebec5"]
 resource_name = "attack_1"
-length = 0.5
+length = 0.33333334
 tracks/0/type = "value"
 tracks/0/imported = false
 tracks/0/enabled = true
@@ -52,15 +53,15 @@ tracks/0/path = NodePath("Sprite2D:frame")
 tracks/0/interp = 1
 tracks/0/loop_wrap = true
 tracks/0/keys = {
-"times": PackedFloat32Array(0, 0.16666667, 0.36666667),
-"transitions": PackedFloat32Array(1, 1, 1),
+"times": PackedFloat32Array(0, 0.06666667),
+"transitions": PackedFloat32Array(1, 1),
 "update": 1,
-"values": [19, 20, 21]
+"values": [21, 22]
 }
 
 [sub_resource type="Animation" id="Animation_yllr7"]
 resource_name = "attack_2"
-length = 0.5
+length = 0.4
 tracks/0/type = "value"
 tracks/0/imported = false
 tracks/0/enabled = true
@@ -68,15 +69,15 @@ tracks/0/path = NodePath("Sprite2D:frame")
 tracks/0/interp = 1
 tracks/0/loop_wrap = true
 tracks/0/keys = {
-"times": PackedFloat32Array(0, 0.20206408, 0.40000004),
+"times": PackedFloat32Array(-0.03333334, 0.033333335, 0.099999994),
 "transitions": PackedFloat32Array(1, 1, 1),
 "update": 1,
-"values": [19, 20, 21]
+"values": [24, 24, 25]
 }
 
 [sub_resource type="Animation" id="Animation_kb6p2"]
 resource_name = "attack_3"
-length = 0.5
+length = 0.3
 tracks/0/type = "value"
 tracks/0/imported = false
 tracks/0/enabled = true
@@ -84,10 +85,10 @@ tracks/0/path = NodePath("Sprite2D:frame")
 tracks/0/interp = 1
 tracks/0/loop_wrap = true
 tracks/0/keys = {
-"times": PackedFloat32Array(0, 0.20345186, 0.40884313),
-"transitions": PackedFloat32Array(1, 1, 1),
+"times": PackedFloat32Array(0, 0.099999994),
+"transitions": PackedFloat32Array(1, 1),
 "update": 1,
-"values": [19, 20, 21]
+"values": [26, 27]
 }
 
 [sub_resource type="Animation" id="Animation_rgyib"]
@@ -132,10 +133,10 @@ tracks/0/path = NodePath("Sprite2D:frame")
 tracks/0/interp = 1
 tracks/0/loop_wrap = true
 tracks/0/keys = {
-"times": PackedFloat32Array(0, 0.2, 0.4, 0.6, 0.8),
+"times": PackedFloat32Array(0, 0.13333334, 0.26666668, 0.46666667, 0.7),
 "transitions": PackedFloat32Array(1, 1, 1, 1, 1),
 "update": 1,
-"values": [3, 4, 5, 6, 7]
+"values": [16, 17, 18, 19, 20]
 }
 
 [sub_resource type="Animation" id="Animation_2ieo8"]
@@ -186,11 +187,14 @@ height = 20
 fill_from = Vector2(0, 0.5321285)
 fill_to = Vector2(1, 0.3995984)
 
+[sub_resource type="SegmentShape2D" id="SegmentShape2D_wodsf"]
+a = Vector2(0, -112)
+b = Vector2(18, -112)
+
 [node name="Player" type="CharacterBody2D" unique_id=500096349 groups=["player"]]
 collision_layer = 2
 collision_mask = 89
 script = ExtResource("1_yw30f")
-move_speed = null
 
 [node name="rope" parent="." unique_id=163704369 instance=ExtResource("2_kb6p2")]
 
@@ -210,7 +214,7 @@ debug_color = Color(1, 1, 0, 0.41960785)
 
 [node name="Sprite2D" type="Sprite2D" parent="." unique_id=555104850]
 position = Vector2(2, -58)
-texture = ExtResource("2_qjkh3")
+texture = ExtResource("3_wodsf")
 hframes = 8
 vframes = 4
 
@@ -232,6 +236,10 @@ autoplay = &"idle"
 [node name="Idle" type="Node" parent="States" unique_id=2045394508]
 unique_name_in_owner = true
 script = ExtResource("4_qjkh3")
+
+[node name="LedgeGrab" type="Node" parent="States" unique_id=724737886]
+unique_name_in_owner = true
+script = ExtResource("5_wodsf")
 
 [node name="Attack1" type="Node" parent="States" unique_id=2108666700]
 unique_name_in_owner = true
@@ -275,37 +283,43 @@ hit_from_inside = true
 
 [node name="Attack_1" type="Area2D" parent="." unique_id=12267597]
 unique_name_in_owner = true
-collision_layer = 128
-collision_mask = 134
+collision_layer = 0
+collision_mask = 128
+monitoring = false
+monitorable = false
 script = ExtResource("8_hg6s5")
 metadata/_custom_type_script = "uid://d0nt3tk0ba3gc"
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Attack_1" unique_id=107625655]
-position = Vector2(23, -84)
+position = Vector2(32, -86)
 shape = SubResource("RectangleShape2D_8t03j")
 debug_color = Color(1, 0, 0, 0.41960785)
 
 [node name="Attack_2" type="Area2D" parent="." unique_id=1925701410]
 unique_name_in_owner = true
-collision_layer = 128
-collision_mask = 134
+collision_layer = 0
+collision_mask = 128
+monitoring = false
+monitorable = false
 script = ExtResource("12_yllr7")
 metadata/_custom_type_script = "uid://d0nt3tk0ba3gc"
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Attack_2" unique_id=64835051]
-position = Vector2(28, -56)
+position = Vector2(37, -54)
 shape = SubResource("RectangleShape2D_2ieo8")
 debug_color = Color(1, 0, 0, 0.41960785)
 
 [node name="Attack_3" type="Area2D" parent="." unique_id=780950279]
 unique_name_in_owner = true
-collision_layer = 128
-collision_mask = 134
+collision_layer = 0
+collision_mask = 128
+monitoring = false
+monitorable = false
 script = ExtResource("13_kb6p2")
 metadata/_custom_type_script = "uid://d0nt3tk0ba3gc"
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Attack_3" unique_id=1563731121]
-position = Vector2(63, -57)
+position = Vector2(70, -57)
 shape = SubResource("RectangleShape2D_ebec5")
 debug_color = Color(1, 0, 0, 0.41960785)
 
@@ -317,3 +331,18 @@ offset_right = 59.0
 offset_bottom = -135.0
 max_value = 1000.0
 texture_progress = SubResource("GradientTexture2D_kb6p2")
+
+[node name="ledgedetec" type="RayCast2D" parent="." unique_id=672789927]
+unique_name_in_owner = true
+position = Vector2(17, -118)
+target_position = Vector2(0, 18)
+
+[node name="ledgegrabcolider" type="CollisionShape2D" parent="." unique_id=673316215]
+unique_name_in_owner = true
+position = Vector2(0, -1)
+shape = SubResource("SegmentShape2D_wodsf")
+disabled = true
+
+[node name="ongrounddetection" type="RayCast2D" parent="." unique_id=1938189657]
+position = Vector2(0, -2)
+target_position = Vector2(0, 11)

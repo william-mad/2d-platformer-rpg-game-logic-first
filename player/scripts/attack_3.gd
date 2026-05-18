@@ -1,7 +1,7 @@
 class_name Attack_3 extends Area2D
 
 
-@export var damage : float = 2
+@export var damage : float = 3
 
 # when scene starts, set monitoring and visible to false until further notice
 func _ready() -> void:
@@ -9,7 +9,7 @@ func _ready() -> void:
 	area_entered.connect(_on_body_entered)
 	visible =false
 	monitorable = false
-	monitoring = true
+	monitoring = false
 	pass 
 
 

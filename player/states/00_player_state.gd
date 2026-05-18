@@ -10,8 +10,10 @@ var next_state : PlayerState
 @onready var fall: PlayerStateFall = %Fall
 @onready var crouch: PlayerStateCrouch = %Crouch
 @onready var attack_3: PlayerAttack3 = %Attack3
+@onready var attack_2: PlayerAttack2 = %Attack2
 @onready var attack_1: PlayerAttack1 = %Attack1
-@onready var attack_2: Node = %Attack2
+@onready var ledge_grab: PlayerStateLedgeGrab = %LedgeGrab
+
 
 
 

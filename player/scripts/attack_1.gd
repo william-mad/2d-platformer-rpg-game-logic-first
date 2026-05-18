@@ -9,7 +9,7 @@ func _ready() -> void:
 	area_entered.connect(_on_body_entered)
 	visible =false
 	monitorable = false
-	monitoring = true
+	monitoring = false
 	pass 
 
 
@@ -18,7 +18,7 @@ func _on_body_entered (body : Node2D) ->void:
 	print("body entered", body.name)
 	if body is Damage_Area:
 		body.take_damage(self)
-		print("Damage!!!")
+		print("Damage dealt because damage area in region")
 	pass
 	
 
