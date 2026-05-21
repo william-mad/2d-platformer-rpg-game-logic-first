@@ -205,5 +205,7 @@ shape = SubResource("RectangleShape2D_kddj0")
 
 [node name="creature1" parent="." unique_id=672300065 instance=ExtResource("7_i1gjs")]
 position = Vector2(660, 361)
-
-[node name="creature2" parent="." unique_id=2099063919 instance=ExtResource("7_i1gjs")]
+gravity = null
+friction = null
+rope_anchor_strength = null
+rope_weight = null
