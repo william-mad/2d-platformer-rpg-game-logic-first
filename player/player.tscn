@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://bda5vp1binny7" path="res://player/scripts/player.gd" id="1_yw30f"]
 [ext_resource type="PackedScene" uid="uid://bg32w4t03pt45" path="res://scenes/things/rope.tscn" id="2_kb6p2"]
-[ext_resource type="Texture2D" uid="uid://bf71w7k5dpcbs" path="res://images/sprites/characters/player/walking with reference blank1.png" id="3_wodsf"]
+[ext_resource type="Texture2D" uid="uid://dn7wx2xcfau3t" path="res://images/sprites/characters/player/walking with reference zenith 3(separating members).png" id="3_wodsf"]
 [ext_resource type="Script" uid="uid://cygujhdr066hh" path="res://player/states/attack_1.gd" id="4_hg6s5"]
 [ext_resource type="Script" uid="uid://daav47am8xp04" path="res://player/states/idle.gd" id="4_qjkh3"]
 [ext_resource type="Script" uid="uid://dpqlkt65cmi33" path="res://player/states/attack_3.gd" id="5_2ieo8"]
@@ -17,16 +17,16 @@
 [ext_resource type="Script" uid="uid://cb30ewi1nbjed" path="res://player/scripts/attack_3.gd" id="13_kb6p2"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_wodsf"]
-radius = 58.0
-height = 116.0
+radius = 35.0
+height = 70.0
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_boad6"]
 radius = 11.0
-height = 112.0
+height = 62.0
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_rgyib"]
-radius = 18.0
-height = 80.0
+radius = 13.0
+height = 52.0
 
 [sub_resource type="Animation" id="Animation_boad6"]
 length = 0.001
@@ -168,13 +168,13 @@ _data = {
 }
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_8t03j"]
-size = Vector2(38.875, 50.25)
+size = Vector2(25.4375, 29.125)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_2ieo8"]
-size = Vector2(49.9375, 96)
+size = Vector2(20.96875, 53)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_ebec5"]
-size = Vector2(115.96875, 23.90625)
+size = Vector2(53.984375, 15.953125)
 
 [sub_resource type="Gradient" id="Gradient_yllr7"]
 offsets = PackedFloat32Array(0.0147929, 0.7307692)
@@ -189,7 +189,7 @@ fill_to = Vector2(1, 0.3995984)
 
 [sub_resource type="SegmentShape2D" id="SegmentShape2D_wodsf"]
 a = Vector2(0, -112)
-b = Vector2(18, -112)
+b = Vector2(21, -112)
 
 [node name="Player" type="CharacterBody2D" unique_id=500096349 groups=["player"]]
 collision_layer = 2
@@ -200,7 +200,7 @@ script = ExtResource("1_yw30f")
 
 [node name="RopeOrigin" type="Marker2D" parent="." unique_id=591490636]
 unique_name_in_owner = true
-position = Vector2(1, -50)
+position = Vector2(1, -33)
 
 [node name="RopeDetector" type="Area2D" parent="." unique_id=1547712304]
 unique_name_in_owner = true
@@ -208,22 +208,22 @@ collision_layer = 0
 collision_mask = 68
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="RopeDetector" unique_id=504887010]
-position = Vector2(1, -56)
+position = Vector2(2, -33)
 shape = SubResource("CapsuleShape2D_wodsf")
 debug_color = Color(1, 1, 0, 0.41960785)
 
 [node name="Sprite2D" type="Sprite2D" parent="." unique_id=555104850]
-position = Vector2(2, -58)
+position = Vector2(0, -55)
 texture = ExtResource("3_wodsf")
 hframes = 8
 vframes = 4
 
 [node name="colider_stand" type="CollisionShape2D" parent="." unique_id=884037014]
-position = Vector2(0, -56)
+position = Vector2(0, -31)
 shape = SubResource("CapsuleShape2D_boad6")
 
 [node name="colider_crouch" type="CollisionShape2D" parent="." unique_id=412477196]
-position = Vector2(0, -40)
+position = Vector2(0, -26)
 shape = SubResource("CapsuleShape2D_rgyib")
 disabled = true
 
@@ -271,9 +271,9 @@ script = ExtResource("8_rgyib")
 
 [node name="Label" type="Label" parent="." unique_id=1188223169]
 offset_left = -20.0
-offset_top = -132.0
+offset_top = -94.0
 offset_right = 29.0
-offset_bottom = -109.0
+offset_bottom = -71.0
 text = "player"
 
 [node name="small platform detection" type="RayCast2D" parent="." unique_id=1325846345]
@@ -291,7 +291,7 @@ script = ExtResource("8_hg6s5")
 metadata/_custom_type_script = "uid://d0nt3tk0ba3gc"
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Attack_1" unique_id=107625655]
-position = Vector2(32, -86)
+position = Vector2(25, -45)
 shape = SubResource("RectangleShape2D_8t03j")
 debug_color = Color(1, 0, 0, 0.41960785)
 
@@ -305,7 +305,7 @@ script = ExtResource("12_yllr7")
 metadata/_custom_type_script = "uid://d0nt3tk0ba3gc"
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Attack_2" unique_id=64835051]
-position = Vector2(37, -54)
+position = Vector2(22.515625, -32.5)
 shape = SubResource("RectangleShape2D_2ieo8")
 debug_color = Color(1, 0, 0, 0.41960785)
 
@@ -319,7 +319,7 @@ script = ExtResource("13_kb6p2")
 metadata/_custom_type_script = "uid://d0nt3tk0ba3gc"
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Attack_3" unique_id=1563731121]
-position = Vector2(70, -57)
+position = Vector2(40, -33)
 shape = SubResource("RectangleShape2D_ebec5")
 debug_color = Color(1, 0, 0, 0.41960785)
 
@@ -334,12 +334,12 @@ texture_progress = SubResource("GradientTexture2D_kb6p2")
 
 [node name="ledgedetec" type="RayCast2D" parent="." unique_id=672789927]
 unique_name_in_owner = true
-position = Vector2(17, -118)
+position = Vector2(23, -71)
 target_position = Vector2(0, 18)
 
 [node name="ledgegrabcolider" type="CollisionShape2D" parent="." unique_id=673316215]
 unique_name_in_owner = true
-position = Vector2(0, -1)
+position = Vector2(7, 48)
 shape = SubResource("SegmentShape2D_wodsf")
 disabled = true
 

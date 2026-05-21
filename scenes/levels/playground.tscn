@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://dmt6p02xayac3"]
 
 [ext_resource type="Texture2D" uid="uid://c52rmg4yokpqi" path="res://images/backgrounds/pngkey.com-nuvens-png-9881438.png" id="1_i1gjs"]
+[ext_resource type="Texture2D" uid="uid://ccmh11d5xjwap" path="res://images/backgrounds/ChatGPT Image 21 de mai. de 2026, 15_21_21.png" id="1_kgnh5"]
 [ext_resource type="Texture2D" uid="uid://buf1alc21l0cv" path="res://images/backgrounds/bg based on gpt1.png" id="2_kgnh5"]
 [ext_resource type="Texture2D" uid="uid://b37a3pkkgvjqn" path="res://images/backgrounds/bg based on gpt2.png" id="3_x0rm7"]
 [ext_resource type="Texture2D" uid="uid://b4rtlr8qecj53" path="res://images/sprites/tilesets/sprite sheet try 1.png" id="4_rc1m4"]
@@ -129,7 +130,19 @@ position = Vector2(0, -183)
 scale = Vector2(72.58594, 18.698414)
 texture = SubResource("GradientTexture2D_q8s1k")
 
+[node name="Parallax2D6" type="Parallax2D" parent="." unique_id=88205550]
+scroll_scale = Vector2(0.1, 1)
+repeat_size = Vector2(2940, 0)
+autoscroll = Vector2(-5, 0)
+repeat_times = 5
+
+[node name="Sprite2D" type="Sprite2D" parent="Parallax2D6" unique_id=912056071]
+position = Vector2(1141, -188.96402)
+scale = Vector2(1.4122939, 1.6050719)
+texture = ExtResource("1_kgnh5")
+
 [node name="Parallax2D3" type="Parallax2D" parent="." unique_id=701812390]
+visible = false
 repeat_size = Vector2(1000, 0)
 autoscroll = Vector2(-100, 0)
 repeat_times = 7
@@ -140,6 +153,7 @@ scale = Vector2(0.5771894, 0.57850003)
 texture = ExtResource("1_i1gjs")
 
 [node name="Parallax2D2" type="Parallax2D" parent="." unique_id=610673188]
+visible = false
 repeat_size = Vector2(1000, 1000)
 autoscroll = Vector2(-10, -5)
 repeat_times = 7
@@ -158,6 +172,7 @@ position = Vector2(49, 137)
 texture = ExtResource("2_kgnh5")
 
 [node name="Parallax2D5" type="Parallax2D" parent="." unique_id=1753937621]
+visible = false
 scroll_scale = Vector2(1.2, 1)
 
 [node name="Sprite2D" type="Sprite2D" parent="Parallax2D5" unique_id=1724996507]
@@ -173,9 +188,9 @@ layer_0/tile_data = PackedInt32Array(1507328, 65536, 0, 1507329, 65536, 0, 15073
 
 [node name="Camera2D" type="Camera2D" parent="Player" unique_id=1030625809]
 position = Vector2(-1, -50)
-limit_left = -4445
-limit_top = -800
-limit_right = 2800
+limit_left = -4423
+limit_top = -764
+limit_right = 2811
 limit_bottom = 400
 
 [node name="Damage_Area" type="Area2D" parent="." unique_id=150656767]
