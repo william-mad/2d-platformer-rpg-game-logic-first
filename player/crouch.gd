@@ -1,7 +1,6 @@
 class_name PlayerStateCrouch extends PlayerState
 
 @export var deceleration_rate : float = 10
-@export var mana_charge_rate: float = 300.0
 
 func init() -> void:
 	
@@ -60,6 +59,6 @@ func physics_process(_delta: float) -> PlayerState:
 
 
 func charge(delta) -> void:
-	player.mana.value += mana_charge_rate *delta
+	player.mana.value += player.mana_charge_rate *delta
 	print("charging: ", player.mana.value)
 		

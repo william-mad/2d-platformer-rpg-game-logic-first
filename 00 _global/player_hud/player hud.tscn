@@ -1,0 +1,64 @@
+[gd_scene format=3 uid="uid://dicudb0t1rd0j"]
+
+[ext_resource type="Texture2D" uid="uid://8ehnoal3e8eh" path="res://images/sprites/assets/hp bar.png" id="1_kyp3m"]
+
+[sub_resource type="Gradient" id="Gradient_3vx8i"]
+offsets = PackedFloat32Array(0.2470238, 0.98511904)
+colors = PackedColorArray(0.2784314, 0, 0, 1, 0, 0, 0, 1)
+
+[sub_resource type="GradientTexture1D" id="GradientTexture1D_w6j1a"]
+gradient = SubResource("Gradient_3vx8i")
+
+[sub_resource type="Gradient" id="Gradient_74uli"]
+offsets = PackedFloat32Array(0.3065476, 0.8720238)
+colors = PackedColorArray(1, 0, 0.050980393, 1, 0.80784315, 0.011764706, 0.06666667, 1)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_4h0pc"]
+gradient = SubResource("Gradient_74uli")
+
+[node name="PlayerHud" type="CanvasLayer" unique_id=1998049805]
+layer = 2
+
+[node name="Control" type="Control" parent="." unique_id=1427456495]
+process_mode = 3
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = 8.0
+offset_bottom = 8.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="hp margin cont" type="MarginContainer" parent="Control" unique_id=2094121738]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 0
+offset_right = 465.0
+offset_bottom = 48.0
+
+[node name="NinePatchRect" type="NinePatchRect" parent="Control/hp margin cont" unique_id=1147600476]
+layout_mode = 2
+texture = ExtResource("1_kyp3m")
+patch_margin_left = 16
+patch_margin_right = 3
+
+[node name="hpbar" type="TextureProgressBar" parent="Control/hp margin cont/NinePatchRect" unique_id=1965864052]
+show_behind_parent = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 6.0
+offset_top = 11.0
+offset_right = -2.0
+offset_bottom = -10.0
+grow_horizontal = 2
+grow_vertical = 2
+value = 100.0
+rounded = true
+nine_patch_stretch = true
+texture_under = SubResource("GradientTexture1D_w6j1a")
+texture_progress = SubResource("GradientTexture2D_4h0pc")

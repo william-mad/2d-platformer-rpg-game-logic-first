@@ -1,7 +1,6 @@
 class_name Player extends CharacterBody2D
 
-#onready variables:
-
+#region //onready variables:
 @onready var sprite_2d: Sprite2D = $Sprite2D
 @onready var colider_stand: CollisionShape2D = $colider_stand
 @onready var colider_crouch: CollisionShape2D = $colider_crouch
@@ -15,17 +14,31 @@ class_name Player extends CharacterBody2D
 @onready var mana: TextureProgressBar = %mana
 @onready var ledgedetec: RayCast2D = %ledgedetec
 
-#rope mechanics:
+#endregion
+
+
+#region //rope mechanics:
 @onready var rope: Rope = $rope
 @onready var rope_detector: Area2D = %RopeDetector
 @onready var rope_origin: Marker2D = %RopeOrigin
+#endregion
 
-
-
-
-
-#export variables
+#region //export variables
 @export var move_speed : float = 700
+#endregion
+
+#region //playerstats:
+var hp : float = 20
+var mana_charge_rate : float = 30
+var max_mana : float = 300
+var dash: bool = false
+var double_jump: bool = false
+var ground_slam: bool = false
+var transformation: bool = false
+#endregion
+
+
+
 
 
 #state machine variables

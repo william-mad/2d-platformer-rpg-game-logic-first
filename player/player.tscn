@@ -329,7 +329,7 @@ offset_left = -41.0
 offset_top = -155.0
 offset_right = 59.0
 offset_bottom = -135.0
-max_value = 1000.0
+max_value = 300.0
 texture_progress = SubResource("GradientTexture2D_kb6p2")
 
 [node name="ledgedetec" type="RayCast2D" parent="." unique_id=672789927]

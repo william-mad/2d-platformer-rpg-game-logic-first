@@ -33,6 +33,9 @@ func exit() -> void:
 
 
 func handle_input(_event: InputEvent) -> PlayerState:
+	if _event.is_action_pressed( "jump" ) and player.is_on_floor():
+		print("trying to jump")
+		return jump
 	# Allow attack input to queue the next combo attack.
 	if _event.is_action_pressed("attack"):
 		combo_requested = true
@@ -56,8 +59,11 @@ func process(delta: float) -> PlayerState:
 	# Attack duration is finished, so choose the next state.
 	if combo_requested and combo_timer > 0.0:
 		return attack_3
-
-	return idle
+		
+	if player.is_on_floor():
+		return idle
+	else:
+		return fall
 
 
 func physics_process(_delta: float) -> PlayerState:
