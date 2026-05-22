@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://cpbq0rrj6i6pp"]
 
-[ext_resource type="Script" uid="uid://lv1i5p268iw8" path="res://creature1.gd" id="1_iipxu"]
+[ext_resource type="Script" uid="uid://lv1i5p268iw8" path="res://scripts/creature1.gd" id="1_iipxu"]
 [ext_resource type="Script" uid="uid://dxg732h3lcbxt" path="res://player/scripts/damage_area.gd" id="2_278pq"]
 [ext_resource type="Texture2D" uid="uid://da3cln2v3wf7s" path="res://images/sprites/characters/player/walking with reference zenith.png" id="2_bc6ex"]
 

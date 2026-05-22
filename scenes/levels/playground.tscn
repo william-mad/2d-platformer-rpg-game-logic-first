@@ -8,6 +8,7 @@
 [ext_resource type="PackedScene" uid="uid://by1aphre1t601" path="res://player/player.tscn" id="5_dlivn"]
 [ext_resource type="Script" uid="uid://dxg732h3lcbxt" path="res://player/scripts/damage_area.gd" id="7_0qlaq"]
 [ext_resource type="PackedScene" uid="uid://cpbq0rrj6i6pp" path="res://scenes/creatures/creature1.tscn" id="7_i1gjs"]
+[ext_resource type="PackedScene" uid="uid://ro8gcfrqsoad" path="res://scenes/creatures/creature_2.tscn" id="9_x0rm7"]
 
 [sub_resource type="Gradient" id="Gradient_kddj0"]
 offsets = PackedFloat32Array(0, 0.5150376, 0.8834587)
@@ -206,4 +207,5 @@ shape = SubResource("RectangleShape2D_kddj0")
 [node name="creature1" parent="." unique_id=672300065 instance=ExtResource("7_i1gjs")]
 position = Vector2(660, 361)
 
-[node name="creature2" parent="." unique_id=2099063919 instance=ExtResource("7_i1gjs")]
+[node name="creature2" parent="." unique_id=861501008 instance=ExtResource("9_x0rm7")]
+position = Vector2(190, 349)
