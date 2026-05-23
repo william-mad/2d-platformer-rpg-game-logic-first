@@ -13,7 +13,10 @@ func enter() -> void:
 	player.animation_player.play("jump")
 	player.animation_player.pause()
 	print("enter", name)
-	player.velocity.y = -jump_velocity
+	if player.previous_state == ledge_grab:
+		player.velocity.y = -jump_velocity/1.5
+	else:
+		player.velocity.y = -jump_velocity
 	pass
 
 

@@ -28,11 +28,18 @@ enum State {
 @export var chase_player: bool = true
 @export var stop_at_ledges: bool = true
 
-@onready var sprite: Sprite2D = $Sprite2D
+@onready var sprite_2d: Sprite2D = %Sprite2D
 @onready var wall_check: RayCast2D = $WallCheck
 @onready var floor_check: RayCast2D = $FloorCheck
 @onready var player_detect: Area2D = $PlayerDetect
 @onready var attack_area: Area2D = $AttackArea
+
+#rope stuff
+@export var friction: float = 900.0
+@export var rope_anchor_strength: float = 1.0
+@export var rope_weight: float = 0.1
+@onready var rope_attach_point: Marker2D = %RopeAttachPoint
+
 
 var state: State = State.PATROL
 var direction: int = 1
@@ -143,8 +150,8 @@ func _update_raycasts() -> void:
 	wall_check.target_position.x = abs(wall_check.target_position.x) * direction
 	floor_check.position.x = abs(floor_check.position.x) * direction
 
-	if sprite:
-		sprite.flip_h = direction < 0
+	
+	sprite_2d.flip_h = direction < 0
 
 
 func _player_in_attack_range() -> bool:
@@ -279,3 +286,8 @@ func _on_attack_area_body_entered(body: Node2D) -> void:
 
 		if can_attack and state not in [State.ATTACK, State.HURT, State.DEAD]:
 			_change_state(State.ATTACK)
+
+
+
+func get_rope_attach_point() -> Node2D:
+	return rope_attach_point

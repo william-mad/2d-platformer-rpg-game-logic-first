@@ -189,7 +189,7 @@ fill_to = Vector2(1, 0.3995984)
 
 [sub_resource type="SegmentShape2D" id="SegmentShape2D_wodsf"]
 a = Vector2(0, -112)
-b = Vector2(12, -112)
+b = Vector2(26, -112)
 
 [node name="Player" type="CharacterBody2D" unique_id=500096349 groups=["player"]]
 collision_layer = 2
@@ -339,9 +339,10 @@ target_position = Vector2(0, 18)
 
 [node name="ledgegrabcolider" type="CollisionShape2D" parent="." unique_id=673316215]
 unique_name_in_owner = true
-position = Vector2(7, 48)
+position = Vector2(0, 48)
 shape = SubResource("SegmentShape2D_wodsf")
 disabled = true
+one_way_collision_margin = 0.0
 
 [node name="ongrounddetection" type="RayCast2D" parent="." unique_id=1938189657]
 position = Vector2(0, -2)
