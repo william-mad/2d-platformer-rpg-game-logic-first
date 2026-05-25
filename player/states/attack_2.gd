@@ -68,7 +68,7 @@ func process(delta: float) -> PlayerState:
 
 func physics_process(_delta: float) -> PlayerState:
 	# Optional: reduce/control movement during attack.
-	player.velocity.x = player.direction.x * player.move_speed
+	player.velocity.x = player.direction.x * player.move_speed /2
 	# Stay in this state unless process() changes it.
 	return null
 

@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://dicudb0t1rd0j"]
 
 [ext_resource type="Texture2D" uid="uid://8ehnoal3e8eh" path="res://images/sprites/assets/hp bar.png" id="1_kyp3m"]
+[ext_resource type="Script" path="res://00 _global/player_hud/player_hud.gd" id="2_hud"]
 
 [sub_resource type="Gradient" id="Gradient_3vx8i"]
 offsets = PackedFloat32Array(0.2470238, 0.98511904)
@@ -18,6 +19,7 @@ gradient = SubResource("Gradient_74uli")
 
 [node name="PlayerHud" type="CanvasLayer" unique_id=1998049805]
 layer = 2
+script = ExtResource("2_hud")
 
 [node name="Control" type="Control" parent="." unique_id=1427456495]
 process_mode = 3

@@ -25,9 +25,12 @@ class_name Player extends CharacterBody2D
 
 #region //export variables
 @export var move_speed : float = 700
+@export var knockback_force: Vector2 = Vector2(220, -160)
+@export var knockback_time: float = 0.15
 #endregion
 
 #region //playerstats:
+@export var max_hp : float = 20
 var hp : float = 20
 var mana_charge_rate : float = 30
 var max_mana : float = 300
@@ -54,10 +57,13 @@ var gravity : float = 1500.0
 var gravity_multiplier : float = 1.0
 var nearby_attachables: Array[Node2D] = []
 var current_rope_target: Node2D = null
+var knockback_timer: float = 0.0
 
 func _ready() -> void:
 	rope_detector.body_entered.connect(_on_rope_detector_body_entered)
 	rope_detector.body_exited.connect(_on_rope_detector_body_exited)
+	hp = max_hp
+	PlayerHud.setup_hp(max_hp, hp)
 	#initialize states
 	initialize_states()
 	pass
@@ -79,6 +85,12 @@ func _process(_delta: float) -> void:
 	
 func _physics_process(_delta: float) -> void:
 	velocity.y += gravity * _delta * gravity_multiplier
+
+	if knockback_timer > 0.0:
+		knockback_timer -= _delta
+		move_and_slide()
+		return
+
 	move_and_slide()
 	change_state(current_state.physics_process(_delta))
 	pass
@@ -198,6 +210,31 @@ func get_closest_attachable() -> Node2D:
 			closest = body
 
 	return closest
+
+
+func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO) -> void:
+	hp = maxf(hp - amount, 0.0)
+	PlayerHud.set_hp(hp)
+
+	if hp <= 0:
+		print("player defeated")
+		return
+
+	apply_knockback(damage_source_position)
+
+
+func heal(amount: float) -> void:
+	hp = minf(hp + amount, max_hp)
+	PlayerHud.set_hp(hp)
+
+
+func apply_knockback(damage_source_position: Vector2) -> void:
+	var knockback_direction := signf(global_position.x - damage_source_position.x)
+	if knockback_direction == 0.0:
+		knockback_direction = -1.0 if sprite_2d.flip_h else 1.0
+
+	velocity = Vector2(knockback_force.x * knockback_direction, knockback_force.y)
+	knockback_timer = knockback_time
 
 
 func _on_rope_detector_body_entered(body: Node2D) -> void:

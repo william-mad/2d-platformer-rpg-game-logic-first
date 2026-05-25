@@ -21,6 +21,10 @@ func exit() -> void:
 
 
 func handle_input(_event : InputEvent) -> PlayerState:
+	
+	if _event.is_action_pressed("up") and can_hide():
+		return hidden
+	
 	if _event.is_action_pressed("attack"):
 		return attack_1
 		

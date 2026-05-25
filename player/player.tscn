@@ -8,13 +8,14 @@
 [ext_resource type="Script" uid="uid://dpqlkt65cmi33" path="res://player/states/attack_3.gd" id="5_2ieo8"]
 [ext_resource type="Script" uid="uid://dt3xncwh77pf4" path="res://player/states/attack_2.gd" id="5_8t03j"]
 [ext_resource type="Script" uid="uid://dcjdfodiahfuh" path="res://player/states/run.gd" id="5_g6k8r"]
-[ext_resource type="Script" uid="uid://cyonuy37qgnrc" path="res://player/ledgegrab.gd" id="5_wodsf"]
+[ext_resource type="Script" uid="uid://cyonuy37qgnrc" path="res://player/states/ledgegrab.gd" id="5_wodsf"]
 [ext_resource type="Script" uid="uid://bnq1lutm6blp7" path="res://player/states/jump.gd" id="6_boad6"]
 [ext_resource type="Script" uid="uid://0y68bl6ivw4c" path="res://player/states/fall.gd" id="7_rgyib"]
 [ext_resource type="Script" uid="uid://d0nt3tk0ba3gc" path="res://player/scripts/attack_1.gd" id="8_hg6s5"]
-[ext_resource type="Script" uid="uid://bqbe74t67iuai" path="res://player/crouch.gd" id="8_rgyib"]
+[ext_resource type="Script" uid="uid://bqbe74t67iuai" path="res://player/states/crouch.gd" id="8_rgyib"]
 [ext_resource type="Script" uid="uid://dnfh2gt3l337x" path="res://player/scripts/attack_2.gd" id="12_yllr7"]
 [ext_resource type="Script" uid="uid://cb30ewi1nbjed" path="res://player/scripts/attack_3.gd" id="13_kb6p2"]
+[ext_resource type="Script" uid="uid://4sa0v2kvddeq" path="res://player/states/hidden.gd" id="14_hidden"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_wodsf"]
 radius = 35.0
@@ -208,12 +209,12 @@ collision_layer = 0
 collision_mask = 68
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="RopeDetector" unique_id=504887010]
-position = Vector2(2, -33)
+position = Vector2(0, -35)
 shape = SubResource("CapsuleShape2D_wodsf")
 debug_color = Color(1, 1, 0, 0.41960785)
 
 [node name="Sprite2D" type="Sprite2D" parent="." unique_id=555104850]
-position = Vector2(0, -55)
+position = Vector2(-1, -57)
 texture = ExtResource("3_wodsf")
 hframes = 8
 vframes = 4
@@ -268,6 +269,10 @@ script = ExtResource("7_rgyib")
 [node name="Crouch" type="Node" parent="States" unique_id=803443223]
 unique_name_in_owner = true
 script = ExtResource("8_rgyib")
+
+[node name="Hidden" type="Node" parent="States" unique_id=542055780]
+unique_name_in_owner = true
+script = ExtResource("14_hidden")
 
 [node name="Label" type="Label" parent="." unique_id=1188223169]
 offset_left = -20.0

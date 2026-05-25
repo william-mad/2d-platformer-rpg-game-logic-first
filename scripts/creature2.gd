@@ -16,7 +16,7 @@ enum State {
 @export var idle_time: float = 1.0
 
 @export_group("Combat")
-@export var max_health: int = 3
+@export var max_hp: float = 100.0
 @export var damage: int = 1
 @export var attack_cooldown: float = 1.0
 @export var attack_windup: float = 0.25
@@ -33,6 +33,8 @@ enum State {
 @onready var floor_check: RayCast2D = $FloorCheck
 @onready var player_detect: Area2D = $PlayerDetect
 @onready var attack_area: Area2D = $AttackArea
+@onready var attack_area_collision: CollisionShape2D = $AttackArea/CollisionShape2D
+@onready var hp_bar: CreatureHpBar = get_node_or_null("HPBar") as CreatureHpBar
 
 #rope stuff
 @export var friction: float = 900.0
@@ -43,14 +45,15 @@ enum State {
 
 var state: State = State.PATROL
 var direction: int = 1
-var health: int
+var hp: float
 var player: Node2D = null
 var can_attack: bool = true
 var is_attacking: bool = false
 
 
 func _ready() -> void:
-	health = max_health
+	hp = max_hp
+	setup_hp_bar()
 	direction = 1 if starts_moving_right else -1
 
 	player_detect.body_entered.connect(_on_player_detect_body_entered)
@@ -149,6 +152,7 @@ func _turn_around() -> void:
 func _update_raycasts() -> void:
 	wall_check.target_position.x = abs(wall_check.target_position.x) * direction
 	floor_check.position.x = abs(floor_check.position.x) * direction
+	attack_area_collision.position.x = abs(attack_area_collision.position.x) * direction
 
 	
 	sprite_2d.flip_h = direction < 0
@@ -229,13 +233,15 @@ func _damage_player(target: Node) -> void:
 		target.damage(damage)
 
 
-func take_damage(amount: int, damage_source_position: Vector2 = Vector2.ZERO) -> void:
+func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO) -> void:
 	if state == State.DEAD:
 		return
 
-	health -= amount
+	hp = maxf(hp - amount, 0.0)
+	update_hp_bar()
+	print(name, " hp: ", hp, "/", max_hp)
 
-	if health <= 0:
+	if hp <= 0.0:
 		_change_state(State.DEAD)
 		return
 
@@ -291,3 +297,13 @@ func _on_attack_area_body_entered(body: Node2D) -> void:
 
 func get_rope_attach_point() -> Node2D:
 	return rope_attach_point
+
+
+func setup_hp_bar() -> void:
+	if hp_bar != null:
+		hp_bar.setup_hp(max_hp, hp)
+
+
+func update_hp_bar() -> void:
+	if hp_bar != null:
+		hp_bar.set_hp(hp)

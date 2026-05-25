@@ -1,0 +1,22 @@
+[gd_scene format=3 uid="uid://bw56u7dpb7tov"]
+
+[ext_resource type="Script" uid="uid://2gb05g6cjept" path="res://scripts/instances/continuous_healing_area.gd" id="1_ffy31"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_healing"]
+size = Vector2(180, 90)
+
+[node name="healing test" type="Node2D" unique_id=1938585894]
+
+[node name="HealingArea" type="Area2D" parent="." unique_id=444519649]
+collision_layer = 0
+collision_mask = 6
+script = ExtResource("1_ffy31")
+healing_per_second = 8.0
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="HealingArea" unique_id=236685780]
+shape = SubResource("RectangleShape2D_healing")
+debug_color = Color(0, 1, 0.15, 0.35)
+
+[node name="HealingVisual" type="Polygon2D" parent="HealingArea" unique_id=1414454012]
+color = Color(0, 0.85, 0.18, 0.35)
+polygon = PackedVector2Array(-90, -45, 90, -45, 90, 45, -90, 45)

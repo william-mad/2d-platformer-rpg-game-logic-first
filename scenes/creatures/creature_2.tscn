@@ -3,6 +3,7 @@
 [ext_resource type="Script" uid="uid://dq3nco2o05wwg" path="res://scripts/creature2.gd" id="1_gwdf5"]
 [ext_resource type="Script" uid="uid://dxg732h3lcbxt" path="res://player/scripts/damage_area.gd" id="2_trko7"]
 [ext_resource type="Texture2D" uid="uid://da3cln2v3wf7s" path="res://images/sprites/characters/player/walking with reference zenith.png" id="3_r3hmo"]
+[ext_resource type="Script" path="res://scripts/instances/creature_hp_bar.gd" id="4_hp"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_ughb4"]
 radius = 28.0
@@ -134,3 +135,12 @@ debug_color = Color(0.98813564, 0.1079878, 3.85046e-07, 0.41960785)
 [node name="RopeAttachPoint2" type="Marker2D" parent="." unique_id=186809504]
 unique_name_in_owner = true
 position = Vector2(1, -78)
+
+[node name="HPBar" type="ProgressBar" parent="."]
+unique_name_in_owner = true
+offset_left = -35.0
+offset_top = -135.0
+offset_right = 35.0
+offset_bottom = -128.0
+show_percentage = false
+script = ExtResource("4_hp")

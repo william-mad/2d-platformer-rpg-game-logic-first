@@ -1,0 +1,31 @@
+[gd_scene format=3 uid="uid://bn1fjdks8u6tm"]
+
+[ext_resource type="Script" uid="uid://dymojqyxshpdn" path="res://scripts/instances/hidden_spot.gd" id="1_hidden"]
+[ext_resource type="Texture2D" uid="uid://bl4yo0ny0uvv6" path="res://images/sprites/assets/bush.png" id="2_x2vkk"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_hidden"]
+size = Vector2(41, 29)
+
+[node name="HiddenSpot" type="Area2D" unique_id=1838723625 groups=["hidden_spot"]]
+collision_layer = 0
+collision_mask = 10
+monitorable = false
+script = ExtResource("1_hidden")
+
+[node name="BushVisual" type="Polygon2D" parent="." unique_id=806954224]
+visible = false
+position = Vector2(0, 6)
+color = Color(0.13, 0.48, 0.18, 1)
+polygon = PackedVector2Array(-50, 18, -44, -6, -31, -22, -15, -12, 0, -30, 14, -12, 32, -22, 45, -5, 50, 18)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=1008998257]
+position = Vector2(0.5, -9.5)
+shape = SubResource("RectangleShape2D_hidden")
+debug_color = Color(0.2, 0.8, 0.2, 0.35)
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="." unique_id=228978517]
+
+[node name="Sprite2D" type="Sprite2D" parent="." unique_id=1918431297]
+position = Vector2(9.536743e-07, -11.999994)
+scale = Vector2(0.10047847, 0.090909086)
+texture = ExtResource("2_x2vkk")

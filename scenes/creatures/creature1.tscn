@@ -3,6 +3,7 @@
 [ext_resource type="Script" uid="uid://lv1i5p268iw8" path="res://scripts/creature1.gd" id="1_iipxu"]
 [ext_resource type="Script" uid="uid://dxg732h3lcbxt" path="res://player/scripts/damage_area.gd" id="2_278pq"]
 [ext_resource type="Texture2D" uid="uid://da3cln2v3wf7s" path="res://images/sprites/characters/player/walking with reference zenith.png" id="2_bc6ex"]
+[ext_resource type="Script" path="res://scripts/instances/creature_hp_bar.gd" id="4_hp"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_bc6ex"]
 radius = 18.0
@@ -99,3 +100,12 @@ position = Vector2(0, -87)
 [node name="AnimationPlayer" type="AnimationPlayer" parent="." unique_id=1430106525]
 libraries/ = SubResource("AnimationLibrary_m0rm8")
 autoplay = &"idle"
+
+[node name="HPBar" type="ProgressBar" parent="."]
+unique_name_in_owner = true
+offset_left = -35.0
+offset_top = -135.0
+offset_right = 35.0
+offset_bottom = -128.0
+show_percentage = false
+script = ExtResource("4_hp")

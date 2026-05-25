@@ -1,0 +1,23 @@
+[gd_scene format=3 uid="uid://c4x0suw8m31ph"]
+
+[ext_resource type="Script" uid="uid://dy7rshy8uqcp1" path="res://scripts/instances/continuous_damage_area.gd" id="2_damage_area"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_damage"]
+size = Vector2(220, 90)
+
+[node name="damage test" type="Node2D" unique_id=2079539797]
+
+[node name="ContinuousDamageArea" type="Area2D" parent="." unique_id=88000391]
+position = Vector2(0, 1)
+collision_layer = 0
+collision_mask = 6
+script = ExtResource("2_damage_area")
+damage_per_second = 4.0
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="ContinuousDamageArea" unique_id=41824805]
+shape = SubResource("RectangleShape2D_damage")
+debug_color = Color(1, 0, 0, 0.35)
+
+[node name="DamageVisual" type="Polygon2D" parent="ContinuousDamageArea" unique_id=1705597516]
+color = Color(1, 0.05, 0.02, 0.35)
+polygon = PackedVector2Array(-110, -45, 110, -45, 110, 45, -110, 45)
