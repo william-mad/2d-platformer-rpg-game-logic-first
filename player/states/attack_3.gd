@@ -24,6 +24,9 @@ func exit() -> void:
 
 
 func handle_input(_event: InputEvent) -> PlayerState:
+	if _event.is_action_released("attack"):
+		return get_special_attack_release_state()
+
 	# Last attack: ignore attack/jump/crouch input while locked.
 	return null
 

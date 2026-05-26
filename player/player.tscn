@@ -16,6 +16,8 @@
 [ext_resource type="Script" uid="uid://dnfh2gt3l337x" path="res://player/scripts/attack_2.gd" id="12_yllr7"]
 [ext_resource type="Script" uid="uid://cb30ewi1nbjed" path="res://player/scripts/attack_3.gd" id="13_kb6p2"]
 [ext_resource type="Script" uid="uid://4sa0v2kvddeq" path="res://player/states/hidden.gd" id="14_hidden"]
+[ext_resource type="Script" uid="uid://dpchrg7gp26h4" path="res://player/states/special_attack.gd" id="15_special"]
+[ext_resource type="Script" uid="uid://d0fnw643glyvm" path="res://player/states/dash.gd" id="16_dash"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_wodsf"]
 radius = 35.0
@@ -177,6 +179,16 @@ size = Vector2(20.96875, 53)
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_ebec5"]
 size = Vector2(53.984375, 15.953125)
 
+[sub_resource type="Gradient" id="Gradient_mana_2"]
+colors = PackedColorArray(0.8, 0.15, 1, 1, 0.25, 0.02, 0.55, 1)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_mana_2"]
+gradient = SubResource("Gradient_mana_2")
+width = 100
+height = 20
+fill_from = Vector2(0, 0.5)
+fill_to = Vector2(1, 0.5)
+
 [sub_resource type="Gradient" id="Gradient_yllr7"]
 offsets = PackedFloat32Array(0.0147929, 0.7307692)
 colors = PackedColorArray(0.09411765, 0.16078432, 1, 1, 0.50411516, 0.66422695, 1, 1)
@@ -258,6 +270,10 @@ script = ExtResource("5_8t03j")
 unique_name_in_owner = true
 script = ExtResource("5_g6k8r")
 
+[node name="Dash" type="Node" parent="States" unique_id=876601785]
+unique_name_in_owner = true
+script = ExtResource("16_dash")
+
 [node name="Jump" type="Node" parent="States" unique_id=1311053870]
 unique_name_in_owner = true
 script = ExtResource("6_boad6")
@@ -273,6 +289,20 @@ script = ExtResource("8_rgyib")
 [node name="Hidden" type="Node" parent="States" unique_id=542055780]
 unique_name_in_owner = true
 script = ExtResource("14_hidden")
+
+[node name="SpecialAttack1" type="Node" parent="States" unique_id=2023403129]
+unique_name_in_owner = true
+script = ExtResource("15_special")
+
+[node name="SpecialAttack2" type="Node" parent="States" unique_id=1762442711]
+unique_name_in_owner = true
+script = ExtResource("15_special")
+attack_tier = 2
+
+[node name="SpecialAttack3" type="Node" parent="States" unique_id=437778776]
+unique_name_in_owner = true
+script = ExtResource("15_special")
+attack_tier = 3
 
 [node name="Label" type="Label" parent="." unique_id=1188223169]
 offset_left = -20.0
@@ -328,13 +358,23 @@ position = Vector2(40, -33)
 shape = SubResource("RectangleShape2D_ebec5")
 debug_color = Color(1, 0, 0, 0.41960785)
 
-[node name="mana" type="TextureProgressBar" parent="." unique_id=1601591476]
+[node name="mana_2" type="TextureProgressBar" parent="." unique_id=1112013473]
 unique_name_in_owner = true
-offset_left = -41.0
-offset_top = -155.0
-offset_right = 59.0
-offset_bottom = -135.0
+offset_left = -50.0
+offset_top = -110.0
+offset_right = 50.0
+offset_bottom = -90.0
 max_value = 300.0
+value = 300.0
+texture_progress = SubResource("GradientTexture2D_mana_2")
+
+[node name="mana" type="TextureProgressBar" parent="mana_2" unique_id=1601591476]
+unique_name_in_owner = true
+layout_mode = 0
+offset_right = 100.0
+offset_bottom = 20.0
+max_value = 300.0
+value = 30.0
 texture_progress = SubResource("GradientTexture2D_kb6p2")
 
 [node name="ledgedetec" type="RayCast2D" parent="." unique_id=672789927]

@@ -26,6 +26,8 @@ func exit() -> void:
 
 
 func handle_input(_event : InputEvent) -> PlayerState:
+	if _event.is_action_released("attack"):
+		return get_attack_release_state()
 	
 	if _event.is_action_released("crouch"):
 		if player.is_on_floor():
@@ -42,12 +44,6 @@ func process(_delta: float) -> PlayerState:
 	if not player.is_on_floor():
 		return fall
 
-	if Input.is_action_pressed("attack"):
-		charge(_delta)
-
-	if Input.is_action_just_released("attack"):
-		return next_state
-
 	return next_state
 	
 
@@ -55,10 +51,3 @@ func physics_process(_delta: float) -> PlayerState:
 	player.velocity.x -= player.velocity.x * deceleration_rate *_delta
 	return next_state
 	#player on the floor, is idle:
-	
-
-
-func charge(delta) -> void:
-	player.mana.value += player.mana_charge_rate *delta
-	print("charging: ", player.mana.value)
-		

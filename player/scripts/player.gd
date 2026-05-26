@@ -12,6 +12,7 @@ class_name Player extends CharacterBody2D
 @onready var attack_2: Attack_2 = %Attack_2
 @onready var attack_3: Attack_3 = %Attack_3
 @onready var mana: TextureProgressBar = %mana
+@onready var mana_2: TextureProgressBar = %mana_2
 @onready var ledgedetec: RayCast2D = %ledgedetec
 
 #endregion
@@ -32,8 +33,11 @@ class_name Player extends CharacterBody2D
 #region //playerstats:
 @export var max_hp : float = 20
 var hp : float = 20
-var mana_charge_rate : float = 30
+var mana_charge_rate : float = 100
 var max_mana : float = 300
+@export var mana_2_starts_full: bool = true
+@export var mana_2_charge_rate: float = 50.0
+var mana_2_amount: float = 0.0
 var dash: bool = false
 var double_jump: bool = false
 var ground_slam: bool = false
@@ -64,6 +68,11 @@ func _ready() -> void:
 	rope_detector.body_exited.connect(_on_rope_detector_body_exited)
 	hp = max_hp
 	PlayerHud.setup_hp(max_hp, hp)
+	mana.max_value = max_mana
+	mana_2.max_value = max_mana
+	mana.value = 0.0
+	mana_2_amount = max_mana if mana_2_starts_full else 0.0
+	sync_mana_2_bar()
 	#initialize states
 	initialize_states()
 	pass
@@ -80,6 +89,8 @@ func _unhandled_input( event: InputEvent) -> void:
 
 func _process(_delta: float) -> void:
 	update_direction()
+	update_mana_2_charge(_delta)
+	update_mana_charge(_delta)
 	change_state(current_state.process(_delta))
 	
 	
@@ -226,6 +237,35 @@ func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO) 
 func heal(amount: float) -> void:
 	hp = minf(hp + amount, max_hp)
 	PlayerHud.set_hp(hp)
+
+
+func update_mana_charge(delta: float) -> void:
+	if current_state is PlayerAttack1 or current_state is PlayerAttack2 or current_state is PlayerAttack3 or current_state is PlayerSpecialAttack:
+		return
+
+	if Input.is_action_pressed("attack"):
+		charge_mana(mana_charge_rate * delta)
+
+
+func charge_mana(amount: float) -> void:
+	mana.value = minf(mana.value + amount, mana_2_amount)
+
+
+func update_mana_2_charge(delta: float) -> void:
+	mana_2_amount = move_toward(mana_2_amount, max_mana, mana_2_charge_rate * delta)
+	sync_mana_2_bar()
+
+
+func sync_mana_2_bar() -> void:
+	mana_2.value = clampf(mana_2_amount, 0.0, max_mana)
+
+	if mana.value > mana_2_amount:
+		mana.value = mana_2_amount
+
+
+func spend_mana_2(amount: float) -> void:
+	mana_2_amount = maxf(mana_2_amount - amount, 0.0)
+	sync_mana_2_bar()
 
 
 func apply_knockback(damage_source_position: Vector2) -> void:

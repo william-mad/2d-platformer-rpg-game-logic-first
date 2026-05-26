@@ -40,9 +40,13 @@ func exit() -> void:
 
 
 func handle_input(_event : InputEvent) -> PlayerState:
+	var requested_dash := get_dash_state_from_input(_event)
+
+	if requested_dash != null:
+		return requested_dash
 	
-	if _event.is_action_pressed("attack"):
-		return attack_1
+	if _event.is_action_released("attack"):
+		return get_attack_release_state()
 	
 	if _event.is_action_pressed( "jump" ) and coyote_timer > 0:
 		return jump
