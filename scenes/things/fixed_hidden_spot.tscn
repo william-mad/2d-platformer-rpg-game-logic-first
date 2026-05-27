@@ -1,0 +1,28 @@
+[gd_scene format=3 uid="uid://mhtjqmdrcoo0"]
+
+[ext_resource type="Script" uid="uid://dymojqyxshpdn" path="res://scripts/instances/hidden_spot.gd" id="1_hidden"]
+[ext_resource type="Texture2D" uid="uid://dqvgjft1fxgde" path="res://images/sprites/assets/boxes kinda.png" id="2_jdu8d"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_fixed_hidden"]
+size = Vector2(64, 53)
+
+[node name="FixedHiddenSpot" type="Area2D" unique_id=237761450 groups=["hidden_spot"]]
+collision_layer = 0
+collision_mask = 10
+monitorable = false
+script = ExtResource("1_hidden")
+move_with_player_while_hidden = false
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=362066145]
+position = Vector2(0, -2.5)
+shape = SubResource("RectangleShape2D_fixed_hidden")
+debug_color = Color(0.2, 0.8, 0.2, 0.35)
+
+[node name="Sprite2D" type="Sprite2D" parent="." unique_id=274735750]
+position = Vector2(0, -6.000002)
+scale = Vector2(0.30571163, 0.2527881)
+texture = ExtResource("2_jdu8d")
+hframes = 5
+vframes = 3
+region_enabled = true
+region_rect = Rect2(91.80206, 118.38008, 1336.7202, 808.1081)

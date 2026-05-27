@@ -58,10 +58,13 @@ func process(_delta: float) -> PlayerState:
 
 
 func physics_process(_delta: float) -> PlayerState:
-	player.velocity.x = player.direction.x * hidden_move_speed
+	if should_move_with_hidden_spot():
+		player.velocity.x = player.direction.x * hidden_move_speed
 
-	if hidden_spot != null and is_instance_valid(hidden_spot):
-		hidden_spot.global_position.x = player.global_position.x
+		if hidden_spot != null and is_instance_valid(hidden_spot):
+			hidden_spot.global_position.x = player.global_position.x
+	else:
+		player.velocity.x = 0.0
 
 	return next_state
 
@@ -71,3 +74,13 @@ func get_floor_exit_state() -> PlayerState:
 		return run
 
 	return idle
+
+
+func should_move_with_hidden_spot() -> bool:
+	if hidden_spot == null or not is_instance_valid(hidden_spot):
+		return false
+
+	if hidden_spot.has_method("should_move_with_player_while_hidden"):
+		return hidden_spot.should_move_with_player_while_hidden()
+
+	return true
