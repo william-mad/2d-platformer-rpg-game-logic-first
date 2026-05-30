@@ -67,10 +67,10 @@ func get_attack_release_state() -> PlayerState:
 
 
 func get_special_attack_release_state() -> PlayerState:
-	var one_third_mana := player.mana.max_value / 3.0
+	var one_third_mana := player.max_mana / 3.0
 	var two_thirds_mana := one_third_mana * 2.0
-	var full_mana := player.mana.max_value
-	var current_mana := player.mana.value
+	var full_mana := player.max_mana
+	var current_mana := player.mana_amount
 
 	if current_mana >= full_mana:
 		return use_special_attack(full_mana, special_attack_3)
@@ -86,7 +86,7 @@ func get_special_attack_release_state() -> PlayerState:
 
 
 func clear_attack_charge() -> void:
-	player.mana.value = 0.0
+	player.clear_mana_charge()
 
 
 func use_special_attack(mana_cost: float, special_state: PlayerState) -> PlayerState:

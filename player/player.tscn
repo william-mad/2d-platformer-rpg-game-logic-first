@@ -179,27 +179,6 @@ size = Vector2(20.96875, 53)
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_ebec5"]
 size = Vector2(53.984375, 15.953125)
 
-[sub_resource type="Gradient" id="Gradient_mana_2"]
-colors = PackedColorArray(0.8, 0.15, 1, 1, 0.25, 0.02, 0.55, 1)
-
-[sub_resource type="GradientTexture2D" id="GradientTexture2D_mana_2"]
-gradient = SubResource("Gradient_mana_2")
-width = 100
-height = 20
-fill_from = Vector2(0, 0.5)
-fill_to = Vector2(1, 0.5)
-
-[sub_resource type="Gradient" id="Gradient_yllr7"]
-offsets = PackedFloat32Array(0.0147929, 0.7307692)
-colors = PackedColorArray(0.09411765, 0.16078432, 1, 1, 0.50411516, 0.66422695, 1, 1)
-
-[sub_resource type="GradientTexture2D" id="GradientTexture2D_kb6p2"]
-gradient = SubResource("Gradient_yllr7")
-width = 100
-height = 20
-fill_from = Vector2(0, 0.5321285)
-fill_to = Vector2(1, 0.3995984)
-
 [sub_resource type="SegmentShape2D" id="SegmentShape2D_wodsf"]
 a = Vector2(0, -112)
 b = Vector2(26, -112)
@@ -357,25 +336,6 @@ metadata/_custom_type_script = "uid://d0nt3tk0ba3gc"
 position = Vector2(40, -33)
 shape = SubResource("RectangleShape2D_ebec5")
 debug_color = Color(1, 0, 0, 0.41960785)
-
-[node name="mana_2" type="TextureProgressBar" parent="." unique_id=1112013473]
-unique_name_in_owner = true
-offset_left = -50.0
-offset_top = -110.0
-offset_right = 50.0
-offset_bottom = -90.0
-max_value = 300.0
-value = 300.0
-texture_progress = SubResource("GradientTexture2D_mana_2")
-
-[node name="mana" type="TextureProgressBar" parent="mana_2" unique_id=1601591476]
-unique_name_in_owner = true
-layout_mode = 0
-offset_right = 100.0
-offset_bottom = 20.0
-max_value = 300.0
-value = 30.0
-texture_progress = SubResource("GradientTexture2D_kb6p2")
 
 [node name="ledgedetec" type="RayCast2D" parent="." unique_id=672789927]
 unique_name_in_owner = true

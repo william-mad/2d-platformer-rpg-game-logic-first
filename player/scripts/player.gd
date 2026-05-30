@@ -11,8 +11,6 @@ class_name Player extends CharacterBody2D
 @onready var attack_1: Attack_1 = %Attack_1
 @onready var attack_2: Attack_2 = %Attack_2
 @onready var attack_3: Attack_3 = %Attack_3
-@onready var mana: TextureProgressBar = %mana
-@onready var mana_2: TextureProgressBar = %mana_2
 @onready var ledgedetec: RayCast2D = %ledgedetec
 
 #endregion
@@ -35,6 +33,7 @@ class_name Player extends CharacterBody2D
 var hp : float = 20
 var mana_charge_rate : float = 100
 var max_mana : float = 300
+var mana_amount: float = 0.0
 @export var mana_2_starts_full: bool = true
 @export var mana_2_charge_rate: float = 50.0
 var mana_2_amount: float = 0.0
@@ -68,10 +67,9 @@ func _ready() -> void:
 	rope_detector.body_exited.connect(_on_rope_detector_body_exited)
 	hp = max_hp
 	PlayerHud.setup_hp(max_hp, hp)
-	mana.max_value = max_mana
-	mana_2.max_value = max_mana
-	mana.value = 0.0
+	mana_amount = 0.0
 	mana_2_amount = max_mana if mana_2_starts_full else 0.0
+	PlayerHud.setup_mana(max_mana, mana_amount, mana_2_amount)
 	sync_mana_2_bar()
 	#initialize states
 	initialize_states()
@@ -248,7 +246,8 @@ func update_mana_charge(delta: float) -> void:
 
 
 func charge_mana(amount: float) -> void:
-	mana.value = minf(mana.value + amount, mana_2_amount)
+	mana_amount = minf(mana_amount + amount, mana_2_amount)
+	PlayerHud.set_mana(mana_amount)
 
 
 func update_mana_2_charge(delta: float) -> void:
@@ -257,15 +256,23 @@ func update_mana_2_charge(delta: float) -> void:
 
 
 func sync_mana_2_bar() -> void:
-	mana_2.value = clampf(mana_2_amount, 0.0, max_mana)
+	mana_2_amount = clampf(mana_2_amount, 0.0, max_mana)
 
-	if mana.value > mana_2_amount:
-		mana.value = mana_2_amount
+	if mana_amount > mana_2_amount:
+		mana_amount = mana_2_amount
+
+	PlayerHud.set_mana_2(mana_2_amount)
+	PlayerHud.set_mana(mana_amount)
 
 
 func spend_mana_2(amount: float) -> void:
 	mana_2_amount = maxf(mana_2_amount - amount, 0.0)
 	sync_mana_2_bar()
+
+
+func clear_mana_charge() -> void:
+	mana_amount = 0.0
+	PlayerHud.set_mana(mana_amount)
 
 
 func apply_knockback(damage_source_position: Vector2) -> void:

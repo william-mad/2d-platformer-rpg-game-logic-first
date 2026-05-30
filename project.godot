@@ -21,9 +21,7 @@ PlayerHud="*uid://dicudb0t1rd0j"
 
 [display]
 
-window/size/viewport_width=720
-window/size/viewport_height=480
-window/size/mode=2
+window/stretch/scale_mode="integer"
 
 [global_group]
 

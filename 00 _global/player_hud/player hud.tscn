@@ -1,7 +1,7 @@
 [gd_scene format=3 uid="uid://dicudb0t1rd0j"]
 
 [ext_resource type="Texture2D" uid="uid://8ehnoal3e8eh" path="res://images/sprites/assets/hp bar.png" id="1_kyp3m"]
-[ext_resource type="Script" path="res://00 _global/player_hud/player_hud.gd" id="2_hud"]
+[ext_resource type="Script" uid="uid://ct62uktvpeu7x" path="res://00 _global/player_hud/player_hud.gd" id="2_hud"]
 
 [sub_resource type="Gradient" id="Gradient_3vx8i"]
 offsets = PackedFloat32Array(0.2470238, 0.98511904)
@@ -16,6 +16,27 @@ colors = PackedColorArray(1, 0, 0.050980393, 1, 0.80784315, 0.011764706, 0.06666
 
 [sub_resource type="GradientTexture2D" id="GradientTexture2D_4h0pc"]
 gradient = SubResource("Gradient_74uli")
+
+[sub_resource type="Gradient" id="Gradient_mana_2"]
+colors = PackedColorArray(0.8, 0.15, 1, 1, 0.25, 0.02, 0.55, 1)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_mana_2"]
+gradient = SubResource("Gradient_mana_2")
+width = 100
+height = 20
+fill_from = Vector2(0, 0.5)
+fill_to = Vector2(1, 0.5)
+
+[sub_resource type="Gradient" id="Gradient_mana"]
+offsets = PackedFloat32Array(0.0147929, 0.7307692)
+colors = PackedColorArray(0.09411765, 0.16078432, 1, 1, 0.50411516, 0.66422695, 1, 1)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_mana"]
+gradient = SubResource("Gradient_mana")
+width = 100
+height = 20
+fill_from = Vector2(0, 0.5321285)
+fill_to = Vector2(1, 0.3995984)
 
 [node name="PlayerHud" type="CanvasLayer" unique_id=1998049805]
 layer = 2
@@ -64,3 +85,24 @@ rounded = true
 nine_patch_stretch = true
 texture_under = SubResource("GradientTexture1D_w6j1a")
 texture_progress = SubResource("GradientTexture2D_4h0pc")
+
+[node name="mana margin cont" type="MarginContainer" parent="Control" unique_id=1236149913]
+layout_mode = 0
+offset_top = 52.0
+offset_right = 437.0
+offset_bottom = 72.0
+
+[node name="mana_2" type="TextureProgressBar" parent="Control/mana margin cont" unique_id=29787464]
+unique_name_in_owner = true
+layout_mode = 2
+max_value = 300.0
+value = 300.0
+texture_progress = SubResource("GradientTexture2D_mana_2")
+
+[node name="mana" type="TextureProgressBar" parent="Control/mana margin cont/mana_2" unique_id=612119304]
+unique_name_in_owner = true
+layout_mode = 0
+offset_right = 100.0
+offset_bottom = 20.0
+max_value = 300.0
+texture_progress = SubResource("GradientTexture2D_mana")
