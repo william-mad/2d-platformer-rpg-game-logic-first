@@ -1,27 +1,28 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://rw53hv66gh37"]
 
-[ext_resource type="Script" path="res://scripts/instances/door_transition.gd" id="1_door"]
+[ext_resource type="Script" uid="uid://buqshqi4ea6ax" path="res://scripts/instances/door_transition.gd" id="1_door"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_door"]
-size = Vector2(64, 72)
+size = Vector2(48, 109)
 
-[node name="DoorTransition" type="Area2D" groups=["door_transition"]]
+[node name="DoorTransition" type="Area2D" unique_id=1309982695 groups=["door_transition"]]
 collision_layer = 0
 collision_mask = 2
 monitorable = false
 script = ExtResource("1_door")
 
-[node name="DoorVisual" type="Polygon2D" parent="."]
-position = Vector2(0, -36)
+[node name="DoorVisual" type="Polygon2D" parent="." unique_id=1626073559]
+position = Vector2(0, -54.5)
+scale = Vector2(1, 1.5138888)
 color = Color(0.26, 0.12, 0.04, 0.8)
 polygon = PackedVector2Array(-24, 36, -24, -36, 24, -36, 24, 36)
 
-[node name="DoorKnob" type="Polygon2D" parent="."]
-position = Vector2(14, -34)
+[node name="DoorKnob" type="Polygon2D" parent="." unique_id=1950369653]
+position = Vector2(18, -53)
 color = Color(0.95, 0.74, 0.22, 1)
 polygon = PackedVector2Array(-3, -3, 3, -3, 3, 3, -3, 3)
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
-position = Vector2(0, -36)
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=6984431]
+position = Vector2(0, -54.5)
 shape = SubResource("RectangleShape2D_door")
 debug_color = Color(0.2, 0.8, 1, 0.35)

@@ -4,7 +4,7 @@
 [ext_resource type="PackedScene" uid="uid://by1aphre1t601" path="res://player/player.tscn" id="2_5vyrd"]
 [ext_resource type="Texture2D" uid="uid://p8b4lq2cxva1" path="res://images/sprites/characters/tests/ilust only sofa 1a.png" id="3_614p5"]
 [ext_resource type="Texture2D" uid="uid://cckdsos542pql" path="res://images/sprites/characters/tests/zeniths + ai -Sheet.png" id="4_8pl2w"]
-[ext_resource type="PackedScene" path="res://scenes/things/door_transition.tscn" id="5_door"]
+[ext_resource type="PackedScene" uid="uid://rw53hv66gh37" path="res://scenes/things/door_transition.tscn" id="5_door"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_2r4u7"]
 size = Vector2(51.5, 397.2041)
@@ -99,12 +99,12 @@ autoplay = &"laying"
 
 [node name="Sprite2D" type="Sprite2D" parent="." unique_id=1826017877]
 
-[node name="DoorToPlayground" parent="." instance=ExtResource("5_door")]
-position = Vector2(128, 255)
+[node name="DoorToPlayground" parent="." unique_id=923892073 instance=ExtResource("5_door")]
+position = Vector2(680, 278)
 target_scene_path = "res://scenes/levels/playground.tscn"
 
 [node name="Player" parent="." unique_id=500096349 instance=ExtResource("2_5vyrd")]
-position = Vector2(268, 255)
+position = Vector2(680, 277)
 
 [node name="Camera2D" type="Camera2D" parent="Player" unique_id=1799392307]
 limit_left = 7

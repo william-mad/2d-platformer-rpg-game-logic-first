@@ -17,7 +17,7 @@
 [ext_resource type="PackedScene" uid="uid://bw56u7dpb7tov" path="res://scenes/things/healingarea.tscn" id="13_vmfr1"]
 [ext_resource type="PackedScene" uid="uid://c4x0suw8m31ph" path="res://scenes/things/damagearea.tscn" id="14_2li26"]
 [ext_resource type="PackedScene" uid="uid://mhtjqmdrcoo0" path="res://scenes/things/fixed_hidden_spot.tscn" id="17_kgokd"]
-[ext_resource type="PackedScene" path="res://scenes/things/door_transition.tscn" id="18_door"]
+[ext_resource type="PackedScene" uid="uid://rw53hv66gh37" path="res://scenes/things/door_transition.tscn" id="18_door"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_q8s1k"]
 texture = ExtResource("4_rc1m4")
@@ -244,12 +244,12 @@ layer_0/tile_data = PackedInt32Array(1507328, 65536, 0, 1507329, 65536, 0, 15073
 [node name="FixedHiddenSpot" parent="." unique_id=237761450 instance=ExtResource("17_kgokd")]
 position = Vector2(-1471, 344)
 
-[node name="DoorToHome1" parent="." instance=ExtResource("18_door")]
-position = Vector2(80, 342)
+[node name="DoorToHome1" parent="." unique_id=1972778194 instance=ExtResource("18_door")]
+position = Vector2(77, 367)
 target_scene_path = "res://scenes/levels/home 1.tscn"
 
 [node name="Player" parent="." unique_id=500096349 instance=ExtResource("5_dlivn")]
-position = Vector2(205, 342)
+position = Vector2(79, 368)
 
 [node name="Camera2D" type="Camera2D" parent="Player" unique_id=1030625809]
 position = Vector2(-1, -50)
@@ -259,7 +259,7 @@ limit_right = 2811
 limit_bottom = 400
 
 [node name="Damage_Area" type="Area2D" parent="." unique_id=150656767]
-position = Vector2(0, -50)
+position = Vector2(-341, -113)
 collision_layer = 128
 collision_mask = 0
 script = ExtResource("7_0qlaq")
