@@ -4,12 +4,13 @@
 [ext_resource type="PackedScene" uid="uid://by1aphre1t601" path="res://player/player.tscn" id="2_5vyrd"]
 [ext_resource type="Texture2D" uid="uid://p8b4lq2cxva1" path="res://images/sprites/characters/tests/ilust only sofa 1a.png" id="3_614p5"]
 [ext_resource type="Texture2D" uid="uid://cckdsos542pql" path="res://images/sprites/characters/tests/zeniths + ai -Sheet.png" id="4_8pl2w"]
+[ext_resource type="PackedScene" path="res://scenes/things/door_transition.tscn" id="5_door"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_2r4u7"]
 size = Vector2(51.5, 397.2041)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_614p5"]
-size = Vector2(857, 78.632935)
+size = Vector2(868.5, 78.632935)
 
 [sub_resource type="Animation" id="Animation_fbydv"]
 length = 0.001
@@ -64,19 +65,19 @@ position = Vector2(-21, 25)
 collision_mask = 6
 
 [node name="CollisionShape2D4" type="CollisionShape2D" parent="StaticBody2D" unique_id=1194378319]
-position = Vector2(-90, 127.60205)
+position = Vector2(-141, 133)
 shape = SubResource("RectangleShape2D_2r4u7")
 
 [node name="CollisionShape2D2" type="CollisionShape2D" parent="StaticBody2D" unique_id=452565491]
-position = Vector2(720, 121)
+position = Vector2(772, 126)
 shape = SubResource("RectangleShape2D_2r4u7")
 
 [node name="CollisionShape2D3" type="CollisionShape2D" parent="StaticBody2D" unique_id=936763693]
-position = Vector2(307, -74)
+position = Vector2(316, -59)
 shape = SubResource("RectangleShape2D_614p5")
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="StaticBody2D" unique_id=1674975046]
-position = Vector2(318, 299)
+position = Vector2(313, 293)
 shape = SubResource("RectangleShape2D_614p5")
 
 [node name="IlustOnlySofa1a" type="Sprite2D" parent="." unique_id=71417946]
@@ -98,11 +99,15 @@ autoplay = &"laying"
 
 [node name="Sprite2D" type="Sprite2D" parent="." unique_id=1826017877]
 
+[node name="DoorToPlayground" parent="." instance=ExtResource("5_door")]
+position = Vector2(128, 255)
+target_scene_path = "res://scenes/levels/playground.tscn"
+
 [node name="Player" parent="." unique_id=500096349 instance=ExtResource("2_5vyrd")]
 position = Vector2(268, 255)
 
 [node name="Camera2D" type="Camera2D" parent="Player" unique_id=1799392307]
-limit_left = 0
-limit_top = 0
-limit_right = 860
-limit_bottom = 350
+limit_left = 7
+limit_top = 2
+limit_right = 867
+limit_bottom = 352

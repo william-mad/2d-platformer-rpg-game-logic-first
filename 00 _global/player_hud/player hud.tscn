@@ -87,9 +87,10 @@ texture_under = SubResource("GradientTexture1D_w6j1a")
 texture_progress = SubResource("GradientTexture2D_4h0pc")
 
 [node name="mana margin cont" type="MarginContainer" parent="Control" unique_id=1236149913]
+custom_minimum_size = Vector2(100, 20)
 layout_mode = 0
 offset_top = 52.0
-offset_right = 437.0
+offset_right = 100.0
 offset_bottom = 72.0
 
 [node name="mana_2" type="TextureProgressBar" parent="Control/mana margin cont" unique_id=29787464]
