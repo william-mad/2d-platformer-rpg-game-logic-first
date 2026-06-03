@@ -1,0 +1,21 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/creatures/npc_favor_event_area.gd" id="1_event_area"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_event_area"]
+size = Vector2(96, 96)
+
+[node name="NpcFavorEventArea" type="Area2D"]
+collision_layer = 0
+collision_mask = 2
+monitorable = false
+script = ExtResource("1_event_area")
+
+[node name="ZoneVisual" type="Polygon2D" parent="."]
+unique_name_in_owner = true
+color = Color(0.2, 0.8, 0.25, 0.35)
+polygon = PackedVector2Array(-48, -48, 48, -48, 48, 48, -48, 48)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_event_area")
+debug_color = Color(0.2, 0.8, 0.25, 0.25)

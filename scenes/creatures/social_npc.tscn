@@ -1,0 +1,48 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/creatures/social_npc.gd" id="1_social_npc"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_body"]
+size = Vector2(48, 64)
+
+[node name="SocialNpc" type="CharacterBody2D" groups=["npc", "social_npc"]]
+collision_layer = 4
+collision_mask = 161
+script = ExtResource("1_social_npc")
+
+[node name="BodyVisual" type="Polygon2D" parent="."]
+unique_name_in_owner = true
+position = Vector2(0, -32)
+color = Color(0.9, 0.78, 0.25, 1)
+polygon = PackedVector2Array(-24, -32, 24, -32, 24, 32, -24, 32)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(0, -32)
+shape = SubResource("RectangleShape2D_body")
+
+[node name="SightPivot" type="Node2D" parent="."]
+unique_name_in_owner = true
+position = Vector2(0, -44)
+
+[node name="SightConeVisual" type="Polygon2D" parent="SightPivot"]
+color = Color(0.25, 0.55, 1, 0.16)
+polygon = PackedVector2Array(0, 0, 330, -130, 330, 130)
+
+[node name="SightArea" type="Area2D" parent="SightPivot"]
+unique_name_in_owner = true
+collision_layer = 0
+collision_mask = 2
+monitorable = false
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="SightPivot/SightArea"]
+polygon = PackedVector2Array(0, 0, 330, -130, 330, 130)
+debug_color = Color(0.25, 0.55, 1, 0.22)
+
+[node name="FavorBar" type="ProgressBar" parent="."]
+unique_name_in_owner = true
+offset_left = -36.0
+offset_top = -94.0
+offset_right = 36.0
+offset_bottom = -86.0
+value = 50.0
+show_percentage = false

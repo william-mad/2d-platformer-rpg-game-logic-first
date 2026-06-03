@@ -1,0 +1,163 @@
+[gd_scene format=3 uid="uid://dcwsjkb1kvp3a"]
+
+[ext_resource type="PackedScene" uid="uid://by1aphre1t601" path="res://player/player.tscn" id="1_player"]
+[ext_resource type="PackedScene" uid="uid://rw53hv66gh37" path="res://scenes/things/door_transition.tscn" id="2_door"]
+[ext_resource type="Texture2D" uid="uid://ccmh11d5xjwap" path="res://images/backgrounds/ChatGPT Image 21 de mai. de 2026, 15_21_21.png" id="3_sky"]
+[ext_resource type="Texture2D" uid="uid://clymdki0w7gnc" path="res://images/backgrounds/ChatGPT Image 25 de mai.png" id="4_houses"]
+[ext_resource type="Texture2D" uid="uid://dpovqj2p2nf5v" path="res://images/backgrounds/ChatGPT Image 25 de mai. de 2026, 17_29_38.png" id="5_front"]
+[ext_resource type="PackedScene" path="res://scenes/creatures/social_npc.tscn" id="6_social_npc"]
+[ext_resource type="PackedScene" path="res://scenes/creatures/npc_favor_event_area.tscn" id="7_favor_event"]
+[ext_resource type="PackedScene" path="res://scenes/creatures/npc_global_event_area.tscn" id="8_global_event"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_floor"]
+size = Vector2(7600, 80)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_wall"]
+size = Vector2(80, 1040)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_platform"]
+size = Vector2(720, 32)
+
+[node name="playground_npcs" type="Node2D" unique_id=1081749426]
+
+[node name="moving sky" type="Parallax2D" parent="." unique_id=1467167052]
+scroll_scale = Vector2(0.1, 1)
+repeat_size = Vector2(2940, 0)
+autoscroll = Vector2(-5, 0)
+repeat_times = 5
+
+[node name="Sprite2D" type="Sprite2D" parent="moving sky" unique_id=1764136632]
+position = Vector2(1141, -188.96402)
+scale = Vector2(1.4122939, 1.6050719)
+texture = ExtResource("3_sky")
+
+[node name="houses bg" type="Parallax2D" parent="." unique_id=1247955446]
+scroll_scale = Vector2(1.1, 1)
+scroll_offset = Vector2(0.1, 0)
+repeat_size = Vector2(2940, 0)
+repeat_times = 5
+
+[node name="Sprite2D" type="Sprite2D" parent="houses bg" unique_id=1158887294]
+position = Vector2(1619.3998, -328.96405)
+scale = Vector2(2.0391345, 1.991812)
+texture = ExtResource("4_houses")
+
+[node name="frontlayer" type="Parallax2D" parent="." unique_id=990883625]
+
+[node name="Sprite2D" type="Sprite2D" parent="frontlayer" unique_id=667171133]
+position = Vector2(-3077, 20)
+scale = Vector2(0.667602, 0.80611813)
+texture = ExtResource("5_front")
+
+[node name="Sprite2D2" type="Sprite2D" parent="frontlayer" unique_id=173456999]
+position = Vector2(1330, 21)
+scale = Vector2(0.71616024, 0.8017956)
+texture = ExtResource("5_front")
+flip_h = true
+
+[node name="GroundVisual" type="Polygon2D" parent="." unique_id=1693406187]
+position = Vector2(0, 402)
+color = Color(0.19, 0.32, 0.17, 1)
+polygon = PackedVector2Array(-3800, 0, 3800, 0, 3800, 260, -3800, 260)
+
+[node name="PlatformVisualLeft" type="Polygon2D" parent="." unique_id=1895055032]
+position = Vector2(-1600, 250)
+color = Color(0.18, 0.27, 0.16, 1)
+polygon = PackedVector2Array(-360, -16, 360, -16, 360, 16, -360, 16)
+
+[node name="PlatformVisualRight" type="Polygon2D" parent="." unique_id=835916281]
+position = Vector2(1300, 220)
+color = Color(0.18, 0.27, 0.16, 1)
+polygon = PackedVector2Array(-360, -16, 360, -16, 360, 16, -360, 16)
+
+[node name="WorldCollision" type="StaticBody2D" parent="." unique_id=1018241854]
+collision_mask = 6
+
+[node name="Floor" type="CollisionShape2D" parent="WorldCollision" unique_id=562397208]
+position = Vector2(0, 440)
+shape = SubResource("RectangleShape2D_floor")
+
+[node name="LeftWall" type="CollisionShape2D" parent="WorldCollision" unique_id=1818906191]
+position = Vector2(-3840, -80)
+shape = SubResource("RectangleShape2D_wall")
+
+[node name="RightWall" type="CollisionShape2D" parent="WorldCollision" unique_id=1395513543]
+position = Vector2(3840, -80)
+shape = SubResource("RectangleShape2D_wall")
+
+[node name="PlatformLeft" type="CollisionShape2D" parent="WorldCollision" unique_id=1492563678]
+position = Vector2(-1600, 250)
+shape = SubResource("RectangleShape2D_platform")
+
+[node name="PlatformRight" type="CollisionShape2D" parent="WorldCollision" unique_id=1866622752]
+position = Vector2(1300, 220)
+shape = SubResource("RectangleShape2D_platform")
+
+[node name="DoorToPlayground" parent="." unique_id=942413467 instance=ExtResource("2_door")]
+position = Vector2(-3600, 367)
+target_scene_path = "res://scenes/levels/playground.tscn"
+
+[node name="Player" parent="." unique_id=1582959368 instance=ExtResource("1_player")]
+position = Vector2(-3500, 368)
+
+[node name="Camera2D" type="Camera2D" parent="Player" unique_id=1038633491]
+position = Vector2(-1, -50)
+limit_left = -3800
+limit_top = -764
+limit_right = 3800
+limit_bottom = 420
+
+[node name="SquareNpc" parent="." instance=ExtResource("6_social_npc")]
+position = Vector2(-1100, 368)
+social_stats = {
+"favor": 55.0,
+"fear": 0.0,
+"hunger": 25.0,
+"love": 5.0
+}
+
+[node name="SquareNpc2" parent="." instance=ExtResource("6_social_npc")]
+position = Vector2(550, 368)
+starts_moving_right = false
+social_stats = {
+"favor": 40.0,
+"fear": 15.0,
+"hunger": 35.0,
+"love": 0.0
+}
+
+[node name="GainFavorArea" parent="." instance=ExtResource("7_favor_event")]
+position = Vector2(-930, 360)
+target_npc_path = NodePath("../SquareNpc")
+stat_delta = {
+"favor": 10.0,
+"love": 2.0
+}
+cooldown_seconds = 1.5
+zone_color = Color(0.2, 0.8, 0.25, 0.35)
+
+[node name="LoseFavorArea" parent="." instance=ExtResource("7_favor_event")]
+position = Vector2(-1250, 360)
+target_npc_path = NodePath("../SquareNpc")
+stat_delta = {
+"favor": -12.0,
+"fear": 6.0
+}
+cooldown_seconds = 1.5
+zone_color = Color(0.95, 0.12, 0.1, 0.35)
+
+[node name="GlobalNpcEventArea" parent="." instance=ExtResource("8_global_event")]
+position = Vector2(-1100, 360)
+target_npc_paths = [NodePath("../SquareNpc"), NodePath("../SquareNpc2")]
+default_stat_delta = {
+"favor": 3.0
+}
+npc_stat_deltas = {
+"SquareNpc": {
+"favor": 10.0
+},
+"SquareNpc2": {
+"favor": -5.0
+}
+}
+cooldown_seconds = 2.0

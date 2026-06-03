@@ -6,7 +6,7 @@ const HIDDEN_LAYER := 4
 @export var hidden_move_speed: float = 100.0
 
 var previous_collision_layer: int = 0
-var hidden_spot: Area2D = null
+var hidden_spot: Node2D = null
 
 
 func init() -> void:
@@ -29,6 +29,9 @@ func enter() -> void:
 
 
 func exit() -> void:
+	if hidden_spot != null and is_instance_valid(hidden_spot) and hidden_spot.has_method("stop_hidden_control"):
+		hidden_spot.call("stop_hidden_control")
+
 	player.collision_layer = previous_collision_layer
 	player.colider_stand.disabled = false
 	player.colider_crouch.disabled = true
@@ -59,9 +62,14 @@ func process(_delta: float) -> PlayerState:
 
 func physics_process(_delta: float) -> PlayerState:
 	if should_move_with_hidden_spot():
-		player.velocity.x = player.direction.x * hidden_move_speed
+		var move_velocity_x := player.direction.x * hidden_move_speed
 
-		if hidden_spot != null and is_instance_valid(hidden_spot):
+		if hidden_spot != null and is_instance_valid(hidden_spot) and hidden_spot.has_method("set_hidden_move_velocity_x"):
+			player.velocity.x = 0.0
+			hidden_spot.call("set_hidden_move_velocity_x", move_velocity_x)
+			sync_player_to_hidden_spot()
+		else:
+			player.velocity.x = move_velocity_x
 			hidden_spot.global_position.x = player.global_position.x
 	else:
 		player.velocity.x = 0.0
@@ -81,6 +89,15 @@ func should_move_with_hidden_spot() -> bool:
 		return false
 
 	if hidden_spot.has_method("should_move_with_player_while_hidden"):
-		return hidden_spot.should_move_with_player_while_hidden()
+		return bool(hidden_spot.call("should_move_with_player_while_hidden"))
 
 	return true
+
+
+func sync_player_to_hidden_spot() -> void:
+	if hidden_spot == null or not is_instance_valid(hidden_spot):
+		return
+
+	if hidden_spot.has_method("get_hidden_player_position"):
+		var hidden_player_position: Vector2 = hidden_spot.call("get_hidden_player_position")
+		player.global_position = hidden_player_position

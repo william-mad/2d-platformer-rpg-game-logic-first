@@ -95,23 +95,35 @@ func use_special_attack(mana_cost: float, special_state: PlayerState) -> PlayerS
 	return special_state
 
 
-func get_current_hidden_spot() -> Area2D:
-	var closest: Area2D = null
+func get_current_hidden_spot() -> Node2D:
+	var closest: Node2D = null
 	var closest_distance := INF
 
 	for hidden_spot in get_tree().get_nodes_in_group("hidden_spot"):
-		var hidden_spot_area := hidden_spot as Area2D
+		var hidden_spot_node := hidden_spot as Node2D
 
-		if hidden_spot_area == null:
+		if hidden_spot_node == null:
 			continue
 
-		if not hidden_spot_area.get_overlapping_bodies().has(player):
+		if not can_hide_in_spot(hidden_spot_node):
 			continue
 
-		var distance := player.global_position.distance_to(hidden_spot_area.global_position)
+		var distance := player.global_position.distance_to(hidden_spot_node.global_position)
 
 		if distance < closest_distance:
 			closest_distance = distance
-			closest = hidden_spot_area
+			closest = hidden_spot_node
 
 	return closest
+
+
+func can_hide_in_spot(hidden_spot: Node2D) -> bool:
+	if hidden_spot.has_method("contains_player"):
+		return bool(hidden_spot.call("contains_player", player))
+
+	var hidden_spot_area := hidden_spot as Area2D
+
+	if hidden_spot_area == null:
+		return false
+
+	return hidden_spot_area.get_overlapping_bodies().has(player)

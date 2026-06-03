@@ -99,8 +99,12 @@ func _apply_rope_pull(delta: float) -> void:
 
 	# Hard cap past max length.
 	if distance > max_length:
-		end_body.global_position = start_pos + direction_from_start_to_end * max_length
-		_remove_velocity_away_from_player(end_body, direction_from_start_to_end)
+		if end_body is RigidBody2D:
+			_remove_velocity_away_from_player(end_body, direction_from_start_to_end)
+			_apply_soft_pull(end_body, direction_to_player, max_pull_speed, delta)
+		else:
+			end_body.global_position = start_pos + direction_from_start_to_end * max_length
+			_remove_velocity_away_from_player(end_body, direction_from_start_to_end)
 
 
 func _apply_pull_to_body(body: Node2D, direction: Vector2, target_speed: float, delta: float) -> void:
@@ -120,8 +124,7 @@ func _apply_pull_to_body(body: Node2D, direction: Vector2, target_speed: float, 
 		character.velocity += direction * speed_change
 
 	elif body is RigidBody2D:
-		var rigid := body as RigidBody2D
-		rigid.apply_central_force(direction * target_speed * pull_strength)
+		_apply_rigid_velocity_pull(body as RigidBody2D, direction, target_speed, delta)
 
 	else:
 		body.global_position += direction * target_speed * delta
@@ -183,8 +186,26 @@ func _apply_soft_pull(body: Node2D, direction: Vector2, target_speed: float, del
 		character.velocity += direction * speed_change
 
 	elif body is RigidBody2D:
-		var rigid := body as RigidBody2D
-		rigid.apply_central_force(direction * target_speed * pull_strength)
+		_apply_rigid_velocity_pull(body as RigidBody2D, direction, target_speed, delta)
 
 	else:
 		body.global_position += direction * target_speed * delta
+
+
+func _apply_rigid_velocity_pull(
+	rigid: RigidBody2D,
+	direction: Vector2,
+	target_speed: float,
+	delta: float
+) -> void:
+	rigid.sleeping = false
+
+	var current_speed := rigid.linear_velocity.dot(direction)
+	var new_speed := move_toward(
+		current_speed,
+		target_speed,
+		pull_strength * delta
+	)
+
+	var speed_change := new_speed - current_speed
+	rigid.linear_velocity += direction * speed_change

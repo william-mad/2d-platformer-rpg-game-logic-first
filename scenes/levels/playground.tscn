@@ -248,6 +248,10 @@ position = Vector2(-1471, 344)
 position = Vector2(77, 367)
 target_scene_path = "res://scenes/levels/home 1.tscn"
 
+[node name="DoorToPlaygroundNpcs" parent="." instance=ExtResource("18_door")]
+position = Vector2(180, 367)
+target_scene_path = "res://scenes/levels/playground_npcs.tscn"
+
 [node name="Player" parent="." unique_id=500096349 instance=ExtResource("5_dlivn")]
 position = Vector2(79, 368)
 

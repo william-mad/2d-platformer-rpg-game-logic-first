@@ -65,6 +65,7 @@ var knockback_timer: float = 0.0
 func _ready() -> void:
 	rope_detector.body_entered.connect(_on_rope_detector_body_entered)
 	rope_detector.body_exited.connect(_on_rope_detector_body_exited)
+	PlayerHud.visible = true
 	hp = max_hp
 	PlayerHud.setup_hp(max_hp, hp)
 	mana_amount = 0.0
@@ -285,11 +286,21 @@ func apply_knockback(damage_source_position: Vector2) -> void:
 
 
 func _on_rope_detector_body_entered(body: Node2D) -> void:
-	if body.is_in_group("rope_attachable"):
-		if not nearby_attachables.has(body):
-			nearby_attachables.append(body)
+	track_rope_attachable(body)
 
 
 func _on_rope_detector_body_exited(body: Node2D) -> void:
-	if nearby_attachables.has(body):
-		nearby_attachables.erase(body)
+	untrack_rope_attachable(body)
+
+
+func track_rope_attachable(attachable: Node2D) -> void:
+	if not attachable.is_in_group("rope_attachable"):
+		return
+
+	if not nearby_attachables.has(attachable):
+		nearby_attachables.append(attachable)
+
+
+func untrack_rope_attachable(attachable: Node2D) -> void:
+	if nearby_attachables.has(attachable):
+		nearby_attachables.erase(attachable)
