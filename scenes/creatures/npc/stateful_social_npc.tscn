@@ -1,0 +1,27 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/creatures/social_npc.tscn" id="1_social"]
+[ext_resource type="PackedScene" path="res://scenes/creatures/npc/npc_state_machine.tscn" id="2_machine"]
+
+[node name="StatefulSocialNpc" instance=ExtResource("1_social")]
+
+[node name="NpcStateMachine" parent="." instance=ExtResource("2_machine")]
+debug_label_path = NodePath("StateLabel")
+walk_speed = 70.0
+run_speed = 130.0
+default_work_time = 2.0
+default_talk_time = 1.6
+default_flee_time = 1.2
+
+[node name="StateLabel" type="Label" parent="."]
+offset_left = -46.0
+offset_top = -125.0
+offset_right = 46.0
+offset_bottom = -102.0
+text = "Idle"
+horizontal_alignment = 1
+vertical_alignment = 1
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1

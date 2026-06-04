@@ -1,0 +1,35 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scenes/creatures/npc/npc_state_test_pad.gd" id="1_pad"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_pad"]
+size = Vector2(118, 86)
+
+[node name="NpcStateTestPad" type="Area2D"]
+collision_layer = 0
+collision_mask = 2
+monitorable = false
+script = ExtResource("1_pad")
+
+[node name="ZoneVisual" type="Polygon2D" parent="."]
+unique_name_in_owner = true
+color = Color(0.25, 0.55, 1, 0.35)
+polygon = PackedVector2Array(-59, -43, 59, -43, 59, 43, -59, 43)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_pad")
+debug_color = Color(0.25, 0.55, 1, 0.25)
+
+[node name="Label" type="Label" parent="."]
+unique_name_in_owner = true
+offset_left = -70.0
+offset_top = -70.0
+offset_right = 70.0
+offset_bottom = -45.0
+text = "State"
+horizontal_alignment = 1
+vertical_alignment = 1
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1

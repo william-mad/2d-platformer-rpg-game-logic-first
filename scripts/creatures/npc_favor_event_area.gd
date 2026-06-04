@@ -36,16 +36,27 @@ func _try_apply_to_player(player: Node2D) -> void:
 	if float(cooldowns.get(body_id, 0.0)) > 0.0:
 		return
 
-	var target_npc := get_node_or_null(target_npc_path) as SocialNpc
+	var target_npc := get_node_or_null(target_npc_path)
 	if target_npc == null:
 		return
 
-	if requires_npc_detection and not target_npc.can_see(player):
+	var event_receiver := _get_event_receiver(target_npc)
+	if event_receiver == null:
 		return
 
-	if target_npc.apply_social_event(stat_delta, player):
+	if requires_npc_detection and target_npc.has_method("can_see") and not bool(target_npc.call("can_see", player)):
+		return
+
+	if bool(event_receiver.call("apply_social_event", stat_delta, player, requires_npc_detection)):
 		applied_bodies[body_id] = true
 		cooldowns[body_id] = cooldown_seconds
+
+
+func _get_event_receiver(target_node: Node) -> Node:
+	if target_node.has_method("apply_social_event"):
+		return target_node
+
+	return target_node.get_node_or_null("NpcStateMachine")
 
 
 func _tick_cooldowns(delta: float) -> void:

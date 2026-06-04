@@ -54,21 +54,25 @@ func _apply_to_designated_npcs(player: Node2D) -> Array[String]:
 	var applied_summaries: Array[String] = []
 
 	for target_path in target_npc_paths:
-		var target_npc := get_node_or_null(target_path) as SocialNpc
+		var target_npc := get_node_or_null(target_path)
 		if target_npc == null:
+			continue
+
+		var event_receiver := _get_event_receiver(target_npc)
+		if event_receiver == null:
 			continue
 
 		var stat_delta := _get_stat_delta_for_npc(target_npc, target_path)
 		if stat_delta.is_empty():
 			continue
 
-		if target_npc.apply_social_event(stat_delta, player, false):
+		if bool(event_receiver.call("apply_social_event", stat_delta, player, false)):
 			applied_summaries.append(_format_stat_delta(target_npc, stat_delta))
 
 	return applied_summaries
 
 
-func _get_stat_delta_for_npc(target_npc: SocialNpc, target_path) -> Dictionary:
+func _get_stat_delta_for_npc(target_npc: Node, target_path) -> Dictionary:
 	var path_key := String(target_path)
 	if npc_stat_deltas.has(path_key) and npc_stat_deltas[path_key] is Dictionary:
 		return npc_stat_deltas[path_key]
@@ -80,6 +84,13 @@ func _get_stat_delta_for_npc(target_npc: SocialNpc, target_path) -> Dictionary:
 	return default_stat_delta
 
 
+func _get_event_receiver(target_node: Node) -> Node:
+	if target_node.has_method("apply_social_event"):
+		return target_node
+
+	return target_node.get_node_or_null("NpcStateMachine")
+
+
 func _get_interacting_player() -> Node2D:
 	for body in get_overlapping_bodies():
 		if body.is_in_group("player"):
@@ -88,7 +99,7 @@ func _get_interacting_player() -> Node2D:
 	return null
 
 
-func _format_stat_delta(target_npc: SocialNpc, stat_delta: Dictionary) -> String:
+func _format_stat_delta(target_npc: Node, stat_delta: Dictionary) -> String:
 	var stat_text := ""
 
 	for stat_key in stat_delta.keys():

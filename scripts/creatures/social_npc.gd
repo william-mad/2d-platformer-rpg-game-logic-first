@@ -17,24 +17,38 @@ signal social_stats_changed(stats: Dictionary)
 @export var social_stats: Dictionary = {
 	"favor": 50.0,
 	"love": 0.0,
+	"trust": 50.0,
+	"fear": 0.0,
+	"anger": 0.0,
 	"hunger": 25.0,
-	"fear": 0.0
+	"energy": 100.0,
+	"sleepiness": 0.0,
+	"work_need": 0.0,
+	"talk_interest": 0.0,
+	"curiosity": 0.0,
+	"hp": 100.0,
+	"disabled": 0.0
 }
 
 @export_group("Reactions")
 @export var reaction_pause_time: float = 0.6
 @export var negative_reaction_speed_multiplier: float = 1.5
 
+@export_group("State Machine")
+@export var use_state_machine_when_available: bool = true
+
 @onready var body_visual: Polygon2D = %BodyVisual
 @onready var sight_pivot: Node2D = %SightPivot
 @onready var sight_area: Area2D = %SightArea
 @onready var favor_bar: ProgressBar = %FavorBar
+@onready var npc_state_machine: NpcStateMachine = get_node_or_null("NpcStateMachine") as NpcStateMachine
 
 var home_position: Vector2
 var direction: int = 1
 var reaction_timer: float = 0.0
 var reaction_velocity_x: float = 0.0
 var seen_targets: Array[Node2D] = []
+var syncing_state_machine_values: bool = false
 
 
 func _ready() -> void:
@@ -51,9 +65,14 @@ func _ready() -> void:
 
 	sight_area.body_entered.connect(_on_sight_area_body_entered)
 	sight_area.body_exited.connect(_on_sight_area_body_exited)
+	_setup_state_machine()
 
 
 func _physics_process(delta: float) -> void:
+	if _state_machine_active():
+		_update_favor_bar_visibility()
+		return
+
 	_apply_gravity(delta)
 
 	if reaction_timer > 0.0:
@@ -82,6 +101,7 @@ func apply_social_event(
 		return false
 
 	var favor_delta := float(stat_delta.get("favor", 0.0))
+	var changed_stats: Dictionary = {}
 
 	for stat_key in stat_delta.keys():
 		var key := String(stat_key)
@@ -89,9 +109,20 @@ func apply_social_event(
 		var next_value := current_value + float(stat_delta[stat_key])
 		social_stats[key] = clampf(next_value, 0.0, 100.0)
 
+		var actual_delta := float(social_stats[key]) - current_value
+		if not is_equal_approx(actual_delta, 0.0):
+			changed_stats[key] = actual_delta
+
 	_update_favor_bar()
 	_update_visual_mood()
-	_react_to_event(actor, favor_delta)
+
+	if _state_machine_active():
+		syncing_state_machine_values = true
+		npc_state_machine.replace_values(social_stats, actor, changed_stats)
+		syncing_state_machine_values = false
+	else:
+		_react_to_event(actor, favor_delta)
+
 	social_stats_changed.emit(social_stats.duplicate())
 	return true
 
@@ -101,14 +132,25 @@ func get_favor() -> float:
 
 
 func _ensure_social_stats() -> void:
-	if not social_stats.has("favor"):
-		social_stats["favor"] = 50.0
-	if not social_stats.has("love"):
-		social_stats["love"] = 0.0
-	if not social_stats.has("hunger"):
-		social_stats["hunger"] = 25.0
-	if not social_stats.has("fear"):
-		social_stats["fear"] = 0.0
+	var default_stats := {
+		"favor": 50.0,
+		"love": 0.0,
+		"trust": 50.0,
+		"fear": 0.0,
+		"anger": 0.0,
+		"hunger": 25.0,
+		"energy": 100.0,
+		"sleepiness": 0.0,
+		"work_need": 0.0,
+		"talk_interest": 0.0,
+		"curiosity": 0.0,
+		"hp": 100.0,
+		"disabled": 0.0
+	}
+
+	for stat_key in default_stats.keys():
+		if not social_stats.has(stat_key):
+			social_stats[stat_key] = default_stats[stat_key]
 
 
 func _apply_gravity(delta: float) -> void:
@@ -187,9 +229,46 @@ func _on_sight_area_body_entered(body: Node2D) -> void:
 		return
 
 	seen_targets.append(body)
+	if npc_state_machine != null:
+		npc_state_machine.notify_target_seen(body)
 	target_seen.emit(body)
 
 
 func _on_sight_area_body_exited(body: Node2D) -> void:
 	seen_targets.erase(body)
+	if npc_state_machine != null:
+		npc_state_machine.notify_target_lost(body)
 	target_lost.emit(body)
+
+
+func _setup_state_machine() -> void:
+	if npc_state_machine == null:
+		return
+
+	npc_state_machine.bind_npc(self)
+
+	var callback := Callable(self, "_on_npc_state_machine_values_changed")
+	if not npc_state_machine.values_changed.is_connected(callback):
+		npc_state_machine.values_changed.connect(callback)
+
+	syncing_state_machine_values = true
+	npc_state_machine.replace_values(social_stats)
+	syncing_state_machine_values = false
+
+
+func _state_machine_active() -> bool:
+	return use_state_machine_when_available and npc_state_machine != null and npc_state_machine.active
+
+
+func _on_npc_state_machine_values_changed(
+	values: Dictionary,
+	_changed_values: Dictionary,
+	_actor: Node2D
+) -> void:
+	if syncing_state_machine_values:
+		return
+
+	social_stats = values.duplicate(true)
+	_update_favor_bar()
+	_update_visual_mood()
+	social_stats_changed.emit(social_stats.duplicate())

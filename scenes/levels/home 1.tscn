@@ -29,7 +29,7 @@ tracks/0/keys = {
 
 [sub_resource type="Animation" id="Animation_11hn1"]
 resource_name = "laying"
-length = 2.0
+length = 1.3333334
 loop_mode = 1
 tracks/0/type = "value"
 tracks/0/imported = false
@@ -38,16 +38,34 @@ tracks/0/path = NodePath(".:frame")
 tracks/0/interp = 1
 tracks/0/loop_wrap = true
 tracks/0/keys = {
-"times": PackedFloat32Array(0.03333333, 0.5, 0.93333334, 1.4),
+"times": PackedFloat32Array(0.03333333, 0.26666668, 0.6333333, 1),
 "transitions": PackedFloat32Array(1, 1, 1, 1),
 "update": 1,
 "values": [192, 200, 208, 216]
 }
 
+[sub_resource type="Animation" id="Animation_8pl2w"]
+resource_name = "sitting"
+length = 1.4
+loop_mode = 1
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath(".:frame")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 0.33333334, 0.7, 1.0666667),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 1,
+"values": [193, 201, 209, 217]
+}
+
 [sub_resource type="AnimationLibrary" id="AnimationLibrary_g8s14"]
 _data = {
 &"RESET": SubResource("Animation_fbydv"),
-&"laying": SubResource("Animation_11hn1")
+&"laying": SubResource("Animation_11hn1"),
+&"sitting": SubResource("Animation_8pl2w")
 }
 
 [node name="Node2D" type="Node2D" unique_id=707484757]
@@ -87,7 +105,7 @@ texture = ExtResource("3_614p5")
 [node name="CharacterBody2D" type="CharacterBody2D" parent="." unique_id=994821621]
 
 [node name="Sprite2D" type="Sprite2D" parent="CharacterBody2D" unique_id=1852265744]
-position = Vector2(23, 224)
+position = Vector2(29, 226)
 texture = ExtResource("4_8pl2w")
 hframes = 56
 vframes = 4
@@ -95,7 +113,7 @@ frame = 192
 
 [node name="AnimationPlayer" type="AnimationPlayer" parent="CharacterBody2D/Sprite2D" unique_id=1269377448]
 libraries/ = SubResource("AnimationLibrary_g8s14")
-autoplay = &"laying"
+autoplay = &"sitting"
 
 [node name="Sprite2D" type="Sprite2D" parent="." unique_id=1826017877]
 

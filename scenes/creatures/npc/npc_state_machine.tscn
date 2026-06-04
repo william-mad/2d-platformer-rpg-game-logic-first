@@ -1,0 +1,58 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scenes/creatures/npc/npc_state_machine.gd" id="1_machine"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/idle.gd" id="2_idle"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/move_to_target.gd" id="3_move"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/work.gd" id="4_work"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/talk.gd" id="5_talk"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/react_to_player.gd" id="6_react"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/flee.gd" id="7_flee"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/sleep.gd" id="8_sleep"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/disabled_dead.gd" id="9_disabled"]
+
+[node name="NpcStateMachine" type="Node"]
+script = ExtResource("1_machine")
+
+[node name="Idle" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("2_idle")
+animation_name = &"idle"
+stop_horizontal_on_enter = true
+
+[node name="MoveToTarget" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("3_move")
+animation_name = &"walk"
+
+[node name="Work" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("4_work")
+animation_name = &"work"
+stop_horizontal_on_enter = true
+
+[node name="Talk" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("5_talk")
+animation_name = &"talk"
+stop_horizontal_on_enter = true
+
+[node name="ReactToPlayer" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("6_react")
+animation_name = &"idle"
+
+[node name="Flee" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("7_flee")
+animation_name = &"run"
+
+[node name="Sleep" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("8_sleep")
+animation_name = &"sleep"
+stop_horizontal_on_enter = true
+
+[node name="DisabledDead" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("9_disabled")
+stop_horizontal_on_enter = true

@@ -1,0 +1,179 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" uid="uid://by1aphre1t601" path="res://player/player.tscn" id="1_player"]
+[ext_resource type="PackedScene" path="res://scenes/creatures/npc/stateful_social_npc.tscn" id="2_npc"]
+[ext_resource type="PackedScene" path="res://scenes/creatures/npc/npc_state_test_pad.tscn" id="3_pad"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/npc_state_value_display.gd" id="4_values"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_floor"]
+size = Vector2(2600, 80)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_wall"]
+size = Vector2(80, 760)
+
+[node name="npc_state_machine_test" type="Node2D"]
+
+[node name="ValueDisplayLayer" type="CanvasLayer" parent="."]
+layer = 20
+
+[node name="ValuePanel" type="ColorRect" parent="ValueDisplayLayer"]
+offset_left = 14.0
+offset_top = 14.0
+offset_right = 288.0
+offset_bottom = 356.0
+color = Color(0.03, 0.04, 0.05, 0.78)
+
+[node name="ValueDisplay" type="Label" parent="ValueDisplayLayer"]
+offset_left = 24.0
+offset_top = 24.0
+offset_right = 278.0
+offset_bottom = 346.0
+text = "NPC State Machine"
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 14
+script = ExtResource("4_values")
+target_npc_path = NodePath("../../TestNpc")
+
+[node name="Sky" type="Polygon2D" parent="."]
+color = Color(0.25, 0.42, 0.7, 1)
+polygon = PackedVector2Array(-1300, -520, 1300, -520, 1300, 440, -1300, 440)
+
+[node name="GroundVisual" type="Polygon2D" parent="."]
+position = Vector2(0, 402)
+color = Color(0.18, 0.32, 0.17, 1)
+polygon = PackedVector2Array(-1300, 0, 1300, 0, 1300, 180, -1300, 180)
+
+[node name="WorldCollision" type="StaticBody2D" parent="."]
+
+[node name="Floor" type="CollisionShape2D" parent="WorldCollision"]
+position = Vector2(0, 440)
+shape = SubResource("RectangleShape2D_floor")
+
+[node name="LeftWall" type="CollisionShape2D" parent="WorldCollision"]
+position = Vector2(-1300, 60)
+shape = SubResource("RectangleShape2D_wall")
+
+[node name="RightWall" type="CollisionShape2D" parent="WorldCollision"]
+position = Vector2(1300, 60)
+shape = SubResource("RectangleShape2D_wall")
+
+[node name="Player" parent="." instance=ExtResource("1_player")]
+position = Vector2(-1020, 368)
+
+[node name="Camera2D" type="Camera2D" parent="Player"]
+position = Vector2(0, -60)
+limit_left = -1300
+limit_top = -520
+limit_right = 1300
+limit_bottom = 440
+
+[node name="TestNpc" parent="." instance=ExtResource("2_npc")]
+position = Vector2(680, 368)
+patrol_range = 0.0
+social_stats = {
+"anger": 0.0,
+"curiosity": 0.0,
+"disabled": 0.0,
+"energy": 100.0,
+"favor": 50.0,
+"fear": 0.0,
+"hp": 100.0,
+"hunger": 25.0,
+"love": 0.0,
+"sleepiness": 0.0,
+"talk_interest": 0.0,
+"trust": 50.0,
+"work_need": 0.0
+}
+
+[node name="MoveTarget" type="Marker2D" parent="."]
+position = Vector2(1060, 368)
+
+[node name="MoveTargetVisual" type="Polygon2D" parent="MoveTarget"]
+position = Vector2(0, -28)
+color = Color(0.95, 0.95, 0.15, 0.8)
+polygon = PackedVector2Array(-14, -14, 14, -14, 14, 14, -14, 14)
+
+[node name="ResetPad" parent="." instance=ExtResource("3_pad")]
+position = Vector2(-1020, 368)
+target_npc_path = NodePath("../TestNpc")
+set_values = {
+"curiosity": 0.0,
+"disabled": 0.0,
+"favor": 50.0,
+"fear": 0.0,
+"hp": 100.0,
+"hunger": 25.0,
+"sleepiness": 0.0,
+"talk_interest": 0.0,
+"work_need": 0.0
+}
+state_request = &"Idle"
+request_priority = 1000
+pad_label = "Reset"
+pad_color = Color(0.78, 0.78, 0.78, 0.42)
+
+[node name="ReactPad" parent="." instance=ExtResource("3_pad")]
+position = Vector2(-820, 368)
+target_npc_path = NodePath("../TestNpc")
+stat_delta = {
+"favor": -20.0
+}
+pad_label = "React"
+pad_color = Color(0.9, 0.78, 0.25, 0.42)
+
+[node name="FleePad" parent="." instance=ExtResource("3_pad")]
+position = Vector2(-620, 368)
+target_npc_path = NodePath("../TestNpc")
+stat_delta = {
+"fear": 80.0
+}
+pad_label = "Flee"
+pad_color = Color(0.95, 0.12, 0.1, 0.42)
+
+[node name="SleepPad" parent="." instance=ExtResource("3_pad")]
+position = Vector2(-420, 368)
+target_npc_path = NodePath("../TestNpc")
+stat_delta = {
+"sleepiness": 85.0
+}
+pad_label = "Sleep"
+pad_color = Color(0.35, 0.35, 0.95, 0.42)
+
+[node name="WorkPad" parent="." instance=ExtResource("3_pad")]
+position = Vector2(-220, 368)
+target_npc_path = NodePath("../TestNpc")
+stat_delta = {
+"work_need": 70.0
+}
+pad_label = "Work"
+pad_color = Color(0.2, 0.75, 0.35, 0.42)
+
+[node name="TalkPad" parent="." instance=ExtResource("3_pad")]
+position = Vector2(-20, 368)
+target_npc_path = NodePath("../TestNpc")
+stat_delta = {
+"talk_interest": 70.0
+}
+pad_label = "Talk"
+pad_color = Color(0.35, 0.75, 0.95, 0.42)
+
+[node name="MovePad" parent="." instance=ExtResource("3_pad")]
+position = Vector2(180, 368)
+target_npc_path = NodePath("../TestNpc")
+move_target_path = NodePath("../MoveTarget")
+move_arrive_state_name = &"Idle"
+pad_label = "Move"
+pad_color = Color(0.95, 0.55, 0.2, 0.42)
+
+[node name="DeadPad" parent="." instance=ExtResource("3_pad")]
+position = Vector2(380, 368)
+target_npc_path = NodePath("../TestNpc")
+stat_delta = {
+"hp": -100.0
+}
+pad_label = "Dead"
+pad_color = Color(0.12, 0.12, 0.12, 0.52)
