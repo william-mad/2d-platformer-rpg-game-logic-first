@@ -1,6 +1,7 @@
 class_name NpcStateTestPad extends Area2D
 
 @export var target_npc_path: NodePath
+@export var extra_target_npc_paths: Array[NodePath] = []
 @export var stat_delta: Dictionary = {}
 @export var set_values: Dictionary = {}
 @export var state_request: StringName = &""
@@ -52,7 +53,18 @@ func _process(delta: float) -> void:
 
 
 func _apply_to_target(player: Node2D) -> void:
-	var target_node := get_node_or_null(target_npc_path)
+	_apply_to_target_path(target_npc_path, player)
+
+	for extra_target_path in extra_target_npc_paths:
+		_apply_to_target_path(extra_target_path, player)
+
+
+func _apply_to_target_path(target_path: NodePath, player: Node2D) -> void:
+	# Pads can drive one NPC or many NPCs, which makes the test room useful for comparing rule variations.
+	if String(target_path) == "":
+		return
+
+	var target_node := get_node_or_null(target_path)
 	if target_node == null:
 		return
 

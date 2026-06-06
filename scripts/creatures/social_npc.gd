@@ -41,6 +41,7 @@ signal social_stats_changed(stats: Dictionary)
 @onready var sight_pivot: Node2D = %SightPivot
 @onready var sight_area: Area2D = %SightArea
 @onready var favor_bar: ProgressBar = %FavorBar
+# Optional child component. If present, social values can drive the reusable NPC states.
 @onready var npc_state_machine: NpcStateMachine = get_node_or_null("NpcStateMachine") as NpcStateMachine
 
 var home_position: Vector2
@@ -70,6 +71,7 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	if _state_machine_active():
+		# When the reusable machine is active, it owns movement and move_and_slide().
 		_update_favor_bar_visibility()
 		return
 
@@ -117,6 +119,7 @@ func apply_social_event(
 	_update_visual_mood()
 
 	if _state_machine_active():
+		# Keep SocialNpc as the stat owner, then sync those values into the state machine.
 		syncing_state_machine_values = true
 		npc_state_machine.replace_values(social_stats, actor, changed_stats)
 		syncing_state_machine_values = false
@@ -245,6 +248,7 @@ func _setup_state_machine() -> void:
 	if npc_state_machine == null:
 		return
 
+	# The same SocialNpc scene still works without this child; this path opts into state behavior.
 	npc_state_machine.bind_npc(self)
 
 	var callback := Callable(self, "_on_npc_state_machine_values_changed")
@@ -268,6 +272,7 @@ func _on_npc_state_machine_values_changed(
 	if syncing_state_machine_values:
 		return
 
+	# States can also change values, so mirror them back into the social NPC display.
 	social_stats = values.duplicate(true)
 	_update_favor_bar()
 	_update_visual_mood()

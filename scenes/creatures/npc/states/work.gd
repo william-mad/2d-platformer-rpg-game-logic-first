@@ -11,6 +11,7 @@ var work_timer: float = 0.0
 func enter() -> void:
 	super.enter()
 
+	# If a work target exists, walk there first, then come back into Work on arrival.
 	var configured_target := _resolve_work_target()
 	if configured_target != null and not is_close_to(configured_target.global_position, machine.stop_distance):
 		machine.move_target = configured_target
@@ -36,6 +37,7 @@ func physics_process(delta: float) -> NpcState:
 		return next_state
 
 	if work_value_name != &"":
+		# Completing work can lower the value that sent the NPC here.
 		machine.apply_value_delta({String(work_value_name): work_complete_delta}, null, false)
 
 	return get_state(&"Idle")

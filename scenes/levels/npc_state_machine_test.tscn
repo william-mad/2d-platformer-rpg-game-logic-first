@@ -4,6 +4,8 @@
 [ext_resource type="PackedScene" path="res://scenes/creatures/npc/stateful_social_npc.tscn" id="2_npc"]
 [ext_resource type="PackedScene" path="res://scenes/creatures/npc/npc_state_test_pad.tscn" id="3_pad"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/npc_state_value_display.gd" id="4_values"]
+[ext_resource type="PackedScene" path="res://scenes/creatures/npc/blueprint_social_npc.tscn" id="5_blueprint"]
+[ext_resource type="PackedScene" path="res://scenes/things/save_spot.tscn" id="6_save"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_floor"]
 size = Vector2(2600, 80)
@@ -36,6 +38,29 @@ theme_override_constants/shadow_offset_y = 1
 theme_override_font_sizes/font_size = 14
 script = ExtResource("4_values")
 target_npc_path = NodePath("../../TestNpc")
+display_title = "Base NPC"
+
+[node name="BlueprintValuePanel" type="ColorRect" parent="ValueDisplayLayer"]
+offset_left = 302.0
+offset_top = 14.0
+offset_right = 576.0
+offset_bottom = 356.0
+color = Color(0.03, 0.04, 0.05, 0.78)
+
+[node name="BlueprintValueDisplay" type="Label" parent="ValueDisplayLayer"]
+offset_left = 312.0
+offset_top = 24.0
+offset_right = 566.0
+offset_bottom = 346.0
+text = "Blueprint NPC"
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 14
+script = ExtResource("4_values")
+target_npc_path = NodePath("../../BlueprintNpc")
+display_title = "Blueprint NPC"
 
 [node name="Sky" type="Polygon2D" parent="."]
 color = Color(0.25, 0.42, 0.7, 1)
@@ -63,6 +88,9 @@ shape = SubResource("RectangleShape2D_wall")
 [node name="Player" parent="." instance=ExtResource("1_player")]
 position = Vector2(-1020, 368)
 
+[node name="SaveSpot" parent="." instance=ExtResource("6_save")]
+position = Vector2(-1160, 368)
+
 [node name="Camera2D" type="Camera2D" parent="Player"]
 position = Vector2(0, -60)
 limit_left = -1300
@@ -89,6 +117,10 @@ social_stats = {
 "work_need": 0.0
 }
 
+[node name="BlueprintNpc" parent="." instance=ExtResource("5_blueprint")]
+position = Vector2(880, 368)
+patrol_range = 0.0
+
 [node name="MoveTarget" type="Marker2D" parent="."]
 position = Vector2(1060, 368)
 
@@ -100,6 +132,7 @@ polygon = PackedVector2Array(-14, -14, 14, -14, 14, 14, -14, 14)
 [node name="ResetPad" parent="." instance=ExtResource("3_pad")]
 position = Vector2(-1020, 368)
 target_npc_path = NodePath("../TestNpc")
+extra_target_npc_paths = [NodePath("../BlueprintNpc")]
 set_values = {
 "curiosity": 0.0,
 "disabled": 0.0,
@@ -119,6 +152,7 @@ pad_color = Color(0.78, 0.78, 0.78, 0.42)
 [node name="ReactPad" parent="." instance=ExtResource("3_pad")]
 position = Vector2(-820, 368)
 target_npc_path = NodePath("../TestNpc")
+extra_target_npc_paths = [NodePath("../BlueprintNpc")]
 stat_delta = {
 "favor": -20.0
 }
@@ -128,6 +162,7 @@ pad_color = Color(0.9, 0.78, 0.25, 0.42)
 [node name="FleePad" parent="." instance=ExtResource("3_pad")]
 position = Vector2(-620, 368)
 target_npc_path = NodePath("../TestNpc")
+extra_target_npc_paths = [NodePath("../BlueprintNpc")]
 stat_delta = {
 "fear": 80.0
 }
@@ -137,6 +172,7 @@ pad_color = Color(0.95, 0.12, 0.1, 0.42)
 [node name="SleepPad" parent="." instance=ExtResource("3_pad")]
 position = Vector2(-420, 368)
 target_npc_path = NodePath("../TestNpc")
+extra_target_npc_paths = [NodePath("../BlueprintNpc")]
 stat_delta = {
 "sleepiness": 85.0
 }
@@ -146,6 +182,7 @@ pad_color = Color(0.35, 0.35, 0.95, 0.42)
 [node name="WorkPad" parent="." instance=ExtResource("3_pad")]
 position = Vector2(-220, 368)
 target_npc_path = NodePath("../TestNpc")
+extra_target_npc_paths = [NodePath("../BlueprintNpc")]
 stat_delta = {
 "work_need": 70.0
 }
@@ -155,6 +192,7 @@ pad_color = Color(0.2, 0.75, 0.35, 0.42)
 [node name="TalkPad" parent="." instance=ExtResource("3_pad")]
 position = Vector2(-20, 368)
 target_npc_path = NodePath("../TestNpc")
+extra_target_npc_paths = [NodePath("../BlueprintNpc")]
 stat_delta = {
 "talk_interest": 70.0
 }
@@ -164,6 +202,7 @@ pad_color = Color(0.35, 0.75, 0.95, 0.42)
 [node name="MovePad" parent="." instance=ExtResource("3_pad")]
 position = Vector2(180, 368)
 target_npc_path = NodePath("../TestNpc")
+extra_target_npc_paths = [NodePath("../BlueprintNpc")]
 move_target_path = NodePath("../MoveTarget")
 move_arrive_state_name = &"Idle"
 pad_label = "Move"
@@ -172,6 +211,7 @@ pad_color = Color(0.95, 0.55, 0.2, 0.42)
 [node name="DeadPad" parent="." instance=ExtResource("3_pad")]
 position = Vector2(380, 368)
 target_npc_path = NodePath("../TestNpc")
+extra_target_npc_paths = [NodePath("../BlueprintNpc")]
 stat_delta = {
 "hp": -100.0
 }

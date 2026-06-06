@@ -17,6 +17,7 @@ config/icon="res://icon.svg"
 
 [autoload]
 
+SaveSystem="*res://scripts/systems/save_system.gd"
 PlayerHud="*uid://dicudb0t1rd0j"
 
 [display]
@@ -26,12 +27,14 @@ window/size/viewport_height=480
 window/size/mode=2
 window/size/initial_position_type=0
 window/stretch/mode="viewport"
+window/stretch/scale=1.2
 window/stretch/scale_mode="integer"
 
 [global_group]
 
 player=""
 rope_attachable=""
+saveable=""
 
 [input]
 

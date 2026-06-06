@@ -117,6 +117,22 @@ theme_override_styles/pressed = SubResource("StyleBoxFlat_button_pressed")
 theme_override_styles/focus = SubResource("StyleBoxFlat_button_focus")
 text = "START GAME"
 
+[node name="ContinueButton" type="Button" parent="Center/Stack"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(280, 62)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.98, 0.94, 0.82, 1)
+theme_override_colors/font_hover_color = Color(1, 0.96, 0.78, 1)
+theme_override_colors/font_pressed_color = Color(0.54, 0.87, 0.68, 1)
+theme_override_colors/font_disabled_color = Color(0.48, 0.5, 0.5, 1)
+theme_override_font_sizes/font_size = 22
+theme_override_styles/normal = SubResource("StyleBoxFlat_button_normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_button_pressed")
+theme_override_styles/focus = SubResource("StyleBoxFlat_button_focus")
+disabled = true
+text = "CONTINUE"
+
 [node name="BottomArea" type="MarginContainer" parent="."]
 layout_mode = 1
 anchor_top = 1.0

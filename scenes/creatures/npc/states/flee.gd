@@ -26,6 +26,7 @@ func physics_process(delta: float) -> NpcState:
 	if flee_timer > 0.0:
 		return next_state
 
+	# Fear is checked only when the flee timer ends, not as a global every-frame rule scan.
 	if keep_fleeing_while_afraid and machine.get_value(fear_value_name) > safe_fear_value:
 		_reset_timer()
 		return next_state

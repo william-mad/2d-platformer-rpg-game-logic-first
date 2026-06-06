@@ -1,0 +1,84 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/creatures/npc/stateful_social_npc.tscn" id="1_stateful"]
+
+[node name="BlueprintSocialNpc" instance=ExtResource("1_stateful")]
+social_stats = {
+"anger": 5.0,
+"curiosity": 20.0,
+"disabled": 0.0,
+"energy": 90.0,
+"favor": 62.0,
+"fear": 0.0,
+"hp": 100.0,
+"hunger": 35.0,
+"love": 5.0,
+"sleepiness": 10.0,
+"talk_interest": 25.0,
+"trust": 65.0,
+"work_need": 10.0
+}
+
+[node name="NpcStateMachine" parent="."]
+walk_speed = 55.0
+run_speed = 115.0
+default_reaction_time = 0.8
+default_work_time = 2.5
+default_talk_time = 2.0
+default_flee_time = 1.8
+value_state_rules = {
+"curious": {
+"at_least": 35.0,
+"priority": 40,
+"state": "ReactToPlayer",
+"value": "curiosity"
+},
+"dead_hp": {
+"at_most": 0.0,
+"priority": 100,
+"state": "DisabledDead",
+"value": "hp"
+},
+"disabled": {
+"priority": 100,
+"state": "DisabledDead",
+"truthy": true,
+"value": "disabled"
+},
+"favor_dropped": {
+"delta_at_most": -1.0,
+"priority": 35,
+"state": "ReactToPlayer",
+"value": "favor"
+},
+"high_fear": {
+"at_least": 60.0,
+"priority": 90,
+"state": "Flee",
+"value": "fear"
+},
+"hungry": {
+"at_least": 70.0,
+"priority": 50,
+"state": "Work",
+"value": "hunger"
+},
+"needs_work": {
+"at_least": 45.0,
+"priority": 50,
+"state": "Work",
+"value": "work_need"
+},
+"sleepy": {
+"at_least": 70.0,
+"priority": 70,
+"state": "Sleep",
+"value": "sleepiness"
+},
+"wants_talk": {
+"at_least": 45.0,
+"priority": 45,
+"state": "Talk",
+"value": "talk_interest"
+}
+}

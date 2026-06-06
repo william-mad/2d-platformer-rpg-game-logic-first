@@ -43,6 +43,12 @@ var ground_slam: bool = false
 var transformation: bool = false
 #endregion
 
+#region //save system:
+@export var save_id: String = "player"
+# Add variable names here in the Inspector when a new simple player value should save automatically.
+@export var extra_saved_value_names: Array[StringName] = []
+#endregion
+
 
 
 
@@ -63,18 +69,104 @@ var current_rope_target: Node2D = null
 var knockback_timer: float = 0.0
 
 func _ready() -> void:
+	add_to_group(&"saveable")
 	rope_detector.body_entered.connect(_on_rope_detector_body_entered)
 	rope_detector.body_exited.connect(_on_rope_detector_body_exited)
 	PlayerHud.visible = true
 	hp = max_hp
-	PlayerHud.setup_hp(max_hp, hp)
 	mana_amount = 0.0
 	mana_2_amount = max_mana if mana_2_starts_full else 0.0
-	PlayerHud.setup_mana(max_mana, mana_amount, mana_2_amount)
-	sync_mana_2_bar()
+	sync_stats_to_hud()
 	#initialize states
 	initialize_states()
 	pass
+
+
+func get_save_id() -> String:
+	return save_id
+
+
+func get_save_data() -> Dictionary:
+	# SaveSystem calls this when SaveSystem.save_game() runs.
+	# Add stable keys here for important player data that needs special restore behavior.
+	return {
+		"global_position": global_position,
+		"hp": hp,
+		"max_hp": max_hp,
+		"mana_amount": mana_amount,
+		"mana_2_amount": mana_2_amount,
+		"max_mana": max_mana,
+		"dash": dash,
+		"double_jump": double_jump,
+		"ground_slam": ground_slam,
+		"transformation": transformation,
+		"facing_left": sprite_2d.flip_h,
+		"extra_values": _collect_extra_save_values(),
+	}
+
+
+func apply_save_data(data: Dictionary) -> void:
+	# SaveSystem calls this after the saved scene finishes loading.
+	# Keep this forgiving so older save files can still load after you add new values.
+	if data.has("global_position") and data["global_position"] is Vector2:
+		global_position = data["global_position"]
+
+	max_hp = float(data.get("max_hp", max_hp))
+	hp = clampf(float(data.get("hp", hp)), 0.0, max_hp)
+
+	max_mana = float(data.get("max_mana", max_mana))
+	mana_amount = clampf(float(data.get("mana_amount", mana_amount)), 0.0, max_mana)
+	mana_2_amount = clampf(float(data.get("mana_2_amount", mana_2_amount)), 0.0, max_mana)
+
+	dash = bool(data.get("dash", dash))
+	double_jump = bool(data.get("double_jump", double_jump))
+	ground_slam = bool(data.get("ground_slam", ground_slam))
+	transformation = bool(data.get("transformation", transformation))
+
+	if data.has("facing_left"):
+		apply_facing_left(bool(data["facing_left"]))
+
+	var extra_values = data.get("extra_values", {})
+	if extra_values is Dictionary:
+		_apply_extra_save_values(extra_values)
+
+	velocity = Vector2.ZERO
+	knockback_timer = 0.0
+	sync_stats_to_hud()
+
+
+func sync_stats_to_hud() -> void:
+	hp = clampf(hp, 0.0, max_hp)
+	mana_amount = clampf(mana_amount, 0.0, max_mana)
+	mana_2_amount = clampf(mana_2_amount, 0.0, max_mana)
+
+	PlayerHud.setup_hp(max_hp, hp)
+	PlayerHud.setup_mana(max_mana, mana_amount, mana_2_amount)
+
+
+func _collect_extra_save_values() -> Dictionary:
+	var values := {}
+	for value_name in extra_saved_value_names:
+		# This keeps experimentation safe: a typo is skipped instead of breaking the save.
+		if _has_player_property(value_name):
+			values[String(value_name)] = get(value_name)
+
+	return values
+
+
+func _apply_extra_save_values(values: Dictionary) -> void:
+	for value_name in extra_saved_value_names:
+		var key := String(value_name)
+		if values.has(key) and _has_player_property(value_name):
+			set(value_name, values[key])
+
+
+func _has_player_property(property_name: StringName) -> bool:
+	for property in get_property_list():
+		if String(property.get("name", "")) == String(property_name):
+			return true
+
+	return false
 	
 func _unhandled_input( event: InputEvent) -> void:
 	change_state(current_state.handle_input( event ))
@@ -157,22 +249,25 @@ func update_direction()->void:
 	direction = Vector2(x_axis, y_axis)
 	
 	if previous_direction.x != direction.x:
-		attack_1.flip(direction.x)
-		attack_2.flip(direction.x)
-		attack_3.flip(direction.x)
 		if direction.x < 0:
-			ledgedetec.position.x = -abs(ledgedetec.position.x)
-			ledgedetec.target_position.x = -abs(ledgedetec.target_position.x)
-			ledgegrabcolider.scale.x = -1
-			sprite_2d.flip_h = true
+			apply_facing_left(true)
 		elif direction.x > 0:
-			sprite_2d.flip_h = false
-			ledgedetec.position.x = abs(ledgedetec.position.x)
-			ledgedetec.target_position.x = abs(ledgedetec.target_position.x)
-			ledgegrabcolider.scale.x = 1
+			apply_facing_left(false)
 			
 	pass
 	
+
+func apply_facing_left(is_facing_left: bool) -> void:
+	var direction_x := -1.0 if is_facing_left else 1.0
+
+	attack_1.flip(direction_x)
+	attack_2.flip(direction_x)
+	attack_3.flip(direction_x)
+	sprite_2d.flip_h = is_facing_left
+	ledgedetec.position.x = abs(ledgedetec.position.x) * direction_x
+	ledgedetec.target_position.x = abs(ledgedetec.target_position.x) * direction_x
+	ledgegrabcolider.scale.x = direction_x
+
 
 func toggle_rope() -> void:
 	if rope.active:

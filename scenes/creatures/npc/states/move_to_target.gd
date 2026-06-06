@@ -23,6 +23,7 @@ func physics_process(delta: float) -> NpcState:
 	if tracked_target == null or not is_instance_valid(tracked_target):
 		return get_state(machine.consume_state_after_move(arrive_state_name))
 
+	# Refresh the target position on a small interval instead of doing extra target work every frame.
 	refresh_timer -= delta
 	if refresh_timer <= 0.0:
 		cached_target_position = tracked_target.global_position

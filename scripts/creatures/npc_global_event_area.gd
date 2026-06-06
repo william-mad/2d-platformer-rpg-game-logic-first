@@ -85,6 +85,7 @@ func _get_stat_delta_for_npc(target_npc: Node, target_path) -> Dictionary:
 
 
 func _get_event_receiver(target_node: Node) -> Node:
+	# This keeps older SocialNpc targets working while allowing direct machine targets too.
 	if target_node.has_method("apply_social_event"):
 		return target_node
 

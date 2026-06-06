@@ -24,6 +24,7 @@ func physics_process(_delta: float) -> NpcState:
 
 
 func can_exit_to(_new_state: NpcState, request_priority: int) -> bool:
+	# Dead/disabled is locked until a high-priority request, such as the test Reset pad, revives it.
 	return request_priority >= revive_priority
 
 

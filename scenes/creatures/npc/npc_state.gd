@@ -1,8 +1,11 @@
 class_name NpcState extends Node
 
+# Set this on each state node to match an AnimationPlayer animation name.
+# Later, add animations like idle, walk, work, talk, run, sleep, disabled, and dead.
 @export var animation_name: StringName = &""
 @export var stop_horizontal_on_enter: bool = false
 
+# The state machine assigns these when it initializes child state nodes.
 var npc: CharacterBody2D
 var machine: NpcStateMachine
 var next_state: NpcState
@@ -18,6 +21,7 @@ func enter() -> void:
 	if stop_horizontal_on_enter:
 		stop_horizontal()
 
+	# This is the shared animation hook for every NPC state.
 	if animation_name != &"":
 		play_animation(animation_name)
 
@@ -27,6 +31,7 @@ func exit() -> void:
 
 
 func target_seen(_target: Node2D) -> NpcState:
+	# Override this in a state if seeing a target should immediately change state.
 	return next_state
 
 
@@ -39,10 +44,12 @@ func values_changed(
 	_changed_values: Dictionary,
 	_actor: Node2D
 ) -> NpcState:
+	# Override this only when a state needs custom handling for value changes.
 	return next_state
 
 
 func physics_process(_delta: float) -> NpcState:
+	# Active-state movement/timers live here; global value rules are not checked every frame.
 	return next_state
 
 

@@ -53,6 +53,7 @@ func _try_apply_to_player(player: Node2D) -> void:
 
 
 func _get_event_receiver(target_node: Node) -> Node:
+	# Event areas can target either the NPC root or its child NpcStateMachine.
 	if target_node.has_method("apply_social_event"):
 		return target_node
 

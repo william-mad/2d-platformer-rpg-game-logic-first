@@ -1,6 +1,7 @@
 class_name NpcStateValueDisplay extends Label
 
 @export var target_npc_path: NodePath
+@export var display_title: String = "NPC State Machine"
 @export var value_order: Array[String] = [
 	"favor",
 	"love",
@@ -26,6 +27,7 @@ func _ready() -> void:
 
 
 func _setup() -> void:
+	# The display reads directly from the machine, so it works with any NPC that has this component.
 	var target_node := get_node_or_null(target_npc_path)
 	if target_node == null:
 		text = "NPC values\nTarget not found"
@@ -67,12 +69,13 @@ func _update_display() -> void:
 	if machine == null:
 		return
 
+	# Keep this event-driven: refresh on state/value signals instead of polling every frame.
 	var state_name := "None"
 	if machine.current_state != null:
 		state_name = machine.current_state.name
 
 	var lines: Array[String] = [
-		"NPC State Machine",
+		display_title,
 		"state: %s" % state_name,
 		""
 	]

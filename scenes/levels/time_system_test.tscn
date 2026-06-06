@@ -1,0 +1,62 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/systems/time_system_test_scene.gd" id="1_time_scene"]
+
+[node name="time_system_test" type="Node2D"]
+script = ExtResource("1_time_scene")
+
+[node name="Sky" type="Polygon2D" parent="."]
+color = Color(0.28, 0.58, 0.95, 1)
+polygon = PackedVector2Array(0, 0, 720, 0, 720, 480, 0, 480)
+
+[node name="HorizonGlow" type="Polygon2D" parent="."]
+color = Color(1, 0.38, 0.16, 0.42)
+polygon = PackedVector2Array(0, 260, 720, 260, 720, 380, 0, 380)
+
+[node name="SunArcGuide" type="Line2D" parent="."]
+width = 2.0
+default_color = Color(1, 1, 1, 0.28)
+
+[node name="Sun" type="Node2D" parent="."]
+position = Vector2(70, 335)
+
+[node name="SunGlow" type="Polygon2D" parent="Sun"]
+color = Color(1, 0.7, 0.2, 0.24)
+
+[node name="SunDisc" type="Polygon2D" parent="Sun"]
+color = Color(1, 0.82, 0.28, 1)
+
+[node name="FarHills" type="Polygon2D" parent="."]
+color = Color(0.18, 0.31, 0.24, 1)
+polygon = PackedVector2Array(0, 360, 70, 310, 140, 340, 240, 285, 350, 350, 470, 300, 570, 340, 720, 292, 720, 480, 0, 480)
+
+[node name="Ground" type="Polygon2D" parent="."]
+color = Color(0.16, 0.27, 0.14, 1)
+polygon = PackedVector2Array(0, 374, 720, 374, 720, 480, 0, 480)
+
+[node name="HorizonLine" type="Line2D" parent="."]
+points = PackedVector2Array(0, 374, 720, 374)
+width = 2.0
+default_color = Color(0.09, 0.16, 0.09, 0.7)
+
+[node name="UILayer" type="CanvasLayer" parent="."]
+layer = 10
+
+[node name="TimePanel" type="ColorRect" parent="UILayer"]
+offset_left = 14.0
+offset_top = 14.0
+offset_right = 254.0
+offset_bottom = 126.0
+color = Color(0.03, 0.04, 0.06, 0.76)
+
+[node name="TimeReadout" type="Label" parent="UILayer/TimePanel"]
+offset_left = 12.0
+offset_top = 10.0
+offset_right = 226.0
+offset_bottom = 102.0
+text = "Time System Test"
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 14

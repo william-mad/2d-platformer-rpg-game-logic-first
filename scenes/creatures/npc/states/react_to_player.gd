@@ -53,6 +53,7 @@ func _prepare_reaction() -> void:
 	var favor_delta := machine.get_last_delta(&"favor")
 	var direction_to_actor := signf(x_direction_to_actor)
 
+	# Negative favor events make the NPC step away; positive/neutral events make it face the actor.
 	if favor_delta < 0.0:
 		var flee_direction := -direction_to_actor
 		face_x_direction(flee_direction)

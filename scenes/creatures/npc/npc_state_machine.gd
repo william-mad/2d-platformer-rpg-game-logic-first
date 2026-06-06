@@ -48,6 +48,8 @@ signal values_changed(values: Dictionary, changed_values: Dictionary, actor: Nod
 	"disabled": 0.0
 }
 
+# Rules are checked only when values change, when a target is seen, or when code asks for a state.
+# Add new entries here to make a value drive a state without changing the state scripts.
 @export var value_state_rules: Dictionary = {
 	"dead_hp": {
 		"value": "hp",
@@ -112,6 +114,7 @@ signal values_changed(values: Dictionary, changed_values: Dictionary, actor: Nod
 var npc: CharacterBody2D
 var states: Array[NpcState] = []
 var state_history: Array[NpcState] = []
+# These targets are shared between states so any NPC scene can request movement, work, or talk.
 var target: Node2D
 var move_target: Node2D
 var work_target: Node2D
@@ -155,6 +158,7 @@ func _physics_process(delta: float) -> void:
 
 	apply_gravity(delta)
 
+	# Only the active state runs per-frame behavior; value-rule decisions stay event-driven.
 	var state_at_start := current_state
 	var requested_state := state_at_start.physics_process(delta)
 
@@ -178,6 +182,7 @@ func initialize_states() -> void:
 	states = []
 	_state_lookup = {}
 
+	# This mirrors the player setup: each child node is one reusable state.
 	for child in get_children():
 		var state := child as NpcState
 		if state == null:
@@ -236,6 +241,7 @@ func request_state(
 	reason: String = "manual",
 	request_priority: int = 0
 ) -> bool:
+	# External code can call this to force a state without waiting for value rules.
 	if state_name == &"":
 		return false
 
@@ -378,6 +384,7 @@ func apply_value_delta(
 	actor: Node2D = null,
 	evaluate_reactions: bool = true
 ) -> bool:
+	# Use deltas for events: {"fear": 20.0} raises fear and may trigger a rule.
 	var changed_values: Dictionary = {}
 
 	for value_key in value_delta.keys():
@@ -449,6 +456,7 @@ func evaluate_value_reactions(
 	actor: Node2D = null,
 	changed_values: Dictionary = {}
 ) -> bool:
+	# Picks the highest-priority matching rule, so Dead/Flee can outrank Talk/Work.
 	var matching_rule := _find_best_matching_rule(changed_values)
 	if matching_rule.is_empty():
 		return false
@@ -469,6 +477,9 @@ func evaluate_value_reactions(
 
 
 func play_animation(state_animation_name: StringName) -> void:
+	# Animation hook:
+	# 1. If the NPC script has _play_animation/play_animation, let it decide.
+	# 2. Otherwise, play an AnimationPlayer child if it has the requested name.
 	if npc != null:
 		if npc.has_method("_play_animation"):
 			npc.call("_play_animation", state_animation_name)

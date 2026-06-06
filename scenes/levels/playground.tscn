@@ -18,6 +18,7 @@
 [ext_resource type="PackedScene" uid="uid://c4x0suw8m31ph" path="res://scenes/things/damagearea.tscn" id="14_2li26"]
 [ext_resource type="PackedScene" uid="uid://mhtjqmdrcoo0" path="res://scenes/things/fixed_hidden_spot.tscn" id="17_kgokd"]
 [ext_resource type="PackedScene" uid="uid://rw53hv66gh37" path="res://scenes/things/door_transition.tscn" id="18_door"]
+[ext_resource type="PackedScene" path="res://scenes/things/save_spot.tscn" id="19_save"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_q8s1k"]
 texture = ExtResource("4_rc1m4")
@@ -254,6 +255,9 @@ target_scene_path = "res://scenes/levels/playground_npcs.tscn"
 
 [node name="Player" parent="." unique_id=500096349 instance=ExtResource("5_dlivn")]
 position = Vector2(79, 368)
+
+[node name="SaveSpot" parent="." instance=ExtResource("19_save")]
+position = Vector2(300, 367)
 
 [node name="Camera2D" type="Camera2D" parent="Player" unique_id=1030625809]
 position = Vector2(-1, -50)

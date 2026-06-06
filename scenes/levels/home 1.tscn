@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://dhphlyvkf38o7"]
 
-[ext_resource type="Texture2D" uid="uid://dymh3jcge5v6i" path="res://images/backgrounds/homebg1.png" id="1_p0uc7"]
+[ext_resource type="Texture2D" uid="uid://dwsr1o83a10c4" path="res://images/backgrounds/ChatGPT Image 5 de jun. de 2026, 21_52_05 (5).png" id="1_8pl2w"]
 [ext_resource type="PackedScene" uid="uid://by1aphre1t601" path="res://player/player.tscn" id="2_5vyrd"]
 [ext_resource type="Texture2D" uid="uid://p8b4lq2cxva1" path="res://images/sprites/characters/tests/ilust only sofa 1a.png" id="3_614p5"]
 [ext_resource type="Texture2D" uid="uid://cckdsos542pql" path="res://images/sprites/characters/tests/zeniths + ai -Sheet.png" id="4_8pl2w"]
@@ -74,9 +74,9 @@ position = Vector2(142, 28)
 [node name="Parallax2D" type="Parallax2D" parent="." unique_id=1623220310]
 
 [node name="Sprite2D" type="Sprite2D" parent="Parallax2D" unique_id=1386741407]
-position = Vector2(297, 151.00002)
-scale = Vector2(0.40250915, 0.5241713)
-texture = ExtResource("1_p0uc7")
+position = Vector2(322, 143.00002)
+scale = Vector2(0.56814003, 0.8798343)
+texture = ExtResource("1_8pl2w")
 
 [node name="StaticBody2D" type="StaticBody2D" parent="." unique_id=1057007172]
 position = Vector2(-21, 25)
@@ -113,7 +113,7 @@ frame = 192
 
 [node name="AnimationPlayer" type="AnimationPlayer" parent="CharacterBody2D/Sprite2D" unique_id=1269377448]
 libraries/ = SubResource("AnimationLibrary_g8s14")
-autoplay = &"sitting"
+autoplay = &"laying"
 
 [node name="Sprite2D" type="Sprite2D" parent="." unique_id=1826017877]
 
