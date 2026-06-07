@@ -8,6 +8,8 @@
 [ext_resource type="PackedScene" path="res://scenes/creatures/social_npc.tscn" id="6_social_npc"]
 [ext_resource type="PackedScene" path="res://scenes/creatures/npc_favor_event_area.tscn" id="7_favor_event"]
 [ext_resource type="PackedScene" path="res://scenes/creatures/npc_global_event_area.tscn" id="8_global_event"]
+[ext_resource type="PackedScene" path="res://scenes/things/npc_travel_door.tscn" id="9_npc_travel_door"]
+[ext_resource type="Script" path="res://scripts/systems/npc_location_scene.gd" id="10_npc_location_scene"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_floor"]
 size = Vector2(7600, 80)
@@ -19,6 +21,12 @@ size = Vector2(80, 1040)
 size = Vector2(720, 32)
 
 [node name="playground_npcs" type="Node2D" unique_id=1081749426]
+
+[node name="NpcLocationScene" type="Node" parent="."]
+script = ExtResource("10_npc_location_scene")
+scene_path = "res://scenes/levels/playground_npcs.tscn"
+spawn_x_min = -3400.0
+spawn_x_max = 3400.0
 
 [node name="moving sky" type="Parallax2D" parent="." unique_id=1467167052]
 scroll_scale = Vector2(0.1, 1)
@@ -97,6 +105,14 @@ shape = SubResource("RectangleShape2D_platform")
 position = Vector2(-3600, 367)
 target_scene_path = "res://scenes/levels/playground.tscn"
 
+[node name="NpcDoorBackToStateMachineTest" parent="." instance=ExtResource("9_npc_travel_door")]
+position = Vector2(-3400, 367)
+target_scene_path = "res://scenes/levels/npc_state_machine_test.tscn"
+
+[node name="NpcDoorToStateMachineTest" parent="." instance=ExtResource("9_npc_travel_door")]
+position = Vector2(3600, 367)
+target_scene_path = "res://scenes/levels/npc_state_machine_test.tscn"
+
 [node name="Player" parent="." unique_id=1582959368 instance=ExtResource("1_player")]
 position = Vector2(-3500, 368)
 
@@ -109,6 +125,8 @@ limit_bottom = 420
 
 [node name="SquareNpc" parent="." instance=ExtResource("6_social_npc")]
 position = Vector2(-1100, 368)
+location_id = &"square_npc"
+npc_scene_path = "res://scenes/creatures/social_npc.tscn"
 social_stats = {
 "favor": 55.0,
 "fear": 0.0,
@@ -119,6 +137,8 @@ social_stats = {
 [node name="SquareNpc2" parent="." instance=ExtResource("6_social_npc")]
 position = Vector2(550, 368)
 starts_moving_right = false
+location_id = &"square_npc2"
+npc_scene_path = "res://scenes/creatures/social_npc.tscn"
 social_stats = {
 "favor": 40.0,
 "fear": 15.0,

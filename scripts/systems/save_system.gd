@@ -3,10 +3,12 @@ class_name GameSaveSystem extends Node
 signal save_finished(success: bool, save_path: String)
 signal load_finished(success: bool, save_path: String)
 
-const SAVE_VERSION: int = 1
+const SAVE_VERSION: int = 2
 const DEFAULT_SLOT: String = "slot_1"
 const SAVEABLE_GROUP: StringName = &"saveable"
 const SAVE_DIR: String = "user://saves"
+const NPC_LOCATIONS_PATH: String = "/root/NpcLocations"
+const RELATIONSHIPS_PATH: String = "/root/Relationships"
 
 var global_values: Dictionary = {}
 var pending_save_data: Dictionary = {}
@@ -40,6 +42,8 @@ func load_game(slot: String = DEFAULT_SLOT) -> bool:
 	pending_save_data = save_data
 	var loaded_global_values = _decode_value(save_data.get("global_values", {}))
 	global_values = loaded_global_values if loaded_global_values is Dictionary else {}
+	_apply_system_save_data(RELATIONSHIPS_PATH, save_data.get("relationships", {}))
+	_apply_system_save_data(NPC_LOCATIONS_PATH, save_data.get("npc_locations", {}))
 
 	var scene_path := String(save_data.get("scene_path", ""))
 	if scene_path.is_empty():
@@ -94,6 +98,8 @@ func erase_value(key: StringName) -> void:
 func clear_runtime_values() -> void:
 	global_values.clear()
 	pending_save_data.clear()
+	_apply_system_save_data(RELATIONSHIPS_PATH, {})
+	_apply_system_save_data(NPC_LOCATIONS_PATH, {})
 
 
 func _build_save_data() -> Dictionary:
@@ -107,6 +113,8 @@ func _build_save_data() -> Dictionary:
 		"saved_at_unix_time": Time.get_unix_time_from_system(),
 		"scene_path": scene_path,
 		"global_values": _encode_value(global_values),
+		"npc_locations": _encode_value(_get_system_save_data(NPC_LOCATIONS_PATH)),
+		"relationships": _encode_value(_get_system_save_data(RELATIONSHIPS_PATH)),
 		"nodes": {},
 	}
 
@@ -204,6 +212,31 @@ func _apply_node_save_data(node: Node, node_data: Dictionary) -> void:
 				node.set(StringName(key), node_data[key])
 
 
+func _get_system_save_data(system_path: String) -> Dictionary:
+	var system := get_node_or_null(system_path)
+	if system == null or not system.has_method("get_save_data"):
+		return {}
+
+	var system_data = system.call("get_save_data")
+	if system_data is Dictionary:
+		return system_data
+
+	return {}
+
+
+func _apply_system_save_data(system_path: String, encoded_data) -> void:
+	var system := get_node_or_null(system_path)
+	if system == null or not system.has_method("apply_save_data"):
+		return
+
+	var decoded_data = _decode_value(encoded_data)
+	var system_data := {}
+	if decoded_data is Dictionary:
+		system_data = decoded_data
+
+	system.call("apply_save_data", system_data)
+
+
 func _get_property_if_present(node: Object, property_name: StringName):
 	for property in node.get_property_list():
 		if String(property.get("name", "")) == String(property_name):
@@ -265,6 +298,10 @@ func _encode_value(value):
 			return {"__type": "Color", "r": value.r, "g": value.g, "b": value.b, "a": value.a}
 		TYPE_STRING_NAME:
 			return String(value)
+		TYPE_NODE_PATH:
+			return String(value)
+		TYPE_OBJECT:
+			return null
 		_:
 			return value
 

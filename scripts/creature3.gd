@@ -135,8 +135,11 @@ func take_damage_from_player(_attack) -> void:
 		_change_state(State.DEFEND)
 
 
-func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO) -> void:
+func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO, damage_source: Node = null) -> void:
+	var previous_hp := hp
 	hp = maxf(hp - amount, 0.0)
+	var damage_taken := previous_hp - hp
+	DamageEvents.emit_damage_dealt(damage_taken, damage_source, self)
 	update_hp_bar()
 	print(name, " hp: ", hp, "/", max_hp)
 
@@ -311,9 +314,10 @@ func _start_attack(monster: Node2D) -> void:
 
 func _damage_monster(monster: Node) -> void:
 	if monster.has_method("take_damage"):
-		monster.take_damage(attack_damage, global_position)
+		monster.take_damage(attack_damage, global_position, self)
 	elif monster.has_method("damage"):
 		monster.damage(attack_damage)
+		DamageEvents.emit_damage_dealt(attack_damage, self, monster)
 
 
 func _monster_in_attack_range(monster: Node2D) -> bool:

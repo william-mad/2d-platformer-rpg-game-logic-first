@@ -58,8 +58,11 @@ func get_rope_attach_point() -> Node2D:
 	return rope_attach_point
 
 
-func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO) -> void:
+func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO, damage_source: Node = null) -> void:
+	var previous_hp := hp
 	hp = maxf(hp - amount, 0.0)
+	var damage_taken := previous_hp - hp
+	DamageEvents.emit_damage_dealt(damage_taken, damage_source, self)
 	update_hp_bar()
 	print(name, " hp: ", hp, "/", max_hp)
 

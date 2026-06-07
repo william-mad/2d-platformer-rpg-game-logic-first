@@ -228,16 +228,20 @@ func _start_attack() -> void:
 
 func _damage_player(target: Node) -> void:
 	if target.has_method("take_damage"):
-		target.take_damage(damage, global_position)
+		target.take_damage(damage, global_position, self)
 	elif target.has_method("damage"):
 		target.damage(damage)
+		DamageEvents.emit_damage_dealt(damage, self, target)
 
 
-func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO) -> void:
+func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO, damage_source: Node = null) -> void:
 	if state == State.DEAD:
 		return
 
+	var previous_hp := hp
 	hp = maxf(hp - amount, 0.0)
+	var damage_taken := previous_hp - hp
+	DamageEvents.emit_damage_dealt(damage_taken, damage_source, self)
 	update_hp_bar()
 	print(name, " hp: ", hp, "/", max_hp)
 

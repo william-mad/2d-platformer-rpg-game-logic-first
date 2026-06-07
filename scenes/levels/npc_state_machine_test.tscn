@@ -6,6 +6,8 @@
 [ext_resource type="Script" path="res://scenes/creatures/npc/npc_state_value_display.gd" id="4_values"]
 [ext_resource type="PackedScene" path="res://scenes/creatures/npc/blueprint_social_npc.tscn" id="5_blueprint"]
 [ext_resource type="PackedScene" path="res://scenes/things/save_spot.tscn" id="6_save"]
+[ext_resource type="PackedScene" path="res://scenes/things/npc_travel_door.tscn" id="7_npc_travel_door"]
+[ext_resource type="Script" path="res://scripts/systems/npc_location_scene.gd" id="8_npc_location_scene"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_floor"]
 size = Vector2(2600, 80)
@@ -14,6 +16,12 @@ size = Vector2(2600, 80)
 size = Vector2(80, 760)
 
 [node name="npc_state_machine_test" type="Node2D"]
+
+[node name="NpcLocationScene" type="Node" parent="."]
+script = ExtResource("8_npc_location_scene")
+scene_path = "res://scenes/levels/npc_state_machine_test.tscn"
+spawn_x_min = -1040.0
+spawn_x_max = 1040.0
 
 [node name="ValueDisplayLayer" type="CanvasLayer" parent="."]
 layer = 20
@@ -85,6 +93,10 @@ shape = SubResource("RectangleShape2D_wall")
 position = Vector2(1300, 60)
 shape = SubResource("RectangleShape2D_wall")
 
+[node name="NpcDoorToPlaygroundNpcs" parent="." instance=ExtResource("7_npc_travel_door")]
+position = Vector2(1160, 367)
+target_scene_path = "res://scenes/levels/playground_npcs.tscn"
+
 [node name="Player" parent="." instance=ExtResource("1_player")]
 position = Vector2(-1020, 368)
 
@@ -101,6 +113,8 @@ limit_bottom = 440
 [node name="TestNpc" parent="." instance=ExtResource("2_npc")]
 position = Vector2(680, 368)
 patrol_range = 0.0
+location_id = &"test_npc"
+npc_scene_path = "res://scenes/creatures/npc/stateful_social_npc.tscn"
 social_stats = {
 "anger": 0.0,
 "curiosity": 0.0,
@@ -120,6 +134,9 @@ social_stats = {
 [node name="BlueprintNpc" parent="." instance=ExtResource("5_blueprint")]
 position = Vector2(880, 368)
 patrol_range = 0.0
+starts_moving_right = false
+location_id = &"blueprint_npc"
+npc_scene_path = "res://scenes/creatures/npc/blueprint_social_npc.tscn"
 
 [node name="MoveTarget" type="Marker2D" parent="."]
 position = Vector2(1060, 368)
@@ -203,7 +220,7 @@ pad_color = Color(0.35, 0.75, 0.95, 0.42)
 position = Vector2(180, 368)
 target_npc_path = NodePath("../TestNpc")
 extra_target_npc_paths = [NodePath("../BlueprintNpc")]
-move_target_path = NodePath("../MoveTarget")
+move_target_path = NodePath("../NpcDoorToPlaygroundNpcs")
 move_arrive_state_name = &"Idle"
 pad_label = "Move"
 pad_color = Color(0.95, 0.55, 0.2, 0.42)

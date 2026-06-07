@@ -2,6 +2,8 @@ class_name NpcStateValueDisplay extends Label
 
 @export var target_npc_path: NodePath
 @export var display_title: String = "NPC State Machine"
+@export var show_relationships: bool = true
+@export var max_relationship_rows: int = 4
 @export var value_order: Array[String] = [
 	"favor",
 	"love",
@@ -18,6 +20,7 @@ class_name NpcStateValueDisplay extends Label
 	"disabled"
 ]
 
+var target_npc: Node
 var machine: NpcStateMachine
 var last_changed_values: Dictionary = {}
 
@@ -28,12 +31,12 @@ func _ready() -> void:
 
 func _setup() -> void:
 	# The display reads directly from the machine, so it works with any NPC that has this component.
-	var target_node := get_node_or_null(target_npc_path)
-	if target_node == null:
+	target_npc = get_node_or_null(target_npc_path)
+	if target_npc == null:
 		text = "NPC values\nTarget not found"
 		return
 
-	machine = _get_machine(target_node)
+	machine = _get_machine(target_npc)
 	if machine == null:
 		text = "NPC values\nMachine not found"
 		return
@@ -46,6 +49,7 @@ func _setup() -> void:
 	if not machine.state_changed.is_connected(state_callback):
 		machine.state_changed.connect(state_callback)
 
+	_setup_relationship_signals()
 	_update_display()
 
 
@@ -96,7 +100,97 @@ func _update_display() -> void:
 
 		lines.append(_format_value_line(key, machine.values[value_key]))
 
+	if show_relationships:
+		_append_relationship_lines(lines)
+
 	text = "\n".join(lines)
+
+
+func _setup_relationship_signals() -> void:
+	if not show_relationships:
+		return
+
+	var relationships := _get_relationship_system()
+	if relationships == null:
+		return
+
+	var met_callback := Callable(self, "_on_relationship_met")
+	if relationships.has_signal(&"relationship_met") and not relationships.is_connected(&"relationship_met", met_callback):
+		relationships.connect(&"relationship_met", met_callback)
+
+	var changed_callback := Callable(self, "_on_relationship_changed")
+	if relationships.has_signal(&"relationship_changed") and not relationships.is_connected(&"relationship_changed", changed_callback):
+		relationships.connect(&"relationship_changed", changed_callback)
+
+	var favor_callback := Callable(self, "_on_relationship_favor_changed")
+	if relationships.has_signal(&"favor_changed") and not relationships.is_connected(&"favor_changed", favor_callback):
+		relationships.connect(&"favor_changed", favor_callback)
+
+
+func _on_relationship_met(relationship_owner: Node, _other: Node, _relationship: Dictionary) -> void:
+	_update_if_owner_is_target(relationship_owner)
+
+
+func _on_relationship_changed(
+	relationship_owner: Node,
+	_other: Node,
+	_changed_values: Dictionary,
+	_relationship: Dictionary
+) -> void:
+	_update_if_owner_is_target(relationship_owner)
+
+
+func _on_relationship_favor_changed(
+	relationship_owner: Node,
+	_other: Node,
+	_favor: float,
+	_delta: float,
+	_relationship: Dictionary
+) -> void:
+	_update_if_owner_is_target(relationship_owner)
+
+
+func _update_if_owner_is_target(relationship_owner: Node) -> void:
+	if relationship_owner == target_npc:
+		_update_display()
+
+
+func _append_relationship_lines(lines: Array[String]) -> void:
+	var relationships := _get_relationship_system()
+	if relationships == null or target_npc == null:
+		return
+
+	var npc_relationships = relationships.call("get_relationships_for", target_npc)
+	if not (npc_relationships is Dictionary):
+		return
+
+	lines.append("")
+	lines.append("relationships:")
+
+	if npc_relationships.is_empty():
+		lines.append("none")
+		return
+
+	var relationship_rows: Array = []
+	for relationship_id in npc_relationships.keys():
+		relationship_rows.append(npc_relationships[relationship_id])
+
+	relationship_rows.sort_custom(Callable(self, "_sort_relationship_rows"))
+
+	var row_count := mini(relationship_rows.size(), max_relationship_rows)
+	for index in range(row_count):
+		lines.append(_format_relationship_line(relationship_rows[index]))
+
+
+func _sort_relationship_rows(first, second) -> bool:
+	return String(first.get("other_name", "")) < String(second.get("other_name", ""))
+
+
+func _format_relationship_line(relationship: Dictionary) -> String:
+	return "%s favor: %s" % [
+		String(relationship.get("other_name", "NPC")),
+		_format_value(relationship.get("favor", 0.0))
+	]
 
 
 func _format_value_line(key: String, value) -> String:
@@ -124,3 +218,7 @@ func _get_machine(target_node: Node) -> NpcStateMachine:
 		return target_machine
 
 	return target_node.get_node_or_null("NpcStateMachine") as NpcStateMachine
+
+
+func _get_relationship_system() -> Node:
+	return get_node_or_null("/root/Relationships")

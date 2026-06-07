@@ -18,6 +18,10 @@ config/icon="res://icon.svg"
 [autoload]
 
 SaveSystem="*res://scripts/systems/save_system.gd"
+DamageEvents="*res://scripts/systems/damage_events.gd"
+EventBus="*res://scripts/systems/event_bus.gd"
+Relationships="*res://scripts/systems/relationships.gd"
+NpcLocations="*res://scripts/systems/npc_locations.gd"
 PlayerHud="*uid://dicudb0t1rd0j"
 
 [display]
@@ -27,7 +31,7 @@ window/size/viewport_height=480
 window/size/mode=2
 window/size/initial_position_type=0
 window/stretch/mode="viewport"
-window/stretch/scale=1.2
+window/stretch/aspect="keep_width"
 window/stretch/scale_mode="integer"
 
 [global_group]

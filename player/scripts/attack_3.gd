@@ -30,6 +30,11 @@ func activate(duration:float=0.1) ->void:
 	pass
 	
 	
+func get_damage_source() -> Node:
+	var damage_source := get_parent()
+	return damage_source if damage_source != null else self
+
+
 
 #making the area visible and monitorable.
 func set_active(value: bool = true) -> void:

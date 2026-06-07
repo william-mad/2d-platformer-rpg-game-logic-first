@@ -1,0 +1,28 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/instances/npc_travel_door.gd" id="1_travel"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_door"]
+size = Vector2(64, 116)
+
+[node name="NpcTravelDoor" type="Area2D" groups=["door_transition", "npc_travel_door"]]
+collision_layer = 0
+collision_mask = 6
+monitorable = false
+script = ExtResource("1_travel")
+
+[node name="DoorVisual" type="Polygon2D" parent="."]
+position = Vector2(0, -58)
+scale = Vector2(1.2, 1.6)
+color = Color(0.26, 0.12, 0.04, 0.8)
+polygon = PackedVector2Array(-24, 36, -24, -36, 24, -36, 24, 36)
+
+[node name="DoorKnob" type="Polygon2D" parent="."]
+position = Vector2(22, -56)
+color = Color(0.95, 0.74, 0.22, 1)
+polygon = PackedVector2Array(-3, -3, 3, -3, 3, 3, -3, 3)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(0, -58)
+shape = SubResource("RectangleShape2D_door")
+debug_color = Color(0.2, 0.8, 1, 0.35)

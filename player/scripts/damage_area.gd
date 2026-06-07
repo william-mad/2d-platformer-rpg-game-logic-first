@@ -18,15 +18,29 @@ func _ready() -> void:
 	add_child(hit_audio_player)
 
 
-func take_damage( attack ) -> void:
+func take_damage(attack) -> void:
 	print ("damage felt in damage area: ", attack.damage)
 	play_hit_sound()
 	var damage_owner := get_parent()
+	var damage_source := get_damage_source(attack)
 
 	if damage_owner != null and damage_owner.has_method("take_damage"):
-		damage_owner.take_damage(attack.damage, attack.global_position)
+		damage_owner.take_damage(attack.damage, attack.global_position, damage_source)
 
 	pass
+
+
+func get_damage_source(attack: Node) -> Node:
+	if attack == null:
+		return null
+
+	if attack.has_method("get_damage_source"):
+		var source := attack.get_damage_source() as Node
+		if source != null:
+			return source
+
+	var attack_owner := attack.get_parent()
+	return attack_owner if attack_owner != null else attack
 
 
 func play_hit_sound() -> void:

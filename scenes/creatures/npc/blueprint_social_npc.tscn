@@ -18,6 +18,22 @@ social_stats = {
 "trust": 65.0,
 "work_need": 10.0
 }
+event_bus_reactions = {
+"damage_dealt": {
+"ignore_self_as_actor": true,
+"ignore_self_as_target": true,
+"priority": 55,
+"radius": 380.0,
+"scope": "local",
+"state_request": "ReactToPlayer",
+"stat_delta": {
+"anger": 8.0,
+"curiosity": 12.0,
+"fear": 25.0,
+"trust": -6.0
+}
+}
+}
 
 [node name="NpcStateMachine" parent="."]
 walk_speed = 55.0
