@@ -5,10 +5,15 @@
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/move_to_target.gd" id="3_move"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/work.gd" id="4_work"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/talk.gd" id="5_talk"]
-[ext_resource type="Script" path="res://scenes/creatures/npc/states/react_to_player.gd" id="6_react"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/react_to_event.gd" id="6_react"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/flee.gd" id="7_flee"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/sleep.gd" id="8_sleep"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/disabled_dead.gd" id="9_disabled"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/eat.gd" id="10_eat"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/rest.gd" id="11_rest"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/collapse.gd" id="12_collapse"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/look_for_talk_target.gd" id="13_look_talk"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/do_anything.gd" id="14_anything"]
 
 [node name="NpcStateMachine" type="Node"]
 script = ExtResource("1_machine")
@@ -30,13 +35,36 @@ script = ExtResource("4_work")
 animation_name = &"work"
 stop_horizontal_on_enter = true
 
+[node name="Eat" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("10_eat")
+animation_name = &"eat"
+stop_horizontal_on_enter = true
+
+[node name="Rest" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("11_rest")
+animation_name = &"rest"
+stop_horizontal_on_enter = true
+
+[node name="DoAnything" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("14_anything")
+animation_name = &"idle"
+stop_horizontal_on_enter = true
+
 [node name="Talk" type="Node" parent="."]
 unique_name_in_owner = true
 script = ExtResource("5_talk")
 animation_name = &"talk"
 stop_horizontal_on_enter = true
 
-[node name="ReactToPlayer" type="Node" parent="."]
+[node name="LookForTalkTarget" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("13_look_talk")
+animation_name = &"walk"
+
+[node name="ReactToEvent" type="Node" parent="."]
 unique_name_in_owner = true
 script = ExtResource("6_react")
 animation_name = &"idle"
@@ -50,6 +78,12 @@ animation_name = &"run"
 unique_name_in_owner = true
 script = ExtResource("8_sleep")
 animation_name = &"sleep"
+stop_horizontal_on_enter = true
+
+[node name="Collapse" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("12_collapse")
+animation_name = &"collapse"
 stop_horizontal_on_enter = true
 
 [node name="DisabledDead" type="Node" parent="."]

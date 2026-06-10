@@ -97,6 +97,43 @@ func is_close_to(target_position: Vector2, stop_distance: float) -> bool:
 	return absf(target_position.x - npc.global_position.x) <= stop_distance
 
 
+func find_closest_need_spot(
+	requested_state_name: StringName,
+	requested_value_name: StringName = &""
+) -> Node2D:
+	# Finds the closest scene spot that says it can serve this NPC and this need.
+	if npc == null or not npc.is_inside_tree():
+		return null
+
+	var closest_spot: Node2D = null
+	var closest_distance := INF
+
+	for candidate in npc.get_tree().get_nodes_in_group("npc_need_spot"):
+		var spot := candidate as Node2D
+		if spot == null or not is_instance_valid(spot):
+			continue
+
+		if not spot.has_method("can_serve_npc_need"):
+			continue
+
+		if not bool(spot.call(
+			"can_serve_npc_need",
+			npc,
+			requested_state_name,
+			requested_value_name
+		)):
+			continue
+
+		var distance := npc.global_position.distance_to(spot.global_position)
+		if distance >= closest_distance:
+			continue
+
+		closest_distance = distance
+		closest_spot = spot
+
+	return closest_spot
+
+
 func move_toward_position(
 	target_position: Vector2,
 	speed: float,

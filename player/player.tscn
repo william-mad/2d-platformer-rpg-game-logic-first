@@ -18,6 +18,7 @@
 [ext_resource type="Script" uid="uid://4sa0v2kvddeq" path="res://player/states/hidden.gd" id="14_hidden"]
 [ext_resource type="Script" uid="uid://dpchrg7gp26h4" path="res://player/states/special_attack.gd" id="15_special"]
 [ext_resource type="Script" uid="uid://d0fnw643glyvm" path="res://player/states/dash.gd" id="16_dash"]
+[ext_resource type="Script" path="res://player/scripts/npc_talk_interactor.gd" id="17_talk_interactor"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_wodsf"]
 radius = 35.0
@@ -30,6 +31,9 @@ height = 62.0
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_rgyib"]
 radius = 13.0
 height = 52.0
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_talk_interaction"]
+size = Vector2(120, 96)
 
 [sub_resource type="Animation" id="Animation_boad6"]
 length = 0.001
@@ -197,12 +201,23 @@ position = Vector2(1, -33)
 [node name="RopeDetector" type="Area2D" parent="." unique_id=1547712304]
 unique_name_in_owner = true
 collision_layer = 0
-collision_mask = 68
+collision_mask = 324
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="RopeDetector" unique_id=504887010]
 position = Vector2(0, -35)
 shape = SubResource("CapsuleShape2D_wodsf")
 debug_color = Color(1, 1, 0, 0.41960785)
+
+[node name="NpcTalkInteractor" type="Area2D" parent="."]
+collision_layer = 0
+collision_mask = 4
+monitorable = false
+script = ExtResource("17_talk_interactor")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="NpcTalkInteractor"]
+position = Vector2(0, -40)
+shape = SubResource("RectangleShape2D_talk_interaction")
+debug_color = Color(0.1, 0.8, 1, 0.24)
 
 [node name="Sprite2D" type="Sprite2D" parent="." unique_id=555104850]
 position = Vector2(-1, -57)

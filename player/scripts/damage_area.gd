@@ -19,7 +19,6 @@ func _ready() -> void:
 
 
 func take_damage(attack) -> void:
-	print ("damage felt in damage area: ", attack.damage)
 	play_hit_sound()
 	var damage_owner := get_parent()
 	var damage_source := get_damage_source(attack)

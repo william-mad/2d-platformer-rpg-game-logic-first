@@ -7,12 +7,10 @@ var attack_timer: float = 0.0
 
 
 func init() -> void:
-	print("init ", name)
+	pass
 
 
 func enter() -> void:
-	print("enter ", name)
-
 	attack_timer = attack_duration
 	next_state = null
 
@@ -20,7 +18,7 @@ func enter() -> void:
 
 
 func exit() -> void:
-	print("exit ", name)
+	pass
 
 
 func handle_input(_event: InputEvent) -> PlayerState:

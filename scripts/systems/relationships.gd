@@ -29,11 +29,12 @@ func meet(
 	var created := not has_relationship_by_id(owner_id, other_id)
 	var initial_favor := default_favor if starting_favor < 0.0 else starting_favor
 	var relationship := _get_or_create_relationship(owner_id, other_id, relationship_owner, other, initial_favor)
+	var stored_context := _get_storable_context(context)
 
 	relationship["met"] = true
 	relationship["meet_count"] = int(relationship.get("meet_count", 0)) + 1
 	relationship["last_seen_msec"] = Time.get_ticks_msec()
-	relationship["last_context"] = context.duplicate(true)
+	relationship["last_context"] = stored_context
 
 	var relationship_copy := relationship.duplicate(true)
 	relationship_seen.emit(relationship_owner, other, relationship_copy)
@@ -43,7 +44,7 @@ func meet(
 		_emit_relationship_event(&"relationship_met", relationship_owner, other, relationship_copy, {}, "meet")
 
 	if not is_equal_approx(favor_delta, 0.0):
-		change_favor(relationship_owner, other, favor_delta, String(context.get("reason", "meet")))
+		change_favor(relationship_owner, other, favor_delta, String(stored_context.get("reason", "meet")), stored_context)
 
 	return relationship.duplicate(true)
 
@@ -70,6 +71,18 @@ func change_favor(
 	return set_favor(relationship_owner, other, current_favor + delta, reason, context)
 
 
+func change_favor_by_id(
+	relationship_owner: Node,
+	other_id: String,
+	delta: float,
+	reason: String = "manual",
+	context: Dictionary = {}
+) -> float:
+	var owner_id := get_relationship_id(relationship_owner)
+	var current_favor := get_favor_by_id(owner_id, other_id, default_favor)
+	return set_favor_by_id(relationship_owner, other_id, current_favor + delta, reason, context)
+
+
 func set_favor(
 	relationship_owner: Node,
 	other: Node,
@@ -84,13 +97,14 @@ func set_favor(
 	var other_id := get_relationship_id(other)
 	var created := not has_relationship_by_id(owner_id, other_id)
 	var relationship := _get_or_create_relationship(owner_id, other_id, relationship_owner, other, default_favor)
+	var stored_context := _get_storable_context(context)
 	var previous_favor := float(relationship.get("favor", default_favor))
 	var next_favor := clampf(value, min_favor, max_favor)
 
 	if created:
 		relationship["met"] = true
 		relationship["last_reason"] = reason
-		relationship["last_context"] = context.duplicate(true)
+		relationship["last_context"] = stored_context
 		var created_copy := relationship.duplicate(true)
 		relationship_met.emit(relationship_owner, other, created_copy)
 		_emit_relationship_event(&"relationship_met", relationship_owner, other, created_copy, {}, reason)
@@ -101,7 +115,62 @@ func set_favor(
 	relationship["favor"] = next_favor
 	relationship["updated_at_msec"] = Time.get_ticks_msec()
 	relationship["last_reason"] = reason
-	relationship["last_context"] = context.duplicate(true)
+	relationship["last_context"] = stored_context
+
+	var delta := next_favor - previous_favor
+	var changed_values := {"favor": delta}
+	var relationship_copy := relationship.duplicate(true)
+	relationship_changed.emit(relationship_owner, other, changed_values, relationship_copy)
+	favor_changed.emit(relationship_owner, other, next_favor, delta, relationship_copy)
+	_emit_relationship_event(&"relationship_favor_changed", relationship_owner, other, relationship_copy, changed_values, reason)
+
+	return next_favor
+
+
+func set_favor_by_id(
+	relationship_owner: Node,
+	other_id: String,
+	value: float,
+	reason: String = "manual",
+	context: Dictionary = {}
+) -> float:
+	if not _can_store_relationship_by_id(relationship_owner, other_id):
+		return default_favor
+
+	var owner_id := get_relationship_id(relationship_owner).strip_edges()
+	var target_id := other_id.strip_edges()
+	var created := not has_relationship_by_id(owner_id, target_id)
+	var other := _get_context_node(context, "other")
+	var stored_context := _get_storable_context(context)
+	var relationship := _get_or_create_relationship_by_id(
+		owner_id,
+		target_id,
+		relationship_owner,
+		other,
+		default_favor,
+		context
+	)
+	if relationship.is_empty():
+		return default_favor
+
+	var previous_favor := float(relationship.get("favor", default_favor))
+	var next_favor := clampf(value, min_favor, max_favor)
+
+	if created:
+		relationship["met"] = true
+		relationship["last_reason"] = reason
+		relationship["last_context"] = stored_context
+		var created_copy := relationship.duplicate(true)
+		relationship_met.emit(relationship_owner, other, created_copy)
+		_emit_relationship_event(&"relationship_met", relationship_owner, other, created_copy, {}, reason)
+
+	if is_equal_approx(previous_favor, next_favor):
+		return next_favor
+
+	relationship["favor"] = next_favor
+	relationship["updated_at_msec"] = Time.get_ticks_msec()
+	relationship["last_reason"] = reason
+	relationship["last_context"] = stored_context
 
 	var delta := next_favor - previous_favor
 	var changed_values := {"favor": delta}
@@ -121,6 +190,14 @@ func get_favor(relationship_owner: Node, other: Node, fallback: float = -1.0) ->
 	return float(relationship.get("favor", default_favor))
 
 
+func get_favor_by_id(owner_id: String, other_id: String, fallback: float = -1.0) -> float:
+	var relationship := get_relationship_by_id(owner_id, other_id)
+	if relationship.is_empty():
+		return default_favor if fallback < 0.0 else fallback
+
+	return float(relationship.get("favor", default_favor))
+
+
 func has_met(relationship_owner: Node, other: Node) -> bool:
 	var relationship := get_relationship(relationship_owner, other)
 	return bool(relationship.get("met", false))
@@ -134,25 +211,36 @@ func get_relationship(relationship_owner: Node, other: Node) -> Dictionary:
 
 
 func get_relationship_by_id(owner_id: String, other_id: String) -> Dictionary:
-	if not has_relationship_by_id(owner_id, other_id):
+	var clean_owner_id := owner_id.strip_edges()
+	var clean_other_id := other_id.strip_edges()
+	if not has_relationship_by_id(clean_owner_id, clean_other_id):
 		return {}
 
-	return relationships[owner_id][other_id].duplicate(true)
+	return relationships[clean_owner_id][clean_other_id].duplicate(true)
 
 
 func get_relationships_for(relationship_owner: Node) -> Dictionary:
 	if relationship_owner == null:
 		return {}
 
-	var owner_id := get_relationship_id(relationship_owner)
-	if not relationships.has(owner_id):
+	return get_relationships_for_id(get_relationship_id(relationship_owner))
+
+
+func get_relationships_for_id(owner_id: String) -> Dictionary:
+	var clean_owner_id := owner_id.strip_edges()
+	if clean_owner_id.is_empty() or not relationships.has(clean_owner_id):
 		return {}
 
-	return relationships[owner_id].duplicate(true)
+	return relationships[clean_owner_id].duplicate(true)
 
 
 func has_relationship_by_id(owner_id: String, other_id: String) -> bool:
-	return relationships.has(owner_id) and relationships[owner_id].has(other_id)
+	var clean_owner_id := owner_id.strip_edges()
+	var clean_other_id := other_id.strip_edges()
+	if clean_owner_id.is_empty() or clean_other_id.is_empty():
+		return false
+
+	return relationships.has(clean_owner_id) and relationships[clean_owner_id].has(clean_other_id)
 
 
 func get_relationship_id(actor: Node) -> String:
@@ -217,6 +305,12 @@ func apply_save_data(data: Dictionary) -> void:
 			relationship["favor"] = clampf(float(relationship.get("favor", default_favor)), min_favor, max_favor)
 			relationship["met"] = bool(relationship.get("met", false))
 			relationship["meet_count"] = int(relationship.get("meet_count", 0))
+			relationship["owner_name"] = String(relationship.get("owner_name", ""))
+			relationship["other_name"] = String(relationship.get("other_name", ""))
+			relationship["owner_path"] = String(relationship.get("owner_path", ""))
+			relationship["other_path"] = String(relationship.get("other_path", ""))
+			relationship["last_reason"] = String(relationship.get("last_reason", ""))
+			relationship["last_context"] = _get_storable_context(relationship.get("last_context", {}))
 			relationships[owner_id][other_id] = relationship
 
 
@@ -227,20 +321,49 @@ func _get_or_create_relationship(
 	other: Node,
 	starting_favor: float
 ) -> Dictionary:
-	if not relationships.has(owner_id):
-		relationships[owner_id] = {}
+	return _get_or_create_relationship_by_id(
+		owner_id,
+		other_id,
+		relationship_owner,
+		other,
+		starting_favor,
+		{}
+	)
 
-	if relationships[owner_id].has(other_id):
-		return relationships[owner_id][other_id]
+
+func _get_or_create_relationship_by_id(
+	owner_id: String,
+	other_id: String,
+	relationship_owner: Node,
+	other: Node,
+	starting_favor: float,
+	context: Dictionary = {}
+) -> Dictionary:
+	var clean_owner_id := owner_id.strip_edges()
+	var clean_other_id := other_id.strip_edges()
+	if clean_owner_id.is_empty() or clean_other_id.is_empty():
+		return {}
+
+	if not relationships.has(clean_owner_id):
+		relationships[clean_owner_id] = {}
+
+	if relationships[clean_owner_id].has(clean_other_id):
+		_update_relationship_identity_fields(
+			relationships[clean_owner_id][clean_other_id],
+			relationship_owner,
+			other,
+			context
+		)
+		return relationships[clean_owner_id][clean_other_id]
 
 	var now := Time.get_ticks_msec()
-	relationships[owner_id][other_id] = {
-		"owner_id": owner_id,
-		"other_id": other_id,
-		"owner_name": relationship_owner.name,
-		"other_name": other.name,
-		"owner_path": String(relationship_owner.get_path()) if relationship_owner.is_inside_tree() else "",
-		"other_path": String(other.get_path()) if other.is_inside_tree() else "",
+	relationships[clean_owner_id][clean_other_id] = {
+		"owner_id": clean_owner_id,
+		"other_id": clean_other_id,
+		"owner_name": _get_relationship_owner_name(relationship_owner, context),
+		"other_name": _get_relationship_other_name(other, context),
+		"owner_path": _get_relationship_owner_path(relationship_owner, context),
+		"other_path": _get_relationship_other_path(other, context),
 		"favor": clampf(starting_favor, min_favor, max_favor),
 		"met": false,
 		"meet_count": 0,
@@ -251,7 +374,70 @@ func _get_or_create_relationship(
 		"last_context": {},
 	}
 
-	return relationships[owner_id][other_id]
+	return relationships[clean_owner_id][clean_other_id]
+
+
+func _update_relationship_identity_fields(
+	relationship: Dictionary,
+	relationship_owner: Node,
+	other: Node,
+	context: Dictionary
+) -> void:
+	var owner_name := _get_relationship_owner_name(relationship_owner, context)
+	if not owner_name.is_empty():
+		relationship["owner_name"] = owner_name
+
+	var other_name := _get_relationship_other_name(other, context)
+	if not other_name.is_empty():
+		relationship["other_name"] = other_name
+
+	var owner_path := _get_relationship_owner_path(relationship_owner, context)
+	if not owner_path.is_empty():
+		relationship["owner_path"] = owner_path
+
+	var other_path := _get_relationship_other_path(other, context)
+	if not other_path.is_empty():
+		relationship["other_path"] = other_path
+
+
+func _get_relationship_owner_name(relationship_owner: Node, context: Dictionary) -> String:
+	var context_name := String(context.get("owner_name", ""))
+	if not context_name.is_empty():
+		return context_name
+	if relationship_owner != null:
+		return relationship_owner.name
+
+	return ""
+
+
+func _get_relationship_other_name(other: Node, context: Dictionary) -> String:
+	var context_name := String(context.get("other_name", ""))
+	if not context_name.is_empty():
+		return context_name
+	if other != null and is_instance_valid(other):
+		return other.name
+
+	return ""
+
+
+func _get_relationship_owner_path(relationship_owner: Node, context: Dictionary) -> String:
+	var context_path := String(context.get("owner_path", ""))
+	if not context_path.is_empty():
+		return context_path
+	if relationship_owner != null and relationship_owner.is_inside_tree():
+		return String(relationship_owner.get_path())
+
+	return ""
+
+
+func _get_relationship_other_path(other: Node, context: Dictionary) -> String:
+	var context_path := String(context.get("other_path", ""))
+	if not context_path.is_empty():
+		return context_path
+	if other != null and is_instance_valid(other) and other.is_inside_tree():
+		return String(other.get_path())
+
+	return ""
 
 
 func _can_store_relationship(relationship_owner: Node, other: Node) -> bool:
@@ -262,6 +448,72 @@ func _can_store_relationship(relationship_owner: Node, other: Node) -> bool:
 		return false
 
 	return is_instance_valid(relationship_owner) and is_instance_valid(other)
+
+
+func _can_store_relationship_by_id(relationship_owner: Node, other_id: String) -> bool:
+	if relationship_owner == null or not is_instance_valid(relationship_owner):
+		return false
+
+	var owner_id := get_relationship_id(relationship_owner).strip_edges()
+	var target_id := other_id.strip_edges()
+	if owner_id.is_empty() or target_id.is_empty():
+		return false
+
+	return owner_id != target_id
+
+
+func _get_context_node(context: Dictionary, key: String) -> Node:
+	var value = context.get(key, null)
+	if value is Node and is_instance_valid(value):
+		return value
+
+	return null
+
+
+func _get_storable_context(context_value) -> Dictionary:
+	# Relationship context can be saved; live scene Objects are used only for immediate signals.
+	if not (context_value is Dictionary):
+		return {}
+
+	var stored_context := {}
+	for context_key in context_value.keys():
+		var key_text := String(context_key)
+		if key_text == "other" or key_text == "relationship_owner":
+			continue
+
+		var stored_value = _get_storable_context_value(context_value[context_key])
+		if stored_value == null:
+			continue
+
+		stored_context[key_text] = stored_value
+
+	return stored_context
+
+
+func _get_storable_context_value(value):
+	match typeof(value):
+		TYPE_NIL:
+			return null
+		TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_STRING:
+			return value
+		TYPE_STRING_NAME:
+			return String(value)
+		TYPE_VECTOR2:
+			return {
+				"x": value.x,
+				"y": value.y,
+			}
+		TYPE_DICTIONARY:
+			return _get_storable_context(value)
+		TYPE_ARRAY:
+			var stored_array := []
+			for item in value:
+				var stored_item = _get_storable_context_value(item)
+				if stored_item != null:
+					stored_array.append(stored_item)
+			return stored_array
+		_:
+			return null
 
 
 func _emit_relationship_event(

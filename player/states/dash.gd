@@ -13,11 +13,10 @@ var cooldown_end_msec: int = 0
 
 
 func init() -> void:
-	print("init ", name)
+	pass
 
 
 func enter() -> void:
-	print("enter ", name)
 	dash_timer = dash_duration
 	cooldown_end_msec = Time.get_ticks_msec() + int(cooldown_time * 1000.0)
 	player.animation_player.play("run")
@@ -27,8 +26,6 @@ func enter() -> void:
 
 
 func exit() -> void:
-	print("exit ", name)
-
 	if player.direction.x == 0.0:
 		player.velocity.x = 0.0
 	else:

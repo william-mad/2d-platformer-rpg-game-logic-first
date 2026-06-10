@@ -13,7 +13,6 @@ func enter() -> void:
 	player.animation_player.play("crouch")
 	player.colider_stand.disabled = true
 	player.colider_crouch.disabled = false
-	print("enter", name)
 	pass
 
 
@@ -21,7 +20,6 @@ func enter() -> void:
 func exit() -> void:
 	player.colider_stand.disabled = false
 	player.colider_crouch.disabled = true
-	print("exit", name)
 	pass
 
 

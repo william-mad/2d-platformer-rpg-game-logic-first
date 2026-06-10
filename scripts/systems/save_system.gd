@@ -3,10 +3,11 @@ class_name GameSaveSystem extends Node
 signal save_finished(success: bool, save_path: String)
 signal load_finished(success: bool, save_path: String)
 
-const SAVE_VERSION: int = 2
+const SAVE_VERSION: int = 3
 const DEFAULT_SLOT: String = "slot_1"
 const SAVEABLE_GROUP: StringName = &"saveable"
 const SAVE_DIR: String = "user://saves"
+const WORLD_TIME_PATH: String = "/root/WorldTime"
 const NPC_LOCATIONS_PATH: String = "/root/NpcLocations"
 const RELATIONSHIPS_PATH: String = "/root/Relationships"
 
@@ -42,12 +43,16 @@ func load_game(slot: String = DEFAULT_SLOT) -> bool:
 	pending_save_data = save_data
 	var loaded_global_values = _decode_value(save_data.get("global_values", {}))
 	global_values = loaded_global_values if loaded_global_values is Dictionary else {}
+	_apply_system_save_data(WORLD_TIME_PATH, save_data.get("world_time", {}))
 	_apply_system_save_data(RELATIONSHIPS_PATH, save_data.get("relationships", {}))
 	_apply_system_save_data(NPC_LOCATIONS_PATH, save_data.get("npc_locations", {}))
 
 	var scene_path := String(save_data.get("scene_path", ""))
 	if scene_path.is_empty():
 		call_deferred("_apply_pending_save_data")
+		return true
+
+	if _change_scene_with_loader_for_save(scene_path, save_path):
 		return true
 
 	var error := get_tree().change_scene_to_file(scene_path)
@@ -98,6 +103,7 @@ func erase_value(key: StringName) -> void:
 func clear_runtime_values() -> void:
 	global_values.clear()
 	pending_save_data.clear()
+	_apply_system_save_data(WORLD_TIME_PATH, {})
 	_apply_system_save_data(RELATIONSHIPS_PATH, {})
 	_apply_system_save_data(NPC_LOCATIONS_PATH, {})
 
@@ -113,6 +119,7 @@ func _build_save_data() -> Dictionary:
 		"saved_at_unix_time": Time.get_unix_time_from_system(),
 		"scene_path": scene_path,
 		"global_values": _encode_value(global_values),
+		"world_time": _encode_value(_get_system_save_data(WORLD_TIME_PATH)),
 		"npc_locations": _encode_value(_get_system_save_data(NPC_LOCATIONS_PATH)),
 		"relationships": _encode_value(_get_system_save_data(RELATIONSHIPS_PATH)),
 		"nodes": {},
@@ -168,6 +175,31 @@ func _apply_save_data_to_current_scene(save_data: Dictionary) -> void:
 
 		var node_data: Dictionary = decoded_node_data
 		_apply_node_save_data(node, node_data)
+
+
+func _change_scene_with_loader_for_save(scene_path: String, save_path: String) -> bool:
+	var scene_loader := get_node_or_null("/root/SceneLoader")
+	if scene_loader == null or not scene_loader.has_method("change_scene"):
+		return false
+	if not scene_loader.has_signal(&"scene_load_finished"):
+		return false
+
+	var started := bool(scene_loader.call("change_scene", scene_path))
+	if not started:
+		return false
+
+	var callback := Callable(self, "_on_save_scene_loaded").bind(save_path)
+	scene_loader.connect(&"scene_load_finished", callback, CONNECT_ONE_SHOT)
+	return true
+
+
+func _on_save_scene_loaded(success: bool, _scene_path: String, save_path: String) -> void:
+	if not success:
+		pending_save_data.clear()
+		load_finished.emit(false, save_path)
+		return
+
+	call_deferred("_apply_pending_save_data")
 
 
 func _get_node_save_id(node: Node) -> String:
@@ -230,7 +262,7 @@ func _apply_system_save_data(system_path: String, encoded_data) -> void:
 		return
 
 	var decoded_data = _decode_value(encoded_data)
-	var system_data := {}
+	var system_data: Dictionary = {}
 	if decoded_data is Dictionary:
 		system_data = decoded_data
 

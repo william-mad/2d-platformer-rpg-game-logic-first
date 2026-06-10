@@ -1,0 +1,35 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/instances/npc_need_spot.gd" id="1_need_spot"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_need_spot"]
+size = Vector2(128, 88)
+
+[node name="NpcNeedSpot" type="Area2D"]
+collision_layer = 0
+collision_mask = 6
+monitorable = false
+script = ExtResource("1_need_spot")
+
+[node name="ZoneVisual" type="Polygon2D" parent="."]
+unique_name_in_owner = true
+color = Color(0.18, 0.82, 0.28, 0.46)
+polygon = PackedVector2Array(-64, -44, 64, -44, 64, 44, -64, 44)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_need_spot")
+debug_color = Color(0.18, 0.82, 0.28, 0.25)
+
+[node name="Label" type="Label" parent="."]
+unique_name_in_owner = true
+offset_left = -74.0
+offset_top = -78.0
+offset_right = 74.0
+offset_bottom = -44.0
+text = "Need"
+horizontal_alignment = 1
+vertical_alignment = 1
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1

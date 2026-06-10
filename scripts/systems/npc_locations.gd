@@ -19,6 +19,7 @@ var rng := RandomNumberGenerator.new()
 
 func _ready() -> void:
 	rng.randomize()
+	_update_return_processing()
 
 
 func _process(delta: float) -> void:
@@ -70,6 +71,7 @@ func register_npc(npc: Node) -> bool:
 	npc_records[npc_id] = record
 
 	npc_registered.emit(npc_id, npc, current_scene_path)
+	_record_watchdog_marker(&"npc_locations:register", "%s %s" % [npc_id, current_scene_path.get_file()])
 	return true
 
 
@@ -113,6 +115,7 @@ func request_travel(npc: Node, target_scene_path: String) -> bool:
 	record["node_state"] = _get_npc_state(npc)
 	record["last_position"] = _get_node_position(npc)
 	_move_record_to_scene(npc_id, record, target_scene_path, true)
+	_record_watchdog_marker(&"npc_locations:travel", "%s -> %s" % [npc_id, target_scene_path.get_file()])
 
 	live_npcs.erase(npc_id)
 	npc.queue_free()
@@ -122,6 +125,7 @@ func request_travel(npc: Node, target_scene_path: String) -> bool:
 func activate_scene(scene_context: Node) -> void:
 	active_scene_context = scene_context
 	active_scene_path = _get_context_scene_path(scene_context)
+	_record_watchdog_marker(&"npc_locations:activate", "%s records=%d" % [active_scene_path.get_file(), npc_records.size()])
 	call_deferred("_spawn_missing_npcs_for_active_scene")
 
 
@@ -154,6 +158,7 @@ func apply_save_data(data: Dictionary) -> void:
 
 	var saved_records = data.get("records", data)
 	if not (saved_records is Dictionary):
+		_update_return_processing()
 		return
 
 	for npc_id_key in saved_records.keys():
@@ -168,6 +173,8 @@ func apply_save_data(data: Dictionary) -> void:
 			continue
 
 		npc_records[npc_id] = _normalize_loaded_record(npc_id, saved_record)
+
+	_update_return_processing()
 
 
 func get_npc_id(npc: Node) -> String:
@@ -305,10 +312,13 @@ func _move_record_to_scene(
 	if target_scene_path == active_scene_path:
 		call_deferred("_spawn_missing_npcs_for_active_scene")
 
+	_update_return_processing()
+
 
 func _try_return_travelling_npcs() -> void:
 	var now := Time.get_ticks_msec()
 	var min_travel_age_msec := int(return_check_seconds * 1000.0)
+	var returned_count := 0
 
 	for npc_id in npc_records.keys():
 		var record: Dictionary = npc_records[npc_id]
@@ -325,6 +335,11 @@ func _try_return_travelling_npcs() -> void:
 			continue
 
 		_return_npc_to_previous_scene(String(npc_id), record)
+		returned_count += 1
+
+	_update_return_processing()
+	if returned_count > 0:
+		_record_watchdog_marker(&"npc_locations:return", "%d" % returned_count)
 
 
 func _return_npc_to_previous_scene(npc_id: String, record: Dictionary) -> void:
@@ -346,6 +361,8 @@ func _spawn_missing_npcs_for_active_scene() -> void:
 	if active_scene_context == null or not is_instance_valid(active_scene_context):
 		return
 
+	var spawned_count := 0
+	var refreshed_count := 0
 	for npc_id in npc_records.keys():
 		var record: Dictionary = npc_records[npc_id]
 		if String(record.get("scene_path", "")) != active_scene_path:
@@ -359,24 +376,32 @@ func _spawn_missing_npcs_for_active_scene() -> void:
 			record["last_position"] = _get_node_position(live_npc)
 			record["spawn_random"] = false
 			npc_records[npc_id] = record
+			refreshed_count += 1
 			continue
 
-		_spawn_record_in_active_scene(String(npc_id), record)
+		if _spawn_record_in_active_scene(String(npc_id), record):
+			spawned_count += 1
+
+	if spawned_count > 0 or refreshed_count > 0:
+		_record_watchdog_marker(
+			&"npc_locations:spawn_missing",
+			"spawned=%d refreshed=%d" % [spawned_count, refreshed_count]
+		)
 
 
-func _spawn_record_in_active_scene(npc_id: String, record: Dictionary) -> void:
+func _spawn_record_in_active_scene(npc_id: String, record: Dictionary) -> bool:
 	var npc_scene_path := String(record.get("npc_scene_path", ""))
 	if npc_scene_path.is_empty():
-		return
+		return false
 
 	var packed_scene := load(npc_scene_path) as PackedScene
 	if packed_scene == null:
 		push_warning("Could not load NPC scene: %s" % npc_scene_path)
-		return
+		return false
 
 	var parent := _get_context_spawn_parent(active_scene_context)
 	if parent == null:
-		return
+		return false
 
 	var npc := packed_scene.instantiate()
 	npc.name = String(record.get("node_name", npc_id))
@@ -410,6 +435,7 @@ func _spawn_record_in_active_scene(npc_id: String, record: Dictionary) -> void:
 	npc_records[npc_id] = record
 
 	npc_spawned.emit(npc_id, npc, active_scene_path)
+	return true
 
 
 func _apply_record_to_npc(npc: Node, record: Dictionary, use_random_position: bool) -> void:
@@ -515,3 +541,29 @@ func _has_property(object: Object, property_name: StringName) -> bool:
 			return true
 
 	return false
+
+
+func _update_return_processing() -> void:
+	set_process(_has_travelling_records())
+
+
+func _has_travelling_records() -> bool:
+	for npc_id in npc_records.keys():
+		var record = npc_records[npc_id]
+		if not (record is Dictionary):
+			continue
+
+		var previous_scene_path := String(record.get("previous_scene_path", ""))
+		if previous_scene_path.is_empty():
+			continue
+
+		if previous_scene_path != String(record.get("scene_path", "")):
+			return true
+
+	return false
+
+
+func _record_watchdog_marker(source: StringName, detail: String = "") -> void:
+	var watchdog := get_node_or_null("/root/PerformanceWatchdog")
+	if watchdog != null and watchdog.has_method("record_marker"):
+		watchdog.call("record_marker", source, detail)

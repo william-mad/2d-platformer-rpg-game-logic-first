@@ -20,19 +20,18 @@ config/icon="res://icon.svg"
 SaveSystem="*res://scripts/systems/save_system.gd"
 DamageEvents="*res://scripts/systems/damage_events.gd"
 EventBus="*res://scripts/systems/event_bus.gd"
+SceneLoader="*res://scripts/systems/scene_loader.gd"
+WorldTime="*res://scripts/systems/world_time.gd"
 Relationships="*res://scripts/systems/relationships.gd"
 NpcLocations="*res://scripts/systems/npc_locations.gd"
 PlayerHud="*uid://dicudb0t1rd0j"
+DebugClockHud="*res://scripts/systems/debug_clock_hud.gd"
+PerformanceWatchdog="*res://scripts/systems/performance_watchdog.gd"
 
 [display]
 
-window/size/viewport_width=720
-window/size/viewport_height=480
 window/size/mode=2
-window/size/initial_position_type=0
 window/stretch/mode="viewport"
-window/stretch/aspect="keep_width"
-window/stretch/scale_mode="integer"
 
 [global_group]
 
@@ -86,6 +85,11 @@ attach_rope={
 "events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":88,"key_label":0,"unicode":120,"location":0,"echo":false,"script":null)
 ]
 }
+stats={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":80,"key_label":0,"unicode":112,"location":0,"echo":false,"script":null)
+]
+}
 
 [layer_names]
 
@@ -97,6 +101,7 @@ attach_rope={
 2d_physics/layer_6="enemy area interactions"
 2d_physics/layer_7="hittable"
 2d_physics/layer_8="attacks physical"
+2d_physics/layer_9="rope attachable objects"
 2d_physics/layer_10="one way platform - if necessary"
 
 [physics]

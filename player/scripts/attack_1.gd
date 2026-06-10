@@ -15,10 +15,8 @@ func _ready() -> void:
 
 #if meet damage_area (area that can be damaged) do something.
 func _on_body_entered (body : Node2D) ->void:
-	print("body entered", body.name)
 	if body is Damage_Area:
 		body.take_damage(self)
-		print("Damage dealt because damage area in region")
 	pass
 	
 

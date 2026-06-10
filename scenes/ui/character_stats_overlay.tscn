@@ -1,0 +1,39 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/character_stats_overlay.gd" id="1_stats_overlay"]
+
+[node name="CharacterStatsOverlay" type="CanvasLayer"]
+visible = false
+script = ExtResource("1_stats_overlay")
+
+[node name="StatsRoot" type="Control" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="StatsPanel" type="ColorRect" parent="StatsRoot"]
+unique_name_in_owner = true
+offset_left = 14.0
+offset_top = 88.0
+offset_right = 334.0
+offset_bottom = 420.0
+mouse_filter = 2
+color = Color(0.03, 0.04, 0.05, 0.78)
+
+[node name="StatsText" type="Label" parent="StatsRoot"]
+unique_name_in_owner = true
+offset_left = 22.0
+offset_top = 96.0
+offset_right = 326.0
+offset_bottom = 412.0
+mouse_filter = 2
+text = "SCENE STATS"
+theme_override_colors/font_color = Color(1, 1, 1, 0.96)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_constants/line_spacing = 0
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 10

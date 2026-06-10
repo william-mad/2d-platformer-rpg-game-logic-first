@@ -124,11 +124,14 @@ social_stats = {
 "fear": 0.0,
 "hp": 100.0,
 "hunger": 25.0,
+"lonely": 0.0,
 "love": 0.0,
-"sleepiness": 0.0,
-"talk_interest": 0.0,
+"sadness": 0.0,
+"sleep_need": 0.0,
+"suspicion": 0.0,
+"talk_need": 0.0,
 "trust": 50.0,
-"work_need": 0.0
+"boredom": 0.0
 }
 
 [node name="BlueprintNpc" parent="." instance=ExtResource("5_blueprint")]
@@ -157,9 +160,9 @@ set_values = {
 "fear": 0.0,
 "hp": 100.0,
 "hunger": 25.0,
-"sleepiness": 0.0,
-"talk_interest": 0.0,
-"work_need": 0.0
+"sleep_need": 0.0,
+"talk_need": 0.0,
+"boredom": 0.0
 }
 state_request = &"Idle"
 request_priority = 1000
@@ -191,7 +194,7 @@ position = Vector2(-420, 368)
 target_npc_path = NodePath("../TestNpc")
 extra_target_npc_paths = [NodePath("../BlueprintNpc")]
 stat_delta = {
-"sleepiness": 85.0
+"sleep_need": 85.0
 }
 pad_label = "Sleep"
 pad_color = Color(0.35, 0.35, 0.95, 0.42)
@@ -201,7 +204,7 @@ position = Vector2(-220, 368)
 target_npc_path = NodePath("../TestNpc")
 extra_target_npc_paths = [NodePath("../BlueprintNpc")]
 stat_delta = {
-"work_need": 70.0
+"boredom": 70.0
 }
 pad_label = "Work"
 pad_color = Color(0.2, 0.75, 0.35, 0.42)
@@ -211,7 +214,7 @@ position = Vector2(-20, 368)
 target_npc_path = NodePath("../TestNpc")
 extra_target_npc_paths = [NodePath("../BlueprintNpc")]
 stat_delta = {
-"talk_interest": 70.0
+"talk_need": 70.0
 }
 pad_label = "Talk"
 pad_color = Color(0.35, 0.75, 0.95, 0.42)

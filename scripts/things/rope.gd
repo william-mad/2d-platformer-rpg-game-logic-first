@@ -11,6 +11,7 @@ class_name Rope
 @export var max_length: float = 200.0
 @export var pull_strength: float = 1800.0
 @export var max_pull_speed: float = 500.0
+@export var hard_limit_slack: float = 4.0
 
 @export_category("Visuals")
 @export var use_sag: bool = true
@@ -27,19 +28,19 @@ class_name Rope
 func _ready() -> void:
 	line.width = rope_width
 	line.visible = active
+	set_physics_process(active)
 
 
 func _physics_process(delta: float) -> void:
 	if not active:
-		line.visible = false
 		return
 
 	if start_body == null or end_body == null:
-		line.visible = false
+		detach()
 		return
 
 	if start_visual_point == null or end_visual_point == null:
-		line.visible = false
+		detach()
 		return
 
 	line.visible = true
@@ -62,11 +63,13 @@ func attach(
 
 	active = true
 	line.visible = true
+	set_physics_process(true)
 
 
 func detach() -> void:
 	active = false
 	line.visible = false
+	set_physics_process(false)
 
 	start_body = null
 	end_body = null
@@ -75,8 +78,9 @@ func detach() -> void:
 
 
 func _apply_rope_pull(delta: float) -> void:
-	var start_pos := start_body.global_position
-	var end_pos := end_body.global_position
+	var start_pos := _get_visual_position(start_visual_point, start_body)
+	var end_pos := _get_visual_position(end_visual_point, end_body)
+	var end_body_to_visual := end_pos - end_body.global_position
 
 	var offset := end_pos - start_pos
 	var distance := offset.length()
@@ -90,7 +94,7 @@ func _apply_rope_pull(delta: float) -> void:
 	var tug_start_distance := max_length * 0.85
 
 	# Soft tug near the end of the rope.
-	if distance > tug_start_distance and distance <= max_length:
+	if distance > tug_start_distance:
 		var pull_ratio := inverse_lerp(tug_start_distance, max_length, distance)
 		pull_ratio = clampf(pull_ratio, 0.0, 1.0)
 
@@ -98,13 +102,10 @@ func _apply_rope_pull(delta: float) -> void:
 		_apply_soft_pull(end_body, direction_to_player, target_speed, delta)
 
 	# Hard cap past max length.
-	if distance > max_length:
-		if end_body is RigidBody2D:
-			_remove_velocity_away_from_player(end_body, direction_from_start_to_end)
-			_apply_soft_pull(end_body, direction_to_player, max_pull_speed, delta)
-		else:
-			end_body.global_position = start_pos + direction_from_start_to_end * max_length
-			_remove_velocity_away_from_player(end_body, direction_from_start_to_end)
+	if distance > max_length + hard_limit_slack:
+		var capped_end_visual_position := start_pos + direction_from_start_to_end * max_length
+		var capped_body_position := capped_end_visual_position - end_body_to_visual
+		_clamp_body_to_rope_limit(end_body, capped_body_position, direction_from_start_to_end)
 
 
 func _apply_pull_to_body(body: Node2D, direction: Vector2, target_speed: float, delta: float) -> void:
@@ -131,8 +132,8 @@ func _apply_pull_to_body(body: Node2D, direction: Vector2, target_speed: float, 
 
 
 func _update_rope_visual() -> void:
-	var start_pos := start_visual_point.global_position
-	var end_pos := end_visual_point.global_position
+	var start_pos := _get_visual_position(start_visual_point, start_body)
+	var end_pos := _get_visual_position(end_visual_point, end_body)
 
 	var distance := start_pos.distance_to(end_pos)
 	var stretch_ratio := clampf(distance / max_length, 0.0, 1.0)
@@ -155,6 +156,27 @@ func _update_rope_visual() -> void:
 
 		line.add_point(line.to_local(point))
 
+
+func _get_visual_position(visual_point: Node2D, fallback_body: Node2D) -> Vector2:
+	if visual_point != null and is_instance_valid(visual_point):
+		return visual_point.global_position
+
+	return fallback_body.global_position
+
+
+func _clamp_body_to_rope_limit(
+	body: Node2D,
+	capped_global_position: Vector2,
+	away_direction: Vector2
+) -> void:
+	if body.has_method("clamp_rope_distance"):
+		body.call("clamp_rope_distance", capped_global_position, away_direction)
+		return
+
+	body.global_position = capped_global_position
+	_remove_velocity_away_from_player(body, away_direction)
+
+
 func _remove_velocity_away_from_player(body: Node2D, away_direction: Vector2) -> void:
 	if body is CharacterBody2D:
 		var character := body as CharacterBody2D
@@ -172,6 +194,10 @@ func _remove_velocity_away_from_player(body: Node2D, away_direction: Vector2) ->
 
 
 func _apply_soft_pull(body: Node2D, direction: Vector2, target_speed: float, delta: float) -> void:
+	if body.has_method("apply_rope_pull_velocity"):
+		body.call("apply_rope_pull_velocity", direction, target_speed, delta)
+		return
+
 	if body is CharacterBody2D:
 		var character := body as CharacterBody2D
 

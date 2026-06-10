@@ -1,58 +1,190 @@
 class_name NpcStateWork extends NpcState
 
 @export var work_target_path: NodePath
-@export var work_duration: float = -1.0
-@export var work_value_name: StringName = &"work_need"
-@export var work_complete_delta: float = -25.0
+@export var work_value_name: StringName = &"boredom"
+@export var boredom_drop_per_full_work: float = 60.0
+@export var fallback_work_needed_capacity: float = 100.0
+@export var work_progress_tick_seconds: float = 3.0
 
-var work_timer: float = 0.0
+var active_work_target: Node2D
+var work_progress_elapsed: float = 0.0
 
 
 func enter() -> void:
+	# Work now clears the area's own work_needed value instead of waiting on a fixed timer.
 	super.enter()
+	active_work_target = _resolve_work_target()
+	work_progress_elapsed = 0.0
 
-	# If a work target exists, walk there first, then come back into Work on arrival.
-	var configured_target := _resolve_work_target()
-	if configured_target != null and not is_close_to(configured_target.global_position, machine.stop_distance):
-		machine.move_target = configured_target
-		machine.state_after_move = &"Work"
-		machine.call_deferred("request_state", &"MoveToTarget", configured_target, "walk_to_work", 20)
+	if active_work_target == null:
+		next_state = get_state(&"Idle")
+		stop_horizontal()
 		return
 
-	work_timer = work_duration
-	if work_timer < 0.0:
-		work_timer = machine.default_work_time
+	if not is_close_to(active_work_target.global_position, machine.stop_distance):
+		_walk_to_work_target(active_work_target)
+		return
+
+	if _target_work_is_done(active_work_target):
+		next_state = get_state(&"Idle")
+		stop_horizontal()
+		return
 
 	stop_horizontal()
 
 
 func physics_process(delta: float) -> NpcState:
+	# Every frame of successful work lowers both the spot's work and the NPC's boredom.
 	stop_horizontal()
 
-	if work_timer <= 0.0:
+	if next_state != null:
 		return next_state
 
-	work_timer -= delta
-	if work_timer > 0.0:
-		return next_state
+	if active_work_target == null or not is_instance_valid(active_work_target):
+		active_work_target = _resolve_work_target()
 
-	if work_value_name != &"":
-		# Completing work can lower the value that sent the NPC here.
-		machine.apply_value_delta({String(work_value_name): work_complete_delta}, null, false)
+	if active_work_target == null:
+		return get_state(&"Idle")
 
-	return get_state(&"Idle")
+	if not _target_can_be_worked(active_work_target):
+		machine.work_target = null
+		active_work_target = _resolve_work_target()
+		if active_work_target == null:
+			return get_state(&"Idle")
+
+	if not is_close_to(active_work_target.global_position, machine.stop_distance):
+		machine.move_target = active_work_target
+		machine.state_after_move = &"Work"
+		return get_state(&"MoveToTarget")
+
+	if _target_work_is_done(active_work_target):
+		return get_state(&"Idle")
+
+	_apply_work_progress(delta, active_work_target)
+	if _target_work_is_done(active_work_target):
+		return get_state(&"Idle")
+
+	return next_state
+
+
+func _apply_work_progress(delta: float, work_target: Node2D) -> void:
+	# The area's actual clamped work change determines how much boredom can fall.
+	work_progress_elapsed += delta
+	var tick_seconds := maxf(work_progress_tick_seconds, 0.0)
+	if tick_seconds > 0.0 and work_progress_elapsed < tick_seconds:
+		return
+
+	var progress_delta := work_progress_elapsed
+	work_progress_elapsed = 0.0
+
+	var full_work_seconds := _get_seconds_to_clear_full_work()
+	var work_capacity := _get_target_work_capacity(work_target)
+	var requested_work_delta := -(work_capacity / full_work_seconds) * progress_delta
+	var actual_work_delta := _apply_target_work_delta(work_target, requested_work_delta)
+
+	if is_equal_approx(actual_work_delta, 0.0):
+		return
+
+	_record_watchdog_marker(
+		&"npc:work_progress",
+		"%s %.2f" % [work_target.name, actual_work_delta]
+	)
+
+	if work_value_name == &"":
+		return
+
+	var progress_fraction := absf(actual_work_delta) / work_capacity
+	var boredom_delta := -absf(boredom_drop_per_full_work) * progress_fraction
+	if is_equal_approx(boredom_delta, 0.0):
+		return
+
+	machine.apply_value_delta({String(work_value_name): boredom_delta}, null, false)
 
 
 func _resolve_work_target() -> Node2D:
+	# Target priority: exported path, assigned spot, then closest matching Work spot.
 	if machine == null:
 		return null
 
 	if String(work_target_path) != "" and machine.npc != null:
 		var configured_target := machine.npc.get_node_or_null(work_target_path) as Node2D
-		if configured_target != null:
+		if _target_can_be_worked(configured_target):
 			return configured_target
 
-	if machine.work_target != null and is_instance_valid(machine.work_target):
+	if _target_can_be_worked(machine.work_target):
 		return machine.work_target
 
+	machine.work_target = null
+	var closest_spot := find_closest_need_spot(&"Work", work_value_name)
+	if closest_spot != null:
+		machine.work_target = closest_spot
+		return closest_spot
+
 	return null
+
+
+func _walk_to_work_target(work_target: Node2D) -> void:
+	# MoveToTarget will return to Work, where progress can start once the NPC arrives.
+	machine.move_target = work_target
+	machine.state_after_move = &"Work"
+	machine.call_deferred("request_state", &"MoveToTarget", work_target, "walk_to_work", 20)
+
+
+func _target_can_be_worked(work_target: Node2D) -> bool:
+	if work_target == null or not is_instance_valid(work_target):
+		return false
+
+	if work_target.has_method("can_serve_npc_need"):
+		return bool(work_target.call("can_serve_npc_need", npc, &"Work", work_value_name))
+
+	if work_target.has_method("has_work_needed"):
+		return bool(work_target.call("has_work_needed"))
+
+	return false
+
+
+func _target_work_is_done(work_target: Node2D) -> bool:
+	if work_target == null or not is_instance_valid(work_target):
+		return true
+
+	if work_target.has_method("is_work_complete"):
+		return bool(work_target.call("is_work_complete"))
+
+	if work_target.has_method("has_work_needed"):
+		return not bool(work_target.call("has_work_needed"))
+
+	return true
+
+
+func _apply_target_work_delta(work_target: Node2D, requested_delta: float) -> float:
+	if work_target != null and work_target.has_method("apply_work_needed_delta"):
+		return float(work_target.call("apply_work_needed_delta", requested_delta))
+
+	return 0.0
+
+
+func _get_target_work_capacity(work_target: Node2D) -> float:
+	if work_target != null and work_target.has_method("get_work_needed_capacity"):
+		return maxf(float(work_target.call("get_work_needed_capacity")), 0.001)
+
+	return maxf(fallback_work_needed_capacity, 0.001)
+
+
+func _get_seconds_to_clear_full_work() -> float:
+	# State machine tuning now means: time to clear a full work-needed spot.
+	if machine == null:
+		return maxf(fallback_work_needed_capacity, 0.001)
+
+	return maxf(
+		machine.get_real_seconds_for_game_hours(
+			machine.default_work_game_hours,
+			machine.default_work_time
+		),
+		0.001
+	)
+
+
+func _record_watchdog_marker(source: StringName, detail: String = "") -> void:
+	var watchdog := get_node_or_null("/root/PerformanceWatchdog")
+	if watchdog != null and watchdog.has_method("record_marker"):
+		watchdog.call("record_marker", source, detail)

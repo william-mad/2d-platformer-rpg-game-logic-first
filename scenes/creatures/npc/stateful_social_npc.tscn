@@ -11,7 +11,7 @@ walk_speed = 70.0
 run_speed = 130.0
 default_work_time = 2.0
 default_talk_time = 1.6
-default_flee_time = 1.2
+default_flee_time = 4.0
 
 [node name="StateLabel" type="Label" parent="."]
 offset_left = -46.0

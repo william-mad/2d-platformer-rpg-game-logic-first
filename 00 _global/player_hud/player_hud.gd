@@ -11,7 +11,11 @@ func setup_hp(max_hp: float, current_hp: float) -> void:
 
 
 func set_hp(current_hp: float) -> void:
-	hpbar.value = clampf(current_hp, 0.0, hpbar.max_value)
+	var next_value := clampf(current_hp, 0.0, hpbar.max_value)
+	if is_equal_approx(hpbar.value, next_value):
+		return
+
+	hpbar.value = next_value
 
 
 func setup_mana(max_mana: float, current_mana: float, current_mana_2: float) -> void:
@@ -22,8 +26,16 @@ func setup_mana(max_mana: float, current_mana: float, current_mana_2: float) -> 
 
 
 func set_mana(current_mana: float) -> void:
-	mana_bar.value = clampf(current_mana, 0.0, mana_bar.max_value)
+	var next_value := clampf(current_mana, 0.0, mana_bar.max_value)
+	if is_equal_approx(mana_bar.value, next_value):
+		return
+
+	mana_bar.value = next_value
 
 
 func set_mana_2(current_mana_2: float) -> void:
-	mana_2_bar.value = clampf(current_mana_2, 0.0, mana_2_bar.max_value)
+	var next_value := clampf(current_mana_2, 0.0, mana_2_bar.max_value)
+	if is_equal_approx(mana_2_bar.value, next_value):
+		return
+
+	mana_2_bar.value = next_value

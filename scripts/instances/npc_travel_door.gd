@@ -32,6 +32,9 @@ func load_target_scene() -> void:
 		push_warning("NpcTravelDoor has no target scene.")
 		return
 
+	if _change_scene_with_loader():
+		return
+
 	get_tree().change_scene_to_file(target_scene_path)
 
 
@@ -42,6 +45,7 @@ func _on_body_entered(body: Node2D) -> void:
 
 	if body.is_in_group(String(player_group)):
 		player_inside = true
+		_preload_target_scene()
 		return
 
 	if not _is_traveller(body):
@@ -79,3 +83,17 @@ func _get_traveller_id(body: Node) -> String:
 			return npc_id
 
 	return str(body.get_instance_id())
+
+
+func _preload_target_scene() -> void:
+	var scene_loader := get_node_or_null("/root/SceneLoader")
+	if scene_loader != null and scene_loader.has_method("preload_scene"):
+		scene_loader.call("preload_scene", target_scene_path)
+
+
+func _change_scene_with_loader() -> bool:
+	var scene_loader := get_node_or_null("/root/SceneLoader")
+	if scene_loader == null or not scene_loader.has_method("change_scene"):
+		return false
+
+	return bool(scene_loader.call("change_scene", target_scene_path))

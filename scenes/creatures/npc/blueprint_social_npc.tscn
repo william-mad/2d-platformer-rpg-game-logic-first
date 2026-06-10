@@ -12,11 +12,15 @@ social_stats = {
 "fear": 0.0,
 "hp": 100.0,
 "hunger": 35.0,
+"lonely": 0.0,
 "love": 5.0,
-"sleepiness": 10.0,
-"talk_interest": 25.0,
+"sadness": 0.0,
+"sleep_need": 10.0,
+"suspicion": 0.0,
+"talk_need": 25.0,
 "trust": 65.0,
-"work_need": 10.0
+"boredom": 10.0,
+"bored": 0.0
 }
 event_bus_reactions = {
 "damage_dealt": {
@@ -25,7 +29,7 @@ event_bus_reactions = {
 "priority": 55,
 "radius": 380.0,
 "scope": "local",
-"state_request": "ReactToPlayer",
+"state_request": "ReactToEvent",
 "stat_delta": {
 "anger": 8.0,
 "curiosity": 12.0,
@@ -41,12 +45,12 @@ run_speed = 115.0
 default_reaction_time = 0.8
 default_work_time = 2.5
 default_talk_time = 2.0
-default_flee_time = 1.8
+default_flee_time = 4.0
 value_state_rules = {
 "curious": {
 "at_least": 35.0,
 "priority": 40,
-"state": "ReactToPlayer",
+"state": "ReactToEvent",
 "value": "curiosity"
 },
 "dead_hp": {
@@ -64,37 +68,73 @@ value_state_rules = {
 "favor_dropped": {
 "delta_at_most": -1.0,
 "priority": 35,
-"state": "ReactToPlayer",
+"state": "ReactToEvent",
 "value": "favor"
 },
 "high_fear": {
 "at_least": 60.0,
+"delta_at_least": 0.001,
+"only_when_changed": true,
 "priority": 90,
 "state": "Flee",
 "value": "fear"
 },
 "hungry": {
-"at_least": 70.0,
+"at_least": 75.0,
 "priority": 50,
-"state": "Work",
+"requires_idle": true,
+"state": "Eat",
 "value": "hunger"
 },
-"needs_work": {
-"at_least": 45.0,
-"priority": 50,
-"state": "Work",
-"value": "work_need"
+"boredom_do_anything": {
+"at_least": 91.0,
+"at_most": 99.0,
+"priority": 55,
+"requires_idle": true,
+"state": "DoAnything",
+"value": "boredom"
 },
-"sleepy": {
-"at_least": 70.0,
+"sleep_collapse": {
+"at_least": 100.0,
+"priority": 95,
+"state": "Collapse",
+"value": "sleep_need"
+},
+"sleep_bed": {
+"at_least": 71.0,
+"at_most": 99.0,
 "priority": 70,
+"requires_idle": true,
 "state": "Sleep",
-"value": "sleepiness"
+"time_windows": [{
+"end_hour": 6.0,
+"start_hour": 22.0
+}],
+"value": "sleep_need"
 },
-"wants_talk": {
-"at_least": 45.0,
+"sleep_rest_before_noon": {
+"at_least": 51.0,
+"at_most": 70.0,
+"before_hour": 12.0,
+"priority": 30,
+"requires_idle": true,
+"state": "Rest",
+"value": "sleep_need"
+},
+"talk_search_for_people": {
+"at_least": 90.0,
+"priority": 40,
+"requires_idle": true,
+"state": "LookForTalkTarget",
+"value": "talk_need"
+},
+"talk_to_seen_target": {
+"at_least": 61.0,
+"min_relationship_favor": 20.0,
 "priority": 45,
+"requires_target": true,
 "state": "Talk",
-"value": "talk_interest"
+"target_groups": [&"npc", &"player"],
+"value": "talk_need"
 }
 }

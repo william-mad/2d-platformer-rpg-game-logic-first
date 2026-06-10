@@ -9,18 +9,17 @@ var attack_timer: float = 0.0
 
 
 func init() -> void:
-	print("init ", name)
+	pass
 
 
 func enter() -> void:
-	print("enter ", name)
 	attack_timer = attack_duration
 	next_state = null
 	do_special_attack()
 
 
 func exit() -> void:
-	print("exit ", name)
+	pass
 
 
 func handle_input(_event: InputEvent) -> PlayerState:
@@ -58,5 +57,3 @@ func do_special_attack() -> void:
 		_:
 			player.attack_1.activate(hitbox_duration)
 			player.animation_player.play("attack_1")
-
-	print("special attack tier ", attack_tier)

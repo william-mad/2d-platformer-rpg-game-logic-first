@@ -9,10 +9,11 @@ size = Vector2(41, 34)
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_hide_area"]
 size = Vector2(64, 53)
 
-[node name="HiddenSpot" type="RigidBody2D" unique_id=1838723625 groups=["hidden_spot", "rope_attachable"]]
-collision_layer = 4
-collision_mask = 5
-lock_rotation = true
+[node name="HiddenSpot" type="CharacterBody2D" unique_id=1838723625 groups=["hidden_spot", "rope_attachable"]]
+collision_layer = 256
+collision_mask = 1
+safe_margin = 0.04
+floor_snap_length = 4.0
 script = ExtResource("1_movable")
 
 [node name="BushVisual" type="Polygon2D" parent="." unique_id=806954224]
@@ -29,7 +30,7 @@ debug_color = Color(0.2, 0.8, 0.2, 0.35)
 [node name="HideArea" type="Area2D" parent="." unique_id=1284604002]
 unique_name_in_owner = true
 collision_layer = 0
-collision_mask = 5
+collision_mask = 10
 monitorable = false
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="HideArea" unique_id=2034971360]

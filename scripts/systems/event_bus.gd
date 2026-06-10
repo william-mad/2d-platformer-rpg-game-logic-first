@@ -22,6 +22,9 @@ const EVENT_DAMAGE_DEALT := &"damage_dealt"
 @export var print_debug_events: bool = false
 @export var damage_event_scope: StringName = SCOPE_LOCAL
 @export var damage_event_radius: float = 380.0
+@export_range(0.0, 5.0, 0.05, "suffix:s") var damage_event_min_interval_seconds: float = 1.0
+
+var recent_damage_event_times: Dictionary = {}
 
 
 func _ready() -> void:
@@ -167,12 +170,16 @@ func _connect_damage_events() -> void:
 
 
 func _on_damage_dealt(amount: float, attacker: Node, target: Node) -> void:
+	if not _can_emit_damage_event(attacker, target):
+		return
+
 	var position_node := _get_first_node2d([target, attacker])
 	var has_position := position_node != null
 	var event_position := position_node.global_position if has_position else Vector2.ZERO
 
 	# DamageEvents stays the focused combat signal; EventBus turns it into a scoped world event.
 	emit_event(EVENT_DAMAGE_DEALT, {
+		"npc_event": true,
 		"amount": amount,
 		"actor": attacker,
 		"attacker": attacker,
@@ -184,6 +191,39 @@ func _on_damage_dealt(amount: float, attacker: Node, target: Node) -> void:
 		"radius": damage_event_radius,
 		"tags": [&"damage", &"combat"],
 	}, damage_event_scope)
+
+
+func _can_emit_damage_event(attacker: Node, target: Node) -> bool:
+	var interval_msec := int(maxf(damage_event_min_interval_seconds, 0.0) * 1000.0)
+	if interval_msec <= 0:
+		return true
+
+	var now := Time.get_ticks_msec()
+	var key := "%s:%s" % [_get_node_event_id(attacker), _get_node_event_id(target)]
+	var previous_time := int(recent_damage_event_times.get(key, -interval_msec))
+	if now - previous_time < interval_msec:
+		return false
+
+	recent_damage_event_times[key] = now
+	_prune_recent_damage_event_times(now, interval_msec)
+	return true
+
+
+func _get_node_event_id(node: Node) -> int:
+	if node == null or not is_instance_valid(node):
+		return 0
+
+	return node.get_instance_id()
+
+
+func _prune_recent_damage_event_times(now: int, interval_msec: int) -> void:
+	if recent_damage_event_times.size() <= 64:
+		return
+
+	var prune_age := maxi(interval_msec * 4, 1000)
+	for key in recent_damage_event_times.keys():
+		if now - int(recent_damage_event_times[key]) > prune_age:
+			recent_damage_event_times.erase(key)
 
 
 func _resolve_payload_position(payload: Dictionary) -> void:

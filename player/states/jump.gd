@@ -12,7 +12,6 @@ func enter() -> void:
 	player.ledgedetec.enabled = true
 	player.animation_player.play("jump")
 	player.animation_player.pause()
-	print("enter", name)
 	if player.previous_state == ledge_grab:
 		player.velocity.y = -jump_velocity/1.5
 	else:
@@ -23,7 +22,6 @@ func enter() -> void:
 
 func exit() -> void:
 	player.ledgedetec.enabled = false
-	print("exit", name)
 	pass
 
 

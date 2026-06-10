@@ -206,7 +206,6 @@ func initialize_states () -> void:
 			c.player = self
 			
 		pass
-	print(states)
 	if states.size() == 0:
 		return
 		
@@ -350,6 +349,14 @@ func charge_mana(amount: float) -> void:
 
 
 func update_mana_2_charge(delta: float) -> void:
+	if mana_2_amount > max_mana:
+		mana_2_amount = max_mana
+		sync_mana_2_bar()
+		return
+
+	if is_equal_approx(mana_2_amount, max_mana):
+		return
+
 	mana_2_amount = move_toward(mana_2_amount, max_mana, mana_2_charge_rate * delta)
 	sync_mana_2_bar()
 

@@ -4,6 +4,12 @@ signal target_seen(target: Node2D)
 signal target_lost(target: Node2D)
 signal social_stats_changed(stats: Dictionary)
 
+const STAT_KEY_ALIASES := {
+	"sleepiness": "sleep_need",
+	"work_need": "boredom",
+	"talk_interest": "talk_need",
+}
+
 @export_group("Movement")
 @export var gravity: float = 1200.0
 @export var walk_speed: float = 45.0
@@ -22,13 +28,23 @@ signal social_stats_changed(stats: Dictionary)
 	"anger": 0.0,
 	"hunger": 25.0,
 	"energy": 100.0,
-	"sleepiness": 0.0,
-	"work_need": 0.0,
-	"talk_interest": 0.0,
+	"sleep_need": 0.0,
+	"boredom": 0.0,
+	"bored": 0.0,
+	"talk_need": 0.0,
+	"lonely": 0.0,
+	"sadness": 0.0,
+	"suspicion": 0.0,
 	"curiosity": 0.0,
 	"hp": 100.0,
 	"disabled": 0.0
 }
+
+@export_group("Identity")
+@export var display_name: String = ""
+@export var npc_tags: Array[StringName] = []
+@export var show_name_tag: bool = true
+@export var show_location_id_in_name_tag: bool = true
 
 @export_group("Relationships")
 @export var use_relationships: bool = true
@@ -46,10 +62,15 @@ signal social_stats_changed(stats: Dictionary)
 @export_group("Health")
 @export var max_hp: float = 100.0
 @export var damage_fear_multiplier: float = 4.0
+@export var damage_anger_multiplier: float = 4.0
+@export_range(0.0, 100.0, 0.1, "suffix:%") var damage_fear_health_threshold_percent: float = 70.0
+@export var low_health_fear_min_scale: float = 1.0
+@export var low_health_fear_max_scale: float = 2.0
 @export var damage_favor_penalty: float = 2.0
 
 @export_group("Event Bus")
 @export var listen_to_event_bus: bool = true
+@export var listen_to_npc_event_bus_only: bool = true
 # Reaction rule scopes: "seen", "local", "scene", or "global".
 @export var event_bus_reactions: Dictionary = {
 	"damage_dealt": {
@@ -62,7 +83,7 @@ signal social_stats_changed(stats: Dictionary)
 			"curiosity": 10.0,
 			"trust": -4.0
 		},
-		"state_request": "ReactToPlayer",
+		"state_request": "ReactToEvent",
 		"priority": 45
 	}
 }
@@ -79,6 +100,7 @@ signal social_stats_changed(stats: Dictionary)
 @onready var sight_area: Area2D = %SightArea
 @onready var favor_bar: ProgressBar = %FavorBar
 @onready var hp_bar: CreatureHpBar = get_node_or_null("HPBar") as CreatureHpBar
+@onready var name_label: Label = get_node_or_null("NameLabel") as Label
 # Optional child component. If present, social values can drive the reusable NPC states.
 @onready var npc_state_machine: NpcStateMachine = get_node_or_null("NpcStateMachine") as NpcStateMachine
 
@@ -91,6 +113,7 @@ var syncing_state_machine_values: bool = false
 
 
 func _ready() -> void:
+	add_to_group("npc")
 	add_to_group("social_npc")
 
 	if not _setup_location_tracking():
@@ -106,6 +129,8 @@ func _ready() -> void:
 	_update_favor_bar_visibility()
 	_update_visual_mood()
 	_setup_relationship_identity()
+	_setup_npc_tags()
+	_update_name_tag()
 
 	sight_area.body_entered.connect(_on_sight_area_body_entered)
 	sight_area.body_exited.connect(_on_sight_area_body_exited)
@@ -151,13 +176,14 @@ func apply_social_event(
 	if requires_actor_visibility and actor != null and not can_see(actor):
 		return false
 
-	var favor_delta := float(stat_delta.get("favor", 0.0))
+	var normalized_delta := _normalize_stat_delta(stat_delta)
+	var favor_delta := float(normalized_delta.get("favor", 0.0))
 	var changed_stats: Dictionary = {}
 
-	for stat_key in stat_delta.keys():
+	for stat_key in normalized_delta.keys():
 		var key := String(stat_key)
 		var current_value := float(social_stats.get(key, 0.0))
-		var next_value := current_value + float(stat_delta[stat_key])
+		var next_value := current_value + float(normalized_delta[stat_key])
 		var max_value := max_hp if key == "hp" else 100.0
 		social_stats[key] = clampf(next_value, 0.0, max_value)
 
@@ -189,9 +215,9 @@ func take_damage(amount: float, _damage_source_position: Vector2 = Vector2.ZERO,
 	var damage_actor := damage_source as Node2D
 	var damage_stats := {
 		"hp": -amount,
-		"fear": amount * damage_fear_multiplier,
 		"favor": -amount * damage_favor_penalty,
 	}
+	damage_stats.merge(_get_damage_emotion_stats(amount, previous_hp), true)
 
 	# Damage is handled as a social value change, so hp/fear/favor rules can drive any state.
 	# Add hurt animations here later:
@@ -204,6 +230,42 @@ func take_damage(amount: float, _damage_source_position: Vector2 = Vector2.ZERO,
 
 	if get_hp() <= 0.0:
 		die()
+
+
+func _get_damage_emotion_stats(amount: float, previous_hp: float) -> Dictionary:
+	# Above the danger threshold, hits annoy the NPC; below it, fear rises with injury.
+	var next_hp := clampf(previous_hp - amount, 0.0, max_hp)
+	var damage_taken := maxf(previous_hp - next_hp, 0.0)
+	var health_percent := _get_health_percent(next_hp)
+	if health_percent >= damage_fear_health_threshold_percent:
+		return {
+			"anger": damage_taken * damage_anger_multiplier,
+	}
+
+	var danger_ratio := _get_low_health_danger_ratio(health_percent)
+	var fear_scale := lerpf(
+		low_health_fear_min_scale,
+		maxf(low_health_fear_max_scale, low_health_fear_min_scale),
+		danger_ratio
+	)
+	return {
+		"fear": damage_taken * damage_fear_multiplier * fear_scale,
+	}
+
+
+func _get_health_percent(hp_value: float) -> float:
+	if max_hp <= 0.0:
+		return 0.0
+
+	return (clampf(hp_value, 0.0, max_hp) / max_hp) * 100.0
+
+
+func _get_low_health_danger_ratio(health_percent: float) -> float:
+	var threshold := clampf(damage_fear_health_threshold_percent, 0.0, 100.0)
+	if threshold <= 0.0:
+		return 1.0
+
+	return clampf((threshold - health_percent) / threshold, 0.0, 1.0)
 
 
 func heal(amount: float) -> void:
@@ -288,7 +350,7 @@ func get_npc_location_save_data() -> Dictionary:
 
 func apply_npc_location_save_data(data: Dictionary) -> void:
 	if data.has("social_stats") and data["social_stats"] is Dictionary:
-		social_stats = data["social_stats"].duplicate(true)
+		social_stats = _normalize_stat_values(data["social_stats"])
 	if data.has("starts_moving_right"):
 		starts_moving_right = bool(data["starts_moving_right"])
 	if data.has("patrol_range"):
@@ -301,6 +363,21 @@ func apply_npc_location_save_data(data: Dictionary) -> void:
 		relationship_id = StringName(String(data["relationship_id"]))
 	if data.has("location_id"):
 		location_id = StringName(String(data["location_id"]))
+
+	_ensure_social_stats()
+	if hp_bar != null:
+		update_hp_bar()
+	if favor_bar != null:
+		_update_favor_bar()
+	if body_visual != null:
+		_update_visual_mood()
+	if name_label != null:
+		_update_name_tag()
+
+	if npc_state_machine != null:
+		syncing_state_machine_values = true
+		npc_state_machine.replace_values(social_stats, null, {}, false)
+		syncing_state_machine_values = false
 
 
 func set_npc_location_position(spawn_position: Vector2) -> void:
@@ -345,6 +422,20 @@ func get_hp() -> float:
 	return clampf(float(social_stats.get("hp", max_hp)), 0.0, max_hp)
 
 
+func get_display_name() -> String:
+	# Chooses the label text shown above the NPC, preferring explicit display_name.
+	if not display_name.is_empty():
+		return display_name
+
+	if relationship_id != &"":
+		return String(relationship_id).capitalize()
+
+	if location_id != &"":
+		return String(location_id).capitalize()
+
+	return String(name)
+
+
 func setup_hp_bar() -> void:
 	if hp_bar == null:
 		return
@@ -368,19 +459,56 @@ func _ensure_social_stats() -> void:
 		"anger": 0.0,
 		"hunger": 25.0,
 		"energy": 100.0,
-		"sleepiness": 0.0,
-		"work_need": 0.0,
-		"talk_interest": 0.0,
+		"sleep_need": 0.0,
+		"boredom": 0.0,
+		"bored": 0.0,
+		"talk_need": 0.0,
+		"lonely": 0.0,
+		"sadness": 0.0,
+		"suspicion": 0.0,
 		"curiosity": 0.0,
 		"hp": 100.0,
 		"disabled": 0.0
 	}
+
+	social_stats = _normalize_stat_values(social_stats)
 
 	for stat_key in default_stats.keys():
 		if not social_stats.has(stat_key):
 			social_stats[stat_key] = default_stats[stat_key]
 
 	social_stats["hp"] = clampf(float(social_stats.get("hp", max_hp)), 0.0, max_hp)
+
+
+func _normalize_stat_values(values: Dictionary) -> Dictionary:
+	var normalized := values.duplicate(true)
+	for old_key in STAT_KEY_ALIASES.keys():
+		if not normalized.has(old_key):
+			continue
+
+		var new_key := String(STAT_KEY_ALIASES[old_key])
+		if not normalized.has(new_key):
+			normalized[new_key] = normalized[old_key]
+		normalized.erase(old_key)
+
+	return normalized
+
+
+func _normalize_stat_delta(stat_delta: Dictionary) -> Dictionary:
+	var normalized := {}
+	for stat_key in stat_delta.keys():
+		var key := _canonical_stat_key(stat_key)
+		normalized[key] = float(normalized.get(key, 0.0)) + float(stat_delta[stat_key])
+
+	return normalized
+
+
+func _canonical_stat_key(stat_key) -> String:
+	var key := String(stat_key)
+	if STAT_KEY_ALIASES.has(key):
+		return String(STAT_KEY_ALIASES[key])
+
+	return key
 
 
 func _apply_gravity(delta: float) -> void:
@@ -496,6 +624,35 @@ func _setup_relationship_identity() -> void:
 	set_meta("relationship_id", String(relationship_id))
 
 
+func _setup_npc_tags() -> void:
+	# Stores tags as metadata and Godot groups so spots/interactions can gate on them.
+	set_meta("npc_tags", npc_tags.duplicate())
+
+	for npc_tag in npc_tags:
+		var tag_text := String(npc_tag)
+		if tag_text.is_empty():
+			continue
+
+		add_to_group(tag_text)
+
+
+func _update_name_tag() -> void:
+	# Refreshes the visible name label, optionally including the stable location id.
+	if name_label == null:
+		return
+
+	name_label.visible = show_name_tag
+	if not show_name_tag:
+		return
+
+	var label_text := get_display_name()
+	var location_text := String(get_npc_location_id())
+	if show_location_id_in_name_tag and not location_text.is_empty() and location_text != label_text:
+		label_text = "%s [%s]" % [label_text, location_text]
+
+	name_label.text = label_text
+
+
 func _setup_location_tracking() -> bool:
 	if not use_npc_location_tracking:
 		return true
@@ -566,7 +723,10 @@ func _setup_event_bus() -> void:
 		return
 
 	var callback := Callable(self, "_on_event_bus_event")
-	if not event_bus.is_connected(&"event_emitted", callback):
+	if listen_to_npc_event_bus_only and event_bus.has_signal(&"npc_event_emitted"):
+		if not event_bus.is_connected(&"npc_event_emitted", callback):
+			event_bus.connect(&"npc_event_emitted", callback)
+	elif not event_bus.is_connected(&"event_emitted", callback):
 		event_bus.connect(&"event_emitted", callback)
 
 
@@ -576,6 +736,8 @@ func _disconnect_event_bus() -> void:
 		return
 
 	var callback := Callable(self, "_on_event_bus_event")
+	if event_bus.has_signal(&"npc_event_emitted") and event_bus.is_connected(&"npc_event_emitted", callback):
+		event_bus.disconnect(&"npc_event_emitted", callback)
 	if event_bus.is_connected(&"event_emitted", callback):
 		event_bus.disconnect(&"event_emitted", callback)
 

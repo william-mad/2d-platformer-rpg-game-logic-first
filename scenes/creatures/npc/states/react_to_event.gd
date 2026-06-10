@@ -1,4 +1,4 @@
-class_name NpcStateReactToPlayer extends NpcState
+class_name NpcStateReactToEvent extends NpcState
 
 @export var reaction_duration: float = -1.0
 @export var negative_favor_speed_multiplier: float = 1.5
@@ -9,6 +9,7 @@ var reaction_velocity_x: float = 0.0
 
 
 func enter() -> void:
+	# Short attention/recoil state for a specific event actor, not normal sight.
 	super.enter()
 	reaction_target = machine.last_actor if machine.last_actor != null else machine.get_active_target()
 	reaction_velocity_x = 0.0

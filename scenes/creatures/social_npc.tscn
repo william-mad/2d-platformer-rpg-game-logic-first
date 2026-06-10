@@ -58,6 +58,19 @@ offset_bottom = -86.0
 value = 50.0
 show_percentage = false
 
+[node name="NameLabel" type="Label" parent="."]
+offset_left = -80.0
+offset_top = -148.0
+offset_right = 80.0
+offset_bottom = -126.0
+text = "NPC"
+horizontal_alignment = 1
+vertical_alignment = 1
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+
 [node name="HPBar" type="ProgressBar" parent="."]
 unique_name_in_owner = true
 offset_left = -36.0

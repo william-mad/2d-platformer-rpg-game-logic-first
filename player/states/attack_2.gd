@@ -11,12 +11,10 @@ var combo_requested: bool = false
 
 
 func init() -> void:
-	print("init ", name)
+	pass
 
 
 func enter() -> void:
-	print("enter ", name)
-
 	# Reset state values every time this state starts.
 	attack_timer = attack_duration
 	combo_timer = 0.0
@@ -27,14 +25,12 @@ func enter() -> void:
 
 
 func exit() -> void:
-	print("exit ", name)
-
 	# Optional: make sure attack hitbox turns off when leaving.
+	pass
 
 
 func handle_input(_event: InputEvent) -> PlayerState:
 	if _event.is_action_pressed( "jump" ) and player.is_on_floor():
-		print("trying to jump")
 		return jump
 	# Allow attack release to queue the next combo attack.
 	if _event.is_action_released("attack"):

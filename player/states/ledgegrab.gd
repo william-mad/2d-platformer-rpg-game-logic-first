@@ -2,7 +2,6 @@ class_name PlayerStateLedgeGrab extends PlayerState
 
 
 func init() -> void:
-	print("init", name)
 	pass
 
 
@@ -10,14 +9,12 @@ func init() -> void:
 func enter() -> void:
 	player.animation_player.play( "idle" )
 	player.ledgegrabcolider.disabled = false
-	print("enter", name)
 	pass
 
 
 
 func exit() -> void:
 	player.ledgegrabcolider.disabled = true
-	print("exit", name)
 	pass
 
 
@@ -27,12 +24,10 @@ func handle_input( _event : InputEvent) -> PlayerState:
 		return next_state
 	
 	if _event.is_action_pressed( "jump" ):
-		print("trying to jump")
 		return jump
 	if _event.is_action_pressed("crouch"):
 		player.position.y += 4
 		return fall
-	print(next_state)
 	return next_state
 
 

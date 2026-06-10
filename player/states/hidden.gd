@@ -24,7 +24,6 @@ func enter() -> void:
 	player.colider_crouch.disabled = false
 	player.sprite_2d.visible = false
 	player.animation_player.play("crouch")
-	print("enter", name)
 	pass
 
 
@@ -37,7 +36,6 @@ func exit() -> void:
 	player.colider_crouch.disabled = true
 	player.sprite_2d.visible = true
 	hidden_spot = null
-	print("exit", name)
 	pass
 
 
