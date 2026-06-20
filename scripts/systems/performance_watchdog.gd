@@ -54,6 +54,15 @@ var pending_scene_summary_frames: int = -1
 
 func _ready() -> void:
 	layer = 120
+	if not DebugToolsConfig.PERFORMANCE_WATCHDOG_ENABLED:
+		enabled = false
+		starts_visible = false
+		write_spike_log_file = false
+		print_spikes = false
+		visible = false
+		set_process(false)
+		return
+
 	visible = starts_visible
 	run_started_msec = Time.get_ticks_msec()
 	_prepare_log_file()
@@ -119,6 +128,9 @@ func _exit_tree() -> void:
 
 
 func record_marker(source: StringName, detail: String = "") -> void:
+	if not enabled or not DebugToolsConfig.PERFORMANCE_WATCHDOG_ENABLED:
+		return
+
 	_record_marker(String(source), detail)
 
 

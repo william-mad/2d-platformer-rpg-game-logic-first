@@ -8,6 +8,10 @@ const VALUE_ALIASES := {
 
 @export_group("Save")
 @export var save_id: String = ""
+@export var spot_id: StringName = &""
+
+@export_group("World Simulation")
+@export var world_definition: NpcSpotDefinition
 
 @export_group("Target")
 @export var target_npc_path: NodePath
@@ -17,6 +21,10 @@ const VALUE_ALIASES := {
 
 @export_group("Serving")
 @export var restrict_to_target_npc: bool = true
+# Clear owner controls for plug-and-play spots. Leave these empty to use the legacy target_npc_path rule.
+@export var owner_npc_paths: Array[NodePath] = []
+@export var owner_npc_ids: Array[StringName] = []
+# Legacy name kept for older scenes; owner_npc_ids is the clearer version.
 @export var allowed_npc_ids: Array[StringName] = []
 @export var required_npc_tags: Array[StringName] = []
 
@@ -48,6 +56,7 @@ const VALUE_ALIASES := {
 @onready var label: Label = get_node_or_null("%Label") as Label
 
 var target_npc: Node
+var owner_npcs: Array[Node2D] = []
 var machine: NpcStateMachine
 var connected_machine: NpcStateMachine
 var request_cooldown: float = 0.0
@@ -59,11 +68,14 @@ var request_dirty: bool = true
 
 
 func _ready() -> void:
+	_apply_world_definition()
 	add_to_group("npc_need_spot")
+	_register_world_spot()
 	call_deferred("_setup")
 
 
 func _exit_tree() -> void:
+	_unregister_world_spot()
 	if connected_machine == null or not is_instance_valid(connected_machine):
 		return
 
@@ -75,7 +87,11 @@ func _exit_tree() -> void:
 func _process(delta: float) -> void:
 	request_cooldown = maxf(request_cooldown - delta, 0.0)
 
-	if target_npc == null or not is_instance_valid(target_npc):
+	var target_needs_resolve := (
+		String(target_npc_path) != ""
+		and (target_npc == null or not is_instance_valid(target_npc))
+	)
+	if target_needs_resolve or _owner_paths_need_resolve():
 		_resolve_target()
 		visual_dirty = true
 		request_dirty = true
@@ -95,6 +111,25 @@ func get_save_id() -> String:
 	return save_id.strip_edges()
 
 
+func get_world_spot_id() -> StringName:
+	return spot_id
+
+
+func _apply_world_definition() -> void:
+	# Cross-scene spots share one resource for live behavior and unloaded simulation.
+	if world_definition == null:
+		return
+
+	spot_id = world_definition.spot_id
+	value_name = world_definition.value_name
+	need_threshold = world_definition.need_threshold
+	request_state_name = world_definition.state_name
+	request_priority = world_definition.priority
+	target_assignment_method = world_definition.target_assignment_method
+	owner_npc_ids = world_definition.owner_npc_ids.duplicate()
+	active_time_windows = world_definition.active_time_windows.duplicate(true)
+
+
 func get_save_data() -> Dictionary:
 	return {}
 
@@ -106,20 +141,101 @@ func apply_save_data(_data: Dictionary) -> void:
 func _resolve_target() -> void:
 	# Finds the target NPC and its state machine, if this spot is assigned to one.
 	target_npc = get_node_or_null(target_npc_path)
+	owner_npcs = _resolve_owner_npcs()
 	machine = _get_machine(target_npc)
 	_connect_machine_signals()
 
 
+func _resolve_owner_npcs() -> Array[Node2D]:
+	var resolved_owners: Array[Node2D] = []
+	for owner_path in owner_npc_paths:
+		if String(owner_path) == "":
+			continue
+
+		var owner_npc := get_node_or_null(owner_path) as Node2D
+		if owner_npc == null or not is_instance_valid(owner_npc):
+			continue
+
+		if resolved_owners.has(owner_npc):
+			continue
+
+		resolved_owners.append(owner_npc)
+
+	return resolved_owners
+
+
+func _owner_paths_need_resolve() -> bool:
+	if owner_npc_paths.is_empty():
+		return false
+
+	var configured_path_count := 0
+	for owner_path in owner_npc_paths:
+		if String(owner_path) != "":
+			configured_path_count += 1
+
+	for owner_npc in owner_npcs:
+		if owner_npc == null or not is_instance_valid(owner_npc):
+			return true
+
+	return owner_npcs.size() != configured_path_count
+
+
+func _get_auto_request_npcs() -> Array[Node2D]:
+	# Ownership filters candidates; it does not require one permanently linked live target.
+	var request_npcs: Array[Node2D] = []
+	for owner_npc in owner_npcs:
+		if owner_npc == null or not is_instance_valid(owner_npc):
+			continue
+		if not request_npcs.has(owner_npc):
+			request_npcs.append(owner_npc)
+
+	var target_node := target_npc as Node2D
+	if target_node != null and is_instance_valid(target_node) and not request_npcs.has(target_node):
+		request_npcs.append(target_node)
+
+	_append_live_owner_id_npcs(request_npcs)
+
+	return request_npcs
+
+
+func _append_live_owner_id_npcs(request_npcs: Array[Node2D]) -> void:
+	if not is_inside_tree():
+		return
+
+	for candidate in get_tree().get_nodes_in_group("npc"):
+		var npc_node := candidate as Node2D
+		if npc_node == null or not is_instance_valid(npc_node):
+			continue
+		if request_npcs.has(npc_node):
+			continue
+		if not _npc_owner_is_allowed(npc_node):
+			continue
+		if not _npc_has_required_tags(npc_node):
+			continue
+
+		request_npcs.append(npc_node)
+
+
 func _update_visual() -> void:
-	# Generic need spots show the target NPC's matching value.
-	if target_npc == null or not is_instance_valid(target_npc):
+	# Multiple owners show the highest relevant need; ID owners can be read while off-screen.
+	var display_value := _get_owner_display_value()
+	if is_work_spot():
+		current_value = _get_display_value()
+	elif bool(display_value.get("found", false)):
+		current_value = float(display_value.get("value", 0.0))
+	elif not _has_explicit_owner_configuration():
+		if zone_visual != null:
+			zone_visual.color = low_need_color
+		if label != null:
+			label.text = "%s\nReady" % label_prefix
+		return
+	else:
 		if zone_visual != null:
 			zone_visual.color = missing_target_color
 		if label != null:
 			label.text = "%s\n--" % label_prefix
 		return
 
-	current_value = _get_display_value()
 	var ratio := _get_display_ratio(current_value)
 	if zone_visual != null:
 		zone_visual.color = low_need_color.lerp(high_need_color, ratio)
@@ -128,24 +244,85 @@ func _update_visual() -> void:
 		label.text = "%s\n%d" % [label_prefix, int(round(current_value))]
 
 
+func _get_owner_display_value() -> Dictionary:
+	var found := false
+	var highest_value := 0.0
+	for npc_node in _get_auto_request_npcs():
+		var npc_machine := _get_machine(npc_node)
+		var candidate_value := _get_npc_value(npc_node, npc_machine)
+		if not found or candidate_value > highest_value:
+			highest_value = candidate_value
+			found = true
+
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations != null and locations.has_method("get_npc_location"):
+		for owner_id in _get_configured_owner_ids():
+			var record: Dictionary = locations.call("get_npc_location", String(owner_id))
+			var saved_value = _get_saved_record_value(record)
+			if saved_value == null:
+				continue
+			var saved_candidate_value := float(saved_value)
+			if not found or saved_candidate_value > highest_value:
+				highest_value = saved_candidate_value
+				found = true
+
+	return {"found": found, "value": highest_value}
+
+
+func _get_configured_owner_ids() -> Array[StringName]:
+	var configured_ids: Array[StringName] = []
+	for owner_id in owner_npc_ids:
+		if not configured_ids.has(owner_id):
+			configured_ids.append(owner_id)
+	for allowed_id in allowed_npc_ids:
+		if not configured_ids.has(allowed_id):
+			configured_ids.append(allowed_id)
+
+	return configured_ids
+
+
+func _get_saved_record_value(record: Dictionary):
+	if record.is_empty():
+		return null
+	var node_state = record.get("node_state", {})
+	if not (node_state is Dictionary):
+		return null
+	var social_stats = node_state.get("social_stats", {})
+	if not (social_stats is Dictionary):
+		return null
+
+	var key := _canonical_value_key(value_name)
+	if not social_stats.has(key):
+		return null
+
+	return float(social_stats[key])
+
+
+func _has_explicit_owner_configuration() -> bool:
+	return (
+		(restrict_to_target_npc and String(target_npc_path) != "")
+		or not owner_npc_paths.is_empty()
+		or not owner_npc_ids.is_empty()
+		or not allowed_npc_ids.is_empty()
+	)
+
+
 func _maybe_request_state() -> void:
 	# If this spot's gate is open and the NPC is idle, ask it to use this exact spot.
 	if not auto_request_when_idle:
 		return
-	if machine == null or request_cooldown > 0.0:
+	if request_cooldown > 0.0:
 		return
 	if not _is_inside_active_time_window():
-		return
-	if require_target_need_threshold and _get_target_value() < need_threshold:
-		return
-	if not _machine_is_idle():
 		return
 	if request_state_name == &"":
 		return
 
-	if _request_target_state():
-		_record_watchdog_marker(&"need_spot:request", "%s -> %s" % [name, String(request_state_name)])
-		request_cooldown = request_cooldown_seconds
+	for request_npc in _get_auto_request_npcs():
+		if _maybe_request_state_for(request_npc):
+			_record_watchdog_marker(&"need_spot:request", "%s -> %s" % [name, String(request_state_name)])
+			request_cooldown = request_cooldown_seconds
+			return
 
 
 func _on_machine_values_changed(
@@ -197,14 +374,31 @@ func _queue_request_check() -> void:
 	request_dirty = true
 
 
-func _request_target_state() -> bool:
+func _maybe_request_state_for(request_npc: Node2D) -> bool:
+	if request_npc == null or not is_instance_valid(request_npc):
+		return false
+	if not can_serve_npc_need(request_npc, request_state_name, value_name):
+		return false
+
+	var request_machine := _get_machine(request_npc)
+	if request_machine == null:
+		return false
+	if require_target_need_threshold and _get_npc_value(request_npc, request_machine) < need_threshold:
+		return false
+	if not _machine_is_idle(request_machine):
+		return false
+
+	return _request_target_state(request_machine)
+
+
+func _request_target_state(request_machine: NpcStateMachine) -> bool:
 	# Prefer specific assignment helpers so states know this exact spot is their target.
 	var assignment_method := _get_target_assignment_method()
-	if assignment_method != &"" and machine.has_method(assignment_method):
-		return bool(machine.call(assignment_method, self))
+	if assignment_method != &"" and request_machine.has_method(assignment_method):
+		return bool(request_machine.call(assignment_method, self))
 
-	if machine.has_method("request_state"):
-		return bool(machine.call(
+	if request_machine.has_method("request_state"):
+		return bool(request_machine.call(
 			"request_state",
 			request_state_name,
 			self,
@@ -248,25 +442,35 @@ func can_serve_npc_need(
 	):
 		return false
 
-	if restrict_to_target_npc and String(target_npc_path) != "":
-		if target_npc == null or not is_instance_valid(target_npc):
-			_resolve_target()
-
-		if target_npc != npc_node:
-			return false
-
-	if not _npc_id_is_allowed(npc_node):
+	if not _npc_owner_is_allowed(npc_node):
 		return false
 
 	return _npc_has_required_tags(npc_node)
 
 
-func _npc_id_is_allowed(npc_node: Node2D) -> bool:
-	# Optional whitelist for spots that should only serve specific NPC ids.
-	if allowed_npc_ids.is_empty():
+func _npc_owner_is_allowed(npc_node: Node2D) -> bool:
+	# Empty owner lists mean "serve anyone" unless legacy target_npc_path restriction is set.
+	var has_legacy_target_owner := restrict_to_target_npc and String(target_npc_path) != ""
+	var has_owner_paths := not owner_npc_paths.is_empty()
+	var has_owner_ids := not owner_npc_ids.is_empty() or not allowed_npc_ids.is_empty()
+	if not has_legacy_target_owner and not has_owner_paths and not has_owner_ids:
 		return true
 
+	if has_legacy_target_owner:
+		if target_npc == null or not is_instance_valid(target_npc):
+			_resolve_target()
+		if target_npc == npc_node:
+			return true
+
+	for owner_npc in owner_npcs:
+		if owner_npc == npc_node:
+			return true
+
 	var npc_id := _get_npc_id(npc_node)
+	for owner_id in owner_npc_ids:
+		if String(owner_id) == String(npc_id):
+			return true
+
 	for allowed_id in allowed_npc_ids:
 		if String(allowed_id) == String(npc_id):
 			return true
@@ -380,11 +584,18 @@ func _get_display_ratio(value: float) -> float:
 
 func _get_target_value() -> float:
 	# Reads from the state machine first, then falls back to raw SocialNpc stats.
-	var key := _canonical_value_key(value_name)
-	if machine != null and machine.has_method("get_value"):
-		return float(machine.call("get_value", StringName(key), 0.0))
+	return _get_npc_value(target_npc, machine)
 
-	var stats = target_npc.get("social_stats") if target_npc != null else null
+
+func _get_npc_value(npc_node: Node, npc_machine: NpcStateMachine) -> float:
+	if npc_node == null or not is_instance_valid(npc_node):
+		return 0.0
+
+	var key := _canonical_value_key(value_name)
+	if npc_machine != null and npc_machine.has_method("get_value"):
+		return float(npc_machine.call("get_value", StringName(key), 0.0))
+
+	var stats = npc_node.get("social_stats")
 	if not (stats is Dictionary):
 		return 0.0
 
@@ -403,12 +614,17 @@ func _get_value_ratio(value: float) -> float:
 	return clampf(inverse_lerp(value_min, value_max, value), 0.0, 1.0)
 
 
-func _machine_is_idle() -> bool:
+func _machine_is_idle(target_machine: NpcStateMachine = null) -> bool:
 	# Spots only auto-request actions when they will not interrupt the current state.
-	if machine.current_state == null:
+	if target_machine == null:
+		target_machine = machine
+	if target_machine == null:
+		return false
+
+	if target_machine.current_state == null:
 		return true
 
-	return String(machine.current_state.name) == String(idle_state_name)
+	return String(target_machine.current_state.name) == String(idle_state_name)
 
 
 func _get_machine(target_node: Node) -> NpcStateMachine:
@@ -459,3 +675,21 @@ func _record_watchdog_marker(source: StringName, detail: String = "") -> void:
 	var watchdog := get_node_or_null("/root/PerformanceWatchdog")
 	if watchdog != null and watchdog.has_method("record_marker"):
 		watchdog.call("record_marker", source, detail)
+
+
+func _register_world_spot() -> void:
+	if spot_id == &"":
+		return
+
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if simulator != null and simulator.has_method("register_live_spot"):
+		simulator.call("register_live_spot", spot_id, self)
+
+
+func _unregister_world_spot() -> void:
+	if spot_id == &"":
+		return
+
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if simulator != null and simulator.has_method("unregister_live_spot"):
+		simulator.call("unregister_live_spot", spot_id, self)

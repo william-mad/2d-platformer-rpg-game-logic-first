@@ -2,6 +2,15 @@
 .godot/
 .nomedia
 
+# Editor crash recovery temp files (e.g. player.tscn<digits>.tmp)
+*.tmp
+
+# Runtime log artifacts
+performance_watchdog.log
+
+# Reserved device-name file accidentally created by shell redirects on Windows
+nul
+
 # Godot-specific ignores
 .import/
 export.cfg

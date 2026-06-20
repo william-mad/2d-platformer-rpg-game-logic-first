@@ -288,16 +288,27 @@ func _is_npc_event_payload(payload: Dictionary) -> bool:
 
 
 func _normalize_scope(scope_value) -> StringName:
-	var scope_text := String(scope_value)
-
-	if scope_text == String(SCOPE_SEEN):
-		return SCOPE_SEEN
-	if scope_text == String(SCOPE_LOCAL):
-		return SCOPE_LOCAL
-	if scope_text == String(SCOPE_SCENE):
-		return SCOPE_SCENE
-	if scope_text == String(SCOPE_GLOBAL):
+	# Fast path: the value is already a StringName (the common case from emit_*).
+	# Comparing StringName to StringName is interned and avoids String allocation.
+	if typeof(scope_value) == TYPE_STRING_NAME:
+		if scope_value == SCOPE_SEEN:
+			return SCOPE_SEEN
+		if scope_value == SCOPE_LOCAL:
+			return SCOPE_LOCAL
+		if scope_value == SCOPE_SCENE:
+			return SCOPE_SCENE
+		if scope_value == SCOPE_GLOBAL:
+			return SCOPE_GLOBAL
 		return SCOPE_GLOBAL
+
+	# Slow path: callers may pass a String or other type. Coerce once for the checks.
+	var scope_text := StringName(scope_value)
+	if scope_text == SCOPE_SEEN:
+		return SCOPE_SEEN
+	if scope_text == SCOPE_LOCAL:
+		return SCOPE_LOCAL
+	if scope_text == SCOPE_SCENE:
+		return SCOPE_SCENE
 
 	return SCOPE_GLOBAL
 

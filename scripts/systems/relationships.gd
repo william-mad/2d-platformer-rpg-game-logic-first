@@ -4,10 +4,16 @@ signal relationship_met(relationship_owner: Node, other: Node, relationship: Dic
 signal relationship_seen(relationship_owner: Node, other: Node, relationship: Dictionary)
 signal relationship_changed(relationship_owner: Node, other: Node, changed_values: Dictionary, relationship: Dictionary)
 signal favor_changed(relationship_owner: Node, other: Node, favor: float, delta: float, relationship: Dictionary)
+signal anger_changed(relationship_owner: Node, other: Node, anger: float, delta: float, relationship: Dictionary)
+signal fear_changed(relationship_owner: Node, other: Node, fear: float, delta: float, relationship: Dictionary)
 
 @export var default_favor: float = 50.0
 @export var min_favor: float = 0.0
 @export var max_favor: float = 100.0
+@export var min_anger: float = 0.0
+@export var max_anger: float = 100.0
+@export var min_fear: float = 0.0
+@export var max_fear: float = 100.0
 @export var emit_event_bus_events: bool = true
 @export var relationship_event_scope: StringName = &"scene"
 
@@ -198,6 +204,207 @@ func get_favor_by_id(owner_id: String, other_id: String, fallback: float = -1.0)
 	return float(relationship.get("favor", default_favor))
 
 
+func change_anger(
+	relationship_owner: Node,
+	other: Node,
+	delta: float,
+	reason: String = "manual",
+	context: Dictionary = {}
+) -> float:
+	var current_anger := get_anger(relationship_owner, other)
+	return set_anger(relationship_owner, other, current_anger + delta, reason, context)
+
+
+func set_anger(
+	relationship_owner: Node,
+	other: Node,
+	value: float,
+	reason: String = "manual",
+	context: Dictionary = {}
+) -> float:
+	if not _can_store_relationship(relationship_owner, other):
+		return min_anger
+
+	var owner_id := get_relationship_id(relationship_owner)
+	var other_id := get_relationship_id(other)
+	var relationship := _get_or_create_relationship(
+		owner_id,
+		other_id,
+		relationship_owner,
+		other,
+		default_favor
+	)
+	var previous_anger := float(relationship.get("anger", min_anger))
+	var next_anger := clampf(value, min_anger, max_anger)
+	if is_equal_approx(previous_anger, next_anger):
+		return next_anger
+
+	relationship["anger"] = next_anger
+	relationship["met"] = true
+	relationship["updated_at_msec"] = Time.get_ticks_msec()
+	relationship["last_reason"] = reason
+	relationship["last_context"] = _get_storable_context(context)
+
+	var delta := next_anger - previous_anger
+	var changed_values := {"anger": delta}
+	var relationship_copy := relationship.duplicate(true)
+	relationship_changed.emit(relationship_owner, other, changed_values, relationship_copy)
+	anger_changed.emit(relationship_owner, other, next_anger, delta, relationship_copy)
+	_emit_relationship_event(
+		&"relationship_anger_changed",
+		relationship_owner,
+		other,
+		relationship_copy,
+		changed_values,
+		reason
+	)
+	return next_anger
+
+
+func get_anger(relationship_owner: Node, other: Node, fallback: float = 0.0) -> float:
+	var relationship := get_relationship(relationship_owner, other)
+	if relationship.is_empty():
+		return fallback
+
+	return float(relationship.get("anger", fallback))
+
+
+func decay_anger_for(relationship_owner: Node, amount: float) -> void:
+	if relationship_owner == null or amount <= 0.0:
+		return
+
+	var owner_id := get_relationship_id(relationship_owner).strip_edges()
+	if owner_id.is_empty() or not relationships.has(owner_id):
+		return
+
+	for other_id in relationships[owner_id].keys():
+		var relationship: Dictionary = relationships[owner_id][other_id]
+		var previous_anger := float(relationship.get("anger", min_anger))
+		if previous_anger <= min_anger:
+			continue
+
+		var next_anger := maxf(previous_anger - amount, min_anger)
+		var delta := next_anger - previous_anger
+		relationship["anger"] = next_anger
+		relationship["updated_at_msec"] = Time.get_ticks_msec()
+		relationship["last_reason"] = "passive_decay"
+
+		var changed_values := {"anger": delta}
+		var relationship_copy := relationship.duplicate(true)
+		relationship_changed.emit(relationship_owner, null, changed_values, relationship_copy)
+		anger_changed.emit(relationship_owner, null, next_anger, delta, relationship_copy)
+
+
+func change_fear(
+	relationship_owner: Node,
+	other: Node,
+	delta: float,
+	reason: String = "manual",
+	context: Dictionary = {}
+) -> float:
+	var current_fear := get_fear(relationship_owner, other)
+	return set_fear(relationship_owner, other, current_fear + delta, reason, context)
+
+
+func set_fear(
+	relationship_owner: Node,
+	other: Node,
+	value: float,
+	reason: String = "manual",
+	context: Dictionary = {}
+) -> float:
+	if not _can_store_relationship(relationship_owner, other):
+		return min_fear
+
+	var owner_id := get_relationship_id(relationship_owner)
+	var other_id := get_relationship_id(other)
+	var relationship := _get_or_create_relationship(
+		owner_id,
+		other_id,
+		relationship_owner,
+		other,
+		default_favor
+	)
+	var previous_fear := float(relationship.get("fear", min_fear))
+	var next_fear := clampf(value, min_fear, max_fear)
+	if is_equal_approx(previous_fear, next_fear):
+		return next_fear
+
+	relationship["fear"] = next_fear
+	relationship["met"] = true
+	relationship["updated_at_msec"] = Time.get_ticks_msec()
+	relationship["last_reason"] = reason
+	relationship["last_context"] = _get_storable_context(context)
+
+	var delta := next_fear - previous_fear
+	var changed_values := {"fear": delta}
+	var relationship_copy := relationship.duplicate(true)
+	relationship_changed.emit(relationship_owner, other, changed_values, relationship_copy)
+	fear_changed.emit(relationship_owner, other, next_fear, delta, relationship_copy)
+	_emit_relationship_event(
+		&"relationship_fear_changed",
+		relationship_owner,
+		other,
+		relationship_copy,
+		changed_values,
+		reason
+	)
+	return next_fear
+
+
+func get_fear(relationship_owner: Node, other: Node, fallback: float = 0.0) -> float:
+	var relationship := get_relationship(relationship_owner, other)
+	if relationship.is_empty():
+		return fallback
+
+	return float(relationship.get("fear", fallback))
+
+
+func decay_fear_for(
+	relationship_owner: Node,
+	game_hours: float,
+	panic_floor: float,
+	panic_cooldown_game_hours: float,
+	slow_decay_per_game_hour: float,
+	stop_value: float
+) -> void:
+	if relationship_owner == null or game_hours <= 0.0:
+		return
+
+	var owner_id := get_relationship_id(relationship_owner).strip_edges()
+	if owner_id.is_empty() or not relationships.has(owner_id):
+		return
+
+	for other_id in relationships[owner_id].keys():
+		var relationship: Dictionary = relationships[owner_id][other_id]
+		var previous_fear := float(relationship.get("fear", min_fear))
+		if previous_fear <= stop_value:
+			continue
+
+		var next_fear := previous_fear
+		if previous_fear > panic_floor:
+			if panic_cooldown_game_hours <= 0.0:
+				next_fear = panic_floor
+			else:
+				var panic_decay_per_hour := (max_fear - panic_floor) / panic_cooldown_game_hours
+				next_fear = maxf(previous_fear - panic_decay_per_hour * game_hours, panic_floor)
+		else:
+			next_fear = maxf(previous_fear - slow_decay_per_game_hour * game_hours, stop_value)
+
+		if is_equal_approx(previous_fear, next_fear):
+			continue
+
+		var delta := next_fear - previous_fear
+		relationship["fear"] = next_fear
+		relationship["updated_at_msec"] = Time.get_ticks_msec()
+		relationship["last_reason"] = "passive_decay"
+
+		var changed_values := {"fear": delta}
+		var relationship_copy := relationship.duplicate(true)
+		relationship_changed.emit(relationship_owner, null, changed_values, relationship_copy)
+		fear_changed.emit(relationship_owner, null, next_fear, delta, relationship_copy)
+
+
 func has_met(relationship_owner: Node, other: Node) -> bool:
 	var relationship := get_relationship(relationship_owner, other)
 	return bool(relationship.get("met", false))
@@ -303,6 +510,8 @@ func apply_save_data(data: Dictionary) -> void:
 			relationship["owner_id"] = String(relationship.get("owner_id", owner_id))
 			relationship["other_id"] = String(relationship.get("other_id", other_id))
 			relationship["favor"] = clampf(float(relationship.get("favor", default_favor)), min_favor, max_favor)
+			relationship["anger"] = clampf(float(relationship.get("anger", min_anger)), min_anger, max_anger)
+			relationship["fear"] = clampf(float(relationship.get("fear", min_fear)), min_fear, max_fear)
 			relationship["met"] = bool(relationship.get("met", false))
 			relationship["meet_count"] = int(relationship.get("meet_count", 0))
 			relationship["owner_name"] = String(relationship.get("owner_name", ""))
@@ -365,6 +574,8 @@ func _get_or_create_relationship_by_id(
 		"owner_path": _get_relationship_owner_path(relationship_owner, context),
 		"other_path": _get_relationship_other_path(other, context),
 		"favor": clampf(starting_favor, min_favor, max_favor),
+		"anger": min_anger,
+		"fear": min_fear,
 		"met": false,
 		"meet_count": 0,
 		"created_at_msec": now,

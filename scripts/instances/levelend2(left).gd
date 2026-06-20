@@ -1,19 +1,19 @@
 extends Area2D
 
-@export var next_level2 = ""
+@export var next_level2: String = ""
 
 
 
 #function to detect the player
 
-func _on_body_entered(body: Node2D) -> void:
+func _on_body_entered(_body: Node2D) -> void:
 	call_deferred("load_next_scene")
 	
 #function to define in which area the player is
 
 #function to call the next scene
-func load_next_scene():
-	var scene_path := "res://scenes/levels/" + next_level2 + ".tscn"
+func load_next_scene() -> void:
+	var scene_path: String = "res://scenes/levels/" + next_level2 + ".tscn"
 	if _change_scene_with_loader(scene_path):
 		return
 

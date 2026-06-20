@@ -4,6 +4,7 @@ class_name NpcStateFlee extends NpcState
 @export var safe_distance_from_threat: float = 280.0
 @export var stop_when_safe_distance_reached: bool = true
 @export var minimum_interrupt_priority: int = 95
+@export var allow_fight_interrupt: bool = true
 
 var flee_timer: float = 0.0
 var threat: Node2D
@@ -32,6 +33,8 @@ func physics_process(delta: float) -> NpcState:
 func can_exit_to(new_state: NpcState, request_priority: int) -> bool:
 	# Event reactions should not interrupt an active flee burst; death/collapse still can.
 	if new_state != null and String(new_state.name) == "Idle":
+		return true
+	if allow_fight_interrupt and new_state != null and String(new_state.name) == "Fight":
 		return true
 
 	return request_priority >= minimum_interrupt_priority

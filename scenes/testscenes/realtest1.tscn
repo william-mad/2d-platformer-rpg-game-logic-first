@@ -16,6 +16,7 @@
 [ext_resource type="PackedScene" path="res://scenes/creatures/npc/stateful_social_npc.tscn" id="18_talk_npc"]
 [ext_resource type="PackedScene" path="res://scenes/ui/character_stats_overlay.tscn" id="19_stats_overlay"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_work_spot.tscn" id="20_work_spot"]
+[ext_resource type="PackedScene" path="res://scenes/things/npc_travel_door.tscn" id="21_home_door"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_q8s1k"]
 texture = ExtResource("9_fddca")
@@ -245,24 +246,17 @@ position = Vector2(300, 367)
 
 [node name="CharacterStatsOverlay" parent="." unique_id=1082242331 instance=ExtResource("19_stats_overlay")]
 
+[node name="RealHomeDoor" parent="." instance=ExtResource("21_home_door")]
+position = Vector2(-320, 368)
+target_scene_path = "res://scenes/testscenes/realhometest.tscn"
+
 [node name="MomNpc" parent="." unique_id=259380572 instance=ExtResource("15_mom_npc")]
 position = Vector2(520, 368)
 
-[node name="MomSleepNeedSpot" parent="." unique_id=498775794 instance=ExtResource("17_need_spot")]
-position = Vector2(-448, 327)
-target_npc_path = NodePath("../MomNpc")
-value_name = &"sleep_need"
-need_threshold = 71.0
-request_state_name = &"Sleep"
-active_time_windows = [{
-"end_hour": 6.0,
-"start_hour": 22.0
-}]
-label_prefix = "Sleep"
-
 [node name="MomEatNeedSpot" parent="." unique_id=2012645276 instance=ExtResource("17_need_spot")]
 position = Vector2(-1217, 325)
-target_npc_path = NodePath("../MomNpc")
+restrict_to_target_npc = false
+owner_npc_ids = Array[StringName]([&"mom"])
 need_threshold = 75.0
 request_state_name = &"Eat"
 label_prefix = "Eat"
@@ -271,15 +265,16 @@ label_prefix = "Eat"
 position = Vector2(1443, 322)
 collision_mask = 0
 save_id = "realtest1_mom_work"
-target_npc_path = NodePath("../MomNpc")
+restrict_to_target_npc = false
+owner_npc_ids = Array[StringName]([&"mom"])
 require_target_need_threshold = false
-active_time_windows = [{
+active_time_windows = Array[Dictionary]([{
 "end_hour": 10.0,
 "start_hour": 8.0
 }, {
 "end_hour": 17.0,
 "start_hour": 14.0
-}]
+}])
 
 [node name="TalkPartnerNpc" parent="." unique_id=1577191316 instance=ExtResource("18_talk_npc")]
 position = Vector2(820, 368)

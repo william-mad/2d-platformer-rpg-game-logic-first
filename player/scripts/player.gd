@@ -1,5 +1,8 @@
 class_name Player extends CharacterBody2D
 
+# Emitted when hp hits 0. GameOverScreen (autoload) listens and shows the game-over flow.
+signal player_defeated
+
 #region //onready variables:
 @onready var sprite_2d: Sprite2D = $Sprite2D
 @onready var colider_stand: CollisionShape2D = $colider_stand
@@ -41,6 +44,8 @@ var dash: bool = false
 var double_jump: bool = false
 var ground_slam: bool = false
 var transformation: bool = false
+# Set to true once hp reaches 0 so the player stops acting and take_damage becomes a no-op.
+var dead: bool = false
 #endregion
 
 #region //save system:
@@ -132,6 +137,11 @@ func apply_save_data(data: Dictionary) -> void:
 
 	velocity = Vector2.ZERO
 	knockback_timer = 0.0
+	# A freshly loaded player is alive and responsive even if the previous run ended in defeat.
+	dead = false
+	set_physics_process(true)
+	set_process(true)
+	set_process_unhandled_input(true)
 	sync_stats_to_hud()
 
 
@@ -317,6 +327,10 @@ func get_closest_attachable() -> Node2D:
 
 
 func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO, damage_source: Node = null) -> void:
+	# A defeated player ignores further damage so the death overlay is the only reaction.
+	if dead:
+		return
+
 	var previous_hp := hp
 	hp = maxf(hp - amount, 0.0)
 	var damage_taken := previous_hp - hp
@@ -324,10 +338,24 @@ func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO, 
 	PlayerHud.set_hp(hp)
 
 	if hp <= 0:
-		print("player defeated")
+		_defeat()
 		return
 
 	apply_knockback(damage_source_position)
+
+
+func _defeat() -> void:
+	# Called once when hp hits 0. Stops movement, freezes input, and lets GameOverScreen react.
+	if dead:
+		return
+
+	dead = true
+	velocity = Vector2.ZERO
+	knockback_timer = 0.0
+	set_physics_process(false)
+	set_process(false)
+	set_process_unhandled_input(false)
+	player_defeated.emit()
 
 
 func heal(amount: float) -> void:

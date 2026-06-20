@@ -51,16 +51,31 @@ func _on_body_entered(body: Node2D) -> void:
 	if not _is_traveller(body):
 		return
 
+	try_travel_npc(body)
+
+
+func try_travel_npc(body: Node2D) -> bool:
+	# Scheduled NPC travel commits here, after the NPC has actually reached the door.
+	if body == null or not is_instance_valid(body) or not _is_traveller(body):
+		return false
+	if target_scene_path.is_empty():
+		return false
+
 	var tracker := get_node_or_null("/root/NpcLocations")
 	if tracker == null or not tracker.has_method("request_travel"):
-		return
+		return false
 
 	var traveller_id := _get_traveller_id(body)
 	if float(cooldowns.get(traveller_id, 0.0)) > 0.0:
-		return
+		return false
 
 	cooldowns[traveller_id] = cooldown_seconds
+	if tracker.has_method("complete_pending_scheduled_travel"):
+		if bool(tracker.call("complete_pending_scheduled_travel", body, target_scene_path)):
+			return true
+
 	tracker.call("request_travel", body, target_scene_path)
+	return true
 
 
 func _on_body_exited(body: Node2D) -> void:

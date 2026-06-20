@@ -79,6 +79,12 @@ value_state_rules = {
 "state": "Flee",
 "value": "fear"
 },
+"anger_fight": {
+"at_least": 100.0,
+"priority": 94,
+"state": "Fight",
+"value": "anger"
+},
 "hungry": {
 "at_least": 75.0,
 "priority": 50,

@@ -71,6 +71,7 @@ func register_npc(npc: Node) -> bool:
 	npc_records[npc_id] = record
 
 	npc_registered.emit(npc_id, npc, current_scene_path)
+	_resume_scheduled_activity_deferred(npc_id, npc)
 	_record_watchdog_marker(&"npc_locations:register", "%s %s" % [npc_id, current_scene_path.get_file()])
 	return true
 
@@ -133,11 +134,210 @@ func get_npc_location(npc_id: String) -> Dictionary:
 	if not npc_records.has(npc_id):
 		return {}
 
+	_refresh_live_record(npc_id)
 	return npc_records[npc_id].duplicate(true)
 
 
 func get_all_locations() -> Dictionary:
+	_refresh_live_records_for_save()
 	return npc_records.duplicate(true)
+
+
+func is_npc_live(npc_id: String) -> bool:
+	var npc = live_npcs.get(npc_id, null) as Node
+	return npc != null and is_instance_valid(npc) and not npc.is_queued_for_deletion()
+
+
+func get_live_npc(npc_id: String) -> Node:
+	if not is_npc_live(npc_id):
+		return null
+
+	return live_npcs.get(npc_id, null) as Node
+
+
+func is_npc_available_for_scheduled_activity(
+	npc_id: String,
+	requested_state_name: StringName = &""
+) -> bool:
+	# Off-screen NPCs are represented by their record and are available by default.
+	var npc := get_live_npc(npc_id)
+	if npc == null:
+		return true
+
+	var machine := npc.get_node_or_null("NpcStateMachine")
+	if machine == null:
+		return true
+
+	var current_state = machine.get("current_state")
+	if current_state == null or String(current_state.name) == "Idle":
+		return true
+
+	return requested_state_name != &"" and String(current_state.name) == String(requested_state_name)
+
+
+func prepare_scheduled_travel(
+	npc_id: String,
+	pending_travel: Dictionary,
+	departure_door: Node2D
+) -> bool:
+	# Keeps the NPC in its current scene until it physically reaches the departure door.
+	if not npc_records.has(npc_id) or pending_travel.is_empty():
+		return false
+
+	var target_scene_path := String(pending_travel.get("target_scene_path", ""))
+	if target_scene_path.is_empty():
+		return false
+
+	_refresh_live_record(npc_id)
+	var record: Dictionary = npc_records[npc_id]
+	record["pending_travel"] = pending_travel.duplicate(true)
+	npc_records[npc_id] = record
+
+	return resume_pending_scheduled_travel(npc_id, departure_door)
+
+
+func resume_pending_scheduled_travel(npc_id: String, departure_door: Node2D) -> bool:
+	var npc := get_live_npc(npc_id) as Node2D
+	if npc == null or departure_door == null or not is_instance_valid(departure_door):
+		return false
+
+	if departure_door is Area2D and (departure_door as Area2D).overlaps_body(npc):
+		if departure_door.has_method("try_travel_npc"):
+			departure_door.call_deferred("try_travel_npc", npc)
+			return true
+
+	var machine := npc.get_node_or_null("NpcStateMachine")
+	if machine == null or not machine.has_method("assign_move_target"):
+		return false
+
+	return bool(machine.call("assign_move_target", departure_door, &"Idle"))
+
+
+func complete_pending_scheduled_travel(npc: Node, door_target_scene_path: String) -> bool:
+	if npc == null or door_target_scene_path.is_empty():
+		return false
+
+	var npc_id := get_npc_id(npc)
+	if npc_id.is_empty() or not npc_records.has(npc_id):
+		return false
+
+	_refresh_live_record(npc_id)
+	var record: Dictionary = npc_records[npc_id]
+	var pending = record.get("pending_travel", {})
+	if not (pending is Dictionary) or pending.is_empty():
+		return false
+	if String(pending.get("target_scene_path", "")) != door_target_scene_path:
+		return false
+
+	var mode := String(pending.get("mode", "start"))
+	var target_position = pending.get("target_position", Vector2.ZERO)
+	if not (target_position is Vector2):
+		target_position = Vector2.ZERO
+
+	if mode == "finish":
+		return finish_scheduled_activity(npc_id, door_target_scene_path, target_position)
+
+	var activity = pending.get("activity", {})
+	if not (activity is Dictionary) or activity.is_empty():
+		return false
+	var world_time := get_node_or_null("/root/WorldTime")
+	if world_time != null and world_time.has_method("get_snapshot"):
+		var snapshot: Dictionary = world_time.call("get_snapshot")
+		activity["last_total_hours"] = float(snapshot.get("total_hours", 0.0))
+
+	return begin_scheduled_activity(npc_id, activity, door_target_scene_path, target_position)
+
+
+func cancel_pending_scheduled_travel(npc_id: String) -> void:
+	if not npc_records.has(npc_id):
+		return
+
+	var record: Dictionary = npc_records[npc_id]
+	record["pending_travel"] = {}
+	npc_records[npc_id] = record
+
+
+func begin_scheduled_activity(
+	npc_id: String,
+	activity: Dictionary,
+	target_scene_path: String,
+	target_position: Vector2
+) -> bool:
+	if not npc_records.has(npc_id) or target_scene_path.is_empty() or activity.is_empty():
+		return false
+
+	_refresh_live_record(npc_id)
+	var record: Dictionary = npc_records[npc_id]
+	var from_scene_path := String(record.get("scene_path", ""))
+	record["activity"] = activity.duplicate(true)
+	record["pending_travel"] = {}
+	record["previous_scene_path"] = ""
+	record["scene_path"] = target_scene_path
+	record["last_position"] = target_position
+	record["spawn_random"] = false
+	record["last_travel_msec"] = Time.get_ticks_msec()
+	npc_records[npc_id] = record
+
+	var live_npc := get_live_npc(npc_id)
+	if live_npc != null and target_scene_path != get_current_scene_path():
+		live_npcs.erase(npc_id)
+		live_npc.queue_free()
+
+	if from_scene_path != target_scene_path:
+		npc_travelled.emit(npc_id, from_scene_path, target_scene_path)
+		_emit_location_event(npc_id, from_scene_path, target_scene_path)
+
+	if target_scene_path == active_scene_path:
+		call_deferred("_spawn_missing_npcs_for_active_scene")
+		if live_npc != null:
+			_resume_scheduled_activity_deferred(npc_id, live_npc)
+
+	_update_return_processing()
+	return true
+
+
+func update_simulated_record(npc_id: String, record: Dictionary) -> void:
+	if not npc_records.has(npc_id) or is_npc_live(npc_id):
+		return
+
+	npc_records[npc_id] = record.duplicate(true)
+
+
+func finish_scheduled_activity(
+	npc_id: String,
+	return_scene_path: String,
+	return_position: Vector2
+) -> bool:
+	if not npc_records.has(npc_id):
+		return false
+
+	_refresh_live_record(npc_id)
+	var record: Dictionary = npc_records[npc_id]
+	var from_scene_path := String(record.get("scene_path", ""))
+	record["activity"] = {}
+	record["pending_travel"] = {}
+	record["previous_scene_path"] = ""
+	record["scene_path"] = return_scene_path if not return_scene_path.is_empty() else from_scene_path
+	record["last_position"] = return_position
+	record["spawn_random"] = false
+	record["last_travel_msec"] = Time.get_ticks_msec()
+	npc_records[npc_id] = record
+
+	var live_npc := get_live_npc(npc_id)
+	if live_npc != null and String(record["scene_path"]) != get_current_scene_path():
+		live_npcs.erase(npc_id)
+		live_npc.queue_free()
+
+	var destination_scene_path := String(record["scene_path"])
+	if from_scene_path != destination_scene_path:
+		npc_travelled.emit(npc_id, from_scene_path, destination_scene_path)
+		_emit_location_event(npc_id, from_scene_path, destination_scene_path)
+
+	if destination_scene_path == active_scene_path:
+		call_deferred("_spawn_missing_npcs_for_active_scene")
+
+	_update_return_processing()
+	return true
 
 
 func get_save_data() -> Dictionary:
@@ -225,6 +425,8 @@ func _build_initial_record(
 		"previous_scene_path": "",
 		"last_position": _get_node_position(npc),
 		"node_state": _get_npc_state(npc),
+		"activity": {},
+		"pending_travel": {},
 		"spawn_random": false,
 		"last_travel_msec": 0,
 	}
@@ -263,6 +465,18 @@ func _refresh_live_records_for_save() -> void:
 		npc_records[npc_id] = record
 
 
+func _refresh_live_record(npc_id: String) -> void:
+	var live_npc := get_live_npc(npc_id)
+	if live_npc == null or not npc_records.has(npc_id):
+		return
+
+	var record: Dictionary = npc_records[npc_id]
+	_refresh_record_from_node(record, live_npc, _get_npc_scene_path(live_npc))
+	record["last_position"] = _get_node_position(live_npc)
+	record["node_state"] = _get_npc_state(live_npc)
+	npc_records[npc_id] = record
+
+
 func _normalize_loaded_record(npc_id: String, saved_record: Dictionary) -> Dictionary:
 	var record := saved_record.duplicate(true)
 	record["npc_id"] = String(record.get("npc_id", npc_id))
@@ -278,6 +492,10 @@ func _normalize_loaded_record(npc_id: String, saved_record: Dictionary) -> Dicti
 
 	if not (record.get("node_state", null) is Dictionary):
 		record["node_state"] = {}
+	if not (record.get("activity", null) is Dictionary):
+		record["activity"] = {}
+	if not (record.get("pending_travel", null) is Dictionary):
+		record["pending_travel"] = {}
 
 	if String(record.get("scene_path", "")).is_empty():
 		record["scene_path"] = String(record.get("home_scene_path", ""))
@@ -322,6 +540,9 @@ func _try_return_travelling_npcs() -> void:
 
 	for npc_id in npc_records.keys():
 		var record: Dictionary = npc_records[npc_id]
+		var activity = record.get("activity", {})
+		if activity is Dictionary and not activity.is_empty():
+			continue
 		var previous_scene_path := String(record.get("previous_scene_path", ""))
 		var scene_path := String(record.get("scene_path", ""))
 		if previous_scene_path.is_empty() or previous_scene_path == scene_path:
@@ -376,6 +597,7 @@ func _spawn_missing_npcs_for_active_scene() -> void:
 			record["last_position"] = _get_node_position(live_npc)
 			record["spawn_random"] = false
 			npc_records[npc_id] = record
+			_resume_scheduled_activity_deferred(String(npc_id), live_npc)
 			refreshed_count += 1
 			continue
 
@@ -435,6 +657,7 @@ func _spawn_record_in_active_scene(npc_id: String, record: Dictionary) -> bool:
 	npc_records[npc_id] = record
 
 	npc_spawned.emit(npc_id, npc, active_scene_path)
+	_resume_scheduled_activity_deferred(npc_id, npc)
 	return true
 
 
@@ -462,7 +685,12 @@ func _place_npc(npc: Node, spawn_position: Vector2) -> void:
 
 
 func _get_spawn_position(scene_context: Node, npc_id: String, record: Dictionary) -> Vector2:
-	if randomize_spawn_positions and scene_context != null and scene_context.has_method("get_random_ground_spawn_position"):
+	if (
+		bool(record.get("spawn_random", false))
+		and randomize_spawn_positions
+		and scene_context != null
+		and scene_context.has_method("get_random_ground_spawn_position")
+	):
 		return scene_context.call("get_random_ground_spawn_position", npc_id)
 
 	var position_value = record.get("last_position", Vector2.ZERO)
@@ -541,6 +769,14 @@ func _has_property(object: Object, property_name: StringName) -> bool:
 			return true
 
 	return false
+
+
+func _resume_scheduled_activity_deferred(npc_id: String, npc: Node) -> void:
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if simulator == null or not simulator.has_method("resume_live_activity"):
+		return
+
+	simulator.call_deferred("resume_live_activity", StringName(npc_id), npc)
 
 
 func _update_return_processing() -> void:

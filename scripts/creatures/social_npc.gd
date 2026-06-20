@@ -67,6 +67,15 @@ const STAT_KEY_ALIASES := {
 @export var low_health_fear_min_scale: float = 1.0
 @export var low_health_fear_max_scale: float = 2.0
 @export var damage_favor_penalty: float = 2.0
+@export_range(0.0, 100.0, 0.1) var npc_relationship_fight_anger_threshold: float = 100.0
+@export_range(0.0, 100.0, 0.1) var npc_relationship_flee_fear_threshold: float = 70.0
+
+@export_group("Damage Hop")
+@export var damage_hop_enabled: bool = true
+@export_range(0.0, 600.0, 1.0, "suffix:px/s") var damage_hop_horizontal_speed: float = 140.0
+@export_range(0.0, 600.0, 1.0, "suffix:px/s") var damage_hop_vertical_speed: float = 180.0
+@export_range(0.0, 1.0, 0.01, "suffix:s") var damage_hop_duration: float = 0.22
+@export_range(0.0, 3000.0, 10.0, "suffix:px/s^2") var damage_hop_horizontal_deceleration: float = 650.0
 
 @export_group("Event Bus")
 @export var listen_to_event_bus: bool = true
@@ -108,8 +117,12 @@ var home_position: Vector2
 var direction: int = 1
 var reaction_timer: float = 0.0
 var reaction_velocity_x: float = 0.0
+var damage_hop_timer: float = 0.0
 var seen_targets: Array[Node2D] = []
 var syncing_state_machine_values: bool = false
+# Cached player reference so _update_favor_bar_visibility() does not scan the player
+# group on every NPC every physics frame. Refreshed lazily when it becomes invalid.
+var cached_player: Node2D
 
 
 func _ready() -> void:
@@ -151,7 +164,9 @@ func _physics_process(delta: float) -> void:
 
 	_apply_gravity(delta)
 
-	if reaction_timer > 0.0:
+	if process_damage_hop(delta):
+		pass
+	elif reaction_timer > 0.0:
 		reaction_timer -= delta
 		velocity.x = reaction_velocity_x
 	else:
@@ -207,17 +222,29 @@ func apply_social_event(
 	return true
 
 
-func take_damage(amount: float, _damage_source_position: Vector2 = Vector2.ZERO, damage_source: Node = null) -> void:
+func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO, damage_source: Node = null) -> void:
 	if amount <= 0.0 or get_hp() <= 0.0:
 		return
 
 	var previous_hp := get_hp()
 	var damage_actor := damage_source as Node2D
+	var damage_came_from_npc := damage_actor != null and damage_actor.is_in_group("npc")
+	var emotion_stats := _get_damage_emotion_stats(amount, previous_hp)
+	var relationship_anger_delta := 0.0
+	var relationship_fear_delta := 0.0
+	if damage_came_from_npc and emotion_stats.has("anger"):
+		relationship_anger_delta = float(emotion_stats.get("anger", 0.0))
+		emotion_stats.erase("anger")
+	if damage_came_from_npc and emotion_stats.has("fear"):
+		relationship_fear_delta = float(emotion_stats.get("fear", 0.0))
+		emotion_stats.erase("fear")
+
 	var damage_stats := {
 		"hp": -amount,
-		"favor": -amount * damage_favor_penalty,
 	}
-	damage_stats.merge(_get_damage_emotion_stats(amount, previous_hp), true)
+	if not damage_came_from_npc:
+		damage_stats["favor"] = -amount * damage_favor_penalty
+	damage_stats.merge(emotion_stats, true)
 
 	# Damage is handled as a social value change, so hp/fear/favor rules can drive any state.
 	# Add hurt animations here later:
@@ -226,10 +253,79 @@ func take_damage(amount: float, _damage_source_position: Vector2 = Vector2.ZERO,
 	apply_social_event(damage_stats, damage_actor, false)
 
 	var damage_taken := previous_hp - get_hp()
+	if damage_came_from_npc and damage_taken > 0.0:
+		change_relationship_favor_for(
+			damage_actor,
+			-damage_taken * damage_favor_penalty,
+			"damaged_by_npc"
+		)
+		var relationship_anger := change_relationship_anger_for(
+			damage_actor,
+			relationship_anger_delta,
+			"damaged_by_npc"
+		)
+		if (
+			npc_state_machine != null
+			and relationship_anger_delta > 0.0
+			and relationship_anger >= npc_relationship_fight_anger_threshold
+		):
+			npc_state_machine.request_state(
+				&"Fight",
+				damage_actor,
+				"npc_relationship_anger",
+				94
+			)
+		var relationship_fear := change_relationship_fear_for(
+			damage_actor,
+			relationship_fear_delta,
+			"damaged_by_npc"
+		)
+		if (
+			npc_state_machine != null
+			and relationship_fear_delta > 0.0
+			and relationship_fear >= npc_relationship_flee_fear_threshold
+		):
+			npc_state_machine.request_state(
+				&"Flee",
+				damage_actor,
+				"npc_relationship_fear",
+				90
+			)
+
+	if damage_taken > 0.0 and get_hp() > 0.0:
+		start_damage_hop(damage_source_position)
 	DamageEvents.emit_damage_dealt(damage_taken, damage_source, self)
 
 	if get_hp() <= 0.0:
 		die()
+
+
+func start_damage_hop(damage_source_position: Vector2) -> void:
+	if not damage_hop_enabled or damage_hop_duration <= 0.0:
+		return
+
+	var away_direction := signf(global_position.x - damage_source_position.x)
+	if is_zero_approx(away_direction):
+		away_direction = -1.0 if direction >= 0 else 1.0
+
+	damage_hop_timer = damage_hop_duration
+	velocity.x = away_direction * damage_hop_horizontal_speed
+	velocity.y = -damage_hop_vertical_speed
+
+
+func process_damage_hop(delta: float) -> bool:
+	# The state machine calls this before its active state, preventing state movement
+	# from replacing the short hit impulse while still allowing normal gravity.
+	if damage_hop_timer <= 0.0:
+		return false
+
+	damage_hop_timer = maxf(damage_hop_timer - maxf(delta, 0.0), 0.0)
+	velocity.x = move_toward(
+		velocity.x,
+		0.0,
+		damage_hop_horizontal_deceleration * maxf(delta, 0.0)
+	)
+	return true
 
 
 func _get_damage_emotion_stats(amount: float, previous_hp: float) -> Dictionary:
@@ -410,6 +506,80 @@ func set_relationship_favor_for(other: Node, value: float, reason: String = "man
 	return float(relationships.call("set_favor", self, other, value, reason))
 
 
+func get_relationship_anger_for(other: Node, fallback: float = 0.0) -> float:
+	var relationships := _get_relationship_system()
+	if relationships == null or not relationships.has_method("get_anger"):
+		return fallback
+
+	return float(relationships.call("get_anger", self, other, fallback))
+
+
+func change_relationship_anger_for(other: Node, delta: float, reason: String = "manual") -> float:
+	var relationships := _get_relationship_system()
+	if relationships == null or not relationships.has_method("change_anger"):
+		return 0.0
+
+	return float(relationships.call("change_anger", self, other, delta, reason))
+
+
+func decay_relationship_anger(game_hours: float, full_decay_game_hours: float) -> void:
+	if game_hours <= 0.0 or full_decay_game_hours <= 0.0:
+		return
+
+	var relationships := _get_relationship_system()
+	if relationships == null or not relationships.has_method("decay_anger_for"):
+		return
+
+	var decay_amount := (100.0 / full_decay_game_hours) * game_hours
+	relationships.call("decay_anger_for", self, decay_amount)
+
+
+func get_relationship_fear_for(other: Node, fallback: float = 0.0) -> float:
+	var relationships := _get_relationship_system()
+	if relationships == null or not relationships.has_method("get_fear"):
+		return fallback
+
+	return float(relationships.call("get_fear", self, other, fallback))
+
+
+func change_relationship_fear_for(other: Node, delta: float, reason: String = "manual") -> float:
+	var relationships := _get_relationship_system()
+	if relationships == null or not relationships.has_method("change_fear"):
+		return 0.0
+
+	return float(relationships.call("change_fear", self, other, delta, reason))
+
+
+func should_flee_from_npc(other: Node) -> bool:
+	return (
+		other != null
+		and other.is_in_group("npc")
+		and get_relationship_fear_for(other, 0.0) >= npc_relationship_flee_fear_threshold
+	)
+
+
+func decay_relationship_fear(
+	game_hours: float,
+	panic_floor: float,
+	panic_cooldown_game_hours: float,
+	slow_decay_per_game_hour: float,
+	stop_value: float
+) -> void:
+	var relationships := _get_relationship_system()
+	if relationships == null or not relationships.has_method("decay_fear_for"):
+		return
+
+	relationships.call(
+		"decay_fear_for",
+		self,
+		game_hours,
+		panic_floor,
+		panic_cooldown_game_hours,
+		slow_decay_per_game_hour,
+		stop_value
+	)
+
+
 func has_met_npc(other: Node) -> bool:
 	var relationships := _get_relationship_system()
 	if relationships == null or not relationships.has_method("has_met"):
@@ -562,12 +732,21 @@ func _update_favor_bar() -> void:
 
 
 func _update_favor_bar_visibility() -> void:
-	var player := get_tree().get_first_node_in_group("player") as Node2D
-	if player == null or not is_instance_valid(player):
+	var player := _get_player()
+	if player == null:
 		favor_bar.visible = false
 		return
 
 	favor_bar.visible = global_position.distance_to(player.global_position) <= favor_bar_visible_distance
+
+
+func _get_player() -> Node2D:
+	# Returns the cached player when still valid; otherwise re-scans the group once.
+	if cached_player != null and is_instance_valid(cached_player):
+		return cached_player
+
+	cached_player = get_tree().get_first_node_in_group("player") as Node2D
+	return cached_player
 
 
 func _update_visual_mood() -> void:

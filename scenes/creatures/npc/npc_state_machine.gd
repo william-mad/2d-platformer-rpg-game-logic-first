@@ -66,6 +66,11 @@ const STATE_ALIASES := {
 @export_range(0.0, 100.0, 0.1, "suffix:/h") var fear_slow_decay_per_game_hour: float = 5.0
 @export_range(0.0, 10.0, 0.1) var fear_decay_stop_below_flee_threshold_by: float = 0.1
 
+@export_group("Anger Decay")
+@export var anger_decay_enabled: bool = true
+@export var anger_decay_value_name: StringName = &"anger"
+@export_range(0.1, 24.0, 0.1, "suffix:h") var anger_full_decay_game_hours: float = 4.0
+
 @export_group("Optional Nodes")
 @export var animation_player_path: NodePath
 @export var sprite_path: NodePath
@@ -116,6 +121,12 @@ const STATE_ALIASES := {
 		"delta_at_least": 0.001,
 		"only_when_changed": true,
 		"priority": 90
+	},
+	"anger_fight": {
+		"value": "anger",
+		"state": "Fight",
+		"at_least": 100.0,
+		"priority": 94
 	},
 	"sleep_collapse": {
 		"value": "sleep_need",
@@ -273,6 +284,11 @@ func _physics_process(delta: float) -> void:
 		return
 
 	apply_gravity(delta)
+	if _process_npc_damage_hop(delta):
+		_update_passive_needs(delta)
+		if auto_move_and_slide:
+			npc.move_and_slide()
+		return
 
 	# Only the active state runs per-frame behavior; value-rule decisions stay event-driven.
 	var state_at_start := current_state
@@ -285,6 +301,13 @@ func _physics_process(delta: float) -> void:
 
 	if auto_move_and_slide:
 		npc.move_and_slide()
+
+
+func _process_npc_damage_hop(delta: float) -> bool:
+	if npc == null or not npc.has_method("process_damage_hop"):
+		return false
+
+	return bool(npc.call("process_damage_hop", delta))
 
 
 func bind_npc(bound_npc: CharacterBody2D) -> void:
@@ -396,6 +419,8 @@ func notify_target_seen(seen_target: Node2D) -> void:
 
 	if _maybe_flee_from_seen_player(seen_target):
 		return
+	if _maybe_flee_from_seen_npc(seen_target):
+		return
 
 	if evaluate_value_reactions(seen_target, {}):
 		return
@@ -422,6 +447,22 @@ func _maybe_flee_from_seen_player(seen_target: Node2D) -> bool:
 		seen_player_flee_state_name,
 		seen_target,
 		"fear_seen_player",
+		seen_player_flee_priority
+	)
+
+
+func _maybe_flee_from_seen_npc(seen_target: Node2D) -> bool:
+	if seen_target == null or not seen_target.is_in_group("npc"):
+		return false
+	if npc == null or not npc.has_method("should_flee_from_npc"):
+		return false
+	if not bool(npc.call("should_flee_from_npc", seen_target)):
+		return false
+
+	return request_state(
+		seen_player_flee_state_name,
+		seen_target,
+		"fear_seen_npc",
 		seen_player_flee_priority
 	)
 
@@ -866,11 +907,44 @@ func _apply_passive_need_growth(real_seconds: float) -> void:
 	var fear_delta := _get_fear_decay_delta(game_hours)
 	if not is_equal_approx(fear_delta, 0.0):
 		value_delta[String(fear_decay_value_name)] = fear_delta
+	if fear_decay_enabled and npc != null and npc.has_method("decay_relationship_fear"):
+		var flee_threshold := _get_flee_fear_threshold()
+		var fear_stop_value := maxf(
+			flee_threshold - fear_decay_stop_below_flee_threshold_by,
+			0.0
+		)
+		npc.call(
+			"decay_relationship_fear",
+			game_hours,
+			fear_panic_floor,
+			fear_panic_cooldown_game_minutes / 60.0,
+			fear_slow_decay_per_game_hour,
+			fear_stop_value
+		)
+
+	var anger_delta := _get_anger_decay_delta(game_hours)
+	if not is_equal_approx(anger_delta, 0.0):
+		value_delta[String(anger_decay_value_name)] = anger_delta
+	if anger_decay_enabled and npc != null and npc.has_method("decay_relationship_anger"):
+		npc.call("decay_relationship_anger", game_hours, anger_full_decay_game_hours)
 
 	if value_delta.is_empty():
 		return
 
 	apply_value_delta(value_delta, null, true)
+
+
+func _get_anger_decay_delta(game_hours: float) -> float:
+	# Anger cools on the same passive tick as needs: 100 -> 0 over the configured game hours.
+	if not anger_decay_enabled or anger_decay_value_name == &"" or game_hours <= 0.0:
+		return 0.0
+
+	var current_anger := get_value(anger_decay_value_name)
+	if current_anger <= 0.0:
+		return 0.0
+
+	var decay_per_hour := 100.0 / maxf(anger_full_decay_game_hours, 0.001)
+	return -minf(current_anger, decay_per_hour * game_hours)
 
 
 func _get_fear_decay_delta(game_hours: float) -> float:

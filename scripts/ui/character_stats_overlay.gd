@@ -3,6 +3,8 @@ class_name CharacterStatsOverlay extends CanvasLayer
 @export var toggle_action: StringName = &"stats"
 @export var starts_visible: bool = false
 @export var refresh_interval_seconds: float = 0.25
+@export var pause_panel_max_screen_ratio: Vector2 = Vector2(0.86, 0.82)
+@export var pause_panel_min_size: Vector2 = Vector2(260.0, 180.0)
 @export var show_player_stats: bool = true
 @export var show_npc_stats: bool = true
 @export var show_need_spots: bool = true
@@ -28,13 +30,24 @@ class_name CharacterStatsOverlay extends CanvasLayer
 ]
 
 @onready var panel: ColorRect = get_node_or_null("%StatsPanel") as ColorRect
+@onready var scroll: ScrollContainer = get_node_or_null("%StatsScroll") as ScrollContainer
 @onready var stats_label: Label = get_node_or_null("%StatsText") as Label
 
 var refresh_timer: float = 0.0
+var pause_overlay_visible: bool = false
+var visible_before_pause: bool = false
 
 
 func _ready() -> void:
 	layer = 90
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	if not DebugToolsConfig.CHARACTER_STATS_OVERLAY_ENABLED:
+		visible = false
+		set_process(false)
+		set_process_unhandled_input(false)
+		return
+
+	_ensure_scroll_layout()
 	visible = starts_visible
 	set_process(visible)
 	set_process_unhandled_input(true)
@@ -42,13 +55,39 @@ func _ready() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if pause_overlay_visible:
+		return
+
 	if toggle_action == &"" or not event.is_action_pressed(toggle_action):
 		return
 
-	visible = not visible
-	set_process(visible)
+	_set_overlay_visible(not visible)
+
+
+func show_pause_overlay() -> void:
+	if not DebugToolsConfig.CHARACTER_STATS_OVERLAY_ENABLED:
+		return
+	if pause_overlay_visible:
+		return
+
+	visible_before_pause = visible
+	pause_overlay_visible = true
+	_set_overlay_visible(true)
+
+
+func hide_pause_overlay() -> void:
+	if not pause_overlay_visible:
+		return
+
+	pause_overlay_visible = false
+	_set_overlay_visible(visible_before_pause)
+
+
+func _set_overlay_visible(next_visible: bool) -> void:
+	visible = next_visible
+	set_process(next_visible)
 	refresh_timer = 0.0
-	if visible:
+	if next_visible:
 		_update_stats_text()
 
 
@@ -61,11 +100,34 @@ func _process(delta: float) -> void:
 	_update_stats_text()
 
 
+func _ensure_scroll_layout() -> void:
+	if stats_label != null:
+		stats_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+	if panel == null or stats_label == null:
+		return
+
+	if scroll == null:
+		scroll = ScrollContainer.new()
+		scroll.name = "StatsScroll"
+		scroll.mouse_filter = Control.MOUSE_FILTER_PASS
+		panel.get_parent().add_child(scroll)
+
+	if stats_label.get_parent() != scroll:
+		stats_label.reparent(scroll)
+
+	scroll.mouse_filter = Control.MOUSE_FILTER_PASS
+	stats_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+
 func _update_stats_text() -> void:
 	if stats_label == null:
 		return
 
-	var lines: Array[String] = ["SCENE STATS"]
+	var lines: Array[String] = []
+	if pause_overlay_visible:
+		lines.append("PAUSED")
+	lines.append("SCENE STATS")
 
 	if show_player_stats:
 		_append_player_lines(lines)
@@ -115,6 +177,47 @@ func _append_npc_lines(lines: Array[String]) -> void:
 		lines.append(_get_character_label(npc))
 		lines.append("state: %s" % _get_current_state_name(npc))
 		_append_value_lines(lines, _get_character_values(npc))
+
+	_append_offscreen_npc_lines(lines)
+
+
+func _append_offscreen_npc_lines(lines: Array[String]) -> void:
+	# Location records keep remote NPC activity and stats inspectable without loading their scene.
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations == null or not locations.has_method("get_all_locations"):
+		return
+
+	var records: Dictionary = locations.call("get_all_locations")
+	var npc_ids := records.keys()
+	npc_ids.sort()
+	for npc_id_key in npc_ids:
+		var npc_id := String(npc_id_key)
+		if locations.has_method("is_npc_live") and bool(locations.call("is_npc_live", npc_id)):
+			continue
+
+		var record = records[npc_id_key]
+		if not (record is Dictionary):
+			continue
+
+		var display_name := String(record.get("node_name", npc_id)).to_upper()
+		lines.append("")
+		lines.append("%s [%s] (OFFSCREEN)" % [display_name, npc_id])
+		lines.append("location: %s" % String(record.get("scene_path", "")).get_file())
+
+		var activity = record.get("activity", {})
+		if activity is Dictionary and not activity.is_empty():
+			lines.append("state: %s @ %s" % [
+				String(activity.get("state_name", "--")),
+				String(activity.get("spot_id", "--")),
+			])
+		else:
+			lines.append("state: simulated idle")
+
+		var node_state = record.get("node_state", {})
+		if node_state is Dictionary:
+			var social_stats = node_state.get("social_stats", {})
+			if social_stats is Dictionary:
+				_append_value_lines(lines, social_stats)
 
 
 func _append_need_spot_lines(lines: Array[String]) -> void:
@@ -271,10 +374,35 @@ func _resize_panel_to_text() -> void:
 	for line in stats_label.text.split("\n"):
 		longest_line = maxi(longest_line, String(line).length())
 
-	var width := clampf(float(longest_line * 6 + 24), 180.0, 420.0)
-	var height := clampf(float(line_count * 12 + 24), 60.0, 560.0)
-	panel.size = Vector2(width, height)
-	stats_label.size = Vector2(width - 16.0, height - 16.0)
+	var viewport_size := get_viewport().get_visible_rect().size
+	var max_size := Vector2(
+		maxf(viewport_size.x * pause_panel_max_screen_ratio.x, pause_panel_min_size.x),
+		maxf(viewport_size.y * pause_panel_max_screen_ratio.y, pause_panel_min_size.y)
+	)
+	var desired_size := Vector2(
+		float(longest_line * 7 + 36),
+		float(line_count * 14 + 40)
+	)
+	var panel_size := Vector2(
+		clampf(desired_size.x, pause_panel_min_size.x, max_size.x),
+		clampf(desired_size.y, pause_panel_min_size.y, max_size.y)
+	)
+
+	if pause_overlay_visible:
+		panel.position = (viewport_size - panel_size) * 0.5
+	else:
+		panel.position = Vector2(14.0, 88.0)
+
+	panel.size = panel_size
+
+	if scroll != null:
+		scroll.position = panel.position + Vector2(12.0, 12.0)
+		scroll.size = panel_size - Vector2(24.0, 24.0)
+		stats_label.custom_minimum_size = Vector2(scroll.size.x - 8.0, 0.0)
+		stats_label.size = Vector2(scroll.size.x - 8.0, maxf(desired_size.y, scroll.size.y))
+	else:
+		stats_label.position = panel.position + Vector2(8.0, 8.0)
+		stats_label.size = panel_size - Vector2(16.0, 16.0)
 
 
 func _record_watchdog_marker(source: StringName, detail: String = "") -> void:

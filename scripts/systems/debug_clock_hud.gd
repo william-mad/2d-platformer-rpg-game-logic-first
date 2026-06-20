@@ -16,6 +16,12 @@ var cached_player: Node
 
 func _ready() -> void:
 	layer = 100
+	if not DebugToolsConfig.CLOCK_HP_EVENTS_HUD_ENABLED:
+		debug_clock_enabled = false
+		visible = false
+		set_process(false)
+		return
+
 	visible = debug_clock_enabled
 	set_process(debug_clock_enabled)
 	if not debug_clock_enabled:
