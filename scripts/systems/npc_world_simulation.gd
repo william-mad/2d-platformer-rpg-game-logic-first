@@ -12,6 +12,7 @@ var live_spots: Dictionary = {}
 var spot_claim_counts: Dictionary = {}
 var spot_runtime_states: Dictionary = {}
 var simulation_timer: float = 0.0
+var simulation_queued: bool = false
 
 
 func _ready() -> void:
@@ -23,6 +24,16 @@ func _ready() -> void:
 		var callback := Callable(self, "_on_world_day_changed")
 		if not world_time.is_connected(&"day_changed", callback):
 			world_time.connect(&"day_changed", callback)
+	if world_time != null and world_time.has_signal(&"hour_changed"):
+		var hour_callback := Callable(self, "_on_world_hour_changed")
+		if not world_time.is_connected(&"hour_changed", hour_callback):
+			world_time.connect(&"hour_changed", hour_callback)
+
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations != null and locations.has_signal(&"npc_registered"):
+		var registered_callback := Callable(self, "_on_npc_registered")
+		if not locations.is_connected(&"npc_registered", registered_callback):
+			locations.connect(&"npc_registered", registered_callback)
 
 
 func get_save_data() -> Dictionary:
@@ -93,6 +104,42 @@ func _on_world_day_changed(_day: int, _snapshot: Dictionary) -> void:
 		var live_spot := live_spots.get(StringName(String(spot_id_key)), null) as Node
 		if live_spot != null and is_instance_valid(live_spot) and live_spot.has_method("apply_world_work_needed"):
 			live_spot.call("apply_world_work_needed", next_value)
+
+	_queue_simulation()
+
+
+func _on_world_hour_changed(_hour: int, _snapshot: Dictionary) -> void:
+	# Scheduled windows commonly open on the hour, so dispatch eligible owners immediately.
+	_queue_simulation()
+
+
+func _on_npc_registered(_npc_id: String, npc: Node, _scene_path: String) -> void:
+	var machine := npc.get_node_or_null("NpcStateMachine") if npc != null else null
+	if machine == null or not machine.has_signal(&"state_changed"):
+		return
+
+	var callback := Callable(self, "_on_npc_state_changed")
+	if not machine.is_connected(&"state_changed", callback):
+		machine.connect(&"state_changed", callback)
+
+
+func _on_npc_state_changed(state_name: StringName, _previous_state_name: StringName) -> void:
+	# A routine that ended inside an active window should not wait for the fallback poll.
+	if state_name == &"Idle":
+		_queue_simulation()
+
+
+func _queue_simulation() -> void:
+	if simulation_queued:
+		return
+
+	simulation_queued = true
+	call_deferred("_run_queued_simulation")
+
+
+func _run_queued_simulation() -> void:
+	simulation_queued = false
+	simulate_now()
 
 
 func _process(delta: float) -> void:
@@ -190,7 +237,11 @@ func _simulate_offscreen_passive_values(
 		if _passive_value_is_paused(value_name, paused_state_name):
 			continue
 		var current_value := float(social_stats.get(value_name, 0.0))
-		var next_value := current_value + float(rates[value_key]) * elapsed_game_hours
+		var growth := float(rates[value_key]) * elapsed_game_hours
+		if value_name == "talk_need":
+			_apply_offscreen_talk_need_growth(social_stats, current_value, growth)
+			continue
+		var next_value := current_value + growth
 		social_stats[value_name] = clampf(next_value, 0.0, 100.0)
 
 	_apply_offscreen_emotion_decay(social_stats, profile, elapsed_game_hours)
@@ -198,6 +249,35 @@ func _simulate_offscreen_passive_values(
 
 	node_state["social_stats"] = social_stats
 	record["node_state"] = node_state
+
+
+func _apply_offscreen_talk_need_growth(
+	social_stats: Dictionary,
+	current_value: float,
+	growth: float
+) -> void:
+	# Preserve every 100 -> 60 lonely cycle even when several game hours pass off-screen.
+	var talk_need := clampf(current_value, 0.0, 100.0)
+	var lonely_increases := 0
+	if talk_need >= 100.0:
+		talk_need = 60.0
+		lonely_increases += 1
+
+	var total := talk_need + maxf(growth, 0.0)
+	if total >= 100.0:
+		var overflow := total - 100.0
+		lonely_increases += 1 + int(floor(overflow / 40.0))
+		total = 60.0 + fposmod(overflow, 40.0)
+
+	social_stats["talk_need"] = clampf(total, 0.0, 100.0)
+	if lonely_increases <= 0 or not social_stats.has("lonely"):
+		return
+
+	social_stats["lonely"] = clampf(
+		float(social_stats.get("lonely", 0.0)) + float(lonely_increases),
+		0.0,
+		100.0
+	)
 
 
 func _apply_offscreen_emotion_decay(

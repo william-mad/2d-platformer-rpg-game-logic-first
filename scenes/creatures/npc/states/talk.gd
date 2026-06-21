@@ -4,8 +4,23 @@ signal talk_started(talker: Node2D, partner: Node2D)
 signal talk_finished(talker: Node2D, partner: Node2D, changed_values: Dictionary)
 signal talk_cancelled(talker: Node2D, partner: Node2D, reason: String)
 
+@export_group("Timing and Range")
+# Negative duration uses the owning state machine's game-time-scaled Talk duration.
+@export_range(-1.0, 60.0, 0.1, "suffix:s") var talk_duration: float = -1.0
+@export_range(0.0, 512.0, 1.0, "suffix:px") var talk_range: float = 32.0
+@export_range(0.0, 1024.0, 1.0, "suffix:px") var maximum_talk_distance: float = 180.0
+@export var follow_partner_while_talking: bool = true
+@export_range(0.0, 200.0, 1.0, "suffix:px/s") var talk_follow_speed: float = 20.0
+@export var follow_animation_name: StringName = &"walk"
+
+@export_group("Visible Limits")
+@export var show_talk_limits: bool = true
+@export var talk_limits_offset: Vector2 = Vector2(-90.0, -172.0)
+@export var talk_limits_size: Vector2 = Vector2(180.0, 20.0)
+@export_range(6, 24, 1) var talk_limits_font_size: int = 10
+@export_range(0.0, 1.0, 0.01) var near_break_distance_ratio: float = 0.8
+
 @export_group("Need")
-@export var talk_duration: float = -1.0
 @export var talk_value_name: StringName = &"talk_need"
 @export var talk_complete_delta: float = -25.0
 @export var boredom_value_name: StringName = &"boredom"
@@ -32,9 +47,12 @@ signal talk_cancelled(talker: Node2D, partner: Node2D, reason: String)
 @export var end_state_name: StringName = &"Idle"
 
 var talk_timer: float = 0.0
+var talk_total_duration: float = 0.0
 var talk_partner: Node2D
 var talk_started_handled: bool = false
 var talk_finished_handled: bool = false
+var following_partner: bool = false
+var talk_limits_label: Label
 var spread_rng := RandomNumberGenerator.new()
 
 
@@ -49,6 +67,7 @@ func enter() -> void:
 	talk_partner = machine.talk_target if machine.talk_target != null else machine.get_active_target()
 	talk_started_handled = false
 	talk_finished_handled = false
+	following_partner = false
 	talk_timer = talk_duration
 
 	if talk_timer < 0.0:
@@ -56,38 +75,50 @@ func enter() -> void:
 			machine.default_talk_game_minutes,
 			machine.default_talk_time
 		)
+	talk_total_duration = maxf(talk_timer, 0.0)
 
 	stop_horizontal()
 	_face_talk_partner()
 
-	if require_talk_partner and not is_valid_target(talk_partner):
+	if require_talk_partner and not _is_valid_talk_partner(talk_partner):
 		talk_timer = 0.0
+		_hide_talk_limits()
 		return
 
+	_show_talk_limits()
+	_update_talk_limits()
 	_start_talk_action()
 
 
 func exit() -> void:
 	# Treat leaving early as a cancelled talk, so no talk_need reduction happens.
+	stop_horizontal()
+	following_partner = false
+	_hide_talk_limits()
 	if talk_started_handled and not talk_finished_handled:
 		_cancel_talk_action("state_exit")
 
 
 func physics_process(delta: float) -> NpcState:
-	# Talk need only drops when the timer reaches the end.
-	stop_horizontal()
-
-	if require_talk_partner and not is_valid_target(talk_partner):
+	# The timed window continues while the NPC slowly follows a drifting partner.
+	if require_talk_partner and not _is_valid_talk_partner(talk_partner):
 		_cancel_talk_action("missing_partner")
 		return get_state(end_state_name)
 
+	if _partner_is_beyond_maximum_distance():
+		_cancel_talk_action("partner_out_of_range")
+		return get_state(end_state_name)
+
+	_update_talk_movement()
 	_face_talk_partner()
+	_update_talk_limits()
 
 	if talk_timer <= 0.0:
 		_finish_talk_action()
 		return get_state(end_state_name)
 
 	talk_timer -= delta
+	_update_talk_limits()
 	if talk_timer > 0.0:
 		return next_state
 
@@ -96,10 +127,9 @@ func physics_process(delta: float) -> NpcState:
 
 
 func target_lost(lost_target: Node2D) -> NpcState:
-	# Losing the partner interrupts the talk and preserves the need.
+	# Sight loss alone does not end a conversation; distance and validity do.
 	if lost_target == talk_partner:
-		_cancel_talk_action("target_lost")
-		return get_state(end_state_name)
+		return next_state
 
 	return next_state
 
@@ -122,6 +152,8 @@ func _finish_talk_action() -> void:
 	if talk_finished_handled:
 		return
 
+	stop_horizontal()
+	_hide_talk_limits()
 	talk_finished_handled = true
 	var changed_values := {}
 
@@ -159,6 +191,8 @@ func _cancel_talk_action(reason: String) -> void:
 	if talk_finished_handled:
 		return
 
+	stop_horizontal()
+	_hide_talk_limits()
 	talk_finished_handled = true
 	if talk_started_handled:
 		talk_cancelled.emit(npc, talk_partner, reason)
@@ -541,7 +575,103 @@ func _call_talk_hook(target: Object, method_name: StringName, args: Array) -> vo
 
 func _face_talk_partner() -> void:
 	# Keeps the NPC visually oriented toward whoever they are talking to.
-	if talk_partner == null or not is_instance_valid(talk_partner) or npc == null:
+	if npc == null or not _is_valid_talk_partner(talk_partner):
 		return
 
 	face_x_direction(talk_partner.global_position.x - npc.global_position.x)
+
+
+func _partner_is_beyond_maximum_distance() -> bool:
+	if maximum_talk_distance <= 0.0 or npc == null or not _is_valid_talk_partner(talk_partner):
+		return false
+
+	return npc.global_position.distance_to(talk_partner.global_position) > maximum_talk_distance
+
+
+func _update_talk_movement() -> void:
+	if npc == null or not _is_valid_talk_partner(talk_partner):
+		stop_horizontal()
+		return
+
+	var desired_range := maxf(talk_range, 0.0)
+	var x_distance := absf(talk_partner.global_position.x - npc.global_position.x)
+	var should_follow := (
+		follow_partner_while_talking
+		and talk_follow_speed > 0.0
+		and x_distance > desired_range
+	)
+	if not should_follow:
+		stop_horizontal()
+		if following_partner and animation_name != &"":
+			play_animation(animation_name)
+		following_partner = false
+		return
+
+	if not following_partner and follow_animation_name != &"":
+		play_animation(follow_animation_name)
+	following_partner = true
+	move_toward_position(talk_partner.global_position, talk_follow_speed, desired_range)
+
+
+func _is_valid_talk_partner(candidate: Node2D) -> bool:
+	return is_valid_target(candidate) and candidate != npc
+
+
+func _show_talk_limits() -> void:
+	if not show_talk_limits or npc == null:
+		return
+
+	_ensure_talk_limits_label()
+	if talk_limits_label != null:
+		talk_limits_label.visible = true
+
+
+func _hide_talk_limits() -> void:
+	if talk_limits_label != null and is_instance_valid(talk_limits_label):
+		talk_limits_label.visible = false
+
+
+func _ensure_talk_limits_label() -> void:
+	if talk_limits_label != null and is_instance_valid(talk_limits_label):
+		return
+	if npc == null:
+		return
+
+	talk_limits_label = Label.new()
+	talk_limits_label.name = "TalkLimitsLabel"
+	talk_limits_label.position = talk_limits_offset
+	talk_limits_label.size = talk_limits_size
+	talk_limits_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	talk_limits_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	talk_limits_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	talk_limits_label.z_index = 120
+	talk_limits_label.add_theme_font_size_override("font_size", talk_limits_font_size)
+	talk_limits_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.95))
+	talk_limits_label.add_theme_constant_override("outline_size", 3)
+	npc.add_child(talk_limits_label)
+
+
+func _update_talk_limits() -> void:
+	if not show_talk_limits or not _is_valid_talk_partner(talk_partner):
+		_hide_talk_limits()
+		return
+
+	_ensure_talk_limits_label()
+	if talk_limits_label == null:
+		return
+
+	var distance := npc.global_position.distance_to(talk_partner.global_position)
+	var break_distance := maxf(maximum_talk_distance, 0.0)
+	talk_limits_label.text = "Talk %.1f/%.1fs | %.0f/%.0fpx" % [
+		maxf(talk_timer, 0.0),
+		talk_total_duration,
+		distance,
+		break_distance,
+	]
+
+	var next_color := Color(0.45, 1.0, 0.55, 1.0)
+	if distance > talk_range:
+		next_color = Color(1.0, 0.88, 0.3, 1.0)
+	if break_distance > 0.0 and distance >= break_distance * near_break_distance_ratio:
+		next_color = Color(1.0, 0.35, 0.25, 1.0)
+	talk_limits_label.add_theme_color_override("font_color", next_color)

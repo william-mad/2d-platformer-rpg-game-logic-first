@@ -832,6 +832,8 @@ func _update_visual_mood() -> void:
 func _on_sight_area_body_entered(body: Node2D) -> void:
 	if not perception_enabled:
 		return
+	if body == self:
+		return
 	if seen_targets.has(body):
 		return
 
@@ -844,6 +846,8 @@ func _on_sight_area_body_entered(body: Node2D) -> void:
 
 
 func _on_sight_area_body_exited(body: Node2D) -> void:
+	if body == self:
+		return
 	seen_targets.erase(body)
 	if not perception_enabled:
 		return

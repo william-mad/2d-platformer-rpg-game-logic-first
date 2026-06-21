@@ -190,11 +190,9 @@ func is_npc_available_for_scheduled_activity(
 	if requested_state_name != &"" and current_state_name == String(requested_state_name):
 		return true
 
-	# Each state declares this itself, so custom danger/routine states remain plug-and-play.
-	if (
-		requested_priority >= 50
-		and current_state.has_method("can_be_interrupted_by_scheduled_activity")
-	):
+	# Each state declares this itself, so even low-priority routines such as Work can
+	# interrupt opt-in states without overriding danger, combat, collapse, or death.
+	if current_state.has_method("can_be_interrupted_by_scheduled_activity"):
 		return bool(current_state.call(
 			"can_be_interrupted_by_scheduled_activity",
 			requested_priority

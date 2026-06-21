@@ -176,9 +176,31 @@ func _append_npc_lines(lines: Array[String]) -> void:
 		lines.append("")
 		lines.append(_get_character_label(npc))
 		lines.append("state: %s" % _get_current_state_name(npc))
+		_append_active_state_details(lines, npc)
 		_append_value_lines(lines, _get_character_values(npc))
 
 	_append_offscreen_npc_lines(lines)
+
+
+func _append_active_state_details(lines: Array[String], npc: Node) -> void:
+	var machine := _get_machine(npc)
+	if machine == null or machine.current_state == null:
+		return
+
+	var state := machine.current_state
+	if String(state.name) != "Talk":
+		return
+
+	var remaining = _get_property_if_present(state, &"talk_timer")
+	var talk_range_value = _get_property_if_present(state, &"talk_range")
+	var break_distance = _get_property_if_present(state, &"maximum_talk_distance")
+	if remaining == null or talk_range_value == null or break_distance == null:
+		return
+
+	lines.append(
+		"talk: %.1fs left | range %.0fpx | break %.0fpx"
+		% [float(remaining), float(talk_range_value), float(break_distance)]
+	)
 
 
 func _append_offscreen_npc_lines(lines: Array[String]) -> void:

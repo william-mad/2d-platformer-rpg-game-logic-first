@@ -195,6 +195,7 @@ const STATE_ALIASES := {
 		"value": "talk_need",
 		"at_least": 100.0,
 		"delta": {
+			"talk_need": -40.0,
 			"lonely": 1.0
 		}
 	},
@@ -378,6 +379,11 @@ func request_state(
 	# External code can call this to force a state without waiting for value rules.
 	if state_name == &"":
 		return false
+	if String(state_name) == "Talk":
+		var requested_partner := actor if actor != null else talk_target
+		if requested_partner == npc:
+			talk_target = null
+			return false
 
 	if actor != null:
 		last_actor = actor
@@ -393,6 +399,8 @@ func request_state(
 
 func notify_target_seen(seen_target: Node2D) -> void:
 	if not active or seen_target == null or not is_instance_valid(seen_target):
+		return
+	if seen_target == npc:
 		return
 
 	set_target(seen_target)
@@ -470,13 +478,15 @@ func notify_target_lost(lost_target: Node2D) -> void:
 func set_target(new_target: Node2D) -> void:
 	if new_target != null and not is_instance_valid(new_target):
 		new_target = null
+	if new_target == npc:
+		new_target = null
 
 	target = new_target
 	target_changed.emit(target)
 
 
 func get_active_target() -> Node2D:
-	if target != null and is_instance_valid(target):
+	if target != null and is_instance_valid(target) and target != npc:
 		return target
 
 	var player := get_tree().get_first_node_in_group("player") as Node2D
@@ -543,7 +553,9 @@ func assign_sleep_target(new_target: Node2D) -> bool:
 
 func request_talk(new_target: Node2D) -> bool:
 	# Starts Talk with a known partner, such as the player or another NPC.
-	if new_target == null or not is_instance_valid(new_target):
+	if new_target == null or not is_instance_valid(new_target) or new_target == npc:
+		if talk_target == npc:
+			talk_target = null
 		return false
 
 	talk_target = new_target
@@ -1235,6 +1247,8 @@ func _get_rule_request_actor(actor: Node2D, rule: Dictionary) -> Node2D:
 func _rule_allows_target(rule: Dictionary, candidate: Node2D) -> bool:
 	# Checks whether a candidate target belongs to any group allowed by the rule.
 	if candidate == null or not is_instance_valid(candidate):
+		return false
+	if candidate == npc:
 		return false
 
 	var allowed_groups = rule.get("target_groups", [])
