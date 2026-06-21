@@ -120,6 +120,9 @@ var reaction_velocity_x: float = 0.0
 var damage_hop_timer: float = 0.0
 var seen_targets: Array[Node2D] = []
 var syncing_state_machine_values: bool = false
+var perception_enabled: bool = true
+var sight_pivot_visible_before_sleep: bool = true
+var sight_area_monitoring_before_sleep: bool = true
 # Cached player reference so _update_favor_bar_visibility() does not scan the player
 # group on every NPC every physics frame. Refreshed lazily when it becomes invalid.
 var cached_player: Node2D
@@ -177,10 +180,32 @@ func _physics_process(delta: float) -> void:
 
 
 func can_see(target: Node2D) -> bool:
-	if target == null or not is_instance_valid(target):
+	if not perception_enabled or target == null or not is_instance_valid(target):
 		return false
 
 	return sight_area.get_overlapping_bodies().has(target)
+
+
+func set_npc_perception_enabled(enabled: bool) -> void:
+	# Sleep can suspend sight without permanently changing this NPC's authored vision setup.
+	if perception_enabled == enabled:
+		return
+
+	perception_enabled = enabled
+	if not enabled:
+		sight_pivot_visible_before_sleep = sight_pivot.visible
+		sight_area_monitoring_before_sleep = sight_area.monitoring
+		sight_pivot.visible = false
+		sight_area.set_deferred("monitoring", false)
+		seen_targets.clear()
+		return
+
+	sight_pivot.visible = sight_pivot_visible_before_sleep
+	sight_area.set_deferred("monitoring", sight_area_monitoring_before_sleep)
+
+
+func is_npc_perception_enabled() -> bool:
+	return perception_enabled
 
 
 func apply_social_event(
@@ -435,12 +460,55 @@ func get_npc_scene_path() -> String:
 func get_npc_location_save_data() -> Dictionary:
 	return {
 		"social_stats": social_stats.duplicate(true),
+		"world_simulation_profile": _get_world_simulation_profile(),
 		"starts_moving_right": starts_moving_right,
 		"patrol_range": patrol_range,
 		"walk_speed": walk_speed,
 		"use_state_machine_when_available": use_state_machine_when_available,
-		"relationship_id": String(relationship_id),
+		"relationship_id": String(get_relationship_id()),
 		"location_id": String(location_id),
+	}
+
+
+func _get_world_simulation_profile() -> Dictionary:
+	# Off-screen simulation reads the same per-NPC rates configured on this machine instance.
+	if npc_state_machine == null:
+		return {}
+
+	var talk_interval_minutes := maxf(
+		float(npc_state_machine.talk_need_growth_interval_game_minutes),
+		0.001
+	)
+	return {
+		"passive_needs_enabled": npc_state_machine.passive_needs_enabled,
+		"rates_per_game_hour": {
+			"sleep_need": npc_state_machine.sleep_need_growth_per_game_hour,
+			"hunger": npc_state_machine.hunger_growth_per_game_hour,
+			"boredom": npc_state_machine.boredom_growth_per_game_hour,
+			"talk_need": (
+				npc_state_machine.talk_need_growth_per_interval
+				* (60.0 / talk_interval_minutes)
+			),
+		},
+		"anger_decay": {
+			"enabled": npc_state_machine.anger_decay_enabled,
+			"value_name": String(npc_state_machine.anger_decay_value_name),
+			"full_decay_game_hours": npc_state_machine.anger_full_decay_game_hours,
+		},
+		"fear_decay": {
+			"enabled": npc_state_machine.fear_decay_enabled,
+			"value_name": String(npc_state_machine.fear_decay_value_name),
+			"panic_floor": npc_state_machine.fear_panic_floor,
+			"panic_cooldown_game_hours": (
+				npc_state_machine.fear_panic_cooldown_game_minutes / 60.0
+			),
+			"slow_decay_per_game_hour": npc_state_machine.fear_slow_decay_per_game_hour,
+			"stop_value": maxf(
+				npc_state_machine.get_flee_fear_threshold()
+					- npc_state_machine.fear_decay_stop_below_flee_threshold_by,
+				0.0
+			),
+		},
 	}
 
 
@@ -762,6 +830,8 @@ func _update_visual_mood() -> void:
 
 
 func _on_sight_area_body_entered(body: Node2D) -> void:
+	if not perception_enabled:
+		return
 	if seen_targets.has(body):
 		return
 
@@ -775,6 +845,8 @@ func _on_sight_area_body_entered(body: Node2D) -> void:
 
 func _on_sight_area_body_exited(body: Node2D) -> void:
 	seen_targets.erase(body)
+	if not perception_enabled:
+		return
 	if npc_state_machine != null:
 		npc_state_machine.notify_target_lost(body)
 	target_lost.emit(body)
@@ -797,10 +869,11 @@ func _setup_state_machine() -> void:
 
 
 func _setup_relationship_identity() -> void:
-	if relationship_id == &"":
+	var resolved_id := get_relationship_id()
+	if resolved_id == &"":
 		return
 
-	set_meta("relationship_id", String(relationship_id))
+	set_meta("relationship_id", String(resolved_id))
 
 
 func _setup_npc_tags() -> void:
@@ -922,6 +995,10 @@ func _disconnect_event_bus() -> void:
 
 
 func _on_event_bus_event(event_name: StringName, payload: Dictionary) -> void:
+	# Sleeping NPCs ignore ambient/observed events; direct damage still reaches take_damage().
+	if npc_state_machine != null and npc_state_machine.is_in_state(&"Sleep"):
+		return
+
 	var reaction_rule := _get_event_reaction_rule(event_name)
 	if reaction_rule.is_empty():
 		reaction_rule = _get_payload_reaction_rule(payload)

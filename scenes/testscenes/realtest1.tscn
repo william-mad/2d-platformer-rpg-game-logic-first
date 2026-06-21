@@ -17,6 +17,8 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/character_stats_overlay.tscn" id="19_stats_overlay"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_work_spot.tscn" id="20_work_spot"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_travel_door.tscn" id="21_home_door"]
+[ext_resource type="Resource" path="res://data/npc_spots/mom_eat.tres" id="22_mom_eat_definition"]
+[ext_resource type="Resource" path="res://data/npc_spots/mom_work.tres" id="23_mom_work_definition"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_q8s1k"]
 texture = ExtResource("9_fddca")
@@ -255,16 +257,16 @@ position = Vector2(520, 368)
 
 [node name="MomEatNeedSpot" parent="." unique_id=2012645276 instance=ExtResource("17_need_spot")]
 position = Vector2(-1217, 325)
+world_definition = ExtResource("22_mom_eat_definition")
 restrict_to_target_npc = false
-owner_npc_ids = Array[StringName]([&"mom"])
-need_threshold = 75.0
-request_state_name = &"Eat"
 label_prefix = "Eat"
 
 [node name="MomWorkNeedSpot" parent="." unique_id=1167551469 instance=ExtResource("20_work_spot")]
 position = Vector2(1443, 322)
 collision_mask = 0
 save_id = "realtest1_mom_work"
+spot_id = &"mom_work"
+world_definition = ExtResource("23_mom_work_definition")
 restrict_to_target_npc = false
 owner_npc_ids = Array[StringName]([&"mom"])
 require_target_need_threshold = false

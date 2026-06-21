@@ -29,41 +29,48 @@ stop_horizontal_on_enter = true
 unique_name_in_owner = true
 script = ExtResource("3_move")
 animation_name = &"walk"
+allows_scheduled_activity_interrupt = true
 
 [node name="Work" type="Node" parent="."]
 unique_name_in_owner = true
 script = ExtResource("4_work")
 animation_name = &"work"
 stop_horizontal_on_enter = true
+allows_scheduled_activity_interrupt = true
 
 [node name="Eat" type="Node" parent="."]
 unique_name_in_owner = true
 script = ExtResource("10_eat")
 animation_name = &"eat"
 stop_horizontal_on_enter = true
+allows_scheduled_activity_interrupt = true
 
 [node name="Rest" type="Node" parent="."]
 unique_name_in_owner = true
 script = ExtResource("11_rest")
 animation_name = &"rest"
 stop_horizontal_on_enter = true
+allows_scheduled_activity_interrupt = true
 
 [node name="DoAnything" type="Node" parent="."]
 unique_name_in_owner = true
 script = ExtResource("14_anything")
 animation_name = &"idle"
 stop_horizontal_on_enter = true
+allows_scheduled_activity_interrupt = true
 
 [node name="Talk" type="Node" parent="."]
 unique_name_in_owner = true
 script = ExtResource("5_talk")
 animation_name = &"talk"
 stop_horizontal_on_enter = true
+allows_scheduled_activity_interrupt = true
 
 [node name="LookForTalkTarget" type="Node" parent="."]
 unique_name_in_owner = true
 script = ExtResource("13_look_talk")
 animation_name = &"walk"
+allows_scheduled_activity_interrupt = true
 
 [node name="ReactToEvent" type="Node" parent="."]
 unique_name_in_owner = true
@@ -85,6 +92,7 @@ unique_name_in_owner = true
 script = ExtResource("8_sleep")
 animation_name = &"sleep"
 stop_horizontal_on_enter = true
+allows_scheduled_activity_interrupt = true
 
 [node name="Collapse" type="Node" parent="."]
 unique_name_in_owner = true

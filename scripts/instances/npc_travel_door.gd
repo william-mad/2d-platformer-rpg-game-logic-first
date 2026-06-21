@@ -5,6 +5,8 @@ class_name NpcTravelDoor extends Area2D
 @export var player_group: StringName = &"player"
 @export var interaction_action: StringName = &"up"
 @export var cooldown_seconds: float = 1.5
+@export var npc_arrival_offset: Vector2 = Vector2(80.0, 0.0)
+@export var allow_unscheduled_npc_travel: bool = false
 
 var cooldowns: Dictionary = {}
 var player_inside: bool = false
@@ -74,8 +76,17 @@ func try_travel_npc(body: Node2D) -> bool:
 		if bool(tracker.call("complete_pending_scheduled_travel", body, target_scene_path)):
 			return true
 
+	# Idle wandering near a door must not silently move an NPC to another scene.
+	if not allow_unscheduled_npc_travel:
+		cooldowns.erase(traveller_id)
+		return false
+
 	tracker.call("request_travel", body, target_scene_path)
 	return true
+
+
+func get_npc_arrival_position() -> Vector2:
+	return global_position + npc_arrival_offset
 
 
 func _on_body_exited(body: Node2D) -> void:

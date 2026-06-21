@@ -206,10 +206,11 @@ func _append_offscreen_npc_lines(lines: Array[String]) -> void:
 
 		var activity = record.get("activity", {})
 		if activity is Dictionary and not activity.is_empty():
-			lines.append("state: %s @ %s" % [
-				String(activity.get("state_name", "--")),
-				String(activity.get("spot_id", "--")),
-			])
+			lines.append("state: %s (simulated)" % String(activity.get("state_name", "--")))
+			lines.append("activity: %s" % String(activity.get("spot_id", "--")))
+			var destination_scene := String(activity.get("target_scene_path", ""))
+			if not destination_scene.is_empty():
+				lines.append("destination: %s" % destination_scene.get_file())
 		else:
 			lines.append("state: simulated idle")
 

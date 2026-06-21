@@ -3,12 +3,13 @@ class_name GameSaveSystem extends Node
 signal save_finished(success: bool, save_path: String)
 signal load_finished(success: bool, save_path: String)
 
-const SAVE_VERSION: int = 3
+const SAVE_VERSION: int = 4
 const DEFAULT_SLOT: String = "slot_1"
 const SAVEABLE_GROUP: StringName = &"saveable"
 const SAVE_DIR: String = "user://saves"
 const WORLD_TIME_PATH: String = "/root/WorldTime"
 const NPC_LOCATIONS_PATH: String = "/root/NpcLocations"
+const NPC_WORLD_SIMULATION_PATH: String = "/root/NpcWorldSimulation"
 const RELATIONSHIPS_PATH: String = "/root/Relationships"
 
 var global_values: Dictionary = {}
@@ -45,6 +46,7 @@ func load_game(slot: String = DEFAULT_SLOT) -> bool:
 	global_values = loaded_global_values if loaded_global_values is Dictionary else {}
 	_apply_system_save_data(WORLD_TIME_PATH, save_data.get("world_time", {}))
 	_apply_system_save_data(RELATIONSHIPS_PATH, save_data.get("relationships", {}))
+	_apply_system_save_data(NPC_WORLD_SIMULATION_PATH, save_data.get("npc_world_simulation", {}))
 	_apply_system_save_data(NPC_LOCATIONS_PATH, save_data.get("npc_locations", {}))
 
 	var scene_path := String(save_data.get("scene_path", ""))
@@ -105,6 +107,7 @@ func clear_runtime_values() -> void:
 	pending_save_data.clear()
 	_apply_system_save_data(WORLD_TIME_PATH, {})
 	_apply_system_save_data(RELATIONSHIPS_PATH, {})
+	_apply_system_save_data(NPC_WORLD_SIMULATION_PATH, {})
 	_apply_system_save_data(NPC_LOCATIONS_PATH, {})
 
 
@@ -121,6 +124,7 @@ func _build_save_data() -> Dictionary:
 		"global_values": _encode_value(global_values),
 		"world_time": _encode_value(_get_system_save_data(WORLD_TIME_PATH)),
 		"npc_locations": _encode_value(_get_system_save_data(NPC_LOCATIONS_PATH)),
+		"npc_world_simulation": _encode_value(_get_system_save_data(NPC_WORLD_SIMULATION_PATH)),
 		"relationships": _encode_value(_get_system_save_data(RELATIONSHIPS_PATH)),
 		"nodes": {},
 	}

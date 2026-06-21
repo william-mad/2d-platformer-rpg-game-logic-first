@@ -9,12 +9,90 @@ const SPOT_DATA_DIRECTORY := "res://data/npc_spots"
 
 var spot_definitions: Dictionary = {}
 var live_spots: Dictionary = {}
+var spot_claim_counts: Dictionary = {}
+var spot_runtime_states: Dictionary = {}
 var simulation_timer: float = 0.0
 
 
 func _ready() -> void:
 	_load_spot_definitions()
+	_initialize_definition_runtime_states()
 	simulation_timer = simulation_interval_seconds
+	var world_time := get_node_or_null("/root/WorldTime")
+	if world_time != null and world_time.has_signal(&"day_changed"):
+		var callback := Callable(self, "_on_world_day_changed")
+		if not world_time.is_connected(&"day_changed", callback):
+			world_time.connect(&"day_changed", callback)
+
+
+func get_save_data() -> Dictionary:
+	return {"spot_runtime_states": spot_runtime_states.duplicate(true)}
+
+
+func apply_save_data(data: Dictionary) -> void:
+	spot_runtime_states.clear()
+	var saved_states = data.get("spot_runtime_states", {})
+	if saved_states is Dictionary:
+		spot_runtime_states = saved_states.duplicate(true)
+	_initialize_definition_runtime_states()
+
+
+func register_work_spot_state(
+	spot_id: StringName,
+	initial_value: float,
+	minimum: float,
+	maximum: float,
+	daily_growth: float
+) -> float:
+	if spot_id == &"":
+		return clampf(initial_value, minimum, maximum)
+
+	var state_key := String(spot_id)
+	var lower := minf(minimum, maximum)
+	var upper := maxf(minimum, maximum)
+	var state = spot_runtime_states.get(state_key, {})
+	if not (state is Dictionary):
+		state = {}
+	state["kind"] = "work"
+	state["minimum"] = lower
+	state["maximum"] = upper
+	state["daily_growth"] = daily_growth
+	state["value"] = clampf(float(state.get("value", initial_value)), lower, upper)
+	spot_runtime_states[state_key] = state
+	return float(state["value"])
+
+
+func set_work_spot_value(spot_id: StringName, value: float) -> void:
+	var state_key := String(spot_id)
+	var state = spot_runtime_states.get(state_key, {})
+	if not (state is Dictionary) or String(state.get("kind", "")) != "work":
+		return
+
+	state["value"] = clampf(
+		value,
+		float(state.get("minimum", 0.0)),
+		float(state.get("maximum", 100.0))
+	)
+	spot_runtime_states[state_key] = state
+
+
+func _on_world_day_changed(_day: int, _snapshot: Dictionary) -> void:
+	for spot_id_key in spot_runtime_states.keys():
+		var state = spot_runtime_states[spot_id_key]
+		if not (state is Dictionary):
+			continue
+
+		var next_value := clampf(
+			float(state.get("value", 0.0)) + float(state.get("daily_growth", 0.0)),
+			float(state.get("minimum", 0.0)),
+			float(state.get("maximum", 100.0))
+		)
+		state["value"] = next_value
+		spot_runtime_states[spot_id_key] = state
+
+		var live_spot := live_spots.get(StringName(String(spot_id_key)), null) as Node
+		if live_spot != null and is_instance_valid(live_spot) and live_spot.has_method("apply_world_work_needed"):
+			live_spot.call("apply_world_work_needed", next_value)
 
 
 func _process(delta: float) -> void:
@@ -39,12 +117,26 @@ func simulate_now() -> void:
 	var total_hours := float(snapshot.get("total_hours", 0.0))
 	var hour := float(snapshot.get("time_of_day_hours", snapshot.get("hour", 0.0)))
 	var records: Dictionary = locations.call("get_all_locations")
+	_rebuild_spot_claims(records)
 
 	for npc_id_key in records.keys():
 		var npc_id := StringName(String(npc_id_key))
 		var record = records[npc_id_key]
 		if not (record is Dictionary):
 			continue
+
+		var npc_is_live := (
+			locations.has_method("is_npc_live")
+			and bool(locations.call("is_npc_live", String(npc_id)))
+		)
+		var current_activity = record.get("activity", {})
+		if not npc_is_live:
+			var paused_state_name := &""
+			if current_activity is Dictionary and not current_activity.is_empty():
+				paused_state_name = StringName(String(current_activity.get("state_name", "")))
+			_simulate_offscreen_passive_values(record, total_hours, paused_state_name)
+			if locations.has_method("update_simulated_record"):
+				locations.call("update_simulated_record", String(npc_id), record)
 
 		var pending_travel = record.get("pending_travel", {})
 		if pending_travel is Dictionary and not pending_travel.is_empty():
@@ -58,11 +150,156 @@ func simulate_now() -> void:
 			_try_start_activity(npc_id, record, total_hours, hour, locations)
 
 
+func _simulate_offscreen_passive_values(
+	record: Dictionary,
+	total_hours: float,
+	paused_state_name: StringName
+) -> void:
+	var last_total_hours := float(record.get("last_simulated_total_hours", total_hours))
+	var elapsed_game_hours := maxf(total_hours - last_total_hours, 0.0)
+	record["last_simulated_total_hours"] = total_hours
+	if elapsed_game_hours <= 0.0:
+		return
+
+	var node_state = record.get("node_state", {})
+	if not (node_state is Dictionary):
+		return
+	var social_stats = node_state.get("social_stats", {})
+	if not (social_stats is Dictionary):
+		return
+
+	var profile = node_state.get("world_simulation_profile", {})
+	if not (profile is Dictionary):
+		profile = {}
+	if not bool(profile.get("passive_needs_enabled", true)):
+		return
+
+	var rates = profile.get("rates_per_game_hour", {})
+	if not (rates is Dictionary) or rates.is_empty():
+		rates = {
+			"sleep_need": 5.1,
+			"hunger": 7.0,
+			"boredom": 8.0,
+			"talk_need": 24.0,
+		}
+
+	for value_key in rates.keys():
+		var value_name := String(value_key)
+		if not social_stats.has(value_name):
+			continue
+		if _passive_value_is_paused(value_name, paused_state_name):
+			continue
+		var current_value := float(social_stats.get(value_name, 0.0))
+		var next_value := current_value + float(rates[value_key]) * elapsed_game_hours
+		social_stats[value_name] = clampf(next_value, 0.0, 100.0)
+
+	_apply_offscreen_emotion_decay(social_stats, profile, elapsed_game_hours)
+	_decay_offscreen_relationships(record, profile, elapsed_game_hours)
+
+	node_state["social_stats"] = social_stats
+	record["node_state"] = node_state
+
+
+func _apply_offscreen_emotion_decay(
+	social_stats: Dictionary,
+	profile: Dictionary,
+	game_hours: float
+) -> void:
+	var anger_decay = profile.get("anger_decay", {})
+	if anger_decay is Dictionary and bool(anger_decay.get("enabled", false)):
+		var anger_name := String(anger_decay.get("value_name", "anger"))
+		if social_stats.has(anger_name):
+			var anger := float(social_stats[anger_name])
+			var full_hours := maxf(float(anger_decay.get("full_decay_game_hours", 4.0)), 0.001)
+			social_stats[anger_name] = maxf(anger - (100.0 / full_hours) * game_hours, 0.0)
+
+	var fear_decay = profile.get("fear_decay", {})
+	if not (fear_decay is Dictionary) or not bool(fear_decay.get("enabled", false)):
+		return
+
+	var fear_name := String(fear_decay.get("value_name", "fear"))
+	if not social_stats.has(fear_name):
+		return
+
+	var fear := float(social_stats[fear_name])
+	var panic_floor := float(fear_decay.get("panic_floor", 90.0))
+	var stop_value := maxf(float(fear_decay.get("stop_value", 69.9)), 0.0)
+	if fear <= stop_value:
+		return
+	if fear > panic_floor:
+		var panic_hours := float(fear_decay.get("panic_cooldown_game_hours", 1.0 / 6.0))
+		if panic_hours <= 0.0:
+			fear = panic_floor
+		else:
+			fear = maxf(fear - ((100.0 - panic_floor) / panic_hours) * game_hours, panic_floor)
+	else:
+		var slow_rate := float(fear_decay.get("slow_decay_per_game_hour", 5.0))
+		fear = maxf(fear - slow_rate * game_hours, stop_value)
+	social_stats[fear_name] = fear
+
+
+func _decay_offscreen_relationships(
+	record: Dictionary,
+	profile: Dictionary,
+	game_hours: float
+) -> void:
+	var node_state = record.get("node_state", {})
+	if not (node_state is Dictionary):
+		return
+	var owner_id := String(node_state.get("relationship_id", record.get("npc_id", "")))
+	if owner_id.is_empty():
+		owner_id = String(record.get("npc_id", ""))
+	if owner_id.is_empty():
+		return
+
+	var relationships := get_node_or_null("/root/Relationships")
+	if relationships == null:
+		return
+
+	var anger_decay = profile.get("anger_decay", {})
+	if anger_decay is Dictionary and bool(anger_decay.get("enabled", false)):
+		var full_hours := maxf(float(anger_decay.get("full_decay_game_hours", 4.0)), 0.001)
+		if relationships.has_method("decay_anger_for_id"):
+			relationships.call("decay_anger_for_id", owner_id, (100.0 / full_hours) * game_hours)
+
+	var fear_decay = profile.get("fear_decay", {})
+	if fear_decay is Dictionary and bool(fear_decay.get("enabled", false)):
+		if relationships.has_method("decay_fear_for_id"):
+			relationships.call(
+				"decay_fear_for_id",
+				owner_id,
+				game_hours,
+				float(fear_decay.get("panic_floor", 90.0)),
+				float(fear_decay.get("panic_cooldown_game_hours", 1.0 / 6.0)),
+				float(fear_decay.get("slow_decay_per_game_hour", 5.0)),
+				float(fear_decay.get("stop_value", 69.9))
+			)
+
+
+func _passive_value_is_paused(value_name: String, state_name: StringName) -> bool:
+	var state_text := String(state_name)
+	if value_name == "sleep_need":
+		return state_text == "Sleep" or state_text == "Collapse"
+	if value_name == "hunger":
+		return state_text == "Eat"
+	if value_name == "boredom":
+		return state_text == "Work"
+	if value_name == "talk_need":
+		return state_text == "Talk"
+
+	return false
+
+
 func register_live_spot(spot_id: StringName, spot: Node2D) -> void:
 	if spot_id == &"" or spot == null:
 		return
+	var existing := live_spots.get(spot_id, null) as Node2D
+	if existing != null and is_instance_valid(existing) and existing != spot:
+		push_warning("Duplicate live NPC spot id '%s'; keeping the first spot." % String(spot_id))
+		return
 
 	live_spots[spot_id] = spot
+	_validate_live_spot_alignment(spot_id, spot)
 
 
 func unregister_live_spot(spot_id: StringName, spot: Node2D) -> void:
@@ -100,16 +337,62 @@ func resume_live_activity(npc_id: StringName, npc: Node) -> void:
 	var machine := npc.get_node_or_null("NpcStateMachine")
 	if machine == null:
 		return
+	if _npc_is_following_activity(machine, definition, spot):
+		return
+	if locations.has_method("is_npc_available_for_scheduled_activity"):
+		if not bool(locations.call(
+			"is_npc_available_for_scheduled_activity",
+			String(npc_id),
+			definition.state_name,
+			definition.priority
+		)):
+			return
 
 	var assignment_method := definition.get_assignment_method()
 	if assignment_method != &"" and machine.has_method(assignment_method):
-		machine.call(assignment_method, spot)
+		if bool(machine.call(assignment_method, spot)):
+			return
 	elif machine.has_method("request_state"):
 		machine.call("request_state", definition.state_name, spot, "world_activity", definition.priority)
+		return
+
+	if machine.has_method("request_state"):
+		machine.call("request_state", definition.state_name, spot, "world_activity", definition.priority)
+
+
+func _npc_is_following_activity(
+	machine: Node,
+	definition: NpcSpotDefinition,
+	spot: Node2D
+) -> bool:
+	var current_state = machine.get("current_state")
+	if current_state != null and String(current_state.name) == String(definition.state_name):
+		return true
+	if current_state == null or String(current_state.name) != "MoveToTarget":
+		return false
+
+	return (
+		machine.get("move_target") == spot
+		and String(machine.get("state_after_move")) == String(definition.state_name)
+	)
 
 
 func get_spot_definition(spot_id: StringName) -> NpcSpotDefinition:
 	return spot_definitions.get(spot_id, null) as NpcSpotDefinition
+
+
+func get_arrival_position(from_scene_path: String, fallback: Vector2) -> Vector2:
+	# The door pointing back to the source scene is the arrival door in the loaded destination.
+	for door_node in get_tree().get_nodes_in_group("npc_travel_door"):
+		var door := door_node as Node2D
+		if door == null or not is_instance_valid(door):
+			continue
+		if String(door.get("target_scene_path")) != from_scene_path:
+			continue
+		if door.has_method("get_npc_arrival_position"):
+			return door.call("get_npc_arrival_position") as Vector2
+
+	return fallback
 
 
 func _load_spot_definitions() -> void:
@@ -125,9 +408,37 @@ func _load_spot_definitions() -> void:
 			var resource_path := "%s/%s" % [SPOT_DATA_DIRECTORY, file_name]
 			var definition := load(resource_path) as NpcSpotDefinition
 			if definition != null and definition.is_valid_definition():
-				spot_definitions[definition.spot_id] = definition
+				if spot_definitions.has(definition.spot_id):
+					push_warning("Duplicate simulated NPC spot id '%s'; keeping the first definition." % String(definition.spot_id))
+				else:
+					spot_definitions[definition.spot_id] = definition
 		file_name = directory.get_next()
 	directory.list_dir_end()
+
+
+func _initialize_definition_runtime_states() -> void:
+	for definition_value in spot_definitions.values():
+		var definition := definition_value as NpcSpotDefinition
+		if definition == null or definition.spot_value_name == &"":
+			continue
+
+		var state_key := String(definition.spot_id)
+		var state = spot_runtime_states.get(state_key, {})
+		if not (state is Dictionary):
+			state = {}
+		var lower := minf(definition.spot_value_minimum, definition.spot_value_maximum)
+		var upper := maxf(definition.spot_value_minimum, definition.spot_value_maximum)
+		state["kind"] = String(definition.spot_value_name)
+		state["minimum"] = lower
+		state["maximum"] = upper
+		state["done_threshold"] = definition.spot_value_done_threshold
+		state["daily_growth"] = definition.spot_value_daily_growth
+		state["value"] = clampf(
+			float(state.get("value", definition.spot_value_initial)),
+			lower,
+			upper
+		)
+		spot_runtime_states[state_key] = state
 
 
 func _try_start_activity(
@@ -147,7 +458,8 @@ func _try_start_activity(
 		if not bool(locations.call(
 			"is_npc_available_for_scheduled_activity",
 			String(npc_id),
-			definition.state_name
+			definition.state_name,
+			definition.priority
 		)):
 			return
 
@@ -155,6 +467,8 @@ func _try_start_activity(
 		"spot_id": String(definition.spot_id),
 		"state_name": String(definition.state_name),
 		"value_name": String(definition.value_name),
+		"target_scene_path": definition.scene_path,
+		"target_position": definition.position,
 		"last_total_hours": total_hours,
 		"return_scene_path": String(record.get("scene_path", "")),
 		"return_position": record.get("last_position", Vector2.ZERO),
@@ -173,6 +487,7 @@ func _try_start_activity(
 			"target_scene_path": definition.scene_path,
 			"target_position": definition.position,
 			"requested_state_name": String(definition.state_name),
+			"requested_priority": definition.priority,
 			"activity": activity,
 		}
 		if bool(locations.call(
@@ -181,6 +496,7 @@ func _try_start_activity(
 			pending_travel,
 			departure_door
 		)):
+			_claim_spot(definition.spot_id)
 			activity_started.emit(npc_id, definition.spot_id)
 		return
 
@@ -195,12 +511,13 @@ func _try_start_activity(
 	)):
 		return
 
+	_claim_spot(definition.spot_id)
 	activity_started.emit(npc_id, definition.spot_id)
 
 
 func _update_pending_travel(
 	npc_id: StringName,
-	record: Dictionary,
+	_record: Dictionary,
 	pending_travel: Dictionary,
 	hour: float,
 	locations: Node
@@ -239,11 +556,13 @@ func _resume_pending_travel(
 		return
 
 	var requested_state_name := StringName(String(pending_travel.get("requested_state_name", "")))
+	var requested_priority := int(pending_travel.get("requested_priority", 0))
 	if locations.has_method("is_npc_available_for_scheduled_activity"):
 		if not bool(locations.call(
 			"is_npc_available_for_scheduled_activity",
 			String(npc_id),
-			requested_state_name
+			requested_state_name,
+			requested_priority
 		)):
 			return
 	if locations.has_method("resume_pending_scheduled_travel"):
@@ -295,6 +614,9 @@ func _update_activity(
 	if definition == null or not definition.is_active_at(hour):
 		_finish_activity(npc_id, record, activity, spot_id, locations)
 		return
+	if not _spot_runtime_is_available(definition):
+		_finish_activity(npc_id, record, activity, spot_id, locations)
+		return
 
 	var value_name := String(definition.value_name)
 	if not value_name.is_empty() and _get_saved_stat(record, value_name) <= 0.0:
@@ -302,6 +624,11 @@ func _update_activity(
 		return
 
 	if locations.has_method("is_npc_live") and bool(locations.call("is_npc_live", String(npc_id))):
+		var live_npc: Node = null
+		if locations.has_method("get_live_npc"):
+			live_npc = locations.call("get_live_npc", String(npc_id)) as Node
+		if live_npc != null:
+			resume_live_activity(npc_id, live_npc)
 		return
 
 	var last_total_hours := float(activity.get("last_total_hours", total_hours))
@@ -314,13 +641,17 @@ func _update_activity(
 			value_name,
 			_get_saved_stat(record, value_name) + definition.value_delta_per_game_hour * elapsed_game_hours
 		)
+	_apply_spot_runtime_progress(definition, elapsed_game_hours)
 
 	record["activity"] = activity
 	record["last_position"] = definition.position
 	if locations.has_method("update_simulated_record"):
 		locations.call("update_simulated_record", String(npc_id), record)
 
-	if not value_name.is_empty() and _get_saved_stat(record, value_name) <= 0.0:
+	if (
+		(not value_name.is_empty() and _get_saved_stat(record, value_name) <= 0.0)
+		or not _spot_runtime_is_available(definition)
+	):
 		_finish_activity(npc_id, record, activity, spot_id, locations)
 
 
@@ -349,6 +680,7 @@ func _finish_activity(
 			"target_scene_path": return_scene_path,
 			"target_position": return_position,
 			"requested_state_name": "",
+			"requested_priority": 100,
 			"spot_id": String(spot_id),
 		}
 		locations.call(
@@ -406,21 +738,164 @@ func _find_best_definition(
 	record: Dictionary,
 	hour: float
 ) -> NpcSpotDefinition:
-	var best_definition: NpcSpotDefinition
+	var best_definition: NpcSpotDefinition = null
+	var best_urgency := -INF
 	for definition_value in spot_definitions.values():
 		var definition := definition_value as NpcSpotDefinition
 		if definition == null or not definition.allows_npc_id(npc_id):
 			continue
+		if not _spot_has_capacity(definition):
+			continue
+		if not _spot_runtime_is_available(definition):
+			continue
 		if not definition.is_active_at(hour):
 			continue
 		if definition.value_name != &"":
-			var current_value := _get_saved_stat(record, String(definition.value_name))
-			if current_value < definition.need_threshold:
+			if not _saved_stat_exists(record, String(definition.value_name)):
 				continue
+			var current_value := _get_saved_stat(record, String(definition.value_name))
+			var effective_threshold := _get_effective_need_threshold(definition)
+			if current_value < effective_threshold:
+				continue
+			if definition.need_maximum >= 0.0 and current_value > definition.need_maximum:
+				continue
+			var urgency := current_value - effective_threshold
+			if (
+				best_definition == null
+				or definition.priority > best_definition.priority
+				or (
+					definition.priority == best_definition.priority
+					and urgency > best_urgency
+				)
+				or (
+					definition.priority == best_definition.priority
+					and is_equal_approx(urgency, best_urgency)
+					and String(definition.spot_id) < String(best_definition.spot_id)
+				)
+			):
+				best_definition = definition
+				best_urgency = urgency
+			continue
 		if best_definition == null or definition.priority > best_definition.priority:
 			best_definition = definition
+			best_urgency = 0.0
 
 	return best_definition
+
+
+func _get_effective_need_threshold(definition: NpcSpotDefinition) -> float:
+	# A mutable spot can lower its need threshold as its backlog approaches maximum.
+	if (
+		definition.spot_value_name == &""
+		or definition.need_threshold_at_spot_value_maximum < 0.0
+	):
+		return definition.need_threshold
+
+	var state = spot_runtime_states.get(String(definition.spot_id), {})
+	if not (state is Dictionary):
+		return definition.need_threshold
+
+	var minimum := float(state.get("minimum", definition.spot_value_minimum))
+	var maximum := float(state.get("maximum", definition.spot_value_maximum))
+	if is_equal_approx(minimum, maximum):
+		return definition.need_threshold
+
+	var current := float(state.get("value", definition.spot_value_initial))
+	var backlog_ratio := clampf(inverse_lerp(minimum, maximum, current), 0.0, 1.0)
+	return lerpf(
+		definition.need_threshold,
+		definition.need_threshold_at_spot_value_maximum,
+		backlog_ratio
+	)
+
+
+func _rebuild_spot_claims(records: Dictionary) -> void:
+	spot_claim_counts.clear()
+	for record_value in records.values():
+		if not (record_value is Dictionary):
+			continue
+		var record: Dictionary = record_value
+		var activity = record.get("activity", {})
+		if activity is Dictionary and not activity.is_empty():
+			_claim_spot(StringName(String(activity.get("spot_id", ""))))
+			continue
+
+		var pending = record.get("pending_travel", {})
+		if not (pending is Dictionary) or pending.is_empty():
+			continue
+		var pending_activity = pending.get("activity", {})
+		if pending_activity is Dictionary and not pending_activity.is_empty():
+			_claim_spot(StringName(String(pending_activity.get("spot_id", ""))))
+
+
+func _claim_spot(spot_id: StringName) -> void:
+	if spot_id == &"":
+		return
+	spot_claim_counts[spot_id] = int(spot_claim_counts.get(spot_id, 0)) + 1
+
+
+func _spot_has_capacity(definition: NpcSpotDefinition) -> bool:
+	if definition.capacity <= 0:
+		return true
+	return int(spot_claim_counts.get(definition.spot_id, 0)) < definition.capacity
+
+
+func _spot_runtime_is_available(definition: NpcSpotDefinition) -> bool:
+	if definition.spot_value_name == &"":
+		return true
+	var state = spot_runtime_states.get(String(definition.spot_id), {})
+	if not (state is Dictionary):
+		return false
+	return float(state.get("value", 0.0)) > float(
+		state.get("done_threshold", definition.spot_value_done_threshold)
+	)
+
+
+func _apply_spot_runtime_progress(
+	definition: NpcSpotDefinition,
+	game_hours: float
+) -> void:
+	if definition.spot_value_name == &"" or game_hours <= 0.0:
+		return
+	var state_key := String(definition.spot_id)
+	var state = spot_runtime_states.get(state_key, {})
+	if not (state is Dictionary):
+		return
+
+	state["value"] = clampf(
+		float(state.get("value", definition.spot_value_initial))
+			+ definition.spot_value_delta_per_game_hour * game_hours,
+		float(state.get("minimum", definition.spot_value_minimum)),
+		float(state.get("maximum", definition.spot_value_maximum))
+	)
+	spot_runtime_states[state_key] = state
+
+
+func _saved_stat_exists(record: Dictionary, value_name: String) -> bool:
+	var node_state = record.get("node_state", {})
+	if not (node_state is Dictionary):
+		return false
+	var social_stats = node_state.get("social_stats", {})
+	return social_stats is Dictionary and social_stats.has(value_name)
+
+
+func _validate_live_spot_alignment(spot_id: StringName, spot: Node2D) -> void:
+	var definition := spot_definitions.get(spot_id, null) as NpcSpotDefinition
+	if definition == null or not spot.is_inside_tree():
+		return
+
+	var current_scene := get_tree().current_scene
+	if current_scene != null and current_scene.scene_file_path != definition.scene_path:
+		push_warning(
+			"NPC spot '%s' is loaded in '%s' but its definition points to '%s'."
+			% [String(spot_id), current_scene.scene_file_path, definition.scene_path]
+		)
+		return
+	if spot.global_position.distance_to(definition.position) > 2.0:
+		push_warning(
+			"NPC spot '%s' position differs from its world definition (%s vs %s)."
+			% [String(spot_id), str(spot.global_position), str(definition.position)]
+		)
 
 
 func _record_is_disabled(record: Dictionary) -> bool:

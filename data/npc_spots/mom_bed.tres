@@ -10,6 +10,7 @@ position = Vector2(220, 368)
 state_name = &"Sleep"
 value_name = &"sleep_need"
 need_threshold = 71.0
+need_maximum = 99.0
 value_delta_per_game_hour = -12.5
 priority = 70
 owner_npc_ids = Array[StringName]([&"mom"])

@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="NpcSpotDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/npc_spot_definition.gd" id="1_spot_definition"]
+
+[resource]
+script = ExtResource("1_spot_definition")
+spot_id = &"mom_eat"
+scene_path = "res://scenes/testscenes/realtest1.tscn"
+position = Vector2(-1217, 325)
+state_name = &"Eat"
+value_name = &"hunger"
+need_threshold = 75.0
+value_delta_per_game_hour = -100.0
+priority = 50
+owner_npc_ids = Array[StringName]([&"mom"])

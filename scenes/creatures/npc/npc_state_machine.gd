@@ -134,20 +134,6 @@ const STATE_ALIASES := {
 		"at_least": 100.0,
 		"priority": 95
 	},
-	"sleep_bed": {
-		"value": "sleep_need",
-		"state": "Sleep",
-		"at_least": 71.0,
-		"at_most": 99.0,
-		"time_windows": [
-			{
-				"start_hour": 22.0,
-				"end_hour": 6.0
-			}
-		],
-		"requires_idle": true,
-		"priority": 70
-	},
 	"sleep_rest_before_noon": {
 		"value": "sleep_need",
 		"state": "Rest",
@@ -500,6 +486,14 @@ func get_active_target() -> Node2D:
 	return null
 
 
+func is_in_state(state_name: StringName) -> bool:
+	return current_state != null and String(current_state.name) == String(state_name)
+
+
+func get_flee_fear_threshold() -> float:
+	return _get_flee_fear_threshold()
+
+
 func assign_move_target(new_target: Node2D, arrive_state_name: StringName = &"Idle") -> bool:
 	# Sends the NPC to a target, then lets MoveToTarget return into the requested state.
 	if new_target == null or not is_instance_valid(new_target):
@@ -716,17 +710,23 @@ func get_last_delta(value_name: StringName, default_value: float = 0.0) -> float
 
 
 func evaluate_value_reactions(
-	actor: Node2D = null,
+	actor = null,
 	changed_values: Dictionary = {}
 ) -> bool:
 	# Picks the highest-priority matching rule, so Dead/Flee can outrank Talk/Work.
-	var matching_rule := _find_best_matching_rule(changed_values, actor)
+	var safe_actor: Node2D = null
+	if actor != null and is_instance_valid(actor):
+		safe_actor = actor as Node2D
+	elif actor != null:
+		last_actor = null
+
+	var matching_rule := _find_best_matching_rule(changed_values, safe_actor)
 	if matching_rule.is_empty():
 		return false
 
 	var state_name := StringName(String(matching_rule.get("state", "")))
 	var priority := int(matching_rule.get("priority", 0))
-	var request_actor := _get_rule_request_actor(actor, matching_rule)
+	var request_actor := _get_rule_request_actor(safe_actor, matching_rule)
 	if bool(matching_rule.get("requires_target", false)) and request_actor == null:
 		return false
 
@@ -1012,7 +1012,10 @@ func _current_state_matches_any(state_names: Array[StringName]) -> bool:
 
 func _get_real_seconds_per_day() -> float:
 	# Reads the current global day length. A missing clock falls back to old timers.
-	var world_time := get_node_or_null("/root/WorldTime")
+	if not is_inside_tree() or get_tree() == null:
+		return 0.0
+
+	var world_time := get_tree().root.get_node_or_null("WorldTime")
 	if world_time == null:
 		return 0.0
 
@@ -1036,7 +1039,7 @@ func _run_idle_value_reaction_check() -> void:
 	# Runs need reactions that were waiting for the NPC to become idle again.
 	idle_value_reaction_queued = false
 
-	if not active or not value_reactions_enabled or current_state == null:
+	if not is_inside_tree() or not active or not value_reactions_enabled or current_state == null:
 		return
 
 	if String(current_state.name) != "Idle":

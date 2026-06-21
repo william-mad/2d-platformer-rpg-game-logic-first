@@ -5,7 +5,8 @@ class_name NpcStateSleep extends NpcState
 @export var sleep_value_name: StringName = &"sleep_need"
 @export var sleep_need_drop_per_full_sleep: float = 100.0
 @export var sleep_progress_tick_seconds: float = 1.0
-@export var wake_on_target_seen: bool = true
+@export var wake_on_target_seen: bool = false
+@export var wake_value_names: Array[StringName] = [&"hp", &"disabled"]
 
 var sleep_timer: float = 0.0
 var total_sleep_seconds: float = 0.0
@@ -18,7 +19,13 @@ func enter() -> void:
 	super.enter()
 
 	active_sleep_target = _resolve_sleep_target()
-	if active_sleep_target != null and not is_close_to(active_sleep_target.global_position, machine.stop_distance):
+	if active_sleep_target == null:
+		# Sleep is spot-driven. Without a valid bed/spot the need keeps rising toward Collapse.
+		sleep_timer = 0.0
+		machine.call_deferred("request_state", &"Idle", null, "missing_sleep_spot", 20)
+		return
+
+	if not is_close_to(active_sleep_target.global_position, machine.stop_distance):
 		machine.move_target = active_sleep_target
 		machine.state_after_move = &"Sleep"
 		machine.call_deferred(
@@ -31,6 +38,7 @@ func enter() -> void:
 		return
 
 	stop_horizontal()
+	_set_perception_enabled(false)
 	sleep_timer = sleep_duration
 	sleep_progress_elapsed = 0.0
 
@@ -43,9 +51,18 @@ func enter() -> void:
 	total_sleep_seconds = maxf(sleep_timer, 0.001)
 
 
+func exit() -> void:
+	# Every wake path, including damage and schedule closure, restores sight immediately.
+	_flush_sleep_progress()
+	_set_perception_enabled(true)
+	active_sleep_target = null
+
+
 func physics_process(delta: float) -> NpcState:
 	# Sleep need drains gradually while the NPC stays asleep at the sleep spot.
 	stop_horizontal()
+	if active_sleep_target == null:
+		return get_state(&"Idle")
 
 	if active_sleep_target != null and not _target_can_be_slept_at(active_sleep_target):
 		machine.sleep_target = null
@@ -84,6 +101,23 @@ func target_seen(seen_target: Node2D) -> NpcState:
 		return get_state(&"ReactToEvent")
 
 	return get_state(&"Idle")
+
+
+func values_changed(
+	_values: Dictionary,
+	changed_values: Dictionary,
+	_actor: Node2D
+) -> NpcState:
+	# Direct damage and future explicitly configured impact values wake the NPC.
+	for value_name in wake_value_names:
+		var key := String(value_name)
+		if not changed_values.has(key):
+			continue
+		if key == "hp" and float(changed_values[key]) >= 0.0:
+			continue
+		return get_state(&"ReactToEvent")
+
+	return next_state
 
 
 func _resolve_sleep_target() -> Node2D:
@@ -131,6 +165,9 @@ func _flush_sleep_progress() -> void:
 	if sleep_value_name == &"":
 		sleep_progress_elapsed = 0.0
 		return
+	if sleep_progress_elapsed <= 0.0 or total_sleep_seconds <= 0.0:
+		sleep_progress_elapsed = 0.0
+		return
 
 	var progress_delta := sleep_progress_elapsed
 	sleep_progress_elapsed = 0.0
@@ -147,3 +184,8 @@ func _sleep_need_is_sated() -> bool:
 		return sleep_timer <= 0.0
 
 	return machine.get_value(sleep_value_name) <= 0.0
+
+
+func _set_perception_enabled(enabled: bool) -> void:
+	if npc != null and npc.has_method("set_npc_perception_enabled"):
+		npc.call("set_npc_perception_enabled", enabled)

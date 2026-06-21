@@ -4,6 +4,7 @@ class_name NpcState extends Node
 # Later, add animations like idle, walk, work, talk, run, sleep, disabled, and dead.
 @export var animation_name: StringName = &""
 @export var stop_horizontal_on_enter: bool = false
+@export var allows_scheduled_activity_interrupt: bool = false
 
 # The state machine assigns these when it initializes child state nodes.
 var npc: CharacterBody2D
@@ -55,6 +56,10 @@ func physics_process(_delta: float) -> NpcState:
 
 func can_exit_to(_new_state: NpcState, _request_priority: int) -> bool:
 	return true
+
+
+func can_be_interrupted_by_scheduled_activity(_request_priority: int) -> bool:
+	return allows_scheduled_activity_interrupt
 
 
 func get_state(state_name: StringName) -> NpcState:

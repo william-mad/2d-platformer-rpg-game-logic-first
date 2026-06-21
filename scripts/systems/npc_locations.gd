@@ -68,6 +68,7 @@ func register_npc(npc: Node) -> bool:
 	record["scene_path"] = current_scene_path
 	record["last_position"] = _get_node_position(npc)
 	record["node_state"] = _get_npc_state(npc)
+	record["last_simulated_total_hours"] = _get_world_total_hours()
 	npc_records[npc_id] = record
 
 	npc_registered.emit(npc_id, npc, current_scene_path)
@@ -90,6 +91,18 @@ func unregister_npc(npc: Node) -> void:
 			var record: Dictionary = npc_records[npc_id]
 			record["node_state"] = _get_npc_state(npc)
 			record["last_position"] = _get_node_position(npc)
+			var activity = record.get("activity", {})
+			if activity is Dictionary and not activity.is_empty():
+				var activity_scene := String(activity.get("target_scene_path", ""))
+				var activity_position = activity.get("target_position", null)
+				if activity_scene.is_empty() or not (activity_position is Vector2):
+					var endpoint := _get_activity_endpoint(activity)
+					activity_scene = String(endpoint.get("scene_path", activity_scene))
+					activity_position = endpoint.get("position", activity_position)
+				if activity_scene == String(record.get("scene_path", "")) and activity_position is Vector2:
+					# Once this scene unloads, finish the unseen walk instead of restarting it on re-entry.
+					record["last_position"] = activity_position
+			record["last_simulated_total_hours"] = _get_world_total_hours()
 			npc_records[npc_id] = record
 
 		live_npcs.erase(npc_id)
@@ -157,7 +170,8 @@ func get_live_npc(npc_id: String) -> Node:
 
 func is_npc_available_for_scheduled_activity(
 	npc_id: String,
-	requested_state_name: StringName = &""
+	requested_state_name: StringName = &"",
+	requested_priority: int = 0
 ) -> bool:
 	# Off-screen NPCs are represented by their record and are available by default.
 	var npc := get_live_npc(npc_id)
@@ -172,7 +186,21 @@ func is_npc_available_for_scheduled_activity(
 	if current_state == null or String(current_state.name) == "Idle":
 		return true
 
-	return requested_state_name != &"" and String(current_state.name) == String(requested_state_name)
+	var current_state_name := String(current_state.name)
+	if requested_state_name != &"" and current_state_name == String(requested_state_name):
+		return true
+
+	# Each state declares this itself, so custom danger/routine states remain plug-and-play.
+	if (
+		requested_priority >= 50
+		and current_state.has_method("can_be_interrupted_by_scheduled_activity")
+	):
+		return bool(current_state.call(
+			"can_be_interrupted_by_scheduled_activity",
+			requested_priority
+		))
+
+	return false
 
 
 func prepare_scheduled_travel(
@@ -269,11 +297,16 @@ func begin_scheduled_activity(
 	_refresh_live_record(npc_id)
 	var record: Dictionary = npc_records[npc_id]
 	var from_scene_path := String(record.get("scene_path", ""))
+	var spawn_position := _get_activity_arrival_position(
+		from_scene_path,
+		target_scene_path,
+		target_position
+	)
 	record["activity"] = activity.duplicate(true)
 	record["pending_travel"] = {}
 	record["previous_scene_path"] = ""
 	record["scene_path"] = target_scene_path
-	record["last_position"] = target_position
+	record["last_position"] = spawn_position
 	record["spawn_random"] = false
 	record["last_travel_msec"] = Time.get_ticks_msec()
 	npc_records[npc_id] = record
@@ -314,11 +347,17 @@ func finish_scheduled_activity(
 	_refresh_live_record(npc_id)
 	var record: Dictionary = npc_records[npc_id]
 	var from_scene_path := String(record.get("scene_path", ""))
+	var destination_scene_path := return_scene_path if not return_scene_path.is_empty() else from_scene_path
+	var spawn_position := _get_activity_arrival_position(
+		from_scene_path,
+		destination_scene_path,
+		return_position
+	)
 	record["activity"] = {}
 	record["pending_travel"] = {}
 	record["previous_scene_path"] = ""
-	record["scene_path"] = return_scene_path if not return_scene_path.is_empty() else from_scene_path
-	record["last_position"] = return_position
+	record["scene_path"] = destination_scene_path
+	record["last_position"] = spawn_position
 	record["spawn_random"] = false
 	record["last_travel_msec"] = Time.get_ticks_msec()
 	npc_records[npc_id] = record
@@ -328,7 +367,7 @@ func finish_scheduled_activity(
 		live_npcs.erase(npc_id)
 		live_npc.queue_free()
 
-	var destination_scene_path := String(record["scene_path"])
+	destination_scene_path = String(record["scene_path"])
 	if from_scene_path != destination_scene_path:
 		npc_travelled.emit(npc_id, from_scene_path, destination_scene_path)
 		_emit_location_event(npc_id, from_scene_path, destination_scene_path)
@@ -427,6 +466,7 @@ func _build_initial_record(
 		"node_state": _get_npc_state(npc),
 		"activity": {},
 		"pending_travel": {},
+		"last_simulated_total_hours": _get_world_total_hours(),
 		"spawn_random": false,
 		"last_travel_msec": 0,
 	}
@@ -454,15 +494,42 @@ func _refresh_live_records_for_save() -> void:
 			record = npc_records[npc_id]
 		else:
 			record = _build_initial_record(npc_id, live_npc, current_scene_path, npc_scene_path)
+		var repaired_activity := _repair_mismatched_activity_record(record)
+		if repaired_activity:
+			var repaired_position = record.get("last_position", null)
+			if repaired_position is Vector2:
+				_place_npc(live_npc, repaired_position)
+			var machine := live_npc.get_node_or_null("NpcStateMachine")
+			if machine != null and machine.has_method("request_state"):
+				machine.call_deferred("request_state", &"Idle", null, "repair_activity_location", 100)
 
-		if current_scene_path.is_empty():
-			current_scene_path = String(record.get("scene_path", ""))
+		var recorded_scene_path := String(record.get("scene_path", ""))
+		current_scene_path = _get_live_npc_scene_path(
+			live_npc,
+			recorded_scene_path if not recorded_scene_path.is_empty() else current_scene_path
+		)
 
 		_refresh_record_from_node(record, live_npc, npc_scene_path)
 		record["scene_path"] = current_scene_path
 		record["last_position"] = _get_node_position(live_npc)
 		record["node_state"] = _get_npc_state(live_npc)
+		record["last_simulated_total_hours"] = _get_world_total_hours()
 		npc_records[npc_id] = record
+
+
+func _get_live_npc_scene_path(npc: Node, fallback: String) -> String:
+	# During change_scene(), the new current scene can exist briefly while the old NPC is exiting.
+	# Only claim the current scene when the NPC is actually parented beneath it.
+	if npc == null or not is_instance_valid(npc) or not npc.is_inside_tree():
+		return fallback
+
+	var current_scene := get_tree().current_scene
+	if current_scene == null:
+		return fallback
+	if current_scene == npc or current_scene.is_ancestor_of(npc):
+		return current_scene.scene_file_path
+
+	return fallback
 
 
 func _refresh_live_record(npc_id: String) -> void:
@@ -474,6 +541,7 @@ func _refresh_live_record(npc_id: String) -> void:
 	_refresh_record_from_node(record, live_npc, _get_npc_scene_path(live_npc))
 	record["last_position"] = _get_node_position(live_npc)
 	record["node_state"] = _get_npc_state(live_npc)
+	record["last_simulated_total_hours"] = _get_world_total_hours()
 	npc_records[npc_id] = record
 
 
@@ -496,6 +564,8 @@ func _normalize_loaded_record(npc_id: String, saved_record: Dictionary) -> Dicti
 		record["activity"] = {}
 	if not (record.get("pending_travel", null) is Dictionary):
 		record["pending_travel"] = {}
+	if not record.has("last_simulated_total_hours"):
+		record["last_simulated_total_hours"] = _get_world_total_hours()
 
 	if String(record.get("scene_path", "")).is_empty():
 		record["scene_path"] = String(record.get("home_scene_path", ""))
@@ -505,7 +575,32 @@ func _normalize_loaded_record(npc_id: String, saved_record: Dictionary) -> Dicti
 	else:
 		record["last_travel_msec"] = int(record.get("last_travel_msec", 0))
 
+	_repair_mismatched_activity_record(record)
 	return record
+
+
+func _repair_mismatched_activity_record(record: Dictionary) -> bool:
+	# A committed activity belongs to its target scene. Older transition races could save
+	# the target coordinates under the source scene, making the NPC appear to disappear.
+	var activity = record.get("activity", {})
+	if not (activity is Dictionary) or activity.is_empty():
+		return false
+
+	var target_scene_path := String(activity.get("target_scene_path", ""))
+	if target_scene_path.is_empty():
+		var endpoint := _get_activity_endpoint(activity)
+		target_scene_path = String(endpoint.get("scene_path", ""))
+	if target_scene_path.is_empty() or target_scene_path == String(record.get("scene_path", "")):
+		return false
+
+	var return_scene_path := String(activity.get("return_scene_path", ""))
+	var return_position = activity.get("return_position", null)
+	if return_scene_path == String(record.get("scene_path", "")) and return_position is Vector2:
+		record["last_position"] = return_position
+
+	record["activity"] = {}
+	record["pending_travel"] = {}
+	return true
 
 
 func _move_record_to_scene(
@@ -748,6 +843,47 @@ func _get_node_position(node: Node) -> Vector2:
 		return Vector2.ZERO
 
 	return node_2d.global_position
+
+
+func _get_world_total_hours() -> float:
+	var world_time := get_node_or_null("/root/WorldTime")
+	if world_time == null or not world_time.has_method("get_snapshot"):
+		return 0.0
+
+	var snapshot: Dictionary = world_time.call("get_snapshot")
+	return float(snapshot.get("total_hours", 0.0))
+
+
+func _get_activity_arrival_position(
+	from_scene_path: String,
+	target_scene_path: String,
+	fallback: Vector2
+) -> Vector2:
+	if target_scene_path != active_scene_path or from_scene_path == target_scene_path:
+		return fallback
+
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if simulator != null and simulator.has_method("get_arrival_position"):
+		return simulator.call("get_arrival_position", from_scene_path, fallback) as Vector2
+
+	return fallback
+
+
+func _get_activity_endpoint(activity: Dictionary) -> Dictionary:
+	# Older saves may not contain the destination fields now stored directly on activities.
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if simulator == null or not simulator.has_method("get_spot_definition"):
+		return {}
+
+	var spot_id := StringName(String(activity.get("spot_id", "")))
+	var definition = simulator.call("get_spot_definition", spot_id)
+	if definition == null:
+		return {}
+
+	return {
+		"scene_path": String(definition.get("scene_path")),
+		"position": definition.get("position"),
+	}
 
 
 func _emit_location_event(npc_id: String, from_scene_path: String, to_scene_path: String) -> void:

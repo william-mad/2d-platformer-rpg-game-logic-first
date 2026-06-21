@@ -9,12 +9,24 @@ class_name NpcSpotDefinition extends Resource
 @export var state_name: StringName = &""
 @export var value_name: StringName = &""
 @export var need_threshold: float = 0.0
+@export var need_maximum: float = -1.0
 @export var value_delta_per_game_hour: float = 0.0
 @export var priority: int = 20
 @export var target_assignment_method: StringName = &""
 
+@export_group("Mutable Spot Value")
+@export var spot_value_name: StringName = &""
+@export var spot_value_initial: float = 0.0
+@export var spot_value_minimum: float = 0.0
+@export var spot_value_maximum: float = 100.0
+@export var spot_value_done_threshold: float = 0.0
+@export var spot_value_delta_per_game_hour: float = 0.0
+@export var spot_value_daily_growth: float = 0.0
+@export var need_threshold_at_spot_value_maximum: float = -1.0
+
 @export_group("Serving")
 @export var owner_npc_ids: Array[StringName] = []
+@export_range(0, 32, 1) var capacity: int = 1
 
 @export_group("Schedule")
 @export var active_time_windows: Array[Dictionary] = []

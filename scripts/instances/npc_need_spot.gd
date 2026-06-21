@@ -120,6 +120,8 @@ func _apply_world_definition() -> void:
 	if world_definition == null:
 		return
 
+	# The world scheduler owns cross-scene requests, preventing duplicate local/global claims.
+	auto_request_when_idle = false
 	spot_id = world_definition.spot_id
 	value_name = world_definition.value_name
 	need_threshold = world_definition.need_threshold

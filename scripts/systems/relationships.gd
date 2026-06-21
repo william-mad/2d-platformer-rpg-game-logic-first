@@ -274,6 +274,14 @@ func decay_anger_for(relationship_owner: Node, amount: float) -> void:
 		return
 
 	var owner_id := get_relationship_id(relationship_owner).strip_edges()
+	decay_anger_for_id(owner_id, amount, relationship_owner)
+
+
+func decay_anger_for_id(owner_id: String, amount: float, relationship_owner: Node = null) -> void:
+	# Off-screen simulation identifies relationship owners by their stable saved id.
+	owner_id = owner_id.strip_edges()
+	if amount <= 0.0:
+		return
 	if owner_id.is_empty() or not relationships.has(owner_id):
 		return
 
@@ -372,6 +380,30 @@ func decay_fear_for(
 		return
 
 	var owner_id := get_relationship_id(relationship_owner).strip_edges()
+	decay_fear_for_id(
+		owner_id,
+		game_hours,
+		panic_floor,
+		panic_cooldown_game_hours,
+		slow_decay_per_game_hour,
+		stop_value,
+		relationship_owner
+	)
+
+
+func decay_fear_for_id(
+	owner_id: String,
+	game_hours: float,
+	panic_floor: float,
+	panic_cooldown_game_hours: float,
+	slow_decay_per_game_hour: float,
+	stop_value: float,
+	relationship_owner: Node = null
+) -> void:
+	# Mirrors decay_fear_for() without requiring the owner NPC scene to be loaded.
+	owner_id = owner_id.strip_edges()
+	if game_hours <= 0.0:
+		return
 	if owner_id.is_empty() or not relationships.has(owner_id):
 		return
 

@@ -20,6 +20,18 @@ func _ready() -> void:
 	super._ready()
 
 
+func _apply_world_definition() -> void:
+	super._apply_world_definition()
+	if world_definition == null or world_definition.spot_value_name != &"work_needed":
+		return
+
+	work_needed = world_definition.spot_value_initial
+	work_needed_min = world_definition.spot_value_minimum
+	work_needed_max = world_definition.spot_value_maximum
+	work_needed_done_threshold = world_definition.spot_value_done_threshold
+	work_needed_daily_growth = world_definition.spot_value_daily_growth
+
+
 func _exit_tree() -> void:
 	_disconnect_world_time_day_signal()
 	super._exit_tree()
@@ -28,8 +40,10 @@ func _exit_tree() -> void:
 func _setup() -> void:
 	# Work spots own their work meter, then use the base spot logic for requests/visuals.
 	super._setup()
-	set_work_needed(work_needed)
-	_connect_world_time_day_signal()
+	var uses_world_state := _setup_world_work_state()
+	if not uses_world_state:
+		set_work_needed(work_needed)
+		_connect_world_time_day_signal()
 	_update_visual()
 
 
@@ -54,6 +68,7 @@ func set_work_needed(new_value: float) -> void:
 		return
 
 	work_needed_changed.emit(work_needed, work_needed - previous_value)
+	_publish_world_work_state()
 	_queue_visual_update()
 	_queue_request_check()
 
@@ -83,6 +98,11 @@ func apply_work_needed_delta(delta: float) -> float:
 
 func reset_work_needed() -> void:
 	set_work_needed(work_needed_max)
+
+
+func apply_world_work_needed(new_value: float) -> void:
+	# Called when the global day cycle updates this spot while its scene may be unloaded.
+	set_work_needed(new_value)
 
 
 func is_work_spot() -> bool:
@@ -147,6 +167,33 @@ func _on_world_time_day_changed(_day: int, _snapshot: Dictionary) -> void:
 		return
 
 	set_work_needed(get_work_needed() + work_needed_daily_growth)
+
+
+func _setup_world_work_state() -> bool:
+	if spot_id == &"":
+		return false
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if simulator == null or not simulator.has_method("register_work_spot_state"):
+		return false
+
+	var stored_value := float(simulator.call(
+		"register_work_spot_state",
+		spot_id,
+		work_needed,
+		_get_work_needed_floor(),
+		_get_work_needed_ceiling(),
+		work_needed_daily_growth
+	))
+	set_work_needed(stored_value)
+	return true
+
+
+func _publish_world_work_state() -> void:
+	if spot_id == &"" or not is_inside_tree():
+		return
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if simulator != null and simulator.has_method("set_work_spot_value"):
+		simulator.call("set_work_spot_value", spot_id, work_needed)
 
 
 func _get_work_needed_ratio(value: float) -> float:
