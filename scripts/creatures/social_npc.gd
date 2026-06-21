@@ -490,6 +490,19 @@ func _get_world_simulation_profile() -> Dictionary:
 				* (60.0 / talk_interval_minutes)
 			),
 		},
+		"loneliness_recovery": {
+			"enabled": npc_state_machine.loneliness_recovery_enabled,
+			"value_name": String(npc_state_machine.loneliness_value_name),
+			"talk_need_below": npc_state_machine.loneliness_recovery_talk_need_below,
+			"full_recovery_game_hours": npc_state_machine.loneliness_full_recovery_game_hours,
+		},
+		"social_seeking": {
+			"enabled": npc_state_machine.cross_scene_talk_enabled,
+			"talk_need_threshold": npc_state_machine.cross_scene_talk_need_threshold,
+			"priority": npc_state_machine.cross_scene_talk_priority,
+			"minimum_npc_favor": npc_state_machine.cross_scene_minimum_npc_favor,
+			"player_target_chance": npc_state_machine.cross_scene_player_target_chance,
+		},
 		"anger_decay": {
 			"enabled": npc_state_machine.anger_decay_enabled,
 			"value_name": String(npc_state_machine.anger_decay_value_name),

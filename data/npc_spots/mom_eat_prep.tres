@@ -4,18 +4,19 @@
 
 [resource]
 script = ExtResource("1_spot_definition")
-spot_id = &"mom_eat"
+spot_id = &"mom_eat_prep"
 scene_path = "res://scenes/testscenes/realtest1.tscn"
 position = Vector2(-1217, 325)
-state_name = &"Eat"
-value_name = &"hunger"
-need_threshold = 75.0
-value_delta_per_game_hour = -200.0
-priority = 50
-spot_value_name = &"food_available"
-spot_value_initial = 0.0
+state_name = &"Work"
+value_name = &"boredom"
+need_threshold = 61.0
+value_delta_per_game_hour = -13.333333
+priority = 40
+spot_value_name = &"work_needed"
+spot_value_initial = 100.0
 spot_value_done_threshold = 0.0
-spot_value_delta_per_game_hour = -50.0
-next_spot_id_when_done = &"mom_eat_prep"
+spot_value_delta_per_game_hour = -200.0
+need_threshold_at_spot_value_maximum = 41.0
+next_spot_id_when_done = &"mom_eat"
 next_spot_value_when_done = 100.0
 capacity = 0

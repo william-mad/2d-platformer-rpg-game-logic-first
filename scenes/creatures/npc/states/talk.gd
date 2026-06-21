@@ -22,11 +22,11 @@ signal talk_cancelled(talker: Node2D, partner: Node2D, reason: String)
 
 @export_group("Need")
 @export var talk_value_name: StringName = &"talk_need"
-@export var talk_complete_delta: float = -25.0
+@export var talk_complete_delta: float = -40.0
 @export var boredom_value_name: StringName = &"boredom"
 @export var boredom_complete_delta: float = -10.0
 @export var reduce_partner_talk_need: bool = true
-@export var partner_talk_complete_delta: float = -10.0
+@export var partner_talk_complete_delta: float = -25.0
 
 @export_group("Conversation Spillover")
 @export var spread_values_to_npc_talk_partner: bool = true
@@ -195,9 +195,10 @@ func _cancel_talk_action(reason: String) -> void:
 	_hide_talk_limits()
 	talk_finished_handled = true
 	if talk_started_handled:
-		talk_cancelled.emit(npc, talk_partner, reason)
-		_call_talk_hook(npc, &"on_npc_talk_cancelled", [talk_partner, self, reason])
-		_call_talk_hook(talk_partner, &"on_npc_talk_cancelled_with", [npc, self, reason])
+		var valid_partner := talk_partner if is_instance_valid(talk_partner) else null
+		talk_cancelled.emit(npc, valid_partner, reason)
+		_call_talk_hook(npc, &"on_npc_talk_cancelled", [valid_partner, self, reason])
+		_call_talk_hook(valid_partner, &"on_npc_talk_cancelled_with", [npc, self, reason])
 
 	_clear_talk_target()
 
@@ -565,7 +566,7 @@ func _clear_talk_target() -> void:
 		machine.talk_target = null
 
 
-func _call_talk_hook(target: Object, method_name: StringName, args: Array) -> void:
+func _call_talk_hook(target, method_name: StringName, args: Array) -> void:
 	# Calls optional methods only when the target script actually implements them.
 	if target == null or not is_instance_valid(target):
 		return
@@ -613,8 +614,12 @@ func _update_talk_movement() -> void:
 	move_toward_position(talk_partner.global_position, talk_follow_speed, desired_range)
 
 
-func _is_valid_talk_partner(candidate: Node2D) -> bool:
-	return is_valid_target(candidate) and candidate != npc
+func _is_valid_talk_partner(candidate) -> bool:
+	# A freed Node2D must be rejected before any typed cast or method call occurs.
+	if candidate == null or not is_instance_valid(candidate):
+		return false
+	var candidate_node := candidate as Node2D
+	return candidate_node != null and is_valid_target(candidate_node) and candidate_node != npc
 
 
 func _show_talk_limits() -> void:

@@ -8,6 +8,12 @@ class_name NpcTravelDoor extends Area2D
 @export var npc_arrival_offset: Vector2 = Vector2(80.0, 0.0)
 @export var allow_unscheduled_npc_travel: bool = false
 
+@export_group("NPC Permissions")
+# Empty allow-list means every NPC may use the door unless explicitly blocked.
+@export var allowed_npc_ids: Array[StringName] = []
+@export var blocked_npc_ids: Array[StringName] = []
+@export var required_npc_tags: Array[StringName] = []
+
 var cooldowns: Dictionary = {}
 var player_inside: bool = false
 
@@ -89,17 +95,61 @@ func get_npc_arrival_position() -> Vector2:
 	return global_position + npc_arrival_offset
 
 
+func can_npc_use(npc: Node) -> bool:
+	if npc == null or not is_instance_valid(npc):
+		return false
+	if not _npc_id_is_allowed(StringName(_get_traveller_id(npc))):
+		return false
+	return _npc_has_required_tags(npc)
+
+
+func can_npc_id_use(npc_id: StringName) -> bool:
+	# ID-only gate is available to unloaded simulation; tag gates require a live NPC.
+	return _npc_id_is_allowed(npc_id) and required_npc_tags.is_empty()
+
+
 func _on_body_exited(body: Node2D) -> void:
 	if body.is_in_group(String(player_group)):
 		player_inside = false
 
 
 func _is_traveller(body: Node) -> bool:
+	var has_traveller_group := false
 	for group_name in traveller_groups:
 		if body.is_in_group(String(group_name)):
-			return true
+			has_traveller_group = true
+			break
+	if not has_traveller_group:
+		return false
 
+	return can_npc_use(body)
+
+
+func _npc_id_is_allowed(npc_id: StringName) -> bool:
+	for blocked_id in blocked_npc_ids:
+		if String(blocked_id) == String(npc_id):
+			return false
+	if allowed_npc_ids.is_empty():
+		return true
+	for allowed_id in allowed_npc_ids:
+		if String(allowed_id) == String(npc_id):
+			return true
 	return false
+
+
+func _npc_has_required_tags(npc: Node) -> bool:
+	if required_npc_tags.is_empty():
+		return true
+	for required_tag in required_npc_tags:
+		var tag_text := String(required_tag)
+		if npc.is_in_group(tag_text):
+			continue
+		var tags = npc.get_meta("npc_tags", [])
+		if tags is Array and tags.has(required_tag):
+			continue
+		return false
+
+	return true
 
 
 func _get_traveller_id(body: Node) -> String:

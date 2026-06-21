@@ -18,7 +18,6 @@ spot_value_done_threshold = 0.0
 spot_value_delta_per_game_hour = -22.222222
 spot_value_daily_growth = 50.0
 need_threshold_at_spot_value_maximum = 41.0
-owner_npc_ids = Array[StringName]([&"mom"])
 capacity = 0
 active_time_windows = Array[Dictionary]([{
 "end_hour": 10.0,

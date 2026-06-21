@@ -58,6 +58,19 @@ const STATE_ALIASES := {
 @export var boredom_paused_states: Array[StringName] = [&"Work"]
 @export var talk_need_paused_states: Array[StringName] = [&"Talk"]
 
+@export_group("Loneliness Recovery")
+@export var loneliness_recovery_enabled: bool = true
+@export_range(0.0, 100.0, 0.1) var loneliness_recovery_talk_need_below: float = 50.0
+@export_range(0.1, 48.0, 0.1, "suffix:h") var loneliness_full_recovery_game_hours: float = 5.0
+@export var loneliness_value_name: StringName = &"lonely"
+
+@export_group("Social Seeking")
+@export var cross_scene_talk_enabled: bool = true
+@export_range(0.0, 100.0, 0.1) var cross_scene_talk_need_threshold: float = 70.0
+@export_range(0, 100, 1) var cross_scene_talk_priority: int = 60
+@export_range(0.0, 100.0, 0.1) var cross_scene_minimum_npc_favor: float = 20.0
+@export_range(0.0, 1.0, 0.01) var cross_scene_player_target_chance: float = 0.35
+
 @export_group("Fear Decay")
 @export var fear_decay_enabled: bool = true
 @export var fear_decay_value_name: StringName = &"fear"
@@ -161,18 +174,18 @@ const STATE_ALIASES := {
 	"talk_to_seen_target": {
 		"value": "talk_need",
 		"state": "Talk",
-		"at_least": 61.0,
+		"at_least": 50.0,
 		"requires_target": true,
 		"target_groups": [&"npc", &"player"],
 		"min_relationship_favor": 20.0,
-		"priority": 45
+		"priority": 60
 	},
 	"talk_search_for_people": {
 		"value": "talk_need",
 		"state": "LookForTalkTarget",
-		"at_least": 90.0,
+		"at_least": 70.0,
 		"requires_idle": true,
-		"priority": 40
+		"priority": 60
 	},
 	"curious": {
 		"value": "curiosity",
@@ -914,6 +927,33 @@ func _apply_passive_need_growth(real_seconds: float) -> void:
 		value_delta["talk_need"] = (
 			talk_need_growth_per_interval
 			* (game_minutes / talk_need_growth_interval_game_minutes)
+		)
+
+	if (
+		loneliness_recovery_enabled
+		and loneliness_value_name != &""
+		and get_value(&"talk_need") < loneliness_recovery_talk_need_below
+	):
+		var current_loneliness := get_value(loneliness_value_name)
+		var recovery_game_hours := game_hours
+		if value_delta.has("talk_need"):
+			var talk_growth_per_hour := float(value_delta["talk_need"]) / game_hours
+			if talk_growth_per_hour > 0.0:
+				recovery_game_hours = minf(
+					recovery_game_hours,
+					maxf(
+						(loneliness_recovery_talk_need_below - get_value(&"talk_need"))
+							/ talk_growth_per_hour,
+						0.0
+					)
+				)
+		var loneliness_decay_per_hour := 100.0 / maxf(
+			loneliness_full_recovery_game_hours,
+			0.001
+		)
+		value_delta[String(loneliness_value_name)] = -minf(
+			current_loneliness,
+			loneliness_decay_per_hour * recovery_game_hours
 		)
 
 	var fear_delta := _get_fear_decay_delta(game_hours)

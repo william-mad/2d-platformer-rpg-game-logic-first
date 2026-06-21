@@ -24,6 +24,10 @@ class_name NpcSpotDefinition extends Resource
 @export var spot_value_daily_growth: float = 0.0
 @export var need_threshold_at_spot_value_maximum: float = -1.0
 
+@export_group("Cycle")
+@export var next_spot_id_when_done: StringName = &""
+@export var next_spot_value_when_done: float = 100.0
+
 @export_group("Serving")
 @export var owner_npc_ids: Array[StringName] = []
 @export_range(0, 32, 1) var capacity: int = 1

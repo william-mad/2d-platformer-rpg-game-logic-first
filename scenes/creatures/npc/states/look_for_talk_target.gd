@@ -1,7 +1,7 @@
 class_name NpcStateLookForTalkTarget extends NpcState
 
 @export var search_duration: float = -1.0
-@export var target_groups: Array[StringName] = [&"npc"]
+@export var target_groups: Array[StringName] = [&"npc", &"player"]
 @export var require_relationship_favor_for_npcs: bool = true
 @export_range(0.0, 100.0, 0.1) var minimum_relationship_favor: float = 20.0
 @export var talk_state_name: StringName = &"Talk"

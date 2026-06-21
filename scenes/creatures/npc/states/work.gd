@@ -77,7 +77,7 @@ func _apply_work_progress(delta: float, work_target: Node2D) -> void:
 	var progress_delta := work_progress_elapsed
 	work_progress_elapsed = 0.0
 
-	var full_work_seconds := _get_seconds_to_clear_full_work()
+	var full_work_seconds := _get_seconds_to_clear_full_work(work_target)
 	var work_capacity := _get_target_work_capacity(work_target)
 	var requested_work_delta := -(work_capacity / full_work_seconds) * progress_delta
 	var actual_work_delta := _apply_target_work_delta(work_target, requested_work_delta)
@@ -94,7 +94,8 @@ func _apply_work_progress(delta: float, work_target: Node2D) -> void:
 		return
 
 	var progress_fraction := absf(actual_work_delta) / work_capacity
-	var boredom_delta := -absf(boredom_drop_per_full_work) * progress_fraction
+	var value_drop := _get_value_drop_per_full_work(work_target)
+	var boredom_delta := -value_drop * progress_fraction
 	if is_equal_approx(boredom_delta, 0.0):
 		return
 
@@ -170,18 +171,36 @@ func _get_target_work_capacity(work_target: Node2D) -> float:
 	return maxf(fallback_work_needed_capacity, 0.001)
 
 
-func _get_seconds_to_clear_full_work() -> float:
-	# State machine tuning now means: time to clear a full work-needed spot.
+func _get_seconds_to_clear_full_work(work_target: Node2D) -> float:
+	# Prefer the spot's rate so short chores and long jobs can share the same Work state.
 	if machine == null:
 		return maxf(fallback_work_needed_capacity, 0.001)
 
+	var game_hours := machine.default_work_game_hours
+	if work_target != null and work_target.has_method("get_full_work_game_hours"):
+		var spot_game_hours := float(work_target.call("get_full_work_game_hours"))
+		if spot_game_hours > 0.0:
+			game_hours = spot_game_hours
+
 	return maxf(
 		machine.get_real_seconds_for_game_hours(
-			machine.default_work_game_hours,
+			game_hours,
 			machine.default_work_time
 		),
 		0.001
 	)
+
+
+func _get_value_drop_per_full_work(work_target: Node2D) -> float:
+	if work_target != null and work_target.has_method("get_value_drop_per_full_work"):
+		var spot_value_drop := float(work_target.call(
+			"get_value_drop_per_full_work",
+			work_value_name
+		))
+		if spot_value_drop >= 0.0:
+			return spot_value_drop
+
+	return absf(boredom_drop_per_full_work)
 
 
 func _record_watchdog_marker(source: StringName, detail: String = "") -> void:

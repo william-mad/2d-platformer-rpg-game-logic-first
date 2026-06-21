@@ -128,16 +128,16 @@ value_state_rules = {
 "value": "sleep_need"
 },
 "talk_search_for_people": {
-"at_least": 90.0,
-"priority": 40,
+"at_least": 70.0,
+"priority": 60,
 "requires_idle": true,
 "state": "LookForTalkTarget",
 "value": "talk_need"
 },
 "talk_to_seen_target": {
-"at_least": 61.0,
+"at_least": 50.0,
 "min_relationship_favor": 20.0,
-"priority": 45,
+"priority": 60,
 "requires_target": true,
 "state": "Talk",
 "target_groups": [&"npc", &"player"],

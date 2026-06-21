@@ -4,8 +4,12 @@ signal activity_started(npc_id: StringName, spot_id: StringName)
 signal activity_finished(npc_id: StringName, spot_id: StringName)
 
 const SPOT_DATA_DIRECTORY := "res://data/npc_spots"
+const PLAYER_SOCIAL_TARGET_ID := "__player__"
 
 @export var simulation_interval_seconds: float = 10.0
+@export var simulated_talk_need_drop: float = 40.0
+@export var simulated_partner_talk_need_drop: float = 25.0
+@export var simulated_talk_boredom_drop: float = 10.0
 
 var spot_definitions: Dictionary = {}
 var live_spots: Dictionary = {}
@@ -13,9 +17,11 @@ var spot_claim_counts: Dictionary = {}
 var spot_runtime_states: Dictionary = {}
 var simulation_timer: float = 0.0
 var simulation_queued: bool = false
+var social_rng := RandomNumberGenerator.new()
 
 
 func _ready() -> void:
+	social_rng.randomize()
 	_load_spot_definitions()
 	_initialize_definition_runtime_states()
 	simulation_timer = simulation_interval_seconds
@@ -74,17 +80,78 @@ func register_work_spot_state(
 
 
 func set_work_spot_value(spot_id: StringName, value: float) -> void:
+	set_spot_value(spot_id, value)
+
+
+func get_spot_value(spot_id: StringName, fallback: float = 0.0) -> float:
 	var state_key := String(spot_id)
 	var state = spot_runtime_states.get(state_key, {})
-	if not (state is Dictionary) or String(state.get("kind", "")) != "work":
+	if not (state is Dictionary):
+		return fallback
+
+	return float(state.get("value", fallback))
+
+
+func apply_spot_value_delta(spot_id: StringName, delta: float) -> float:
+	var previous_value := get_spot_value(spot_id)
+	set_spot_value(spot_id, previous_value + delta)
+	return get_spot_value(spot_id) - previous_value
+
+
+func set_spot_value(spot_id: StringName, value: float, allow_cycle_transition: bool = true) -> void:
+	var state_key := String(spot_id)
+	var state = spot_runtime_states.get(state_key, {})
+	if not (state is Dictionary):
 		return
 
-	state["value"] = clampf(
+	var previous_value := float(state.get("value", 0.0))
+	var next_value := clampf(
 		value,
 		float(state.get("minimum", 0.0)),
 		float(state.get("maximum", 100.0))
 	)
+	var done_threshold := float(state.get("done_threshold", 0.0))
+	if absf(next_value - done_threshold) <= 0.001:
+		next_value = done_threshold
+	state["value"] = next_value
 	spot_runtime_states[state_key] = state
+	_notify_live_spot_value(spot_id, next_value)
+
+	if not allow_cycle_transition:
+		return
+
+	if previous_value > done_threshold and next_value <= done_threshold:
+		_activate_linked_spot(spot_id)
+
+
+func _activate_linked_spot(completed_spot_id: StringName) -> void:
+	var definition := spot_definitions.get(completed_spot_id, null) as NpcSpotDefinition
+	if definition == null or definition.next_spot_id_when_done == &"":
+		return
+	if not spot_runtime_states.has(String(definition.next_spot_id_when_done)):
+		push_warning(
+			"NPC spot '%s' completed but linked spot '%s' does not exist."
+			% [String(completed_spot_id), String(definition.next_spot_id_when_done)]
+		)
+		return
+
+	set_spot_value(
+		definition.next_spot_id_when_done,
+		definition.next_spot_value_when_done,
+		false
+	)
+	_queue_simulation()
+
+
+func _notify_live_spot_value(spot_id: StringName, value: float) -> void:
+	var live_spot := live_spots.get(spot_id, null) as Node
+	if live_spot == null or not is_instance_valid(live_spot):
+		return
+	if live_spot.has_method("apply_world_spot_value"):
+		live_spot.call("apply_world_spot_value", spot_id, value)
+		return
+	if live_spot.has_method("apply_world_work_needed"):
+		live_spot.call("apply_world_work_needed", value)
 
 
 func _on_world_day_changed(_day: int, _snapshot: Dictionary) -> void:
@@ -98,12 +165,7 @@ func _on_world_day_changed(_day: int, _snapshot: Dictionary) -> void:
 			float(state.get("minimum", 0.0)),
 			float(state.get("maximum", 100.0))
 		)
-		state["value"] = next_value
-		spot_runtime_states[spot_id_key] = state
-
-		var live_spot := live_spots.get(StringName(String(spot_id_key)), null) as Node
-		if live_spot != null and is_instance_valid(live_spot) and live_spot.has_method("apply_world_work_needed"):
-			live_spot.call("apply_world_work_needed", next_value)
+		set_spot_value(StringName(String(spot_id_key)), next_value)
 
 	_queue_simulation()
 
@@ -121,6 +183,7 @@ func _on_npc_registered(_npc_id: String, npc: Node, _scene_path: String) -> void
 	var callback := Callable(self, "_on_npc_state_changed")
 	if not machine.is_connected(&"state_changed", callback):
 		machine.connect(&"state_changed", callback)
+	_queue_simulation()
 
 
 func _on_npc_state_changed(state_name: StringName, _previous_state_name: StringName) -> void:
@@ -194,7 +257,7 @@ func simulate_now() -> void:
 		if activity is Dictionary and not activity.is_empty():
 			_update_activity(npc_id, record, activity, total_hours, hour, locations)
 		else:
-			_try_start_activity(npc_id, record, total_hours, hour, locations)
+			_try_start_activity(npc_id, record, total_hours, hour, locations, records)
 
 
 func _simulate_offscreen_passive_values(
@@ -229,6 +292,8 @@ func _simulate_offscreen_passive_values(
 			"boredom": 8.0,
 			"talk_need": 24.0,
 		}
+	var talk_need_before_growth := float(social_stats.get("talk_need", 0.0))
+	var talk_need_rate := float(rates.get("talk_need", 0.0))
 
 	for value_key in rates.keys():
 		var value_name := String(value_key)
@@ -244,6 +309,14 @@ func _simulate_offscreen_passive_values(
 		var next_value := current_value + growth
 		social_stats[value_name] = clampf(next_value, 0.0, 100.0)
 
+	_apply_offscreen_loneliness_recovery(
+		social_stats,
+		profile,
+		talk_need_before_growth,
+		talk_need_rate,
+		elapsed_game_hours,
+		_passive_value_is_paused("talk_need", paused_state_name)
+	)
 	_apply_offscreen_emotion_decay(social_stats, profile, elapsed_game_hours)
 	_decay_offscreen_relationships(record, profile, elapsed_game_hours)
 
@@ -277,6 +350,48 @@ func _apply_offscreen_talk_need_growth(
 		float(social_stats.get("lonely", 0.0)) + float(lonely_increases),
 		0.0,
 		100.0
+	)
+
+
+func _apply_offscreen_loneliness_recovery(
+	social_stats: Dictionary,
+	profile: Dictionary,
+	initial_talk_need: float,
+	talk_need_rate: float,
+	elapsed_game_hours: float,
+	talk_need_paused: bool
+) -> void:
+	# Recover only for the part of an unloaded interval spent below the threshold.
+	var settings = profile.get("loneliness_recovery", {})
+	if not (settings is Dictionary):
+		settings = {}
+	if not bool(settings.get("enabled", true)):
+		return
+
+	var lonely_name := String(settings.get("value_name", "lonely"))
+	if lonely_name.is_empty() or not social_stats.has(lonely_name):
+		return
+	var threshold := float(settings.get("talk_need_below", 50.0))
+	if initial_talk_need >= threshold:
+		return
+
+	var recovery_hours := elapsed_game_hours
+	if not talk_need_paused and talk_need_rate > 0.0:
+		recovery_hours = minf(
+			recovery_hours,
+			maxf((threshold - initial_talk_need) / talk_need_rate, 0.0)
+		)
+	if recovery_hours <= 0.0:
+		return
+
+	var full_recovery_hours := maxf(
+		float(settings.get("full_recovery_game_hours", 5.0)),
+		0.001
+	)
+	var current_loneliness := float(social_stats.get(lonely_name, 0.0))
+	social_stats[lonely_name] = maxf(
+		current_loneliness - (100.0 / full_recovery_hours) * recovery_hours,
+		0.0
 	)
 
 
@@ -521,17 +636,293 @@ func _initialize_definition_runtime_states() -> void:
 		spot_runtime_states[state_key] = state
 
 
+func _try_start_social_seek(
+	npc_id: StringName,
+	record: Dictionary,
+	records: Dictionary,
+	locations: Node,
+	blocking_priority: int
+) -> bool:
+	var settings := _get_social_seek_settings(record)
+	if not bool(settings.get("enabled", true)):
+		return false
+	var seek_priority := int(settings.get("priority", 60))
+	if blocking_priority > seek_priority:
+		return false
+	if _get_saved_stat(record, "talk_need") < float(settings.get("talk_need_threshold", 70.0)):
+		return false
+
+	var candidate := _choose_social_candidate(npc_id, record, records, locations, settings)
+	if candidate.is_empty():
+		return false
+
+	var target_scene_path := String(candidate.get("scene_path", ""))
+	var seeker_scene_path := String(record.get("scene_path", ""))
+	if target_scene_path.is_empty() or seeker_scene_path.is_empty():
+		return false
+	var target_position = candidate.get("position", Vector2.ZERO)
+	if not (target_position is Vector2):
+		target_position = Vector2.ZERO
+	var social_target_id := String(candidate.get("target_id", ""))
+
+	var live_npc: Node2D
+	if locations.has_method("get_live_npc"):
+		live_npc = locations.call("get_live_npc", String(npc_id)) as Node2D
+	if seeker_scene_path == target_scene_path:
+		var live_target := _get_live_social_target(candidate, locations)
+		if live_npc != null and live_target != null:
+			return _request_live_social_seek(
+				npc_id,
+				live_npc,
+				live_target,
+				seek_priority,
+				locations
+			)
+		if live_npc == null and live_target == null and social_target_id != PLAYER_SOCIAL_TARGET_ID:
+			return _complete_simulated_conversation(
+				npc_id,
+				social_target_id,
+				record,
+				records,
+				locations
+			)
+		if live_npc == null and locations.has_method("move_simulated_npc_for_social_visit"):
+			return bool(locations.call(
+				"move_simulated_npc_for_social_visit",
+				String(npc_id),
+				target_scene_path,
+				target_position,
+				social_target_id
+			))
+		return false
+
+	if live_npc != null:
+		var departure_door := _find_departure_door(target_scene_path, live_npc)
+		if departure_door == null or not locations.has_method("prepare_scheduled_travel"):
+			return false
+		var pending_travel := {
+			"mode": "social",
+			"target_scene_path": target_scene_path,
+			"target_position": target_position,
+			"social_target_id": social_target_id,
+			"requested_state_name": "LookForTalkTarget",
+			"requested_priority": seek_priority,
+		}
+		return bool(locations.call(
+			"prepare_scheduled_travel",
+			String(npc_id),
+			pending_travel,
+			departure_door
+		))
+
+	if locations.has_method("move_simulated_npc_for_social_visit"):
+		return bool(locations.call(
+			"move_simulated_npc_for_social_visit",
+			String(npc_id),
+			target_scene_path,
+			target_position,
+			social_target_id
+		))
+	return false
+
+
+func _get_social_seek_settings(record: Dictionary) -> Dictionary:
+	var node_state = record.get("node_state", {})
+	if node_state is Dictionary:
+		var profile = node_state.get("world_simulation_profile", {})
+		if profile is Dictionary:
+			var settings = profile.get("social_seeking", {})
+			if settings is Dictionary and not settings.is_empty():
+				return settings
+	return {
+		"enabled": true,
+		"talk_need_threshold": 70.0,
+		"priority": 60,
+		"minimum_npc_favor": 20.0,
+		"player_target_chance": 0.35,
+	}
+
+
+func _choose_social_candidate(
+	npc_id: StringName,
+	record: Dictionary,
+	records: Dictionary,
+	locations: Node,
+	settings: Dictionary
+) -> Dictionary:
+	var seeker_scene_path := String(record.get("scene_path", ""))
+	var local_candidates: Array[Dictionary] = []
+	var remote_candidates: Array[Dictionary] = []
+	var player := get_tree().get_first_node_in_group("player") as Node2D
+	if player != null and is_instance_valid(player):
+		var player_scene_path := String(locations.call("get_current_scene_path"))
+		_add_social_candidate({
+			"target_id": PLAYER_SOCIAL_TARGET_ID,
+			"scene_path": player_scene_path,
+			"position": player.global_position,
+			"is_player": true,
+		}, seeker_scene_path, local_candidates, remote_candidates)
+
+	var relationships := get_node_or_null("/root/Relationships")
+	var owner_id := _get_record_relationship_id(npc_id, record)
+	var minimum_favor := float(settings.get("minimum_npc_favor", 20.0))
+	for target_id_key in records.keys():
+		var target_id := String(target_id_key)
+		if target_id == String(npc_id):
+			continue
+		var target_record = records[target_id_key]
+		if not (target_record is Dictionary) or _record_is_disabled(target_record):
+			continue
+		var target_relationship_id := _get_record_relationship_id(
+			StringName(target_id),
+			target_record
+		)
+		if relationships != null and relationships.has_method("get_favor_by_id"):
+			var favor := float(relationships.call(
+				"get_favor_by_id",
+				owner_id,
+				target_relationship_id,
+				50.0
+			))
+			if favor <= minimum_favor:
+				continue
+		var target_position = target_record.get("last_position", Vector2.ZERO)
+		if locations.has_method("get_live_npc"):
+			var target_live := locations.call("get_live_npc", target_id) as Node2D
+			if target_live != null:
+				target_position = target_live.global_position
+		_add_social_candidate({
+			"target_id": target_id,
+			"scene_path": String(target_record.get("scene_path", "")),
+			"position": target_position,
+			"is_player": false,
+		}, seeker_scene_path, local_candidates, remote_candidates)
+
+	var candidates := local_candidates if not local_candidates.is_empty() else remote_candidates
+	if candidates.is_empty():
+		return {}
+	var preferred_target_id := String(record.get("social_visit_target_id", ""))
+	for candidate in candidates:
+		if not preferred_target_id.is_empty() and String(candidate.get("target_id", "")) == preferred_target_id:
+			return candidate
+
+	var player_chance := clampf(float(settings.get("player_target_chance", 0.35)), 0.0, 1.0)
+	if social_rng.randf() < player_chance:
+		for candidate in candidates:
+			if bool(candidate.get("is_player", false)):
+				return candidate
+	return candidates[social_rng.randi_range(0, candidates.size() - 1)]
+
+
+func _add_social_candidate(
+	candidate: Dictionary,
+	seeker_scene_path: String,
+	local_candidates: Array[Dictionary],
+	remote_candidates: Array[Dictionary]
+) -> void:
+	if String(candidate.get("scene_path", "")).is_empty():
+		return
+	if String(candidate.get("scene_path", "")) == seeker_scene_path:
+		local_candidates.append(candidate)
+	else:
+		remote_candidates.append(candidate)
+
+
+func _get_record_relationship_id(npc_id: StringName, record: Dictionary) -> String:
+	var node_state = record.get("node_state", {})
+	if node_state is Dictionary:
+		var relationship_id := String(node_state.get("relationship_id", ""))
+		if not relationship_id.is_empty():
+			return relationship_id
+	return String(npc_id)
+
+
+func _get_live_social_target(candidate: Dictionary, locations: Node) -> Node2D:
+	var target_id := String(candidate.get("target_id", ""))
+	if target_id == PLAYER_SOCIAL_TARGET_ID:
+		var player := get_tree().get_first_node_in_group("player") as Node2D
+		return player if player != null and is_instance_valid(player) else null
+	if locations.has_method("get_live_npc"):
+		return locations.call("get_live_npc", target_id) as Node2D
+	return null
+
+
+func _request_live_social_seek(
+	npc_id: StringName,
+	npc: Node2D,
+	target: Node2D,
+	seek_priority: int,
+	locations: Node
+) -> bool:
+	if npc == null or target == null or npc == target:
+		return false
+	var machine := npc.get_node_or_null("NpcStateMachine")
+	if machine == null or not machine.has_method("request_state"):
+		return false
+	var current_state = machine.get("current_state")
+	if current_state != null and String(current_state.name) in ["Talk", "LookForTalkTarget"]:
+		return true
+	if locations.has_method("is_npc_available_for_scheduled_activity"):
+		if not bool(locations.call(
+			"is_npc_available_for_scheduled_activity",
+			String(npc_id),
+			&"LookForTalkTarget",
+			seek_priority
+		)):
+			return false
+	return bool(machine.call(
+		"request_state",
+		&"LookForTalkTarget",
+		target,
+		"social_seek",
+		seek_priority
+	))
+
+
+func _complete_simulated_conversation(
+	npc_id: StringName,
+	target_id: String,
+	record: Dictionary,
+	records: Dictionary,
+	locations: Node
+) -> bool:
+	if target_id.is_empty() or not records.has(target_id):
+		return false
+	var target_record = records[target_id]
+	if not (target_record is Dictionary):
+		return false
+	_set_saved_stat(record, "talk_need", _get_saved_stat(record, "talk_need") - simulated_talk_need_drop)
+	_set_saved_stat(record, "boredom", _get_saved_stat(record, "boredom") - simulated_talk_boredom_drop)
+	_set_saved_stat(
+		target_record,
+		"talk_need",
+		_get_saved_stat(target_record, "talk_need") - simulated_partner_talk_need_drop
+	)
+	record["social_visit_target_id"] = ""
+	target_record["social_visit_target_id"] = ""
+	records[String(npc_id)] = record
+	records[target_id] = target_record
+	if locations.has_method("update_simulated_record"):
+		locations.call("update_simulated_record", String(npc_id), record)
+		locations.call("update_simulated_record", target_id, target_record)
+	return true
+
+
 func _try_start_activity(
 	npc_id: StringName,
 	record: Dictionary,
 	total_hours: float,
 	hour: float,
-	locations: Node
+	locations: Node,
+	records: Dictionary
 ) -> void:
 	if _record_is_disabled(record):
 		return
 
 	var definition := _find_best_definition(npc_id, record, hour)
+	var blocking_priority := definition.priority if definition != null else -1
+	if _try_start_social_seek(npc_id, record, records, locations, blocking_priority):
+		return
 	if definition == null:
 		return
 	if locations.has_method("is_npc_available_for_scheduled_activity"):
@@ -631,6 +1022,8 @@ func _resume_pending_travel(
 	var target_scene_path := String(pending_travel.get("target_scene_path", ""))
 	var departure_door := _find_departure_door(target_scene_path, npc)
 	if departure_door == null:
+		if locations.has_method("cancel_pending_scheduled_travel"):
+			locations.call("cancel_pending_scheduled_travel", String(npc_id))
 		return
 	if _npc_is_moving_to_door(npc, departure_door):
 		return
@@ -666,6 +1059,16 @@ func _commit_pending_travel_offscreen(
 				String(npc_id),
 				target_scene_path,
 				target_position
+			)
+		return
+	if String(pending_travel.get("mode", "start")) == "social":
+		if locations.has_method("move_simulated_npc_for_social_visit"):
+			locations.call(
+				"move_simulated_npc_for_social_visit",
+				String(npc_id),
+				target_scene_path,
+				target_position,
+				String(pending_travel.get("social_target_id", ""))
 			)
 		return
 
@@ -792,6 +1195,8 @@ func _find_departure_door(target_scene_path: String, npc: Node2D) -> Node2D:
 		if door == null or not is_instance_valid(door):
 			continue
 		if String(door.get("target_scene_path")) != target_scene_path:
+			continue
+		if door.has_method("can_npc_use") and not bool(door.call("can_npc_use", npc)):
 			continue
 
 		var distance := npc.global_position.distance_squared_to(door.global_position)
@@ -937,18 +1342,10 @@ func _apply_spot_runtime_progress(
 ) -> void:
 	if definition.spot_value_name == &"" or game_hours <= 0.0:
 		return
-	var state_key := String(definition.spot_id)
-	var state = spot_runtime_states.get(state_key, {})
-	if not (state is Dictionary):
-		return
-
-	state["value"] = clampf(
-		float(state.get("value", definition.spot_value_initial))
-			+ definition.spot_value_delta_per_game_hour * game_hours,
-		float(state.get("minimum", definition.spot_value_minimum)),
-		float(state.get("maximum", definition.spot_value_maximum))
+	apply_spot_value_delta(
+		definition.spot_id,
+		definition.spot_value_delta_per_game_hour * game_hours
 	)
-	spot_runtime_states[state_key] = state
 
 
 func _saved_stat_exists(record: Dictionary, value_name: String) -> bool:

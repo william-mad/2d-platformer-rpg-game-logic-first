@@ -21,7 +21,7 @@ signal interaction_blocked(player: Node2D, npc: Node2D, interaction_id: StringNa
 @export var stat_delta: Dictionary = {
 	"favor": 2.0,
 	"love": 1.0,
-	"talk_need": -25.0,
+	"talk_need": -40.0,
 	"boredom": -10.0
 }
 @export var set_values: Dictionary = {}
@@ -48,8 +48,27 @@ func _process(delta: float) -> void:
 
 	if not Input.is_action_just_pressed(interaction_action):
 		return
+	if _player_is_at_active_work_spot():
+		return
 
 	_try_talk_interaction()
+
+
+func _player_is_at_active_work_spot() -> bool:
+	# Work has contextual priority when Up could otherwise trigger work and talk together.
+	if player == null or not is_instance_valid(player) or not player.is_inside_tree():
+		return false
+	for spot_node in player.get_tree().get_nodes_in_group("npc_work_spot"):
+		var spot := spot_node as Area2D
+		if spot == null or not is_instance_valid(spot):
+			continue
+		if not spot.has_method("can_player_work"):
+			continue
+		if not bool(spot.call("can_player_work", player)):
+			continue
+		if spot.overlaps_body(player):
+			return true
+	return false
 
 
 func _try_talk_interaction() -> void:
