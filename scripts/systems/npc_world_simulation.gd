@@ -281,6 +281,14 @@ func _simulate_offscreen_passive_values(
 	var profile = node_state.get("world_simulation_profile", {})
 	if not (profile is Dictionary):
 		profile = {}
+	var tired_settings = profile.get("tired", {})
+	if not (tired_settings is Dictionary):
+		tired_settings = {}
+	var tired_value_name := String(tired_settings.get("value_name", "tired"))
+	if not tired_value_name.is_empty() and not social_stats.has(tired_value_name):
+		social_stats[tired_value_name] = 0.0
+		node_state["social_stats"] = social_stats
+		record["node_state"] = node_state
 	if not bool(profile.get("passive_needs_enabled", true)):
 		return
 
@@ -309,6 +317,13 @@ func _simulate_offscreen_passive_values(
 		var next_value := current_value + growth
 		social_stats[value_name] = clampf(next_value, 0.0, 100.0)
 
+	_apply_offscreen_tired_change(
+		social_stats,
+		profile,
+		paused_state_name,
+		elapsed_game_hours
+	)
+
 	_apply_offscreen_loneliness_recovery(
 		social_stats,
 		profile,
@@ -322,6 +337,58 @@ func _simulate_offscreen_passive_values(
 
 	node_state["social_stats"] = social_stats
 	record["node_state"] = node_state
+
+
+func _apply_offscreen_tired_change(
+	social_stats: Dictionary,
+	profile: Dictionary,
+	state_name: StringName,
+	game_hours: float
+) -> void:
+	# Scheduled actions build fatigue; idle off-screen NPCs can casually recover without an activity.
+	var settings = profile.get("tired", {})
+	if not (settings is Dictionary):
+		settings = {}
+	if not bool(settings.get("enabled", true)) or game_hours <= 0.0:
+		return
+
+	var value_name := String(settings.get("value_name", "tired"))
+	if value_name.is_empty():
+		return
+	var state_text := String(state_name)
+	var rate := 0.0
+	if state_text.is_empty():
+		var current_tired := float(social_stats.get(value_name, 0.0))
+		var rest_threshold := float(settings.get("rest_threshold", 50.0))
+		if current_tired < rest_threshold:
+			return
+		var rest_floor := float(settings.get("rest_floor", 40.0))
+		social_stats[value_name] = maxf(
+			current_tired
+				- absf(float(settings.get("rest_recovery_per_game_hour", 100.0)))
+				* game_hours,
+			rest_floor
+		)
+		return
+	elif state_text == "Rest":
+		rate = -absf(float(settings.get("rest_recovery_per_game_hour", 100.0)))
+	elif state_text == "Fight":
+		rate = absf(float(settings.get("fight_growth_per_game_hour", 60.0)))
+	else:
+		var inactive_states = settings.get(
+			"inactive_states",
+			[&"Idle", &"Sleep", &"Collapse", &"DisabledDead"]
+		)
+		if _variant_array_has_string(inactive_states, state_text):
+			return
+		rate = absf(float(settings.get("action_growth_per_game_hour", 25.0)))
+
+	var minimum_value := float(settings.get("rest_floor", 40.0)) if state_text == "Rest" else 0.0
+	social_stats[value_name] = clampf(
+		float(social_stats.get(value_name, 0.0)) + rate * game_hours,
+		minimum_value,
+		100.0
+	)
 
 
 func _apply_offscreen_talk_need_growth(
@@ -478,7 +545,7 @@ func _passive_value_is_paused(value_name: String, state_name: StringName) -> boo
 	if value_name == "hunger":
 		return state_text == "Eat"
 	if value_name == "boredom":
-		return state_text == "Work"
+		return state_text == "Work" or state_text == "Recreation"
 	if value_name == "talk_need":
 		return state_text == "Talk"
 
@@ -925,6 +992,7 @@ func _try_start_activity(
 		return
 	if definition == null:
 		return
+
 	if locations.has_method("is_npc_available_for_scheduled_activity"):
 		if not bool(locations.call(
 			"is_npc_available_for_scheduled_activity",
@@ -1145,6 +1213,11 @@ func _finish_activity(
 	spot_id: StringName,
 	locations: Node
 ) -> void:
+	if String(activity.get("state_name", "")) == "Sleep":
+		_set_saved_stat(record, "tired", 0.0)
+		if locations.has_method("update_simulated_record"):
+			locations.call("update_simulated_record", String(npc_id), record)
+
 	var return_scene_path := String(activity.get("return_scene_path", record.get("scene_path", "")))
 	var return_position = activity.get("return_position", record.get("last_position", Vector2.ZERO))
 	if not (return_position is Vector2):
@@ -1266,6 +1339,15 @@ func _find_best_definition(
 			best_urgency = 0.0
 
 	return best_definition
+
+
+func _variant_array_has_string(values, expected: String) -> bool:
+	if not (values is Array):
+		return false
+	for value in values:
+		if String(value) == expected:
+			return true
+	return false
 
 
 func _get_effective_need_threshold(definition: NpcSpotDefinition) -> float:

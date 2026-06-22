@@ -29,6 +29,7 @@ const STAT_KEY_ALIASES := {
 	"hunger": 25.0,
 	"energy": 100.0,
 	"sleep_need": 0.0,
+	"tired": 0.0,
 	"boredom": 0.0,
 	"bored": 0.0,
 	"talk_need": 0.0,
@@ -475,6 +476,15 @@ func _get_world_simulation_profile() -> Dictionary:
 	if npc_state_machine == null:
 		return {}
 
+	var tired_rest_threshold := 50.0
+	var tired_rest_rule = npc_state_machine.value_state_rules.get("tired_rest", {})
+	if tired_rest_rule is Dictionary:
+		tired_rest_threshold = float(tired_rest_rule.get("at_least", tired_rest_threshold))
+	var tired_rest_floor := 40.0
+	var rest_state := npc_state_machine.get_state(&"Rest")
+	if rest_state != null and rest_state.has_method("get_tired_floor"):
+		tired_rest_floor = float(rest_state.call("get_tired_floor"))
+
 	var talk_interval_minutes := maxf(
 		float(npc_state_machine.talk_need_growth_interval_game_minutes),
 		0.001
@@ -489,6 +499,16 @@ func _get_world_simulation_profile() -> Dictionary:
 				npc_state_machine.talk_need_growth_per_interval
 				* (60.0 / talk_interval_minutes)
 			),
+		},
+		"tired": {
+			"enabled": npc_state_machine.tired_enabled,
+			"value_name": String(npc_state_machine.tired_value_name),
+			"action_growth_per_game_hour": npc_state_machine.tired_growth_per_action_game_hour,
+			"fight_growth_per_game_hour": npc_state_machine.tired_growth_per_fight_game_hour,
+			"rest_recovery_per_game_hour": npc_state_machine.tired_recovery_per_rest_game_hour,
+			"rest_threshold": tired_rest_threshold,
+			"rest_floor": tired_rest_floor,
+			"inactive_states": npc_state_machine.tired_inactive_states.duplicate(),
 		},
 		"loneliness_recovery": {
 			"enabled": npc_state_machine.loneliness_recovery_enabled,
@@ -711,6 +731,7 @@ func _ensure_social_stats() -> void:
 		"hunger": 25.0,
 		"energy": 100.0,
 		"sleep_need": 0.0,
+		"tired": 0.0,
 		"boredom": 0.0,
 		"bored": 0.0,
 		"talk_need": 0.0,

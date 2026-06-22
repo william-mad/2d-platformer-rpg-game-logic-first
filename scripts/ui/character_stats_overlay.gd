@@ -13,6 +13,7 @@ class_name CharacterStatsOverlay extends CanvasLayer
 	"hp",
 	"hunger",
 	"sleep_need",
+	"tired",
 	"boredom",
 	"talk_need",
 	"lonely",

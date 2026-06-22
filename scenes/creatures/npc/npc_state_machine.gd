@@ -35,7 +35,6 @@ const STATE_ALIASES := {
 @export_range(0.0, 24.0, 0.05, "suffix:h") var default_work_game_hours: float = 4.5
 @export var default_eat_time: float = 2.0
 @export_range(0.0, 1440.0, 1.0, "suffix:min") var default_eat_game_minutes: float = 60.0
-@export var default_rest_time: float = 2.0
 @export var default_talk_time: float = 1.5
 @export_range(0.0, 1440.0, 1.0, "suffix:min") var default_talk_game_minutes: float = 10.0
 @export var default_look_for_talk_time: float = 4.0
@@ -55,8 +54,21 @@ const STATE_ALIASES := {
 @export var stagger_passive_need_ticks: bool = true
 @export var sleep_need_paused_states: Array[StringName] = [&"Sleep", &"Collapse"]
 @export var hunger_paused_states: Array[StringName] = [&"Eat"]
-@export var boredom_paused_states: Array[StringName] = [&"Work"]
+@export var boredom_paused_states: Array[StringName] = [&"Work", &"Recreation"]
 @export var talk_need_paused_states: Array[StringName] = [&"Talk"]
+
+@export_group("Action Fatigue")
+@export var tired_enabled: bool = true
+@export var tired_value_name: StringName = &"tired"
+@export_range(0.0, 100.0, 0.1, "suffix:/h") var tired_growth_per_action_game_hour: float = 25.0
+@export_range(0.0, 100.0, 0.1, "suffix:/h") var tired_growth_per_fight_game_hour: float = 60.0
+@export_range(0.0, 200.0, 0.1, "suffix:/h") var tired_recovery_per_rest_game_hour: float = 100.0
+@export var tired_inactive_states: Array[StringName] = [
+	&"Idle",
+	&"Sleep",
+	&"Collapse",
+	&"DisabledDead",
+]
 
 @export_group("Loneliness Recovery")
 @export var loneliness_recovery_enabled: bool = true
@@ -101,6 +113,7 @@ const STATE_ALIASES := {
 	"hunger": 25.0,
 	"energy": 100.0,
 	"sleep_need": 0.0,
+	"tired": 0.0,
 	"boredom": 0.0,
 	"bored": 0.0,
 	"talk_need": 0.0,
@@ -147,14 +160,12 @@ const STATE_ALIASES := {
 		"at_least": 100.0,
 		"priority": 95
 	},
-	"sleep_rest_before_noon": {
-		"value": "sleep_need",
+	"tired_rest": {
+		"value": "tired",
 		"state": "Rest",
-		"at_least": 51.0,
-		"at_most": 70.0,
-		"before_hour": 12.0,
+		"at_least": 50.0,
 		"requires_idle": true,
-		"priority": 30
+		"priority": 15
 	},
 	"hungry": {
 		"value": "hunger",
@@ -163,13 +174,13 @@ const STATE_ALIASES := {
 		"requires_idle": true,
 		"priority": 50
 	},
-	"boredom_do_anything": {
+	"casual_recreation": {
 		"value": "boredom",
-		"state": "DoAnything",
-		"at_least": 91.0,
-		"at_most": 99.0,
+		"state": "Recreation",
+		"at_least": 50.0,
 		"requires_idle": true,
-		"priority": 55
+		"requires_casual_spot": true,
+		"priority": 10
 	},
 	"talk_to_seen_target": {
 		"value": "talk_need",
@@ -238,6 +249,7 @@ var move_target: Node2D
 var work_target: Node2D
 var eat_target: Node2D
 var rest_target: Node2D
+var recreation_target: Node2D
 var sleep_target: Node2D
 var talk_target: Node2D
 var state_after_move: StringName = &"Idle"
@@ -547,12 +559,21 @@ func assign_eat_target(new_target: Node2D) -> bool:
 
 
 func assign_rest_target(new_target: Node2D) -> bool:
-	# Stores a rest spot for medium sleep need before a full bed/sleep response.
+	# Stores a fatigue-rest spot without changing the NPC's sleep need.
 	if new_target == null or not is_instance_valid(new_target):
 		return false
 
 	rest_target = new_target
 	return request_state(&"Rest", new_target, "rest_target", 20)
+
+
+func assign_recreation_target(new_target: Node2D) -> bool:
+	# Stores a recreation spot so the NPC can walk there before lowering boredom.
+	if new_target == null or not is_instance_valid(new_target):
+		return false
+
+	recreation_target = new_target
+	return request_state(&"Recreation", new_target, "recreation_target", 20)
 
 
 func assign_sleep_target(new_target: Node2D) -> bool:
@@ -929,6 +950,10 @@ func _apply_passive_need_growth(real_seconds: float) -> void:
 			* (game_minutes / talk_need_growth_interval_game_minutes)
 		)
 
+	var tired_delta := _get_tired_delta(game_hours)
+	if not is_equal_approx(tired_delta, 0.0):
+		value_delta[String(tired_value_name)] = tired_delta
+
 	if (
 		loneliness_recovery_enabled
 		and loneliness_value_name != &""
@@ -984,6 +1009,30 @@ func _apply_passive_need_growth(real_seconds: float) -> void:
 		return
 
 	apply_value_delta(value_delta, null, true)
+
+
+func _get_tired_delta(game_hours: float) -> float:
+	# Actions build short-term fatigue; Rest clears it quickly while Sleep handles it on completion.
+	if not tired_enabled or tired_value_name == &"" or game_hours <= 0.0:
+		return 0.0
+	if current_state == null:
+		return 0.0
+
+	if _current_state_is(&"Rest"):
+		var recovery_floor := 0.0
+		var rest_state := get_state(&"Rest")
+		if rest_state != null and rest_state.has_method("get_tired_floor"):
+			recovery_floor = float(rest_state.call("get_tired_floor"))
+		return -minf(
+			maxf(get_value(tired_value_name) - recovery_floor, 0.0),
+			tired_recovery_per_rest_game_hour * game_hours
+		)
+	if _current_state_is(&"Fight"):
+		return tired_growth_per_fight_game_hour * game_hours
+	if _current_state_matches_any(tired_inactive_states):
+		return 0.0
+
+	return tired_growth_per_action_game_hour * game_hours
 
 
 func _get_anger_decay_delta(game_hours: float) -> float:
@@ -1170,6 +1219,11 @@ func _find_best_matching_rule(changed_values: Dictionary, actor: Node2D = null) 
 		var state_name := StringName(String(rule_dictionary.get("state", "")))
 		if state_name == &"" or get_state(state_name) == null:
 			continue
+		if (
+			bool(rule_dictionary.get("requires_casual_spot", false))
+			and not _has_available_casual_spot(state_name)
+		):
+			continue
 
 		if bool(rule_dictionary.get("requires_target", false)):
 			if _get_rule_request_actor(actor, rule_dictionary) == null:
@@ -1184,6 +1238,21 @@ func _find_best_matching_rule(changed_values: Dictionary, actor: Node2D = null) 
 		best_rule["reason"] = String(rule_name)
 
 	return best_rule
+
+
+func _has_available_casual_spot(state_name: StringName) -> bool:
+	if npc == null or not npc.is_inside_tree():
+		return false
+	for candidate in npc.get_tree().get_nodes_in_group("npc_casual_spot"):
+		var spot := candidate as Node2D
+		if spot == null or not is_instance_valid(spot):
+			continue
+		if not spot.has_method("can_serve_npc_casual_activity"):
+			continue
+		if bool(spot.call("can_serve_npc_casual_activity", npc, state_name)):
+			return true
+
+	return false
 
 
 func _apply_threshold_effects(changed_values: Dictionary) -> void:

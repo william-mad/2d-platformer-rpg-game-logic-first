@@ -1,19 +1,25 @@
 class_name NpcStateRest extends NpcState
 
 @export var rest_target_path: NodePath
-@export var rest_duration: float = -1.0
-@export var rest_value_name: StringName = &"sleep_need"
-@export var rest_complete_delta: float = -15.0
+@export var rest_value_name: StringName = &"tired"
+@export_range(0.0, 100.0, 0.1) var tired_floor: float = 40.0
+@export_range(0.0, 1.0, 0.01) var rest_in_place_chance: float = 0.4
 
-var rest_timer: float = 0.0
 var active_rest_target: Node2D
+var resting_in_place: bool = false
+var choice_rng := RandomNumberGenerator.new()
+
+
+func init() -> void:
+	choice_rng.randomize()
 
 
 func enter() -> void:
-	# Walks to a rest spot first, then starts a short sleep_need relief timer.
+	# Chooses an assigned/preferred rest spot or occasionally rests where the NPC stands.
 	super.enter()
 
 	active_rest_target = _resolve_rest_target()
+	resting_in_place = active_rest_target == null
 	if active_rest_target != null and not is_close_to(active_rest_target.global_position, machine.stop_distance):
 		machine.move_target = active_rest_target
 		machine.state_after_move = &"Rest"
@@ -26,43 +32,40 @@ func enter() -> void:
 		)
 		return
 
-	rest_timer = rest_duration
-	if rest_timer < 0.0:
-		rest_timer = machine.default_rest_time
-
 	stop_horizontal()
 
 
-func physics_process(delta: float) -> NpcState:
-	# Rest only lowers sleep_need after the timer completes.
+func physics_process(_delta: float) -> NpcState:
+	# The state machine's 10-second fatigue tick lowers tired while this state remains active.
 	stop_horizontal()
 
 	if active_rest_target != null and not _target_can_be_rested_at(active_rest_target):
 		machine.rest_target = null
 		active_rest_target = _resolve_rest_target()
-		if active_rest_target == null:
-			return get_state(&"Idle")
+		resting_in_place = active_rest_target == null
 
 	if active_rest_target != null and not is_close_to(active_rest_target.global_position, machine.stop_distance):
 		machine.move_target = active_rest_target
 		machine.state_after_move = &"Rest"
 		return get_state(&"MoveToTarget")
 
-	if rest_timer <= 0.0:
-		return next_state
+	if rest_value_name == &"" or machine.get_value(rest_value_name) <= tired_floor:
+		machine.rest_target = null
+		return get_state(&"Idle")
 
-	rest_timer -= delta
-	if rest_timer > 0.0:
-		return next_state
+	return next_state
 
-	if rest_value_name != &"":
-		machine.apply_value_delta({String(rest_value_name): rest_complete_delta}, null, false)
 
-	return get_state(&"Idle")
+func is_resting_in_place() -> bool:
+	return resting_in_place and active_rest_target == null
+
+
+func get_tired_floor() -> float:
+	return tired_floor
 
 
 func _resolve_rest_target() -> Node2D:
-	# Target priority: exported path, assigned spot, then closest matching Rest spot.
+	# Explicit assignments win; otherwise the NPC rolls in-place rest before weighted spot choice.
 	if machine == null:
 		return null
 
@@ -75,10 +78,13 @@ func _resolve_rest_target() -> Node2D:
 		return machine.rest_target
 
 	machine.rest_target = null
-	var closest_spot := find_closest_need_spot(&"Rest", rest_value_name)
-	if closest_spot != null:
-		machine.rest_target = closest_spot
-		return closest_spot
+	if choice_rng.randf() < clampf(rest_in_place_chance, 0.0, 1.0):
+		return null
+
+	var preferred_spot := find_weighted_casual_spot(&"Rest", choice_rng)
+	if preferred_spot != null:
+		machine.rest_target = preferred_spot
+		return preferred_spot
 
 	return null
 
@@ -87,7 +93,7 @@ func _target_can_be_rested_at(rest_target: Node2D) -> bool:
 	if rest_target == null or not is_instance_valid(rest_target):
 		return false
 
-	if rest_target.has_method("can_serve_npc_need"):
-		return bool(rest_target.call("can_serve_npc_need", npc, &"Rest", rest_value_name))
+	if rest_target.has_method("can_serve_npc_casual_activity"):
+		return bool(rest_target.call("can_serve_npc_casual_activity", npc, &"Rest"))
 
 	return true

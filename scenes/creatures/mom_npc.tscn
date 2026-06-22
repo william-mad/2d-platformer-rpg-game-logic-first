@@ -31,6 +31,7 @@ social_stats = {
 "love": 80.0,
 "sadness": 0.0,
 "sleep_need": 10.0,
+"tired": 0.0,
 "suspicion": 0.0,
 "talk_need": 25.0,
 "trust": 85.0

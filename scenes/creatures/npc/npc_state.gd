@@ -139,6 +139,52 @@ func find_closest_need_spot(
 	return closest_spot
 
 
+func find_weighted_casual_spot(
+	requested_state_name: StringName,
+	rng: RandomNumberGenerator
+) -> Node2D:
+	# Casual spots have no need values; preference only weights valid destinations.
+	if npc == null or not npc.is_inside_tree() or rng == null:
+		return null
+
+	var candidates: Array[Node2D] = []
+	var weights: Array[float] = []
+	var total_weight := 0.0
+	for candidate in npc.get_tree().get_nodes_in_group("npc_casual_spot"):
+		var spot := candidate as Node2D
+		if spot == null or not is_instance_valid(spot):
+			continue
+		if not spot.has_method("can_serve_npc_casual_activity"):
+			continue
+		if not bool(spot.call(
+			"can_serve_npc_casual_activity",
+			npc,
+			requested_state_name
+		)):
+			continue
+
+		var weight := 1.0
+		if spot.has_method("get_npc_preference_weight"):
+			weight = maxf(float(spot.call("get_npc_preference_weight", npc)), 0.0)
+		if weight <= 0.0:
+			continue
+
+		candidates.append(spot)
+		weights.append(weight)
+		total_weight += weight
+
+	if candidates.is_empty() or total_weight <= 0.0:
+		return null
+
+	var roll := rng.randf_range(0.0, total_weight)
+	for index in candidates.size():
+		roll -= weights[index]
+		if roll <= 0.0:
+			return candidates[index]
+
+	return candidates.back()
+
+
 func move_toward_position(
 	target_position: Vector2,
 	speed: float,

@@ -1,0 +1,24 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/instances/npc_casual_spot.gd" id="1_casual_spot"]
+
+[node name="NpcRestSpot" type="Node2D"]
+script = ExtResource("1_casual_spot")
+activity_state_name = &"Rest"
+
+[node name="ZoneVisual" type="Polygon2D" parent="."]
+color = Color(0.25, 0.72, 0.45, 0.32)
+polygon = PackedVector2Array(-64, -44, 64, -44, 64, 44, -64, 44)
+
+[node name="Label" type="Label" parent="."]
+offset_left = -74.0
+offset_top = -78.0
+offset_right = 74.0
+offset_bottom = -44.0
+text = "Rest"
+horizontal_alignment = 1
+vertical_alignment = 1
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1

@@ -13,8 +13,8 @@
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/rest.gd" id="11_rest"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/collapse.gd" id="12_collapse"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/look_for_talk_target.gd" id="13_look_talk"]
-[ext_resource type="Script" path="res://scenes/creatures/npc/states/do_anything.gd" id="14_anything"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/fight.gd" id="15_fight"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/recreation.gd" id="16_recreation"]
 
 [node name="NpcStateMachine" type="Node"]
 script = ExtResource("1_machine")
@@ -52,10 +52,10 @@ animation_name = &"rest"
 stop_horizontal_on_enter = true
 allows_scheduled_activity_interrupt = true
 
-[node name="DoAnything" type="Node" parent="."]
+[node name="Recreation" type="Node" parent="."]
 unique_name_in_owner = true
-script = ExtResource("14_anything")
-animation_name = &"idle"
+script = ExtResource("16_recreation")
+animation_name = &"recreation"
 stop_horizontal_on_enter = true
 allows_scheduled_activity_interrupt = true
 

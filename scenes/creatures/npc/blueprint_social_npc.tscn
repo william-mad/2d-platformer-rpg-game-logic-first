@@ -16,6 +16,7 @@ social_stats = {
 "love": 5.0,
 "sadness": 0.0,
 "sleep_need": 10.0,
+"tired": 0.0,
 "suspicion": 0.0,
 "talk_need": 25.0,
 "trust": 65.0,
@@ -92,12 +93,12 @@ value_state_rules = {
 "state": "Eat",
 "value": "hunger"
 },
-"boredom_do_anything": {
-"at_least": 91.0,
-"at_most": 99.0,
-"priority": 55,
+"casual_recreation": {
+"at_least": 50.0,
+"priority": 10,
+"requires_casual_spot": true,
 "requires_idle": true,
-"state": "DoAnything",
+"state": "Recreation",
 "value": "boredom"
 },
 "sleep_collapse": {
@@ -118,14 +119,12 @@ value_state_rules = {
 }],
 "value": "sleep_need"
 },
-"sleep_rest_before_noon": {
-"at_least": 51.0,
-"at_most": 70.0,
-"before_hour": 12.0,
-"priority": 30,
+"tired_rest": {
+"at_least": 50.0,
+"priority": 15,
 "requires_idle": true,
 "state": "Rest",
-"value": "sleep_need"
+"value": "tired"
 },
 "talk_search_for_people": {
 "at_least": 70.0,

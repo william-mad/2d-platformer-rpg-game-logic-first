@@ -5,6 +5,7 @@ class_name NpcStateSleep extends NpcState
 @export var sleep_value_name: StringName = &"sleep_need"
 @export var sleep_need_drop_per_full_sleep: float = 100.0
 @export var sleep_progress_tick_seconds: float = 1.0
+@export var refreshed_value_name: StringName = &"tired"
 @export var wake_on_target_seen: bool = false
 @export var wake_value_names: Array[StringName] = [&"hp", &"disabled"]
 
@@ -77,6 +78,7 @@ func physics_process(delta: float) -> NpcState:
 		return get_state(&"MoveToTarget")
 
 	if sleep_timer <= 0.0:
+		_finish_successful_sleep()
 		return get_state(&"Idle")
 
 	sleep_timer -= delta
@@ -84,9 +86,11 @@ func physics_process(delta: float) -> NpcState:
 
 	if sleep_timer <= 0.0:
 		_flush_sleep_progress()
+		_finish_successful_sleep()
 		return get_state(&"Idle")
 
 	if _sleep_need_is_sated():
+		_finish_successful_sleep()
 		return get_state(&"Idle")
 
 	return next_state
@@ -184,6 +188,16 @@ func _sleep_need_is_sated() -> bool:
 		return sleep_timer <= 0.0
 
 	return machine.get_value(sleep_value_name) <= 0.0
+
+
+func _finish_successful_sleep() -> void:
+	# A completed sleep fully clears action fatigue; interrupted sleep leaves it intact.
+	if refreshed_value_name == &"":
+		return
+	var current_value := machine.get_value(refreshed_value_name)
+	if current_value <= 0.0:
+		return
+	machine.apply_value_delta({String(refreshed_value_name): -current_value}, null, false)
 
 
 func _set_perception_enabled(enabled: bool) -> void:

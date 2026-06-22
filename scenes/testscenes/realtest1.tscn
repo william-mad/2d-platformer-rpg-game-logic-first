@@ -19,6 +19,8 @@
 [ext_resource type="Resource" path="res://data/npc_spots/mom_eat.tres" id="22_mom_eat_definition"]
 [ext_resource type="Resource" path="res://data/npc_spots/mom_work.tres" id="23_mom_work_definition"]
 [ext_resource type="Resource" path="res://data/npc_spots/mom_eat_prep.tres" id="24_mom_eat_prep_definition"]
+[ext_resource type="PackedScene" path="res://scenes/things/npc_recreation_spot.tscn" id="25_recreation_spot"]
+[ext_resource type="PackedScene" path="res://scenes/things/npc_rest_spot.tscn" id="26_rest_spot"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_q8s1k"]
 texture = ExtResource("9_fddca")
@@ -254,6 +256,24 @@ target_scene_path = "res://scenes/testscenes/realhometest.tscn"
 
 [node name="MomNpc" parent="." unique_id=259380572 instance=ExtResource("15_mom_npc")]
 position = Vector2(520, 368)
+
+[node name="GardenRecreationSpot" parent="." instance=ExtResource("25_recreation_spot")]
+position = Vector2(-850, 368)
+npc_preference_weights = {
+"mom": 1.0
+}
+
+[node name="YardRecreationSpot" parent="." instance=ExtResource("25_recreation_spot")]
+position = Vector2(1080, 368)
+npc_preference_weights = {
+"mom": 3.0
+}
+
+[node name="OutsideRestSpot" parent="." instance=ExtResource("26_rest_spot")]
+position = Vector2(-80, 368)
+npc_preference_weights = {
+"mom": 1.0
+}
 
 [node name="MomMealCycleSpot" parent="." unique_id=2012645276 instance=ExtResource("20_work_spot")]
 position = Vector2(-1217, 325)

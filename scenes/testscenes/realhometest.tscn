@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="PackedScene" path="res://player/player.tscn" id="1_player"]
 [ext_resource type="Script" path="res://scripts/systems/npc_location_scene.gd" id="2_location_scene"]
@@ -6,6 +6,7 @@
 [ext_resource type="PackedScene" path="res://scenes/things/npc_need_spot.tscn" id="4_need_spot"]
 [ext_resource type="PackedScene" path="res://scenes/ui/character_stats_overlay.tscn" id="5_stats_overlay"]
 [ext_resource type="Resource" path="res://data/npc_spots/mom_bed.tres" id="6_mom_bed"]
+[ext_resource type="PackedScene" path="res://scenes/things/npc_rest_spot.tscn" id="7_rest_spot"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_floor"]
 size = Vector2(1152, 64)
@@ -96,5 +97,12 @@ save_id = "realhometest_mom_sleep"
 world_definition = ExtResource("6_mom_bed")
 restrict_to_target_npc = false
 label_prefix = "Mom Sleep"
+
+[node name="HomeRestSpot" parent="." instance=ExtResource("7_rest_spot")]
+position = Vector2(-120, 368)
+owner_npc_ids = Array[StringName]([&"mom"])
+npc_preference_weights = {
+"mom": 4.0
+}
 
 [node name="CharacterStatsOverlay" parent="." instance=ExtResource("5_stats_overlay")]
