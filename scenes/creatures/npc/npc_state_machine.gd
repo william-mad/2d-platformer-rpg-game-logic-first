@@ -540,49 +540,49 @@ func assign_move_target(new_target: Node2D, arrive_state_name: StringName = &"Id
 	return request_state(&"MoveToTarget", new_target, "move_target", 20)
 
 
-func assign_work_target(new_target: Node2D) -> bool:
+func assign_work_target(new_target: Node2D, request_priority: int = 20) -> bool:
 	# Stores a work spot so Work can walk there before clearing its work_needed.
 	if new_target == null or not is_instance_valid(new_target):
 		return false
 
 	work_target = new_target
-	return request_state(&"Work", new_target, "work_target", 20)
+	return request_state(&"Work", new_target, "work_target", request_priority)
 
 
-func assign_eat_target(new_target: Node2D) -> bool:
+func assign_eat_target(new_target: Node2D, request_priority: int = 20) -> bool:
 	# Stores an eat spot so Eat can walk there before lowering hunger.
 	if new_target == null or not is_instance_valid(new_target):
 		return false
 
 	eat_target = new_target
-	return request_state(&"Eat", new_target, "eat_target", 20)
+	return request_state(&"Eat", new_target, "eat_target", request_priority)
 
 
-func assign_rest_target(new_target: Node2D) -> bool:
+func assign_rest_target(new_target: Node2D, request_priority: int = 20) -> bool:
 	# Stores a fatigue-rest spot without changing the NPC's sleep need.
 	if new_target == null or not is_instance_valid(new_target):
 		return false
 
 	rest_target = new_target
-	return request_state(&"Rest", new_target, "rest_target", 20)
+	return request_state(&"Rest", new_target, "rest_target", request_priority)
 
 
-func assign_recreation_target(new_target: Node2D) -> bool:
+func assign_recreation_target(new_target: Node2D, request_priority: int = 20) -> bool:
 	# Stores a recreation spot so the NPC can walk there before lowering boredom.
 	if new_target == null or not is_instance_valid(new_target):
 		return false
 
 	recreation_target = new_target
-	return request_state(&"Recreation", new_target, "recreation_target", 20)
+	return request_state(&"Recreation", new_target, "recreation_target", request_priority)
 
 
-func assign_sleep_target(new_target: Node2D) -> bool:
+func assign_sleep_target(new_target: Node2D, request_priority: int = 20) -> bool:
 	# Stores a sleep spot so Sleep can walk there before starting the long timer.
 	if new_target == null or not is_instance_valid(new_target):
 		return false
 
 	sleep_target = new_target
-	return request_state(&"Sleep", new_target, "sleep_target", 20)
+	return request_state(&"Sleep", new_target, "sleep_target", request_priority)
 
 
 func request_talk(new_target: Node2D) -> bool:

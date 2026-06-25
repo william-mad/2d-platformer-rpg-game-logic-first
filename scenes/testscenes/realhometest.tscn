@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="PackedScene" path="res://player/player.tscn" id="1_player"]
 [ext_resource type="Script" path="res://scripts/systems/npc_location_scene.gd" id="2_location_scene"]
@@ -7,6 +7,7 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/character_stats_overlay.tscn" id="5_stats_overlay"]
 [ext_resource type="Resource" path="res://data/npc_spots/mom_bed.tres" id="6_mom_bed"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_rest_spot.tscn" id="7_rest_spot"]
+[ext_resource type="PackedScene" path="res://scenes/things/player_sleep_spot.tscn" id="8_player_sleep_spot"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_floor"]
 size = Vector2(1152, 64)
@@ -97,6 +98,9 @@ save_id = "realhometest_mom_sleep"
 world_definition = ExtResource("6_mom_bed")
 restrict_to_target_npc = false
 label_prefix = "Mom Sleep"
+
+[node name="PlayerSleepSpot" parent="." instance=ExtResource("8_player_sleep_spot")]
+position = Vector2(80, 368)
 
 [node name="HomeRestSpot" parent="." instance=ExtResource("7_rest_spot")]
 position = Vector2(-120, 368)

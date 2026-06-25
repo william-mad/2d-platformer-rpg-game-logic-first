@@ -44,6 +44,7 @@ const VALUE_ALIASES := {
 
 @export_group("Visual")
 @export var label_prefix: String = "Need"
+@export var show_owner_debug_label: bool = true
 @export var low_need_color: Color = Color(0.18, 0.82, 0.28, 0.46)
 @export var high_need_color: Color = Color(0.95, 0.12, 0.08, 0.54)
 @export var missing_target_color: Color = Color(0.45, 0.45, 0.45, 0.32)
@@ -128,6 +129,7 @@ func _apply_world_definition() -> void:
 	request_state_name = world_definition.state_name
 	request_priority = world_definition.priority
 	target_assignment_method = world_definition.target_assignment_method
+	require_target_need_threshold = world_definition.require_npc_value_threshold
 	owner_npc_ids = world_definition.owner_npc_ids.duplicate()
 	active_time_windows = world_definition.active_time_windows.duplicate(true)
 
@@ -229,13 +231,13 @@ func _update_visual() -> void:
 		if zone_visual != null:
 			zone_visual.color = low_need_color
 		if label != null:
-			label.text = "%s\nReady" % label_prefix
+			label.text = _format_spot_label(label_prefix, "Ready")
 		return
 	else:
 		if zone_visual != null:
 			zone_visual.color = missing_target_color
 		if label != null:
-			label.text = "%s\n--" % label_prefix
+			label.text = _format_spot_label(label_prefix, "--")
 		return
 
 	var ratio := _get_display_ratio(current_value)
@@ -243,7 +245,7 @@ func _update_visual() -> void:
 		zone_visual.color = low_need_color.lerp(high_need_color, ratio)
 
 	if label != null:
-		label.text = "%s\n%d" % [label_prefix, int(round(current_value))]
+		label.text = _format_spot_label(label_prefix, str(int(round(current_value))))
 
 
 func _get_owner_display_value() -> Dictionary:
@@ -662,6 +664,27 @@ func _connect_machine_signals() -> void:
 
 func is_work_spot() -> bool:
 	return false
+
+
+func _format_spot_label(title: String, value_text: String, owner_text: String = "") -> String:
+	if owner_text.is_empty():
+		owner_text = _get_owner_debug_text()
+	if show_owner_debug_label and not owner_text.is_empty():
+		return "%s\n%s\n%s" % [owner_text, title, value_text]
+
+	return "%s\n%s" % [title, value_text]
+
+
+func _get_owner_debug_text() -> String:
+	var owner_ids := _get_configured_owner_ids()
+	if owner_ids.is_empty():
+		return "owners:any"
+
+	var owner_texts: Array[String] = []
+	for owner_id in owner_ids:
+		owner_texts.append(String(owner_id))
+
+	return "owners:%s" % ",".join(owner_texts)
 
 
 func _canonical_value_key(value_key) -> String:

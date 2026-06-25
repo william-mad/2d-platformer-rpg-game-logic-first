@@ -13,6 +13,9 @@ class_name NpcSpotDefinition extends Resource
 @export var value_delta_per_game_hour: float = 0.0
 @export var priority: int = 20
 @export var target_assignment_method: StringName = &""
+@export var require_npc_value_threshold: bool = true
+@export var finish_when_npc_value_sated: bool = true
+@export var timed_need_thresholds: Array[Dictionary] = []
 
 @export_group("Mutable Spot Value")
 @export var spot_value_name: StringName = &""

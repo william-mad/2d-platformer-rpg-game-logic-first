@@ -30,12 +30,13 @@ func physics_process(delta: float) -> NpcState:
 	if search_timer <= 0.0:
 		return get_state(end_state_name)
 
-	if is_close_to(talk_target.global_position, machine.stop_distance):
+	var approach_distance := _get_talk_approach_distance()
+	if is_close_to(talk_target.global_position, approach_distance):
 		machine.talk_target = talk_target
 		machine.set_target(talk_target)
 		return get_state(talk_state_name)
 
-	move_toward_position(talk_target.global_position, machine.walk_speed, machine.stop_distance)
+	move_toward_position(talk_target.global_position, machine.walk_speed, approach_distance)
 	return next_state
 
 
@@ -102,3 +103,13 @@ func _get_relationship_favor_for(candidate: Node) -> float:
 		return float(relationships.call("get_favor", npc, candidate, 50.0))
 
 	return 50.0
+
+
+func _get_talk_approach_distance() -> float:
+	# Keeps the search arrival distance aligned with the actual Talk state's preferred range.
+	var fallback_distance := machine.stop_distance if machine != null else 12.0
+	var talk_state := get_state(talk_state_name)
+	if talk_state != null and talk_state.has_method("get_talk_approach_distance"):
+		return maxf(float(talk_state.call("get_talk_approach_distance")), fallback_distance)
+
+	return fallback_distance

@@ -159,6 +159,8 @@ func _append_player_lines(lines: Array[String]) -> void:
 	var player_values := {
 		"hp": _get_property_if_present(player, &"hp"),
 		"max_hp": _get_property_if_present(player, &"max_hp"),
+		"hunger": _get_property_if_present(player, &"hunger"),
+		"sleep_need": _get_property_if_present(player, &"sleep_need"),
 		"mana": _get_property_if_present(player, &"mana_amount"),
 		"mana_2": _get_property_if_present(player, &"mana_2_amount"),
 	}

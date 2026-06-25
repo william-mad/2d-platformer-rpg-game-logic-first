@@ -285,7 +285,6 @@ player_work_interaction_id = &"meal_prep"
 
 [node name="MomWorkNeedSpot" parent="." unique_id=1167551469 instance=ExtResource("20_work_spot")]
 position = Vector2(1443, 322)
-collision_mask = 0
 save_id = "realtest1_mom_work"
 spot_id = &"mom_work"
 world_definition = ExtResource("23_mom_work_definition")

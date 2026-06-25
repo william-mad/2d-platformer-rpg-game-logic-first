@@ -260,6 +260,132 @@ func simulate_now() -> void:
 			_try_start_activity(npc_id, record, total_hours, hour, locations, records)
 
 
+func simulate_player_sleep_skip(
+	start_total_hours: float,
+	end_total_hours: float,
+	options: Dictionary = {}
+) -> void:
+	# Overnight player sleep refreshes body needs only; social stats/relationships are preserved.
+	var elapsed_game_hours := maxf(end_total_hours - start_total_hours, 0.0)
+	if elapsed_game_hours <= 0.0:
+		return
+
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations == null or not locations.has_method("get_all_locations"):
+		return
+
+	var records: Dictionary = locations.call("get_all_locations")
+	for npc_id_key in records.keys():
+		var record = records[npc_id_key]
+		if not (record is Dictionary):
+			continue
+
+		var npc_id := String(npc_id_key)
+		var updated_record: Dictionary = record.duplicate(true)
+		_apply_sleep_skip_body_values(
+			updated_record,
+			elapsed_game_hours,
+			end_total_hours,
+			options
+		)
+
+		if locations.has_method("apply_simulated_record"):
+			locations.call("apply_simulated_record", npc_id, updated_record, true)
+		elif locations.has_method("update_simulated_record"):
+			locations.call("update_simulated_record", npc_id, updated_record)
+
+		if locations.has_method("get_live_npc"):
+			var live_npc := locations.call("get_live_npc", npc_id) as Node
+			_wake_live_npc_after_sleep_skip(live_npc)
+
+	_queue_simulation()
+
+
+func _apply_sleep_skip_body_values(
+	record: Dictionary,
+	elapsed_game_hours: float,
+	end_total_hours: float,
+	options: Dictionary
+) -> void:
+	var node_state = record.get("node_state", {})
+	if not (node_state is Dictionary):
+		return
+	var social_stats = node_state.get("social_stats", {})
+	if not (social_stats is Dictionary):
+		return
+
+	var profile = node_state.get("world_simulation_profile", {})
+	if not (profile is Dictionary):
+		profile = {}
+	var rates = profile.get("rates_per_game_hour", {})
+	if not (rates is Dictionary):
+		rates = {}
+
+	var hunger_name := String(options.get("hunger_value_name", "hunger"))
+	if not hunger_name.is_empty() and social_stats.has(hunger_name):
+		var hunger_rate := float(rates.get(
+			hunger_name,
+			options.get("fallback_hunger_growth_per_game_hour", 7.0)
+		))
+		social_stats[hunger_name] = clampf(
+			float(social_stats.get(hunger_name, 0.0)) + hunger_rate * elapsed_game_hours,
+			0.0,
+			100.0
+		)
+
+	var reset_values = options.get("body_reset_values", {})
+	if not (reset_values is Dictionary) or reset_values.is_empty():
+		reset_values = {
+			"sleep_need": 0.0,
+			"tired": 0.0,
+			"energy": 100.0,
+		}
+	for value_key in reset_values.keys():
+		var value_name := String(value_key)
+		if value_name.is_empty() or not social_stats.has(value_name):
+			continue
+		social_stats[value_name] = clampf(float(reset_values[value_key]), 0.0, 100.0)
+
+	node_state["social_stats"] = social_stats
+	record["node_state"] = node_state
+	record["last_simulated_total_hours"] = end_total_hours
+	_clear_sleep_activity_after_skip(record)
+
+
+func _clear_sleep_activity_after_skip(record: Dictionary) -> void:
+	var activity = record.get("activity", {})
+	if activity is Dictionary and String(activity.get("state_name", "")) == "Sleep":
+		record["activity"] = {}
+
+	var pending = record.get("pending_travel", {})
+	if not (pending is Dictionary) or pending.is_empty():
+		return
+	if String(pending.get("requested_state_name", "")) == "Sleep":
+		record["pending_travel"] = {}
+		return
+
+	var pending_activity = pending.get("activity", {})
+	if pending_activity is Dictionary and String(pending_activity.get("state_name", "")) == "Sleep":
+		record["pending_travel"] = {}
+
+
+func _wake_live_npc_after_sleep_skip(live_npc: Node) -> void:
+	if live_npc == null or not is_instance_valid(live_npc):
+		return
+
+	var machine := live_npc.get_node_or_null("NpcStateMachine")
+	if machine == null or not machine.has_method("request_state"):
+		return
+
+	var current_state = machine.get("current_state")
+	if current_state == null:
+		return
+	if not ["Sleep", "Collapse", "Rest"].has(String(current_state.name)):
+		return
+
+	machine.call("request_state", &"Idle", null, "player_sleep_skip", 100)
+
+
 func _simulate_offscreen_passive_values(
 	record: Dictionary,
 	total_hours: float,
@@ -612,7 +738,7 @@ func resume_live_activity(npc_id: StringName, npc: Node) -> void:
 
 	var assignment_method := definition.get_assignment_method()
 	if assignment_method != &"" and machine.has_method(assignment_method):
-		if bool(machine.call(assignment_method, spot)):
+		if bool(machine.call(assignment_method, spot, definition.priority)):
 			return
 	elif machine.has_method("request_state"):
 		machine.call("request_state", definition.state_name, spot, "world_activity", definition.priority)
@@ -701,6 +827,121 @@ func _initialize_definition_runtime_states() -> void:
 			upper
 		)
 		spot_runtime_states[state_key] = state
+
+	_repair_stalled_linked_spot_cycles()
+
+
+func _repair_stalled_linked_spot_cycles() -> void:
+	# Linked spot cycles can get stranded by old saves or interrupted transitions.
+	# When every phase in a cycle is already "done", restore the configured starting phase.
+	var repaired_any := false
+	var visited_cycles: Dictionary = {}
+	for definition_value in spot_definitions.values():
+		var definition := definition_value as NpcSpotDefinition
+		if definition == null or definition.next_spot_id_when_done == &"":
+			continue
+
+		var cycle := _collect_linked_spot_cycle(definition.spot_id)
+		if cycle.is_empty():
+			continue
+
+		var cycle_key := _get_spot_cycle_key(cycle)
+		if visited_cycles.has(cycle_key):
+			continue
+		visited_cycles[cycle_key] = true
+
+		if not _linked_spot_cycle_is_stalled(cycle):
+			continue
+
+		var recovery_definition := _choose_cycle_recovery_definition(cycle)
+		if recovery_definition == null:
+			continue
+
+		set_spot_value(
+			recovery_definition.spot_id,
+			recovery_definition.spot_value_initial,
+			false
+		)
+		repaired_any = true
+
+	if repaired_any:
+		_queue_simulation()
+
+
+func _collect_linked_spot_cycle(start_spot_id: StringName) -> Array[NpcSpotDefinition]:
+	var cycle: Array[NpcSpotDefinition] = []
+	var seen: Dictionary = {}
+	var current_id := start_spot_id
+	while current_id != &"":
+		var current_key := String(current_id)
+		if seen.has(current_key):
+			if current_id == start_spot_id:
+				return cycle
+			return []
+
+		var definition := spot_definitions.get(current_id, null) as NpcSpotDefinition
+		if (
+			definition == null
+			or definition.spot_value_name == &""
+			or not spot_runtime_states.has(current_key)
+		):
+			return []
+
+		seen[current_key] = true
+		cycle.append(definition)
+		current_id = definition.next_spot_id_when_done
+
+	return []
+
+
+func _get_spot_cycle_key(cycle: Array[NpcSpotDefinition]) -> String:
+	var ids: PackedStringArray = []
+	for definition in cycle:
+		if definition != null:
+			ids.append(String(definition.spot_id))
+	ids.sort()
+	return "|".join(ids)
+
+
+func _linked_spot_cycle_is_stalled(cycle: Array[NpcSpotDefinition]) -> bool:
+	for definition in cycle:
+		if definition == null:
+			return false
+		var state = spot_runtime_states.get(String(definition.spot_id), {})
+		if not (state is Dictionary):
+			return false
+		var value := float(state.get("value", definition.spot_value_initial))
+		var done_threshold := float(state.get(
+			"done_threshold",
+			definition.spot_value_done_threshold
+		))
+		if value > done_threshold:
+			return false
+
+	return true
+
+
+func _choose_cycle_recovery_definition(
+	cycle: Array[NpcSpotDefinition]
+) -> NpcSpotDefinition:
+	var best_definition: NpcSpotDefinition
+	var best_score := -999999.0
+	for definition in cycle:
+		if definition == null:
+			continue
+		if definition.spot_value_initial <= definition.spot_value_done_threshold:
+			continue
+
+		var score := definition.spot_value_initial
+		if definition.spot_value_name == &"work_needed":
+			score += 5000.0
+		if definition.state_name == &"Work":
+			score += 10000.0
+		if best_definition == null or score > best_score:
+			best_definition = definition
+			best_score = score
+
+	return best_definition
 
 
 func _try_start_social_seek(
@@ -1170,7 +1411,11 @@ func _update_activity(
 		return
 
 	var value_name := String(definition.value_name)
-	if not value_name.is_empty() and _get_saved_stat(record, value_name) <= 0.0:
+	if (
+		definition.finish_when_npc_value_sated
+		and not value_name.is_empty()
+		and _get_saved_stat(record, value_name) <= 0.0
+	):
 		_finish_activity(npc_id, record, activity, spot_id, locations)
 		return
 
@@ -1200,7 +1445,11 @@ func _update_activity(
 		locations.call("update_simulated_record", String(npc_id), record)
 
 	if (
-		(not value_name.is_empty() and _get_saved_stat(record, value_name) <= 0.0)
+		(
+			definition.finish_when_npc_value_sated
+			and not value_name.is_empty()
+			and _get_saved_stat(record, value_name) <= 0.0
+		)
 		or not _spot_runtime_is_available(definition)
 	):
 		_finish_activity(npc_id, record, activity, spot_id, locations)
@@ -1309,15 +1558,20 @@ func _find_best_definition(
 		if not definition.is_active_at(hour):
 			continue
 		if definition.value_name != &"":
-			if not _saved_stat_exists(record, String(definition.value_name)):
+			if (
+				definition.require_npc_value_threshold
+				and not _saved_stat_exists(record, String(definition.value_name))
+			):
 				continue
 			var current_value := _get_saved_stat(record, String(definition.value_name))
-			var effective_threshold := _get_effective_need_threshold(definition)
-			if current_value < effective_threshold:
-				continue
-			if definition.need_maximum >= 0.0 and current_value > definition.need_maximum:
-				continue
-			var urgency := current_value - effective_threshold
+			var effective_threshold := _get_effective_need_threshold(definition, hour)
+			var urgency := _get_definition_urgency(definition)
+			if definition.require_npc_value_threshold:
+				if current_value < effective_threshold:
+					continue
+				if definition.need_maximum >= 0.0 and current_value > definition.need_maximum:
+					continue
+				urgency = current_value - effective_threshold
 			if (
 				best_definition == null
 				or definition.priority > best_definition.priority
@@ -1350,30 +1604,78 @@ func _variant_array_has_string(values, expected: String) -> bool:
 	return false
 
 
-func _get_effective_need_threshold(definition: NpcSpotDefinition) -> float:
+func _get_effective_need_threshold(definition: NpcSpotDefinition, hour: float) -> float:
 	# A mutable spot can lower its need threshold as its backlog approaches maximum.
+	var threshold := _get_timed_need_threshold(definition, hour)
 	if (
 		definition.spot_value_name == &""
 		or definition.need_threshold_at_spot_value_maximum < 0.0
 	):
-		return definition.need_threshold
+		return threshold
 
 	var state = spot_runtime_states.get(String(definition.spot_id), {})
 	if not (state is Dictionary):
-		return definition.need_threshold
+		return threshold
 
 	var minimum := float(state.get("minimum", definition.spot_value_minimum))
 	var maximum := float(state.get("maximum", definition.spot_value_maximum))
 	if is_equal_approx(minimum, maximum):
-		return definition.need_threshold
+		return threshold
 
 	var current := float(state.get("value", definition.spot_value_initial))
 	var backlog_ratio := clampf(inverse_lerp(minimum, maximum, current), 0.0, 1.0)
 	return lerpf(
-		definition.need_threshold,
+		threshold,
 		definition.need_threshold_at_spot_value_maximum,
 		backlog_ratio
 	)
+
+
+func _get_timed_need_threshold(definition: NpcSpotDefinition, hour: float) -> float:
+	# Meal-style windows can temporarily lower a need threshold without making the spot inactive.
+	for window in definition.timed_need_thresholds:
+		if not (window is Dictionary):
+			continue
+		var window_dictionary: Dictionary = window
+		if not _time_window_contains_hour(window_dictionary, hour):
+			continue
+		return float(window_dictionary.get(
+			"need_threshold",
+			window_dictionary.get("threshold", definition.need_threshold)
+		))
+
+	return definition.need_threshold
+
+
+func _time_window_contains_hour(window: Dictionary, hour: float) -> bool:
+	var start_hour := fposmod(float(window.get("start_hour", window.get("start", 0.0))), 24.0)
+	var end_hour := fposmod(float(window.get("end_hour", window.get("end", 24.0))), 24.0)
+	var normalized_hour := fposmod(hour, 24.0)
+
+	if is_equal_approx(start_hour, end_hour):
+		return true
+	if start_hour < end_hour:
+		return normalized_hour >= start_hour and normalized_hour < end_hour
+
+	return normalized_hour >= start_hour or normalized_hour < end_hour
+
+
+func _get_definition_urgency(definition: NpcSpotDefinition) -> float:
+	# For work-gated activities, backlog is the urgency when NPC need is not the gate.
+	if definition.spot_value_name == &"":
+		return 0.0
+
+	var state = spot_runtime_states.get(String(definition.spot_id), {})
+	if not (state is Dictionary):
+		return 0.0
+
+	var minimum := float(state.get("minimum", definition.spot_value_minimum))
+	var maximum := float(state.get("maximum", definition.spot_value_maximum))
+	if is_equal_approx(minimum, maximum):
+		return 0.0
+
+	var current := float(state.get("value", definition.spot_value_initial))
+	return clampf(inverse_lerp(minimum, maximum, current), 0.0, 1.0) * 100.0
 
 
 func _rebuild_spot_claims(records: Dictionary) -> void:

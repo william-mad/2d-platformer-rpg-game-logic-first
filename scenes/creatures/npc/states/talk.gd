@@ -9,8 +9,13 @@ signal talk_cancelled(talker: Node2D, partner: Node2D, reason: String)
 @export_range(-1.0, 60.0, 0.1, "suffix:s") var talk_duration: float = -1.0
 @export_range(0.0, 512.0, 1.0, "suffix:px") var talk_range: float = 32.0
 @export_range(0.0, 1024.0, 1.0, "suffix:px") var maximum_talk_distance: float = 180.0
+@export_range(0.1, 1.0, 0.01) var preferred_talk_distance_ratio: float = 0.65
+@export_range(0.0, 64.0, 1.0, "suffix:px") var talk_follow_resume_margin: float = 6.0
+@export var use_horizontal_talk_distance: bool = true
 @export var follow_partner_while_talking: bool = true
 @export_range(0.0, 200.0, 1.0, "suffix:px/s") var talk_follow_speed: float = 20.0
+@export_range(0.0, 200.0, 1.0, "suffix:px/s") var talk_approach_speed: float = 65.0
+@export_range(0.0, 30.0, 0.1, "suffix:s") var talk_approach_timeout: float = 8.0
 @export var follow_animation_name: StringName = &"walk"
 
 @export_group("Visible Limits")
@@ -52,6 +57,8 @@ var talk_partner: Node2D
 var talk_started_handled: bool = false
 var talk_finished_handled: bool = false
 var following_partner: bool = false
+var approaching_partner: bool = false
+var approach_timer: float = 0.0
 var talk_limits_label: Label
 var spread_rng := RandomNumberGenerator.new()
 
@@ -68,6 +75,8 @@ func enter() -> void:
 	talk_started_handled = false
 	talk_finished_handled = false
 	following_partner = false
+	approaching_partner = false
+	approach_timer = talk_approach_timeout
 	talk_timer = talk_duration
 
 	if talk_timer < 0.0:
@@ -87,6 +96,12 @@ func enter() -> void:
 
 	_show_talk_limits()
 	_update_talk_limits()
+	if _needs_talk_approach():
+		approaching_partner = true
+		if follow_animation_name != &"":
+			play_animation(follow_animation_name)
+		return
+
 	_start_talk_action()
 
 
@@ -94,6 +109,7 @@ func exit() -> void:
 	# Treat leaving early as a cancelled talk, so no talk_need reduction happens.
 	stop_horizontal()
 	following_partner = false
+	approaching_partner = false
 	_hide_talk_limits()
 	if talk_started_handled and not talk_finished_handled:
 		_cancel_talk_action("state_exit")
@@ -109,9 +125,19 @@ func physics_process(delta: float) -> NpcState:
 		_cancel_talk_action("partner_out_of_range")
 		return get_state(end_state_name)
 
+	if approaching_partner:
+		if _update_talk_approach(delta):
+			_start_talk_action()
+		if talk_finished_handled:
+			return get_state(end_state_name)
+		_update_talk_limits()
+		return next_state
+
 	_update_talk_movement()
 	_face_talk_partner()
 	_update_talk_limits()
+	if _talk_is_outside_active_range():
+		return next_state
 
 	if talk_timer <= 0.0:
 		_finish_talk_action()
@@ -132,6 +158,11 @@ func target_lost(lost_target: Node2D) -> NpcState:
 		return next_state
 
 	return next_state
+
+
+func get_talk_approach_distance() -> float:
+	# Search states use this smaller distance so NPCs do not stop at the range edge.
+	return maxf(talk_range * preferred_talk_distance_ratio, 0.0)
 
 
 func _start_talk_action() -> void:
@@ -192,6 +223,8 @@ func _cancel_talk_action(reason: String) -> void:
 		return
 
 	stop_horizontal()
+	approaching_partner = false
+	following_partner = false
 	_hide_talk_limits()
 	talk_finished_handled = true
 	if talk_started_handled:
@@ -586,7 +619,7 @@ func _partner_is_beyond_maximum_distance() -> bool:
 	if maximum_talk_distance <= 0.0 or npc == null or not _is_valid_talk_partner(talk_partner):
 		return false
 
-	return npc.global_position.distance_to(talk_partner.global_position) > maximum_talk_distance
+	return _get_talk_distance_to_partner() > maximum_talk_distance
 
 
 func _update_talk_movement() -> void:
@@ -594,12 +627,21 @@ func _update_talk_movement() -> void:
 		stop_horizontal()
 		return
 
-	var desired_range := maxf(talk_range, 0.0)
+	if _talk_is_outside_active_range():
+		_reconnect_to_talk_partner()
+		return
+
+	var desired_range := get_talk_approach_distance()
+	var follow_resume_distance := minf(
+		maxf(desired_range + talk_follow_resume_margin, desired_range),
+		maxf(talk_range, desired_range)
+	)
 	var x_distance := absf(talk_partner.global_position.x - npc.global_position.x)
+	var distance_for_follow := desired_range if following_partner else follow_resume_distance
 	var should_follow := (
 		follow_partner_while_talking
 		and talk_follow_speed > 0.0
-		and x_distance > desired_range
+		and x_distance > distance_for_follow
 	)
 	if not should_follow:
 		stop_horizontal()
@@ -612,6 +654,78 @@ func _update_talk_movement() -> void:
 		play_animation(follow_animation_name)
 	following_partner = true
 	move_toward_position(talk_partner.global_position, talk_follow_speed, desired_range)
+
+
+func _talk_is_outside_active_range() -> bool:
+	if npc == null or not _is_valid_talk_partner(talk_partner):
+		return false
+
+	return _get_talk_distance_to_partner() > talk_range
+
+
+func _reconnect_to_talk_partner() -> void:
+	var approach_speed := _get_talk_approach_speed()
+	if approach_speed <= 0.0:
+		stop_horizontal()
+		return
+
+	if not following_partner and follow_animation_name != &"":
+		play_animation(follow_animation_name)
+	following_partner = true
+	move_toward_position(talk_partner.global_position, approach_speed, get_talk_approach_distance())
+
+
+func _needs_talk_approach() -> bool:
+	if npc == null or not _is_valid_talk_partner(talk_partner):
+		return false
+
+	return _get_talk_distance_to_partner() > get_talk_approach_distance()
+
+
+func _get_talk_distance_to_partner() -> float:
+	if npc == null or not _is_valid_talk_partner(talk_partner):
+		return 0.0
+	if use_horizontal_talk_distance:
+		return absf(talk_partner.global_position.x - npc.global_position.x)
+
+	return npc.global_position.distance_to(talk_partner.global_position)
+
+
+func _update_talk_approach(delta: float) -> bool:
+	# Direct Talk requests can come from sight reactions while the partner is still far away.
+	# Approach first, then start the actual timed conversation once the spacing is comfortable.
+	if npc == null or not _is_valid_talk_partner(talk_partner):
+		stop_horizontal()
+		return false
+
+	if not _needs_talk_approach():
+		stop_horizontal()
+		approaching_partner = false
+		if animation_name != &"":
+			play_animation(animation_name)
+		return true
+
+	if talk_approach_timeout > 0.0:
+		approach_timer -= delta
+		if approach_timer <= 0.0:
+			_cancel_talk_action("approach_timeout")
+			return false
+
+	move_toward_position(
+		talk_partner.global_position,
+		_get_talk_approach_speed(),
+		get_talk_approach_distance()
+	)
+	_face_talk_partner()
+	return false
+
+
+func _get_talk_approach_speed() -> float:
+	var approach_speed := talk_approach_speed
+	if approach_speed <= 0.0 and machine != null:
+		approach_speed = machine.walk_speed
+
+	return maxf(approach_speed, talk_follow_speed)
 
 
 func _is_valid_talk_partner(candidate) -> bool:
@@ -665,9 +779,15 @@ func _update_talk_limits() -> void:
 	if talk_limits_label == null:
 		return
 
-	var distance := npc.global_position.distance_to(talk_partner.global_position)
+	var distance := _get_talk_distance_to_partner()
 	var break_distance := maxf(maximum_talk_distance, 0.0)
-	talk_limits_label.text = "Talk %.1f/%.1fs | %.0f/%.0fpx" % [
+	var mode_text := "Talk"
+	if approaching_partner:
+		mode_text = "Approach"
+	elif _talk_is_outside_active_range():
+		mode_text = "Reconnect"
+	talk_limits_label.text = "%s %.1f/%.1fs | %.0f/%.0fpx" % [
+		mode_text,
 		maxf(talk_timer, 0.0),
 		talk_total_duration,
 		distance,

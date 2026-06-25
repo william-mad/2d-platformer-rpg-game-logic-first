@@ -403,6 +403,27 @@ func update_simulated_record(npc_id: String, record: Dictionary) -> void:
 	npc_records[npc_id] = record.duplicate(true)
 
 
+func apply_simulated_record(
+	npc_id: String,
+	record: Dictionary,
+	apply_to_live_npc: bool = true
+) -> void:
+	# Time skips can update both unloaded records and live NPC bodies in one place.
+	if npc_id.is_empty() or record.is_empty():
+		return
+
+	npc_records[npc_id] = record.duplicate(true)
+	if not apply_to_live_npc:
+		return
+
+	var live_npc := get_live_npc(npc_id)
+	if live_npc == null:
+		return
+
+	if live_npc.has_method("apply_npc_location_save_data"):
+		live_npc.call("apply_npc_location_save_data", record.get("node_state", {}))
+
+
 func finish_scheduled_activity(
 	npc_id: String,
 	return_scene_path: String,

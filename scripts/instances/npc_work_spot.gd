@@ -17,23 +17,31 @@ signal player_work_applied(player: Node2D, work_done: float, work_remaining: flo
 @export var player_group: StringName = &"player"
 @export var player_work_action: StringName = &"up"
 @export_range(0.1, 100.0, 0.1) var player_work_per_interaction: float = 25.0
+@export_range(0.05, 30.0, 0.05, "suffix:s") var player_work_duration_seconds: float = 2.0
 @export_range(0.0, 10.0, 0.05, "suffix:s") var player_work_cooldown_seconds: float = 0.35
 @export var player_work_interaction_id: StringName = &"work"
 
 @export_group("Optional Eat Phase")
 @export var eat_world_definition: NpcSpotDefinition
 @export_range(0.1, 100.0, 0.1) var food_consumed_per_full_eat: float = 25.0
+@export_range(0.1, 100.0, 0.1) var player_hunger_drop_per_meal: float = 35.0
+@export_range(0.05, 30.0, 0.05, "suffix:s") var player_eat_duration_seconds: float = 2.0
 @export var work_phase_label: String = "Prep Work"
 @export var eat_phase_label: String = "Food"
 
 var food_available: float = 0.0
 var nearby_players: Array[Node2D] = []
 var player_work_cooldown: float = 0.0
+var active_player: Node2D
+var active_player_action: StringName = &""
+var active_player_action_timer: float = 0.0
+var active_player_action_duration: float = 0.0
 
 
 func _ready() -> void:
 	request_state_name = &"Work"
 	value_name = &"boredom"
+	require_target_need_threshold = false
 	add_to_group("npc_work_spot")
 	add_to_group("saveable")
 	super._ready()
@@ -47,6 +55,8 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	super._process(delta)
 	player_work_cooldown = maxf(player_work_cooldown - delta, 0.0)
+	if _update_active_player_action(delta):
+		return
 	if not allow_player_work or player_work_cooldown > 0.0:
 		return
 	if player_work_action == &"" or not InputMap.has_action(player_work_action):
@@ -55,8 +65,12 @@ func _process(delta: float) -> void:
 		return
 
 	var player := _get_closest_player_worker()
-	if player != null and perform_player_work(player) > 0.0:
-		player_work_cooldown = player_work_cooldown_seconds
+	if player == null:
+		return
+	if has_work_needed():
+		_start_player_action(player, &"work", player_work_duration_seconds)
+	elif has_food_available() and _player_can_eat(player):
+		_start_player_action(player, &"eat", player_eat_duration_seconds)
 
 
 func _apply_world_definition() -> void:
@@ -90,12 +104,16 @@ func _setup() -> void:
 
 func get_save_data() -> Dictionary:
 	# Work areas save remaining area work separately from NPC stats.
+	if _uses_world_spot_state():
+		return {}
 	return {
 		"work_needed": get_work_needed(),
 	}
 
 
 func apply_save_data(data: Dictionary) -> void:
+	if _uses_world_spot_state():
+		return
 	if data.has("work_needed"):
 		set_work_needed(float(data["work_needed"]))
 
@@ -181,6 +199,22 @@ func perform_player_work(player: Node2D, requested_work: float = -1.0) -> float:
 	return work_done
 
 
+func perform_player_eat(player: Node2D) -> float:
+	# Player eating consumes the same food pool as NPC eating, but finishes faster.
+	if not _player_can_eat(player):
+		return 0.0
+
+	var food_fraction := consume_eat_progress(1.0)
+	if food_fraction <= 0.0:
+		return 0.0
+
+	var hunger_drop := absf(player_hunger_drop_per_meal) * food_fraction
+	if player.has_method("apply_hunger_delta"):
+		player.call("apply_hunger_delta", -hunger_drop)
+	player_work_cooldown = player_work_cooldown_seconds
+	return hunger_drop
+
+
 func can_player_work(player: Node2D) -> bool:
 	return (
 		allow_player_work
@@ -189,6 +223,19 @@ func can_player_work(player: Node2D) -> bool:
 		and player.is_in_group(String(player_group))
 		and has_work_needed()
 	)
+
+
+func _player_can_eat(player: Node2D) -> bool:
+	if player == null or not is_instance_valid(player):
+		return false
+	if not player.is_in_group(String(player_group)):
+		return false
+	if not has_food_available():
+		return false
+	if player.has_method("can_eat") and not bool(player.call("can_eat")):
+		return false
+
+	return true
 
 
 func reset_work_needed() -> void:
@@ -275,6 +322,8 @@ func can_serve_npc_need(
 		return _can_serve_eat_phase(npc_node, requested_value_name)
 	if require_work_needed_for_work and not has_work_needed():
 		return false
+	if String(requested_state_name) == "Work":
+		return super.can_serve_npc_need(npc_node, requested_state_name, &"")
 
 	return super.can_serve_npc_need(npc_node, requested_state_name, requested_value_name)
 
@@ -300,6 +349,63 @@ func _get_display_ratio(value: float) -> float:
 		return _get_work_needed_ratio(value)
 
 	return super._get_display_ratio(value)
+
+
+func _start_player_action(player: Node2D, action_name: StringName, duration: float) -> void:
+	active_player = player
+	active_player_action = action_name
+	active_player_action_duration = maxf(duration, 0.05)
+	active_player_action_timer = active_player_action_duration
+	if active_player.has_method("begin_spot_action"):
+		active_player.call("begin_spot_action", self, action_name)
+	_queue_visual_update()
+
+
+func _update_active_player_action(delta: float) -> bool:
+	if active_player_action == &"":
+		return false
+	if active_player == null or not is_instance_valid(active_player) or not nearby_players.has(active_player):
+		_cancel_player_action()
+		return false
+
+	_stop_player_horizontal(active_player)
+	active_player_action_timer -= delta
+	_queue_visual_update()
+	if active_player_action_timer > 0.0:
+		return true
+
+	var completed_action := active_player_action
+	var completed_player := active_player
+	if active_player.has_method("end_spot_action"):
+		active_player.call("end_spot_action", self, active_player_action, true)
+	_clear_player_action()
+	if completed_action == &"work":
+		if perform_player_work(completed_player) > 0.0:
+			player_work_cooldown = player_work_cooldown_seconds
+	elif completed_action == &"eat":
+		perform_player_eat(completed_player)
+
+	return true
+
+
+func _cancel_player_action() -> void:
+	if active_player != null and is_instance_valid(active_player) and active_player.has_method("end_spot_action"):
+		active_player.call("end_spot_action", self, active_player_action, false)
+	_clear_player_action()
+
+
+func _clear_player_action() -> void:
+	active_player = null
+	active_player_action = &""
+	active_player_action_timer = 0.0
+	active_player_action_duration = 0.0
+	_queue_visual_update()
+
+
+func _stop_player_horizontal(player: Node2D) -> void:
+	var player_body := player as CharacterBody2D
+	if player_body != null:
+		player_body.velocity.x = 0.0
 
 
 func _connect_world_time_day_signal() -> void:
@@ -347,6 +453,10 @@ func _setup_world_work_state() -> bool:
 	))
 	set_work_needed(stored_value)
 	return true
+
+
+func _uses_world_spot_state() -> bool:
+	return world_definition != null and world_definition.spot_value_name != &""
 
 
 func _setup_world_food_state() -> void:
@@ -412,7 +522,7 @@ func _update_visual() -> void:
 		if zone_visual != null:
 			zone_visual.color = low_need_color.lerp(high_need_color, _get_work_needed_ratio(current_value))
 		if label != null:
-			label.text = "%s\n%d" % [label_prefix, int(round(current_value))]
+			label.text = _format_spot_label(label_prefix, str(int(round(current_value))))
 		return
 
 	if has_work_needed():
@@ -420,14 +530,43 @@ func _update_visual() -> void:
 		if zone_visual != null:
 			zone_visual.color = low_need_color.lerp(high_need_color, _get_work_needed_ratio(current_value))
 		if label != null:
-			label.text = "%s\n%d" % [work_phase_label, int(round(current_value))]
+			label.text = _format_spot_label(
+				work_phase_label,
+				_get_phase_value_text(current_value),
+				_get_owner_debug_text()
+			)
 		return
 
 	current_value = food_available
 	if zone_visual != null:
 		zone_visual.color = high_need_color.lerp(low_need_color, _get_food_ratio(current_value))
 	if label != null:
-		label.text = "%s\n%d" % [eat_phase_label, int(round(current_value))]
+		label.text = _format_spot_label(
+			eat_phase_label,
+			_get_phase_value_text(current_value),
+			_get_eat_owner_debug_text()
+		)
+
+
+func _get_phase_value_text(value: float) -> String:
+	if active_player_action != &"" and active_player_action_duration > 0.0:
+		var progress := 1.0 - clampf(active_player_action_timer / active_player_action_duration, 0.0, 1.0)
+		return "%d | player %d%%" % [int(round(value)), int(round(progress * 100.0))]
+
+	return str(int(round(value)))
+
+
+func _get_eat_owner_debug_text() -> String:
+	if eat_world_definition == null:
+		return _get_owner_debug_text()
+	if eat_world_definition.owner_npc_ids.is_empty():
+		return "owners:any"
+
+	var owner_texts: Array[String] = []
+	for owner_id in eat_world_definition.owner_npc_ids:
+		owner_texts.append(String(owner_id))
+
+	return "owners:%s" % ",".join(owner_texts)
 
 
 func _get_food_ratio(value: float) -> float:
@@ -467,6 +606,8 @@ func _on_work_body_entered(body: Node2D) -> void:
 
 func _on_work_body_exited(body: Node2D) -> void:
 	nearby_players.erase(body)
+	if body == active_player:
+		_cancel_player_action()
 
 
 func _get_closest_player_worker() -> Node2D:

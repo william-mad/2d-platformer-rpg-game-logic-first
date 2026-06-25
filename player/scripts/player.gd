@@ -40,12 +40,20 @@ var mana_amount: float = 0.0
 @export var mana_2_starts_full: bool = true
 @export var mana_2_charge_rate: float = 50.0
 var mana_2_amount: float = 0.0
+@export_group("Needs")
+@export var player_needs_enabled: bool = true
+@export_range(0.0, 100.0, 0.1) var hunger: float = 20.0
+@export_range(0.0, 100.0, 0.1) var sleep_need: float = 10.0
+@export_range(0.0, 100.0, 0.1, "suffix:/h") var hunger_growth_per_game_hour: float = 7.0
+@export_range(0.0, 100.0, 0.1, "suffix:/h") var sleep_need_growth_per_game_hour: float = 5.1
 var dash: bool = false
 var double_jump: bool = false
 var ground_slam: bool = false
 var transformation: bool = false
 # Set to true once hp reaches 0 so the player stops acting and take_damage becomes a no-op.
 var dead: bool = false
+var active_spot_action: StringName = &""
+var active_spot: Node
 #endregion
 
 #region //save system:
@@ -101,6 +109,8 @@ func get_save_data() -> Dictionary:
 		"mana_amount": mana_amount,
 		"mana_2_amount": mana_2_amount,
 		"max_mana": max_mana,
+		"hunger": hunger,
+		"sleep_need": sleep_need,
 		"dash": dash,
 		"double_jump": double_jump,
 		"ground_slam": ground_slam,
@@ -122,6 +132,8 @@ func apply_save_data(data: Dictionary) -> void:
 	max_mana = float(data.get("max_mana", max_mana))
 	mana_amount = clampf(float(data.get("mana_amount", mana_amount)), 0.0, max_mana)
 	mana_2_amount = clampf(float(data.get("mana_2_amount", mana_2_amount)), 0.0, max_mana)
+	hunger = clampf(float(data.get("hunger", hunger)), 0.0, 100.0)
+	sleep_need = clampf(float(data.get("sleep_need", sleep_need)), 0.0, 100.0)
 
 	dash = bool(data.get("dash", dash))
 	double_jump = bool(data.get("double_jump", double_jump))
@@ -149,9 +161,13 @@ func sync_stats_to_hud() -> void:
 	hp = clampf(hp, 0.0, max_hp)
 	mana_amount = clampf(mana_amount, 0.0, max_mana)
 	mana_2_amount = clampf(mana_2_amount, 0.0, max_mana)
+	hunger = clampf(hunger, 0.0, 100.0)
+	sleep_need = clampf(sleep_need, 0.0, 100.0)
 
 	PlayerHud.setup_hp(max_hp, hp)
 	PlayerHud.setup_mana(max_mana, mana_amount, mana_2_amount)
+	if PlayerHud.has_method("setup_needs"):
+		PlayerHud.call("setup_needs", 100.0, hunger, sleep_need)
 
 
 func _collect_extra_save_values() -> Dictionary:
@@ -192,6 +208,7 @@ func _process(_delta: float) -> void:
 	update_direction()
 	update_mana_2_charge(_delta)
 	update_mana_charge(_delta)
+	update_player_needs(_delta)
 	change_state(current_state.process(_delta))
 	
 	
@@ -361,6 +378,69 @@ func _defeat() -> void:
 func heal(amount: float) -> void:
 	hp = minf(hp + amount, max_hp)
 	PlayerHud.set_hp(hp)
+
+
+func update_player_needs(delta: float) -> void:
+	if not player_needs_enabled:
+		return
+
+	var game_hours := _get_game_hours_for_real_seconds(delta)
+	if game_hours <= 0.0:
+		return
+
+	if active_spot_action != &"eat":
+		apply_hunger_delta(hunger_growth_per_game_hour * game_hours)
+	if active_spot_action != &"sleep":
+		apply_sleep_need_delta(sleep_need_growth_per_game_hour * game_hours)
+
+
+func apply_hunger_delta(delta: float) -> float:
+	var previous_value := hunger
+	hunger = clampf(hunger + delta, 0.0, 100.0)
+	if PlayerHud.has_method("set_hunger"):
+		PlayerHud.call("set_hunger", hunger)
+	return hunger - previous_value
+
+
+func apply_sleep_need_delta(delta: float) -> float:
+	var previous_value := sleep_need
+	sleep_need = clampf(sleep_need + delta, 0.0, 100.0)
+	if PlayerHud.has_method("set_sleep_need"):
+		PlayerHud.call("set_sleep_need", sleep_need)
+	return sleep_need - previous_value
+
+
+func can_eat() -> bool:
+	return hunger > 0.0
+
+
+func can_sleep() -> bool:
+	return sleep_need > 0.0
+
+
+func begin_spot_action(spot: Node, action_name: StringName) -> void:
+	active_spot = spot
+	active_spot_action = action_name
+
+
+func end_spot_action(spot: Node, action_name: StringName, _completed: bool) -> void:
+	if active_spot != spot or active_spot_action != action_name:
+		return
+
+	active_spot = null
+	active_spot_action = &""
+
+
+func _get_game_hours_for_real_seconds(real_seconds: float) -> float:
+	var world_time := get_tree().root.get_node_or_null("WorldTime")
+	if world_time == null:
+		return 0.0
+
+	var real_seconds_per_day := float(world_time.get("real_seconds_per_day"))
+	if real_seconds_per_day <= 0.0:
+		return 0.0
+
+	return (maxf(real_seconds, 0.0) / real_seconds_per_day) * 24.0
 
 
 func update_mana_charge(delta: float) -> void:
