@@ -49,28 +49,63 @@ func _build_ui() -> void:
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(root)
 
-	var row := HBoxContainer.new()
-	row.name = "DebugClockRow"
-	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.position = panel_offset
-	row.add_theme_constant_override("separation", 12)
-	root.add_child(row)
+	var panel_size := Vector2(178.0, 46.0)
+	var panel := PanelContainer.new()
+	panel.name = "DebugClockPanel"
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.anchor_left = 1.0
+	panel.anchor_right = 1.0
+	panel.offset_left = -panel_size.x - panel_offset.x
+	panel.offset_top = panel_offset.y
+	panel.offset_right = -panel_offset.x
+	panel.offset_bottom = panel_offset.y + panel_size.y
+	panel.add_theme_stylebox_override("panel", _make_debug_panel_style())
+	root.add_child(panel)
 
 	clock_label = Label.new()
 	clock_label.name = "ClockAndHp"
 	clock_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	clock_label.add_theme_font_size_override("font_size", 14)
-	clock_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.96))
+	clock_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	clock_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	clock_label.add_theme_font_size_override("font_size", 12)
+	clock_label.add_theme_color_override("font_color", Color(0.94, 0.97, 1.0, 0.97))
 	clock_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.95))
 	clock_label.add_theme_constant_override("shadow_offset_x", 1)
 	clock_label.add_theme_constant_override("shadow_offset_y", 1)
-	row.add_child(clock_label)
+	panel.add_child(clock_label)
 
 	event_stack = VBoxContainer.new()
 	event_stack.name = "EventLines"
 	event_stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	event_stack.anchor_left = 1.0
+	event_stack.anchor_right = 1.0
+	event_stack.offset_left = -panel_size.x - panel_offset.x
+	event_stack.offset_top = panel_offset.y + panel_size.y + 4.0
+	event_stack.offset_right = -panel_offset.x
+	event_stack.offset_bottom = panel_offset.y + panel_size.y + 80.0
 	event_stack.add_theme_constant_override("separation", 1)
-	row.add_child(event_stack)
+	root.add_child(event_stack)
+
+
+func _make_debug_panel_style() -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.025, 0.03, 0.04, 0.76)
+	style.border_color = Color(0.72, 0.82, 0.94, 0.22)
+	style.border_width_left = 1
+	style.border_width_top = 1
+	style.border_width_right = 1
+	style.border_width_bottom = 1
+	style.corner_radius_top_left = 2
+	style.corner_radius_top_right = 2
+	style.corner_radius_bottom_left = 2
+	style.corner_radius_bottom_right = 2
+	style.shadow_color = Color(0.0, 0.0, 0.0, 0.30)
+	style.shadow_size = 2
+	style.set_content_margin(SIDE_LEFT, 7.0)
+	style.set_content_margin(SIDE_TOP, 5.0)
+	style.set_content_margin(SIDE_RIGHT, 7.0)
+	style.set_content_margin(SIDE_BOTTOM, 5.0)
+	return style
 
 
 func _connect_world_time() -> void:
@@ -141,8 +176,10 @@ func _add_event_line(event_name: StringName, payload: Dictionary) -> void:
 
 	var line := Label.new()
 	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	line.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	line.add_theme_font_size_override("font_size", 12)
-	line.add_theme_color_override("font_color", Color(0.74, 0.94, 1.0, 0.96))
+	line.add_theme_color_override("font_color", Color(0.62, 0.86, 1.0, 0.92))
 	line.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9))
 	line.add_theme_constant_override("shadow_offset_x", 1)
 	line.add_theme_constant_override("shadow_offset_y", 1)

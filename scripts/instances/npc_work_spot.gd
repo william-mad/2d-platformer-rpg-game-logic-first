@@ -522,7 +522,7 @@ func _update_visual() -> void:
 		if zone_visual != null:
 			zone_visual.color = low_need_color.lerp(high_need_color, _get_work_needed_ratio(current_value))
 		if label != null:
-			label.text = _format_spot_label(label_prefix, str(int(round(current_value))))
+			label.text = _format_spot_label(label_prefix, _get_phase_value_text(current_value))
 		return
 
 	if has_work_needed():

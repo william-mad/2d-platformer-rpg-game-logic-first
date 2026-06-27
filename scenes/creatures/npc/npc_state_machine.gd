@@ -256,6 +256,7 @@ var state_after_move: StringName = &"Idle"
 var last_actor: Node2D
 var last_changed_values: Dictionary = {}
 var idle_value_reaction_queued: bool = false
+var suppress_next_idle_value_reaction_check: bool = false
 var passive_need_elapsed_seconds: float = 0.0
 var next_talk_need_payout_already_applied: bool = false
 
@@ -594,6 +595,10 @@ func request_talk(new_target: Node2D) -> bool:
 
 	talk_target = new_target
 	return request_state(&"Talk", new_target, "talk", 20)
+
+
+func suppress_next_idle_value_reaction() -> void:
+	suppress_next_idle_value_reaction_check = true
 
 
 func can_talk_to_target(
@@ -1139,6 +1144,9 @@ func _queue_idle_value_reaction_check() -> void:
 func _run_idle_value_reaction_check() -> void:
 	# Runs need reactions that were waiting for the NPC to become idle again.
 	idle_value_reaction_queued = false
+	if suppress_next_idle_value_reaction_check:
+		suppress_next_idle_value_reaction_check = false
+		return
 
 	if not is_inside_tree() or not active or not value_reactions_enabled or current_state == null:
 		return

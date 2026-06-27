@@ -257,6 +257,8 @@ func simulate_now() -> void:
 		if activity is Dictionary and not activity.is_empty():
 			_update_activity(npc_id, record, activity, total_hours, hour, locations)
 		else:
+			if _consume_sleep_skip_wake_pause(npc_id, record, locations):
+				continue
 			_try_start_activity(npc_id, record, total_hours, hour, locations, records)
 
 
@@ -282,8 +284,10 @@ func simulate_player_sleep_skip(
 
 		var npc_id := String(npc_id_key)
 		var updated_record: Dictionary = record.duplicate(true)
-		_apply_sleep_skip_body_values(
+		var slept_during_skip := _apply_sleep_skip_body_values(
+			npc_id,
 			updated_record,
+			start_total_hours,
 			elapsed_game_hours,
 			end_total_hours,
 			options
@@ -296,23 +300,25 @@ func simulate_player_sleep_skip(
 
 		if locations.has_method("get_live_npc"):
 			var live_npc := locations.call("get_live_npc", npc_id) as Node
-			_wake_live_npc_after_sleep_skip(live_npc)
+			_wake_live_npc_after_sleep_skip(live_npc, slept_during_skip)
 
 	_queue_simulation()
 
 
 func _apply_sleep_skip_body_values(
+	npc_id: String,
 	record: Dictionary,
+	start_total_hours: float,
 	elapsed_game_hours: float,
 	end_total_hours: float,
 	options: Dictionary
-) -> void:
+) -> bool:
 	var node_state = record.get("node_state", {})
 	if not (node_state is Dictionary):
-		return
+		return _finalize_sleep_skip_record(npc_id, record, start_total_hours, end_total_hours)
 	var social_stats = node_state.get("social_stats", {})
 	if not (social_stats is Dictionary):
-		return
+		return _finalize_sleep_skip_record(npc_id, record, start_total_hours, end_total_hours)
 
 	var profile = node_state.get("world_simulation_profile", {})
 	if not (profile is Dictionary):
@@ -348,33 +354,325 @@ func _apply_sleep_skip_body_values(
 
 	node_state["social_stats"] = social_stats
 	record["node_state"] = node_state
+	return _finalize_sleep_skip_record(npc_id, record, start_total_hours, end_total_hours)
+
+
+func _finalize_sleep_skip_record(
+	npc_id: String,
+	record: Dictionary,
+	start_total_hours: float,
+	end_total_hours: float
+) -> bool:
 	record["last_simulated_total_hours"] = end_total_hours
-	_clear_sleep_activity_after_skip(record)
+	var slept_during_skip := _clear_sleep_activity_after_skip(record)
+	if not slept_during_skip:
+		slept_during_skip = _move_record_to_sleep_definition_for_skip(
+			npc_id,
+			record,
+			start_total_hours,
+			end_total_hours
+		)
+	if slept_during_skip:
+		record["skip_next_activity_start_after_sleep"] = true
+	return slept_during_skip
 
 
-func _clear_sleep_activity_after_skip(record: Dictionary) -> void:
+func _clear_sleep_activity_after_skip(record: Dictionary) -> bool:
+	var moved_to_sleep_wake_destination := false
 	var activity = record.get("activity", {})
 	if activity is Dictionary and String(activity.get("state_name", "")) == "Sleep":
+		moved_to_sleep_wake_destination = _move_record_to_sleep_skip_wake_destination(record, activity)
 		record["activity"] = {}
 
 	var pending = record.get("pending_travel", {})
 	if not (pending is Dictionary) or pending.is_empty():
-		return
+		return moved_to_sleep_wake_destination
 	if String(pending.get("requested_state_name", "")) == "Sleep":
+		moved_to_sleep_wake_destination = _move_record_to_sleep_skip_wake_destination(
+			record,
+			_get_sleep_activity_from_pending(pending)
+		) or moved_to_sleep_wake_destination
 		record["pending_travel"] = {}
-		return
+		return moved_to_sleep_wake_destination
 
 	var pending_activity = pending.get("activity", {})
 	if pending_activity is Dictionary and String(pending_activity.get("state_name", "")) == "Sleep":
+		moved_to_sleep_wake_destination = _move_record_to_sleep_skip_wake_destination(
+			record,
+			pending_activity
+		) or moved_to_sleep_wake_destination
 		record["pending_travel"] = {}
 
+	return moved_to_sleep_wake_destination
 
-func _wake_live_npc_after_sleep_skip(live_npc: Node) -> void:
+
+func _get_sleep_activity_from_pending(pending: Dictionary) -> Dictionary:
+	var pending_activity = pending.get("activity", {})
+	if pending_activity is Dictionary and not pending_activity.is_empty():
+		return pending_activity
+
+	return pending
+
+
+func _move_record_to_sleep_skip_wake_destination(
+	record: Dictionary,
+	sleep_activity: Dictionary
+) -> bool:
+	var destination := _get_sleep_skip_wake_destination(record, sleep_activity)
+	if destination.is_empty():
+		return false
+
+	return _move_record_to_destination(record, destination)
+
+
+func _move_record_to_destination(record: Dictionary, destination: Dictionary) -> bool:
+	var scene_path := String(destination.get("scene_path", ""))
+	var position = destination.get("position", null)
+	if scene_path.is_empty() or not (position is Vector2):
+		return false
+
+	record["activity"] = {}
+	record["pending_travel"] = {}
+	record["scene_path"] = scene_path
+	record["previous_scene_path"] = ""
+	record["last_position"] = position
+	record["spawn_random"] = false
+	record["social_visit_target_id"] = ""
+	record["last_travel_msec"] = Time.get_ticks_msec()
+	return true
+
+
+func _get_sleep_skip_wake_destination(
+	record: Dictionary,
+	sleep_activity: Dictionary
+) -> Dictionary:
+	var definition := _get_sleep_activity_definition(sleep_activity)
+	if definition != null:
+		var wake_spot_destination := _get_wake_spot_destination(definition)
+		if not wake_spot_destination.is_empty():
+			return wake_spot_destination
+
+		var explicit_wake_destination := _get_explicit_wake_destination(definition)
+		if not explicit_wake_destination.is_empty():
+			return explicit_wake_destination
+
+		if definition.wake_at_home_position:
+			var home_destination := _get_record_home_destination(record)
+			if not home_destination.is_empty():
+				return home_destination
+
+	var sleep_spot_destination := _get_activity_target_destination(sleep_activity)
+	if not sleep_spot_destination.is_empty():
+		return sleep_spot_destination
+
+	var fallback_home_destination := _get_record_home_destination(record)
+	if not fallback_home_destination.is_empty():
+		return fallback_home_destination
+
+	return _get_activity_return_destination(record, sleep_activity)
+
+
+func _move_record_to_sleep_definition_for_skip(
+	npc_id: String,
+	record: Dictionary,
+	start_total_hours: float,
+	end_total_hours: float
+) -> bool:
+	var definition := _find_sleep_definition_during_skip(
+		StringName(npc_id),
+		record,
+		start_total_hours,
+		end_total_hours
+	)
+	if definition == null:
+		return false
+
+	return _move_record_to_destination(record, {
+		"scene_path": definition.scene_path,
+		"position": definition.position,
+	})
+
+
+func _find_sleep_definition_during_skip(
+	npc_id: StringName,
+	record: Dictionary,
+	start_total_hours: float,
+	end_total_hours: float
+) -> NpcSpotDefinition:
+	if _record_is_disabled(record):
+		return null
+
+	var best_definition: NpcSpotDefinition
+	for definition_value in spot_definitions.values():
+		var definition := definition_value as NpcSpotDefinition
+		if definition == null or String(definition.state_name) != "Sleep":
+			continue
+		if not definition.allows_npc_id(npc_id):
+			continue
+		if not _definition_is_active_during_interval(definition, start_total_hours, end_total_hours):
+			continue
+		if (
+			best_definition == null
+			or definition.priority > best_definition.priority
+			or (
+				definition.priority == best_definition.priority
+				and String(definition.spot_id) < String(best_definition.spot_id)
+			)
+		):
+			best_definition = definition
+
+	return best_definition
+
+
+func _definition_is_active_during_interval(
+	definition: NpcSpotDefinition,
+	start_total_hours: float,
+	end_total_hours: float
+) -> bool:
+	if end_total_hours <= start_total_hours:
+		return false
+	if definition.active_time_windows.is_empty():
+		return true
+
+	var first_day := int(floor(start_total_hours / 24.0)) - 1
+	var last_day := int(floor(end_total_hours / 24.0)) + 1
+	for day in range(first_day, last_day + 1):
+		for window in definition.active_time_windows:
+			if not (window is Dictionary):
+				continue
+			if _window_overlaps_interval(window, day, start_total_hours, end_total_hours):
+				return true
+
+	return false
+
+
+func _window_overlaps_interval(
+	window: Dictionary,
+	day: int,
+	start_total_hours: float,
+	end_total_hours: float
+) -> bool:
+	var start_hour := fposmod(float(window.get("start_hour", window.get("start", 0.0))), 24.0)
+	var end_hour := fposmod(float(window.get("end_hour", window.get("end", 24.0))), 24.0)
+	if is_equal_approx(start_hour, end_hour):
+		return true
+
+	var window_start := float(day) * 24.0 + start_hour
+	var window_end := float(day) * 24.0 + end_hour
+	if start_hour > end_hour:
+		window_end += 24.0
+
+	return window_start < end_total_hours and window_end > start_total_hours
+
+
+func _get_sleep_activity_definition(sleep_activity: Dictionary) -> NpcSpotDefinition:
+	var spot_id := StringName(String(sleep_activity.get("spot_id", "")))
+	if spot_id == &"":
+		return null
+
+	return spot_definitions.get(spot_id, null) as NpcSpotDefinition
+
+
+func _get_wake_spot_destination(definition: NpcSpotDefinition) -> Dictionary:
+	if definition == null or definition.wake_spot_id == &"":
+		return {}
+
+	var wake_definition := spot_definitions.get(definition.wake_spot_id, null) as NpcSpotDefinition
+	if wake_definition == null:
+		push_warning(
+			"NPC spot '%s' wake spot '%s' does not exist."
+			% [String(definition.spot_id), String(definition.wake_spot_id)]
+		)
+		return {}
+
+	return {
+		"scene_path": wake_definition.scene_path,
+		"position": wake_definition.position,
+	}
+
+
+func _get_explicit_wake_destination(definition: NpcSpotDefinition) -> Dictionary:
+	if definition == null or definition.wake_scene_path.is_empty():
+		return {}
+
+	return {
+		"scene_path": definition.wake_scene_path,
+		"position": definition.wake_position,
+	}
+
+
+func _get_record_home_destination(record: Dictionary) -> Dictionary:
+	var scene_path := String(record.get("home_scene_path", ""))
+	if scene_path.is_empty():
+		scene_path = String(record.get("scene_path", ""))
+
+	var position = record.get("home_position", null)
+	if scene_path.is_empty() or not (position is Vector2):
+		return {}
+
+	return {
+		"scene_path": scene_path,
+		"position": position,
+	}
+
+
+func _get_activity_target_destination(activity: Dictionary) -> Dictionary:
+	var scene_path := String(activity.get("target_scene_path", ""))
+	var position = activity.get("target_position", null)
+
+	if scene_path.is_empty():
+		var definition := _get_sleep_activity_definition(activity)
+		if definition != null:
+			scene_path = definition.scene_path
+			position = definition.position
+
+	if scene_path.is_empty() or not (position is Vector2):
+		return {}
+
+	return {
+		"scene_path": scene_path,
+		"position": position,
+	}
+
+
+func _get_activity_return_destination(
+	record: Dictionary,
+	activity: Dictionary
+) -> Dictionary:
+	var scene_path := String(activity.get("return_scene_path", record.get("scene_path", "")))
+	if scene_path.is_empty():
+		scene_path = String(record.get("scene_path", ""))
+
+	var position = activity.get("return_position", record.get("last_position", Vector2.ZERO))
+	if not (position is Vector2):
+		position = Vector2.ZERO
+	if scene_path.is_empty():
+		return {}
+
+	return {
+		"scene_path": scene_path,
+		"position": position,
+	}
+
+
+func _wake_live_npc_after_sleep_skip(live_npc: Node, slept_during_skip: bool = false) -> void:
 	if live_npc == null or not is_instance_valid(live_npc):
 		return
 
 	var machine := live_npc.get_node_or_null("NpcStateMachine")
 	if machine == null or not machine.has_method("request_state"):
+		return
+
+	if slept_during_skip:
+		var current_state = machine.get("current_state")
+		if (
+			current_state != null
+			and String(current_state.name) != "Idle"
+			and machine.has_method("suppress_next_idle_value_reaction")
+		):
+			machine.call("suppress_next_idle_value_reaction")
+		_prepare_live_npc_after_sleep_skip(live_npc, machine)
+		machine.call("request_state", &"Idle", null, "player_sleep_skip_wake", 1000)
 		return
 
 	var current_state = machine.get("current_state")
@@ -384,6 +682,17 @@ func _wake_live_npc_after_sleep_skip(live_npc: Node) -> void:
 		return
 
 	machine.call("request_state", &"Idle", null, "player_sleep_skip", 100)
+
+
+func _prepare_live_npc_after_sleep_skip(live_npc: Node, machine: Node) -> void:
+	if live_npc is CharacterBody2D:
+		(live_npc as CharacterBody2D).velocity = Vector2.ZERO
+
+	machine.set("move_target", null)
+	machine.set("sleep_target", null)
+	machine.set("state_after_move", &"Idle")
+	if machine.has_method("set_target"):
+		machine.call("set_target", null)
 
 
 func _simulate_offscreen_passive_values(
@@ -463,6 +772,22 @@ func _simulate_offscreen_passive_values(
 
 	node_state["social_stats"] = social_stats
 	record["node_state"] = node_state
+
+
+func _consume_sleep_skip_wake_pause(
+	npc_id: StringName,
+	record: Dictionary,
+	locations: Node
+) -> bool:
+	if not bool(record.get("skip_next_activity_start_after_sleep", false)):
+		return false
+
+	record.erase("skip_next_activity_start_after_sleep")
+	if locations != null and locations.has_method("apply_simulated_record"):
+		locations.call("apply_simulated_record", String(npc_id), record, false)
+	elif locations != null and locations.has_method("update_simulated_record"):
+		locations.call("update_simulated_record", String(npc_id), record)
+	return true
 
 
 func _apply_offscreen_tired_change(

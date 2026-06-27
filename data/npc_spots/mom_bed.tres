@@ -13,6 +13,7 @@ need_threshold = 71.0
 need_maximum = 99.0
 value_delta_per_game_hour = -12.5
 priority = 70
+wake_at_home_position = false
 owner_npc_ids = Array[StringName]([&"mom"])
 active_time_windows = Array[Dictionary]([{
 "end_hour": 6.0,

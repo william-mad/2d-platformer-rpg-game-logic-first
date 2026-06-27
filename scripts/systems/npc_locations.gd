@@ -412,16 +412,40 @@ func apply_simulated_record(
 	if npc_id.is_empty() or record.is_empty():
 		return
 
+	var previous_scene_path := ""
+	if npc_records.has(npc_id) and npc_records[npc_id] is Dictionary:
+		previous_scene_path = String(npc_records[npc_id].get("scene_path", ""))
+
 	npc_records[npc_id] = record.duplicate(true)
 	if not apply_to_live_npc:
+		_update_return_processing()
 		return
 
 	var live_npc := get_live_npc(npc_id)
 	if live_npc == null:
+		if String(record.get("scene_path", "")) == active_scene_path:
+			call_deferred("_spawn_missing_npcs_for_active_scene")
+		_update_return_processing()
+		return
+
+	var target_scene_path := String(record.get("scene_path", ""))
+	var live_scene_path := _get_live_npc_scene_path(live_npc, previous_scene_path)
+	if not target_scene_path.is_empty() and target_scene_path != live_scene_path:
+		live_npcs.erase(npc_id)
+		live_npc.queue_free()
+		if target_scene_path == active_scene_path:
+			call_deferred("_spawn_missing_npcs_for_active_scene")
+		_update_return_processing()
 		return
 
 	if live_npc.has_method("apply_npc_location_save_data"):
 		live_npc.call("apply_npc_location_save_data", record.get("node_state", {}))
+	var position_value = record.get("last_position", null)
+	if position_value is Vector2:
+		_place_npc(live_npc, position_value)
+		record["last_position"] = _get_node_position(live_npc)
+		npc_records[npc_id] = record.duplicate(true)
+	_update_return_processing()
 
 
 func finish_scheduled_activity(
@@ -558,6 +582,7 @@ func _build_initial_record(
 		"node_name": npc.name,
 		"npc_scene_path": npc_scene_path,
 		"home_scene_path": current_scene_path,
+		"home_position": _get_node_position(npc),
 		"scene_path": current_scene_path,
 		"previous_scene_path": "",
 		"last_position": _get_node_position(npc),
@@ -656,6 +681,26 @@ func _normalize_loaded_record(npc_id: String, saved_record: Dictionary) -> Dicti
 
 	if not (record.get("last_position", null) is Vector2):
 		record["last_position"] = Vector2.ZERO
+	if not (record.get("home_position", null) is Vector2):
+		var home_activity = record.get("activity", {})
+		var activity_return_position = (
+			home_activity.get("return_position", null)
+			if home_activity is Dictionary
+			else null
+		)
+		if activity_return_position is Vector2:
+			record["home_position"] = activity_return_position
+		else:
+			record["home_position"] = record["last_position"]
+	if String(record.get("home_scene_path", "")).is_empty():
+		var home_scene_activity = record.get("activity", {})
+		var activity_return_scene := (
+			String(home_scene_activity.get("return_scene_path", ""))
+			if home_scene_activity is Dictionary
+			else ""
+		)
+		if not activity_return_scene.is_empty():
+			record["home_scene_path"] = activity_return_scene
 
 	if not (record.get("node_state", null) is Dictionary):
 		record["node_state"] = {}

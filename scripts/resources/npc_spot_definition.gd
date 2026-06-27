@@ -31,6 +31,12 @@ class_name NpcSpotDefinition extends Resource
 @export var next_spot_id_when_done: StringName = &""
 @export var next_spot_value_when_done: float = 100.0
 
+@export_group("Sleep Skip Wake")
+@export var wake_at_home_position: bool = true
+@export var wake_spot_id: StringName = &""
+@export_file("*.tscn") var wake_scene_path: String = ""
+@export var wake_position: Vector2 = Vector2.ZERO
+
 @export_group("Serving")
 @export var owner_npc_ids: Array[StringName] = []
 @export_range(0, 32, 1) var capacity: int = 1

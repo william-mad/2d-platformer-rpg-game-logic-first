@@ -421,14 +421,26 @@ func can_sleep() -> bool:
 func begin_spot_action(spot: Node, action_name: StringName) -> void:
 	active_spot = spot
 	active_spot_action = action_name
+	_on_spot_action_started(spot, action_name)
 
 
-func end_spot_action(spot: Node, action_name: StringName, _completed: bool) -> void:
+func end_spot_action(spot: Node, action_name: StringName, completed: bool) -> void:
 	if active_spot != spot or active_spot_action != action_name:
 		return
 
+	_on_spot_action_finished(spot, action_name, completed)
 	active_spot = null
 	active_spot_action = &""
+
+
+func _on_spot_action_started(_spot: Node, _action_name: StringName) -> void:
+	# Animation hook: start player work/eat/sleep animations here.
+	pass
+
+
+func _on_spot_action_finished(_spot: Node, _action_name: StringName, _completed: bool) -> void:
+	# Animation hook: stop or swap back from player work/eat/sleep animations here.
+	pass
 
 
 func _get_game_hours_for_real_seconds(real_seconds: float) -> float:
