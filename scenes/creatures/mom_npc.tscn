@@ -4,6 +4,7 @@
 [ext_resource type="Script" path="res://player/scripts/damage_area.gd" id="2_damage_area"]
 [ext_resource type="Script" path="res://scripts/instances/creature_hp_bar.gd" id="3_hp_bar"]
 [ext_resource type="PackedScene" path="res://scenes/creatures/npc/npc_state_machine.tscn" id="4_state_machine"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/mom_fight.gd" id="5_mom_fight"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_body"]
 size = Vector2(48, 64)
@@ -114,6 +115,25 @@ default_reaction_time = 0.8
 default_work_time = 2.5
 default_talk_time = 2.0
 default_flee_time = 4.0
+
+[node name="Fight" parent="NpcStateMachine"]
+script = ExtResource("5_mom_fight")
+target_groups = Array[StringName]([&"player"])
+preferred_attack_distance = 150.0
+attack_position_tolerance = 18.0
+attack_range = 520.0
+attack_min_range = 8.0
+projectile_damage = 4.0
+projectile_flight_time = 0.82
+projectile_arc_height = 58.0
+projectile_spawn_offset = Vector2(24, -48)
+melee_damage = 6.0
+melee_range_hitbox_multiplier = 3.0
+melee_windup_seconds = 0.18
+melee_cooldown_seconds = 0.85
+projectile_distance_threshold = 260.0
+projectile_aim_windup_seconds = 0.34
+projectile_cooldown_seconds = 1.35
 
 [node name="StateLabel" type="Label" parent="."]
 offset_left = -46.0
