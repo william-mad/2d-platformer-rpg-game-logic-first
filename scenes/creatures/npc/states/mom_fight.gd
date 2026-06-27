@@ -19,6 +19,10 @@ enum MomAttackMode {
 @export var melee_swing_visual_width: float = 7.0
 @export var melee_swing_visual_color: Color = Color(1.0, 0.9, 0.35, 0.9)
 
+@export_group("Mom Fight Movement")
+@export var match_target_move_speed: bool = true
+@export var fallback_fight_move_speed: float = 700.0
+
 @export_group("Mom Projectile Aim")
 @export var projectile_distance_threshold: float = 260.0
 @export var projectile_aim_windup_seconds: float = 0.34
@@ -75,7 +79,7 @@ func _update_chase() -> void:
 		return
 
 	var chase_stop_distance := maxf(_get_melee_reach_distance() * 0.9, machine.stop_distance)
-	var chase_speed := machine.run_speed * maxf(chase_speed_multiplier, 0.0)
+	var chase_speed := _get_fight_move_speed()
 	move_toward_position(fight_target.global_position, chase_speed, chase_stop_distance)
 
 
@@ -352,6 +356,26 @@ func _get_target_distance() -> float:
 		return INF
 
 	return npc.global_position.distance_to(fight_target.global_position)
+
+
+func _get_fight_move_speed() -> float:
+	if match_target_move_speed:
+		var target_move_speed := _get_float_property(fight_target, &"move_speed", -1.0)
+		if target_move_speed > 0.0:
+			return target_move_speed
+
+	return maxf(fallback_fight_move_speed, 0.0)
+
+
+func _get_float_property(node: Node, property_name: StringName, fallback: float) -> float:
+	if node == null or not is_instance_valid(node):
+		return fallback
+
+	for property in node.get_property_list():
+		if String(property.get("name", "")) == String(property_name):
+			return float(node.get(property_name))
+
+	return fallback
 
 
 func _get_melee_reach_distance() -> float:
