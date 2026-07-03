@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="PackedScene" path="res://player/player.tscn" id="1_player"]
 [ext_resource type="Script" path="res://scripts/systems/npc_location_scene.gd" id="2_location_scene"]
@@ -8,6 +8,7 @@
 [ext_resource type="Resource" path="res://data/npc_spots/mom_bed.tres" id="6_mom_bed"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_rest_spot.tscn" id="7_rest_spot"]
 [ext_resource type="PackedScene" path="res://scenes/things/player_sleep_spot.tscn" id="8_player_sleep_spot"]
+[ext_resource type="Script" path="res://scripts/instances/player_spawn.gd" id="9_player_spawn"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_floor"]
 size = Vector2(1152, 64)
@@ -91,6 +92,13 @@ limit_bottom = 432
 [node name="OutsideDoor" parent="." instance=ExtResource("3_door")]
 position = Vector2(-450, 368)
 target_scene_path = "res://scenes/testscenes/realtest1.tscn"
+target_spawn_id = &"from_realhometest"
+owner_ids = Array[StringName]([&"mom", &"player"])
+
+[node name="PlayerSpawnFromYard" type="Marker2D" parent="."]
+position = Vector2(-350, 368)
+script = ExtResource("9_player_spawn")
+spawn_id = &"from_realtest1"
 
 [node name="MomSleepNeedSpot" parent="." instance=ExtResource("4_need_spot")]
 position = Vector2(220, 368)

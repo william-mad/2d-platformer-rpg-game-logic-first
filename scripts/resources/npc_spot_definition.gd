@@ -38,6 +38,8 @@ class_name NpcSpotDefinition extends Resource
 @export var wake_position: Vector2 = Vector2.ZERO
 
 @export_group("Serving")
+@export var owner_ids: Array[StringName] = []
+# Legacy NPC-only list. Use owner_ids for new spots, especially when the player can also use it.
 @export var owner_npc_ids: Array[StringName] = []
 @export_range(0, 32, 1) var capacity: int = 1
 
@@ -50,14 +52,31 @@ func is_valid_definition() -> bool:
 
 
 func allows_npc_id(npc_id: StringName) -> bool:
-	if owner_npc_ids.is_empty():
+	return allows_owner_id(npc_id)
+
+
+func allows_owner_id(owner_id: StringName) -> bool:
+	var configured_owner_ids := get_owner_ids()
+	if configured_owner_ids.is_empty():
 		return true
 
-	for owner_id in owner_npc_ids:
-		if String(owner_id) == String(npc_id):
+	for configured_owner_id in configured_owner_ids:
+		if String(configured_owner_id) == String(owner_id):
 			return true
 
 	return false
+
+
+func get_owner_ids() -> Array[StringName]:
+	var configured_owner_ids: Array[StringName] = []
+	for owner_id in owner_ids:
+		if not configured_owner_ids.has(owner_id):
+			configured_owner_ids.append(owner_id)
+	for owner_id in owner_npc_ids:
+		if not configured_owner_ids.has(owner_id):
+			configured_owner_ids.append(owner_id)
+
+	return configured_owner_ids
 
 
 func is_active_at(hour: float) -> bool:

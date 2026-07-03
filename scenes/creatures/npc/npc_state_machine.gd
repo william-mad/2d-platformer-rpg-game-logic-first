@@ -80,8 +80,17 @@ const STATE_ALIASES := {
 @export var cross_scene_talk_enabled: bool = true
 @export_range(0.0, 100.0, 0.1) var cross_scene_talk_need_threshold: float = 70.0
 @export_range(0, 100, 1) var cross_scene_talk_priority: int = 60
-@export_range(0.0, 100.0, 0.1) var cross_scene_minimum_npc_favor: float = 20.0
+@export_range(0.0, 100.0, 0.1) var cross_scene_minimum_npc_favor: float = 10.0
 @export_range(0.0, 1.0, 0.01) var cross_scene_player_target_chance: float = 0.35
+
+@export_group("NPC Talk Handshake")
+@export var npc_talk_requires_mutual_favor: bool = true
+@export_range(0.0, 100.0, 0.1) var npc_talk_handshake_minimum_favor: float = 10.0
+@export_range(0, 1000, 1) var npc_talk_handshake_priority: int = 70
+
+@export_group("Player Interaction")
+@export_range(0.0, 30.0, 0.1, "suffix:s") var default_player_interaction_hold_seconds: float = 5.0
+@export_range(0.0, 120.0, 0.1, "suffix:s") var default_player_interaction_cooldown_seconds: float = 20.0
 
 @export_group("Fear Decay")
 @export var fear_decay_enabled: bool = true
@@ -188,7 +197,7 @@ const STATE_ALIASES := {
 		"at_least": 50.0,
 		"requires_target": true,
 		"target_groups": [&"npc", &"player"],
-		"min_relationship_favor": 20.0,
+		"min_relationship_favor": 10.0,
 		"priority": 60
 	},
 	"talk_search_for_people": {
@@ -259,6 +268,10 @@ var idle_value_reaction_queued: bool = false
 var suppress_next_idle_value_reaction_check: bool = false
 var passive_need_elapsed_seconds: float = 0.0
 var next_talk_need_payout_already_applied: bool = false
+var player_interaction_hold_timer: float = 0.0
+var player_interaction_hold_actor: Node2D
+var player_interaction_cooldown_timer: float = 0.0
+var player_interaction_cooldown_actor: Node2D
 
 var current_state: NpcState:
 	get:
@@ -296,8 +309,16 @@ func _physics_process(delta: float) -> void:
 	if not active or npc == null or current_state == null:
 		return
 
+	_update_player_interaction_timers(delta)
 	apply_gravity(delta)
 	if _process_npc_damage_hop(delta):
+		_update_passive_needs(delta)
+		if auto_move_and_slide:
+			npc.move_and_slide()
+		return
+
+	if _player_interaction_hold_is_active():
+		_process_player_interaction_hold()
 		_update_passive_needs(delta)
 		if auto_move_and_slide:
 			npc.move_and_slide()
@@ -407,10 +428,17 @@ func request_state(
 		return false
 	if String(state_name) == "Talk":
 		var requested_partner := actor if actor != null else talk_target
-		if requested_partner == npc:
-			talk_target = null
-			return false
+		return _request_talk_state(requested_partner, reason, request_priority, true)
 
+	return _request_state_direct(state_name, actor, reason, request_priority)
+
+
+func _request_state_direct(
+	state_name: StringName,
+	actor: Node2D = null,
+	reason: String = "manual",
+	request_priority: int = 0
+) -> bool:
 	if actor != null:
 		last_actor = actor
 		set_target(actor)
@@ -428,6 +456,8 @@ func notify_target_seen(seen_target: Node2D) -> void:
 		return
 	if seen_target == npc:
 		return
+	if is_ignoring_player_interaction(seen_target):
+		return
 
 	set_target(seen_target)
 	last_actor = seen_target
@@ -437,6 +467,8 @@ func notify_target_seen(seen_target: Node2D) -> void:
 		if requested_state != null and change_state(requested_state, "target_seen"):
 			return
 
+	if _maybe_fight_from_seen_target(seen_target):
+		return
 	if _maybe_flee_from_seen_player(seen_target):
 		return
 	if _maybe_flee_from_seen_npc(seen_target):
@@ -449,6 +481,39 @@ func notify_target_seen(seen_target: Node2D) -> void:
 		request_state(player_seen_state_name, seen_target, "player_seen", 10)
 
 
+func _maybe_fight_from_seen_target(seen_target: Node2D) -> bool:
+	if seen_target == null or not is_instance_valid(seen_target):
+		return false
+
+	var anger_fight_rule := _get_matching_anger_fight_rule(seen_target)
+	if not anger_fight_rule.is_empty():
+		return request_state(
+			&"Fight",
+			seen_target,
+			"anger_seen_target",
+			int(anger_fight_rule.get("priority", _get_anger_fight_priority()))
+		)
+
+	if (
+		seen_target.is_in_group("npc")
+		and npc != null
+		and npc.has_method("should_fight_npc")
+		and bool(npc.call("should_fight_npc", seen_target))
+	):
+		var fight_priority := _get_anger_fight_priority()
+		if _higher_priority_value_reaction_blocks_combat(seen_target, fight_priority):
+			return false
+
+		return request_state(
+			&"Fight",
+			seen_target,
+			"npc_relationship_anger_seen",
+			fight_priority
+		)
+
+	return false
+
+
 func _maybe_flee_from_seen_player(seen_target: Node2D) -> bool:
 	# Seeing the player can start a flee burst if fear was already high.
 	if not flee_from_seen_player_when_afraid:
@@ -458,6 +523,9 @@ func _maybe_flee_from_seen_player(seen_target: Node2D) -> bool:
 		return false
 
 	if seen_player_flee_state_name == &"":
+		return false
+
+	if _anger_meets_fight_threshold():
 		return false
 
 	if get_value(fear_decay_value_name) < _get_flee_fear_threshold():
@@ -474,7 +542,11 @@ func _maybe_flee_from_seen_player(seen_target: Node2D) -> bool:
 func _maybe_flee_from_seen_npc(seen_target: Node2D) -> bool:
 	if seen_target == null or not seen_target.is_in_group("npc"):
 		return false
+	if _anger_meets_fight_threshold():
+		return false
 	if npc == null or not npc.has_method("should_flee_from_npc"):
+		return false
+	if npc.has_method("should_fight_npc") and bool(npc.call("should_fight_npc", seen_target)):
 		return false
 	if not bool(npc.call("should_flee_from_npc", seen_target)):
 		return false
@@ -516,7 +588,7 @@ func get_active_target() -> Node2D:
 		return target
 
 	var player := get_tree().get_first_node_in_group("player") as Node2D
-	if player != null and is_instance_valid(player):
+	if player != null and is_instance_valid(player) and not is_ignoring_player_interaction(player):
 		return player
 
 	return null
@@ -528,6 +600,30 @@ func is_in_state(state_name: StringName) -> bool:
 
 func get_flee_fear_threshold() -> float:
 	return _get_flee_fear_threshold()
+
+
+func get_fight_anger_threshold() -> float:
+	return _get_anger_fight_threshold()
+
+
+func evaluate_persistent_combat_reactions(actor: Node2D = null) -> bool:
+	if not active or not value_reactions_enabled:
+		return false
+
+	var fight_actor := actor
+	if fight_actor == null:
+		fight_actor = get_active_target()
+
+	var anger_fight_rule := _get_matching_anger_fight_rule(fight_actor)
+	if anger_fight_rule.is_empty():
+		return false
+
+	return request_state(
+		&"Fight",
+		_get_rule_request_actor(fight_actor, anger_fight_rule),
+		"persistent_anger",
+		int(anger_fight_rule.get("priority", _get_anger_fight_priority()))
+	)
 
 
 func assign_move_target(new_target: Node2D, arrive_state_name: StringName = &"Idle") -> bool:
@@ -586,15 +682,265 @@ func assign_sleep_target(new_target: Node2D, request_priority: int = 20) -> bool
 	return request_state(&"Sleep", new_target, "sleep_target", request_priority)
 
 
-func request_talk(new_target: Node2D) -> bool:
-	# Starts Talk with a known partner, such as the player or another NPC.
+func request_talk(
+	new_target: Node2D,
+	request_priority: int = -1,
+	require_mutual_handshake: bool = true
+) -> bool:
+	# Starts Talk with a known partner, using a two-sided handshake for NPC partners.
+	var priority := request_priority
+	if priority < 0:
+		priority = npc_talk_handshake_priority
+
+	return _request_talk_state(new_target, "talk", priority, require_mutual_handshake)
+
+
+func begin_player_interaction_hold(actor: Node2D, hold_seconds: float = -1.0) -> bool:
+	if not _is_player_interaction_actor(actor):
+		return false
+	if is_ignoring_player_interaction(actor):
+		return false
+
+	var duration := default_player_interaction_hold_seconds if hold_seconds < 0.0 else hold_seconds
+	player_interaction_hold_timer = maxf(duration, 0.0)
+	player_interaction_hold_actor = actor
+	last_actor = actor
+	set_target(actor)
+	_process_player_interaction_hold()
+	return true
+
+
+func end_player_interaction_hold(actor: Node2D = null) -> void:
+	if actor != null and player_interaction_hold_actor != actor:
+		return
+
+	player_interaction_hold_timer = 0.0
+	player_interaction_hold_actor = null
+	if npc != null:
+		npc.velocity.x = 0.0
+
+
+func start_player_interaction_cooldown(actor: Node2D, cooldown_seconds: float = -1.0) -> bool:
+	if not _is_player_interaction_actor(actor):
+		return false
+
+	var duration := (
+		default_player_interaction_cooldown_seconds
+		if cooldown_seconds < 0.0
+		else cooldown_seconds
+	)
+	player_interaction_cooldown_timer = maxf(
+		player_interaction_cooldown_timer,
+		maxf(duration, 0.0)
+	)
+	player_interaction_cooldown_actor = actor
+	end_player_interaction_hold(actor)
+
+	if target == actor and not is_talking_with(actor):
+		set_target(null)
+	if talk_target == actor and not is_talking_with(actor):
+		talk_target = null
+
+	return true
+
+
+func is_ignoring_player_interaction(actor: Node2D = null) -> bool:
+	if player_interaction_cooldown_timer <= 0.0:
+		return false
+	if actor == null:
+		return true
+
+	return _is_player_interaction_actor(actor)
+
+
+func can_accept_talk_request(candidate: Node2D, request_priority: int = -1) -> bool:
+	var priority := request_priority
+	if priority < 0:
+		priority = npc_talk_handshake_priority
+
+	return _can_enter_talk_with(candidate, priority)
+
+
+func is_talking_with(candidate: Node2D) -> bool:
+	if candidate == null or not is_instance_valid(candidate):
+		return false
+	if current_state == null or String(current_state.name) != "Talk":
+		return false
+	if current_state.has_method("is_talking_with"):
+		return bool(current_state.call("is_talking_with", candidate))
+
+	return talk_target == candidate
+
+
+func cancel_talk_with(candidate: Node2D, reason: String = "cancelled") -> void:
+	if candidate == null or not is_instance_valid(candidate):
+		return
+
+	if is_talking_with(candidate) and current_state != null and current_state.has_method("cancel_talk_with"):
+		current_state.call("cancel_talk_with", candidate, reason)
+
+	if talk_target == candidate:
+		talk_target = null
+
+
+func _request_talk_state(
+	new_target: Node2D,
+	reason: String,
+	request_priority: int,
+	require_mutual_handshake: bool
+) -> bool:
 	if new_target == null or not is_instance_valid(new_target) or new_target == npc:
 		if talk_target == npc:
 			talk_target = null
+		state_request_failed.emit(&"Talk", "invalid_talk_target")
+		return false
+
+	if is_ignoring_player_interaction(new_target) and not is_talking_with(new_target):
+		state_request_failed.emit(&"Talk", "player_interaction_cooldown")
+		return false
+
+	var partner_machine := _get_talk_machine_for_target(new_target)
+	var is_npc_partner := (
+		new_target.is_in_group("npc")
+		and partner_machine != null
+		and partner_machine != self
+	)
+	var priority := request_priority
+	if priority < 0:
+		priority = 0
+	if is_npc_partner:
+		priority = max(priority, npc_talk_handshake_priority)
+
+	if not is_npc_partner:
+		return _accept_talk_request(new_target, priority, reason)
+
+	if (
+		require_mutual_handshake
+		and npc_talk_requires_mutual_favor
+		and not _mutual_talk_favor_allows(new_target, partner_machine)
+	):
+		state_request_failed.emit(&"Talk", "mutual_favor_too_low")
+		return false
+
+	if not _can_enter_talk_with(new_target, priority):
+		state_request_failed.emit(&"Talk", "talker_cannot_enter_talk")
+		return false
+
+	if not partner_machine.can_accept_talk_request(npc, priority):
+		state_request_failed.emit(&"Talk", "partner_cannot_enter_talk")
+		if partner_machine.has_signal(&"state_request_failed"):
+			partner_machine.state_request_failed.emit(&"Talk", "partner_cannot_enter_talk")
 		return false
 
 	talk_target = new_target
-	return request_state(&"Talk", new_target, "talk", 20)
+	set_target(new_target)
+	partner_machine.talk_target = npc
+	partner_machine.set_target(npc)
+
+	var partner_started := partner_machine._accept_talk_request(npc, priority, "talk_handshake")
+	if not partner_started:
+		state_request_failed.emit(&"Talk", "partner_talk_start_failed")
+		if talk_target == new_target:
+			talk_target = null
+		return false
+
+	var self_started := _accept_talk_request(new_target, priority, reason)
+	if not self_started:
+		state_request_failed.emit(&"Talk", "talker_start_failed")
+		partner_machine.cancel_talk_with(npc, "handshake_failed")
+		if talk_target == new_target:
+			talk_target = null
+		return false
+
+	return true
+
+
+func _accept_talk_request(new_target: Node2D, request_priority: int, reason: String) -> bool:
+	if is_talking_with(new_target):
+		return true
+
+	talk_target = new_target
+	return _request_state_direct(&"Talk", new_target, reason, request_priority)
+
+
+func _can_enter_talk_with(candidate: Node2D, request_priority: int) -> bool:
+	if candidate == null or not is_instance_valid(candidate) or candidate == npc:
+		return false
+
+	if is_talking_with(candidate):
+		return true
+
+	if current_state != null and String(current_state.name) == "Talk":
+		return false
+
+	var talk_state := get_state(&"Talk")
+	if talk_state == null:
+		return false
+
+	if current_state != null and not current_state.can_exit_to(talk_state, request_priority):
+		return false
+
+	return true
+
+
+func _mutual_talk_favor_allows(candidate: Node2D, partner_machine: NpcStateMachine) -> bool:
+	if candidate == null or partner_machine == null:
+		return false
+
+	var threshold := maxf(
+		npc_talk_handshake_minimum_favor,
+		partner_machine.npc_talk_handshake_minimum_favor
+	)
+	var own_favor := _get_relationship_favor_for_target(candidate)
+	var partner_favor := partner_machine._get_relationship_favor_for_target(npc)
+	return own_favor > threshold and partner_favor > threshold
+
+
+func _get_talk_machine_for_target(candidate: Node) -> NpcStateMachine:
+	if candidate == null or not is_instance_valid(candidate):
+		return null
+
+	var machine_candidate := candidate as NpcStateMachine
+	if machine_candidate != null:
+		return machine_candidate
+
+	return candidate.get_node_or_null("NpcStateMachine") as NpcStateMachine
+
+
+func _update_player_interaction_timers(delta: float) -> void:
+	if player_interaction_hold_timer > 0.0:
+		player_interaction_hold_timer = maxf(player_interaction_hold_timer - delta, 0.0)
+		if player_interaction_hold_timer <= 0.0:
+			player_interaction_hold_actor = null
+
+	if player_interaction_cooldown_timer > 0.0:
+		player_interaction_cooldown_timer = maxf(player_interaction_cooldown_timer - delta, 0.0)
+		if player_interaction_cooldown_timer <= 0.0:
+			player_interaction_cooldown_actor = null
+
+
+func _player_interaction_hold_is_active() -> bool:
+	if player_interaction_hold_timer <= 0.0:
+		return false
+	if player_interaction_hold_actor == null or not is_instance_valid(player_interaction_hold_actor):
+		player_interaction_hold_timer = 0.0
+		player_interaction_hold_actor = null
+		return false
+
+	return true
+
+
+func _process_player_interaction_hold() -> void:
+	if npc == null:
+		return
+
+	npc.velocity.x = 0.0
+	if player_interaction_hold_actor != null and is_instance_valid(player_interaction_hold_actor):
+		face_x_direction(player_interaction_hold_actor.global_position.x - npc.global_position.x)
+
+
+func _is_player_interaction_actor(actor: Node2D) -> bool:
+	return actor != null and is_instance_valid(actor) and actor.is_in_group("player")
 
 
 func suppress_next_idle_value_reaction() -> void:
@@ -603,7 +949,7 @@ func suppress_next_idle_value_reaction() -> void:
 
 func can_talk_to_target(
 	candidate: Node2D,
-	minimum_npc_favor: float = 20.0,
+	minimum_npc_favor: float = 10.0,
 	require_npc_favor: bool = true
 ) -> bool:
 	# Shared gate for autonomous talk choices; direct scripted/player talk can still call request_talk.
@@ -611,6 +957,9 @@ func can_talk_to_target(
 		return false
 
 	if candidate == npc:
+		return false
+
+	if is_ignoring_player_interaction(candidate):
 		return false
 
 	if not candidate.is_in_group("npc"):
@@ -1096,6 +1445,68 @@ func _get_flee_fear_threshold() -> float:
 	return fallback_threshold
 
 
+func _get_anger_fight_threshold() -> float:
+	var rule := _get_anger_fight_rule()
+	return _variant_to_float(rule.get("at_least", 100.0))
+
+
+func _get_anger_fight_priority() -> int:
+	var rule := _get_anger_fight_rule()
+	return int(rule.get("priority", 94))
+
+
+func _anger_meets_fight_threshold() -> bool:
+	if anger_decay_value_name == &"":
+		return false
+
+	return get_value(anger_decay_value_name) >= _get_anger_fight_threshold()
+
+
+func _get_matching_anger_fight_rule(actor: Node2D = null) -> Dictionary:
+	var matching_rule := _find_best_matching_rule({}, actor)
+	if matching_rule.is_empty():
+		return {}
+	if String(matching_rule.get("state", "")) != "Fight":
+		return {}
+	if _canonical_value_key(matching_rule.get("value", "")) != _canonical_value_key(anger_decay_value_name):
+		return {}
+
+	return matching_rule
+
+
+func _higher_priority_value_reaction_blocks_combat(actor: Node2D, combat_priority: int) -> bool:
+	var matching_rule := _find_best_matching_rule({}, actor)
+	if matching_rule.is_empty():
+		return false
+	if String(matching_rule.get("state", "")) == "Fight":
+		return false
+
+	return int(matching_rule.get("priority", 0)) > combat_priority
+
+
+func _get_anger_fight_rule() -> Dictionary:
+	var fallback_rule := {
+		"value": String(anger_decay_value_name),
+		"state": "Fight",
+		"at_least": 100.0,
+		"priority": 94,
+	}
+	for rule_name in value_state_rules.keys():
+		var rule = value_state_rules[rule_name]
+		if not (rule is Dictionary):
+			continue
+
+		var rule_dictionary: Dictionary = rule
+		if String(rule_dictionary.get("state", "")) != "Fight":
+			continue
+		if _canonical_value_key(rule_dictionary.get("value", "")) != _canonical_value_key(anger_decay_value_name):
+			continue
+
+		return rule_dictionary
+
+	return fallback_rule
+
+
 func _stagger_passive_need_tick() -> void:
 	if not stagger_passive_need_ticks:
 		return
@@ -1366,6 +1777,8 @@ func _rule_allows_target(rule: Dictionary, candidate: Node2D) -> bool:
 	if candidate == null or not is_instance_valid(candidate):
 		return false
 	if candidate == npc:
+		return false
+	if is_ignoring_player_interaction(candidate):
 		return false
 
 	var allowed_groups = rule.get("target_groups", [])

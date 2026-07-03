@@ -10,6 +10,7 @@
 [ext_resource type="PackedScene" path="res://scenes/creatures/npc_global_event_area.tscn" id="8_global_event"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_travel_door.tscn" id="9_npc_travel_door"]
 [ext_resource type="Script" path="res://scripts/systems/npc_location_scene.gd" id="10_npc_location_scene"]
+[ext_resource type="Script" path="res://scripts/instances/player_spawn.gd" id="11_player_spawn"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_floor"]
 size = Vector2(7600, 80)
@@ -104,14 +105,27 @@ shape = SubResource("RectangleShape2D_platform")
 [node name="DoorToPlayground" parent="." unique_id=942413467 instance=ExtResource("2_door")]
 position = Vector2(-3600, 367)
 target_scene_path = "res://scenes/levels/playground.tscn"
+target_spawn_id = &"from_playground_npcs"
 
 [node name="NpcDoorBackToStateMachineTest" parent="." instance=ExtResource("9_npc_travel_door")]
 position = Vector2(-3400, 367)
 target_scene_path = "res://scenes/levels/npc_state_machine_test.tscn"
+target_spawn_id = &"from_playground_npcs_left"
 
 [node name="NpcDoorToStateMachineTest" parent="." instance=ExtResource("9_npc_travel_door")]
 position = Vector2(3600, 367)
 target_scene_path = "res://scenes/levels/npc_state_machine_test.tscn"
+target_spawn_id = &"from_playground_npcs_right"
+
+[node name="PlayerSpawnFromPlayground" type="Marker2D" parent="."]
+position = Vector2(-3500, 368)
+script = ExtResource("11_player_spawn")
+spawn_id = &"from_playground"
+
+[node name="PlayerSpawnFromNpcStateMachineTest" type="Marker2D" parent="."]
+position = Vector2(3500, 368)
+script = ExtResource("11_player_spawn")
+spawn_id = &"from_npc_state_machine_test"
 
 [node name="Player" parent="." unique_id=1582959368 instance=ExtResource("1_player")]
 position = Vector2(-3500, 368)

@@ -21,6 +21,7 @@
 [ext_resource type="Resource" path="res://data/npc_spots/mom_eat_prep.tres" id="24_mom_eat_prep_definition"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_recreation_spot.tscn" id="25_recreation_spot"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_rest_spot.tscn" id="26_rest_spot"]
+[ext_resource type="Script" path="res://scripts/instances/player_spawn.gd" id="27_player_spawn"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_q8s1k"]
 texture = ExtResource("9_fddca")
@@ -250,26 +251,33 @@ position = Vector2(300, 367)
 
 [node name="CharacterStatsOverlay" parent="." unique_id=1082242331 instance=ExtResource("19_stats_overlay")]
 
-[node name="RealHomeDoor" parent="." instance=ExtResource("21_home_door")]
+[node name="RealHomeDoor" parent="." unique_id=579890697 instance=ExtResource("21_home_door")]
 position = Vector2(-320, 368)
 target_scene_path = "res://scenes/testscenes/realhometest.tscn"
+target_spawn_id = &"from_realtest1"
+owner_ids = Array[StringName]([&"mom", &"player"])
+
+[node name="PlayerSpawnFromHome" type="Marker2D" parent="." unique_id=1165842368]
+position = Vector2(-220, 368)
+script = ExtResource("27_player_spawn")
+spawn_id = &"from_realhometest"
 
 [node name="MomNpc" parent="." unique_id=259380572 instance=ExtResource("15_mom_npc")]
 position = Vector2(520, 368)
 
-[node name="GardenRecreationSpot" parent="." instance=ExtResource("25_recreation_spot")]
+[node name="GardenRecreationSpot" parent="." unique_id=380431408 instance=ExtResource("25_recreation_spot")]
 position = Vector2(-850, 368)
 npc_preference_weights = {
 "mom": 1.0
 }
 
-[node name="YardRecreationSpot" parent="." instance=ExtResource("25_recreation_spot")]
+[node name="YardRecreationSpot" parent="." unique_id=1184648296 instance=ExtResource("25_recreation_spot")]
 position = Vector2(1080, 368)
 npc_preference_weights = {
 "mom": 3.0
 }
 
-[node name="OutsideRestSpot" parent="." instance=ExtResource("26_rest_spot")]
+[node name="OutsideRestSpot" parent="." unique_id=1037082136 instance=ExtResource("26_rest_spot")]
 position = Vector2(-80, 368)
 npc_preference_weights = {
 "mom": 1.0
@@ -277,11 +285,11 @@ npc_preference_weights = {
 
 [node name="MomMealCycleSpot" parent="." unique_id=2012645276 instance=ExtResource("20_work_spot")]
 position = Vector2(-1217, 325)
+player_work_interaction_id = &"meal_prep"
+eat_world_definition = ExtResource("22_mom_eat_definition")
 save_id = "realtest1_mom_meal_cycle"
 world_definition = ExtResource("24_mom_eat_prep_definition")
-eat_world_definition = ExtResource("22_mom_eat_definition")
 restrict_to_target_npc = false
-player_work_interaction_id = &"meal_prep"
 
 [node name="MomWorkNeedSpot" parent="." unique_id=1167551469 instance=ExtResource("20_work_spot")]
 position = Vector2(1443, 322)

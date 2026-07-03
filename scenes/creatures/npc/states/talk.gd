@@ -160,6 +160,17 @@ func target_lost(lost_target: Node2D) -> NpcState:
 	return next_state
 
 
+func is_talking_with(candidate: Node2D) -> bool:
+	return _is_valid_talk_partner(candidate) and talk_partner == candidate
+
+
+func cancel_talk_with(candidate: Node2D, reason: String = "cancelled") -> void:
+	if not is_talking_with(candidate):
+		return
+
+	_cancel_talk_action(reason)
+
+
 func get_talk_approach_distance() -> float:
 	# Search states use this smaller distance so NPCs do not stop at the range edge.
 	return maxf(talk_range * preferred_talk_distance_ratio, 0.0)
@@ -233,6 +244,9 @@ func _cancel_talk_action(reason: String) -> void:
 		_call_talk_hook(npc, &"on_npc_talk_cancelled", [valid_partner, self, reason])
 		_call_talk_hook(valid_partner, &"on_npc_talk_cancelled_with", [npc, self, reason])
 
+	if not reason.begins_with("partner_"):
+		_cancel_partner_talk_if_linked(reason)
+
 	_clear_talk_target()
 
 
@@ -243,6 +257,9 @@ func _apply_partner_talk_delta() -> void:
 
 	var partner_machine := _get_partner_machine()
 	if partner_machine != null:
+		if _partner_machine_is_talking_back(partner_machine):
+			return
+
 		_apply_talk_delta_to_machine(partner_machine, talk_value_name, partner_talk_complete_delta, npc)
 		return
 
@@ -253,6 +270,29 @@ func _apply_partner_talk_delta() -> void:
 			npc,
 			false
 		)
+
+
+func _partner_machine_is_talking_back(partner_machine: NpcStateMachine) -> bool:
+	if partner_machine == null:
+		return false
+	if partner_machine.has_method("is_talking_with"):
+		return bool(partner_machine.call("is_talking_with", npc))
+
+	return (
+		partner_machine.current_state != null
+		and String(partner_machine.current_state.name) == "Talk"
+		and partner_machine.talk_target == npc
+	)
+
+
+func _cancel_partner_talk_if_linked(reason: String) -> void:
+	var partner_machine := _get_partner_machine()
+	if partner_machine == null:
+		return
+	if not partner_machine.has_method("cancel_talk_with"):
+		return
+
+	partner_machine.call("cancel_talk_with", npc, "partner_%s" % reason)
 
 
 func _apply_talk_spillover(changed_values: Dictionary) -> void:

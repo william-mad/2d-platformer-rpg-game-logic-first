@@ -27,4 +27,5 @@ spot_value_done_threshold = 0.0
 spot_value_delta_per_game_hour = -50.0
 next_spot_id_when_done = &"mom_eat_prep"
 next_spot_value_when_done = 100.0
+owner_ids = Array[StringName]([&"mom", &"player"])
 capacity = 0

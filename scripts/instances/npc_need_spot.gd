@@ -23,6 +23,7 @@ const VALUE_ALIASES := {
 @export var restrict_to_target_npc: bool = true
 # Clear owner controls for plug-and-play spots. Leave these empty to use the legacy target_npc_path rule.
 @export var owner_npc_paths: Array[NodePath] = []
+@export var owner_ids: Array[StringName] = []
 @export var owner_npc_ids: Array[StringName] = []
 # Legacy name kept for older scenes; owner_npc_ids is the clearer version.
 @export var allowed_npc_ids: Array[StringName] = []
@@ -130,7 +131,10 @@ func _apply_world_definition() -> void:
 	request_priority = world_definition.priority
 	target_assignment_method = world_definition.target_assignment_method
 	require_target_need_threshold = world_definition.require_npc_value_threshold
-	owner_npc_ids = world_definition.owner_npc_ids.duplicate()
+	if not world_definition.owner_ids.is_empty():
+		owner_ids = world_definition.owner_ids.duplicate()
+	if not world_definition.owner_npc_ids.is_empty():
+		owner_npc_ids = world_definition.owner_npc_ids.duplicate()
 	active_time_windows = world_definition.active_time_windows.duplicate(true)
 
 
@@ -275,6 +279,9 @@ func _get_owner_display_value() -> Dictionary:
 
 func _get_configured_owner_ids() -> Array[StringName]:
 	var configured_ids: Array[StringName] = []
+	for owner_id in owner_ids:
+		if not configured_ids.has(owner_id):
+			configured_ids.append(owner_id)
 	for owner_id in owner_npc_ids:
 		if not configured_ids.has(owner_id):
 			configured_ids.append(owner_id)
@@ -306,6 +313,7 @@ func _has_explicit_owner_configuration() -> bool:
 	return (
 		(restrict_to_target_npc and String(target_npc_path) != "")
 		or not owner_npc_paths.is_empty()
+		or not owner_ids.is_empty()
 		or not owner_npc_ids.is_empty()
 		or not allowed_npc_ids.is_empty()
 	)
@@ -456,7 +464,7 @@ func _npc_owner_is_allowed(npc_node: Node2D) -> bool:
 	# Empty owner lists mean "serve anyone" unless legacy target_npc_path restriction is set.
 	var has_legacy_target_owner := restrict_to_target_npc and String(target_npc_path) != ""
 	var has_owner_paths := not owner_npc_paths.is_empty()
-	var has_owner_ids := not owner_npc_ids.is_empty() or not allowed_npc_ids.is_empty()
+	var has_owner_ids := not _get_configured_owner_ids().is_empty()
 	if not has_legacy_target_owner and not has_owner_paths and not has_owner_ids:
 		return true
 
@@ -470,16 +478,27 @@ func _npc_owner_is_allowed(npc_node: Node2D) -> bool:
 		if owner_npc == npc_node:
 			return true
 
-	var npc_id := _get_npc_id(npc_node)
-	for owner_id in owner_npc_ids:
-		if String(owner_id) == String(npc_id):
-			return true
+	if _owner_id_is_configured(_get_npc_id(npc_node)):
+		return true
 
-	for allowed_id in allowed_npc_ids:
-		if String(allowed_id) == String(npc_id):
+	return false
+
+
+func _owner_id_is_configured(owner_id: StringName) -> bool:
+	for configured_owner_id in _get_configured_owner_ids():
+		if String(configured_owner_id) == String(owner_id):
 			return true
 
 	return false
+
+
+func _character_owner_id_is_allowed(owner_id: StringName) -> bool:
+	if owner_id == &"":
+		return not _has_explicit_owner_configuration()
+	if not _has_explicit_owner_configuration():
+		return true
+
+	return _owner_id_is_configured(owner_id)
 
 
 func _npc_has_required_tags(npc_node: Node2D) -> bool:
@@ -676,12 +695,12 @@ func _format_spot_label(title: String, value_text: String, owner_text: String = 
 
 
 func _get_owner_debug_text() -> String:
-	var owner_ids := _get_configured_owner_ids()
-	if owner_ids.is_empty():
+	var configured_owner_ids := _get_configured_owner_ids()
+	if configured_owner_ids.is_empty():
 		return "owners:any"
 
 	var owner_texts: Array[String] = []
-	for owner_id in owner_ids:
+	for owner_id in configured_owner_ids:
 		owner_texts.append(String(owner_id))
 
 	return "owners:%s" % ",".join(owner_texts)

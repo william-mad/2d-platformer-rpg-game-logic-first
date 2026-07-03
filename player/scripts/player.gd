@@ -92,6 +92,7 @@ func _ready() -> void:
 	sync_stats_to_hud()
 	#initialize states
 	initialize_states()
+	_apply_pending_runtime_state()
 	pass
 
 
@@ -155,6 +156,12 @@ func apply_save_data(data: Dictionary) -> void:
 	set_process(true)
 	set_process_unhandled_input(true)
 	sync_stats_to_hud()
+
+
+func _apply_pending_runtime_state() -> void:
+	var runtime := get_node_or_null("/root/PlayerRuntime")
+	if runtime != null and runtime.has_method("apply_to_player"):
+		runtime.call("apply_to_player", self)
 
 
 func sync_stats_to_hud() -> void:

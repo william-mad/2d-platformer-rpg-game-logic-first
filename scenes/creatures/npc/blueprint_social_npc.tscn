@@ -135,7 +135,7 @@ value_state_rules = {
 },
 "talk_to_seen_target": {
 "at_least": 50.0,
-"min_relationship_favor": 20.0,
+"min_relationship_favor": 10.0,
 "priority": 60,
 "requires_target": true,
 "state": "Talk",

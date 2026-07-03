@@ -167,6 +167,33 @@ func test_sleep_skip_routes_location_even_without_saved_body_stats() -> void:
 	assert_eq(float(record["last_simulated_total_hours"]), 30.0, "simulation timestamp is still updated")
 
 
+func test_sleep_skip_caps_wake_hunger_at_sixty() -> void:
+	var simulator := _make_simulator()
+	var record := {
+		"node_state": {
+			"social_stats": {
+				"hunger": 50.0,
+				"sleep_need": 80.0,
+				"tired": 20.0,
+			},
+			"world_simulation_profile": {
+				"rates_per_game_hour": {
+					"hunger": 7.0,
+				},
+			},
+		},
+		"activity": {},
+		"pending_travel": {},
+	}
+
+	simulator._apply_sleep_skip_body_values("mom", record, 22.0, 10.0, 32.0, {})
+
+	var social_stats: Dictionary = record["node_state"]["social_stats"]
+	assert_eq(float(social_stats["hunger"]), 60.0, "wake hunger should never exceed the sleep-skip cap")
+	assert_eq(float(social_stats["sleep_need"]), 0.0, "sleep still clears sleep need")
+	assert_eq(float(social_stats["tired"]), 0.0, "sleep still clears tired")
+
+
 func test_sleep_skip_routes_to_sleep_spot_when_sleep_window_was_skipped() -> void:
 	var simulator := _make_simulator()
 	var bed := _make_spot(

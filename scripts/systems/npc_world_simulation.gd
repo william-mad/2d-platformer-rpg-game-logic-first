@@ -5,6 +5,7 @@ signal activity_finished(npc_id: StringName, spot_id: StringName)
 
 const SPOT_DATA_DIRECTORY := "res://data/npc_spots"
 const PLAYER_SOCIAL_TARGET_ID := "__player__"
+const DEFAULT_SLEEP_SKIP_WAKE_HUNGER_MAX := 60.0
 
 @export var simulation_interval_seconds: float = 10.0
 @export var simulated_talk_need_drop: float = 40.0
@@ -333,10 +334,15 @@ func _apply_sleep_skip_body_values(
 			hunger_name,
 			options.get("fallback_hunger_growth_per_game_hour", 7.0)
 		))
+		var max_wake_hunger := clampf(
+			float(options.get("max_wake_hunger", DEFAULT_SLEEP_SKIP_WAKE_HUNGER_MAX)),
+			0.0,
+			100.0
+		)
 		social_stats[hunger_name] = clampf(
 			float(social_stats.get(hunger_name, 0.0)) + hunger_rate * elapsed_game_hours,
 			0.0,
-			100.0
+			max_wake_hunger
 		)
 
 	var reset_values = options.get("body_reset_values", {})
@@ -502,7 +508,7 @@ func _find_sleep_definition_during_skip(
 	if _record_is_disabled(record):
 		return null
 
-	var best_definition: NpcSpotDefinition
+	var best_definition: NpcSpotDefinition = null
 	for definition_value in spot_definitions.values():
 		var definition := definition_value as NpcSpotDefinition
 		if definition == null or String(definition.state_name) != "Sleep":
@@ -664,10 +670,10 @@ func _wake_live_npc_after_sleep_skip(live_npc: Node, slept_during_skip: bool = f
 		return
 
 	if slept_during_skip:
-		var current_state = machine.get("current_state")
+		var sleep_skip_state = machine.get("current_state")
 		if (
-			current_state != null
-			and String(current_state.name) != "Idle"
+			sleep_skip_state != null
+			and String(sleep_skip_state.name) != "Idle"
 			and machine.has_method("suppress_next_idle_value_reaction")
 		):
 			machine.call("suppress_next_idle_value_reaction")
@@ -1249,7 +1255,7 @@ func _linked_spot_cycle_is_stalled(cycle: Array[NpcSpotDefinition]) -> bool:
 func _choose_cycle_recovery_definition(
 	cycle: Array[NpcSpotDefinition]
 ) -> NpcSpotDefinition:
-	var best_definition: NpcSpotDefinition
+	var best_definition: NpcSpotDefinition = null
 	var best_score := -999999.0
 	for definition in cycle:
 		if definition == null:
@@ -1371,7 +1377,7 @@ func _get_social_seek_settings(record: Dictionary) -> Dictionary:
 		"enabled": true,
 		"talk_need_threshold": 70.0,
 		"priority": 60,
-		"minimum_npc_favor": 20.0,
+		"minimum_npc_favor": 10.0,
 		"player_target_chance": 0.35,
 	}
 
@@ -1398,7 +1404,7 @@ func _choose_social_candidate(
 
 	var relationships := get_node_or_null("/root/Relationships")
 	var owner_id := _get_record_relationship_id(npc_id, record)
-	var minimum_favor := float(settings.get("minimum_npc_favor", 20.0))
+	var minimum_favor := float(settings.get("minimum_npc_favor", 10.0))
 	for target_id_key in records.keys():
 		var target_id := String(target_id_key)
 		if target_id == String(npc_id):
@@ -1411,13 +1417,19 @@ func _choose_social_candidate(
 			target_record
 		)
 		if relationships != null and relationships.has_method("get_favor_by_id"):
-			var favor := float(relationships.call(
+			var seeker_favor := float(relationships.call(
 				"get_favor_by_id",
 				owner_id,
 				target_relationship_id,
 				50.0
 			))
-			if favor <= minimum_favor:
+			var target_favor := float(relationships.call(
+				"get_favor_by_id",
+				target_relationship_id,
+				owner_id,
+				50.0
+			))
+			if seeker_favor <= minimum_favor or target_favor <= minimum_favor:
 				continue
 		var target_position = target_record.get("last_position", Vector2.ZERO)
 		if locations.has_method("get_live_npc"):

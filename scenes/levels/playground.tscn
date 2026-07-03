@@ -19,6 +19,7 @@
 [ext_resource type="PackedScene" uid="uid://mhtjqmdrcoo0" path="res://scenes/things/fixed_hidden_spot.tscn" id="17_kgokd"]
 [ext_resource type="PackedScene" uid="uid://rw53hv66gh37" path="res://scenes/things/door_transition.tscn" id="18_door"]
 [ext_resource type="PackedScene" path="res://scenes/things/save_spot.tscn" id="19_save"]
+[ext_resource type="Script" path="res://scripts/instances/player_spawn.gd" id="20_player_spawn"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_q8s1k"]
 texture = ExtResource("4_rc1m4")
@@ -248,10 +249,22 @@ position = Vector2(-1471, 344)
 [node name="DoorToHome1" parent="." unique_id=1972778194 instance=ExtResource("18_door")]
 position = Vector2(77, 367)
 target_scene_path = "res://scenes/levels/home 1.tscn"
+target_spawn_id = &"from_playground"
 
 [node name="DoorToPlaygroundNpcs" parent="." instance=ExtResource("18_door")]
 position = Vector2(180, 367)
 target_scene_path = "res://scenes/levels/playground_npcs.tscn"
+target_spawn_id = &"from_playground"
+
+[node name="PlayerSpawnFromHome1" type="Marker2D" parent="."]
+position = Vector2(25, 368)
+script = ExtResource("20_player_spawn")
+spawn_id = &"from_home1"
+
+[node name="PlayerSpawnFromPlaygroundNpcs" type="Marker2D" parent="."]
+position = Vector2(235, 368)
+script = ExtResource("20_player_spawn")
+spawn_id = &"from_playground_npcs"
 
 [node name="Player" parent="." unique_id=500096349 instance=ExtResource("5_dlivn")]
 position = Vector2(79, 368)

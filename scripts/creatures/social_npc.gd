@@ -64,7 +64,7 @@ const STAT_KEY_ALIASES := {
 @export var max_hp: float = 100.0
 @export var damage_fear_multiplier: float = 4.0
 @export var damage_anger_multiplier: float = 4.0
-@export_range(0.0, 100.0, 0.1, "suffix:%") var damage_fear_health_threshold_percent: float = 70.0
+@export_range(0.0, 100.0, 0.1, "suffix:%") var damage_fear_health_threshold_percent: float = 50.0
 @export var low_health_fear_min_scale: float = 1.0
 @export var low_health_fear_max_scale: float = 2.0
 @export var damage_favor_penalty: float = 2.0
@@ -310,6 +310,7 @@ func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO, 
 			npc_state_machine != null
 			and relationship_fear_delta > 0.0
 			and relationship_fear >= npc_relationship_flee_fear_threshold
+			and relationship_anger < npc_relationship_fight_anger_threshold
 		):
 			npc_state_machine.request_state(
 				&"Flee",
@@ -575,6 +576,7 @@ func apply_npc_location_save_data(data: Dictionary) -> void:
 		syncing_state_machine_values = true
 		npc_state_machine.replace_values(social_stats, null, {}, false)
 		syncing_state_machine_values = false
+		npc_state_machine.evaluate_persistent_combat_reactions()
 
 
 func set_npc_location_position(spawn_position: Vector2) -> void:
@@ -655,7 +657,16 @@ func should_flee_from_npc(other: Node) -> bool:
 	return (
 		other != null
 		and other.is_in_group("npc")
+		and get_relationship_anger_for(other, 0.0) < npc_relationship_fight_anger_threshold
 		and get_relationship_fear_for(other, 0.0) >= npc_relationship_flee_fear_threshold
+	)
+
+
+func should_fight_npc(other: Node) -> bool:
+	return (
+		other != null
+		and other.is_in_group("npc")
+		and get_relationship_anger_for(other, 0.0) >= npc_relationship_fight_anger_threshold
 	)
 
 

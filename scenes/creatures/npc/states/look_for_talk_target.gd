@@ -3,7 +3,7 @@ class_name NpcStateLookForTalkTarget extends NpcState
 @export var search_duration: float = -1.0
 @export var target_groups: Array[StringName] = [&"npc", &"player"]
 @export var require_relationship_favor_for_npcs: bool = true
-@export_range(0.0, 100.0, 0.1) var minimum_relationship_favor: float = 20.0
+@export_range(0.0, 100.0, 0.1) var minimum_relationship_favor: float = 10.0
 @export var talk_state_name: StringName = &"Talk"
 @export var end_state_name: StringName = &"Idle"
 
@@ -32,9 +32,10 @@ func physics_process(delta: float) -> NpcState:
 
 	var approach_distance := _get_talk_approach_distance()
 	if is_close_to(talk_target.global_position, approach_distance):
-		machine.talk_target = talk_target
-		machine.set_target(talk_target)
-		return get_state(talk_state_name)
+		if machine != null and machine.request_talk(talk_target):
+			return next_state
+
+		return get_state(end_state_name)
 
 	move_toward_position(talk_target.global_position, machine.walk_speed, approach_distance)
 	return next_state

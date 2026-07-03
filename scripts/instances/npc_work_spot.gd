@@ -15,6 +15,7 @@ signal player_work_applied(player: Node2D, work_done: float, work_remaining: flo
 @export_group("Player Work")
 @export var allow_player_work: bool = true
 @export var player_group: StringName = &"player"
+@export var player_owner_id: StringName = &"player"
 @export var player_work_action: StringName = &"up"
 @export_range(0.1, 100.0, 0.1) var player_work_per_interaction: float = 25.0
 @export_range(0.05, 30.0, 0.05, "suffix:s") var player_work_duration_seconds: float = 2.0
@@ -221,6 +222,7 @@ func can_player_work(player: Node2D) -> bool:
 		and player != null
 		and is_instance_valid(player)
 		and player.is_in_group(String(player_group))
+		and _player_owner_is_allowed(player)
 		and has_work_needed()
 	)
 
@@ -229,6 +231,8 @@ func _player_can_eat(player: Node2D) -> bool:
 	if player == null or not is_instance_valid(player):
 		return false
 	if not player.is_in_group(String(player_group)):
+		return false
+	if not _player_owner_is_allowed_for_eat(player):
 		return false
 	if not has_food_available():
 		return false
@@ -514,6 +518,35 @@ func _can_serve_eat_phase(npc_node: Node2D, requested_value_name: StringName) ->
 			return false
 
 	return true
+
+
+func _player_owner_is_allowed(player: Node2D) -> bool:
+	return _character_owner_id_is_allowed(_get_player_owner_id(player))
+
+
+func _player_owner_is_allowed_for_eat(player: Node2D) -> bool:
+	if eat_world_definition == null:
+		return _player_owner_is_allowed(player)
+
+	var owner_id := _get_player_owner_id(player)
+	var eat_owner_ids := eat_world_definition.get_owner_ids()
+	if eat_owner_ids.is_empty():
+		return _player_owner_is_allowed(player)
+
+	for eat_owner_id in eat_owner_ids:
+		if String(eat_owner_id) == String(owner_id):
+			return true
+
+	return false
+
+
+func _get_player_owner_id(player: Node2D) -> StringName:
+	if player != null and player.has_meta("owner_id"):
+		var owner_id := String(player.get_meta("owner_id"))
+		if not owner_id.is_empty():
+			return StringName(owner_id)
+
+	return player_owner_id
 
 
 func _update_visual() -> void:

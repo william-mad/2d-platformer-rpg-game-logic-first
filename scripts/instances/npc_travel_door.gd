@@ -1,12 +1,17 @@
 class_name NpcTravelDoor extends Area2D
 
 @export_file("*.tscn") var target_scene_path: String = ""
+@export var target_spawn_id: StringName = &""
 @export var traveller_groups: Array[StringName] = [&"npc"]
 @export var player_group: StringName = &"player"
 @export var interaction_action: StringName = &"up"
 @export var cooldown_seconds: float = 1.5
 @export var npc_arrival_offset: Vector2 = Vector2(80.0, 0.0)
 @export var allow_unscheduled_npc_travel: bool = false
+
+@export_group("Owners")
+@export var owner_ids: Array[StringName] = []
+@export var player_owner_id: StringName = &"player"
 
 @export_group("NPC Permissions")
 # Empty allow-list means every NPC may use the door unless explicitly blocked.
@@ -16,6 +21,7 @@ class_name NpcTravelDoor extends Area2D
 
 var cooldowns: Dictionary = {}
 var player_inside: bool = false
+var active_player: Node2D
 
 
 func _ready() -> void:
@@ -40,6 +46,7 @@ func load_target_scene() -> void:
 		push_warning("NpcTravelDoor has no target scene.")
 		return
 
+	_capture_player_runtime_state()
 	if _change_scene_with_loader():
 		return
 
@@ -52,7 +59,10 @@ func _on_body_entered(body: Node2D) -> void:
 		return
 
 	if body.is_in_group(String(player_group)):
+		if not _owner_id_is_allowed(player_owner_id):
+			return
 		player_inside = true
+		active_player = body
 		_preload_target_scene()
 		return
 
@@ -98,19 +108,24 @@ func get_npc_arrival_position() -> Vector2:
 func can_npc_use(npc: Node) -> bool:
 	if npc == null or not is_instance_valid(npc):
 		return false
-	if not _npc_id_is_allowed(StringName(_get_traveller_id(npc))):
+	var npc_id := StringName(_get_traveller_id(npc))
+	if not _owner_id_is_allowed(npc_id):
+		return false
+	if not _npc_id_is_allowed(npc_id):
 		return false
 	return _npc_has_required_tags(npc)
 
 
 func can_npc_id_use(npc_id: StringName) -> bool:
 	# ID-only gate is available to unloaded simulation; tag gates require a live NPC.
-	return _npc_id_is_allowed(npc_id) and required_npc_tags.is_empty()
+	return _owner_id_is_allowed(npc_id) and _npc_id_is_allowed(npc_id) and required_npc_tags.is_empty()
 
 
 func _on_body_exited(body: Node2D) -> void:
 	if body.is_in_group(String(player_group)):
 		player_inside = false
+		if body == active_player:
+			active_player = null
 
 
 func _is_traveller(body: Node) -> bool:
@@ -137,6 +152,16 @@ func _npc_id_is_allowed(npc_id: StringName) -> bool:
 	return false
 
 
+func _owner_id_is_allowed(owner_id: StringName) -> bool:
+	if owner_ids.is_empty():
+		return true
+	for configured_owner_id in owner_ids:
+		if String(configured_owner_id) == String(owner_id):
+			return true
+
+	return false
+
+
 func _npc_has_required_tags(npc: Node) -> bool:
 	if required_npc_tags.is_empty():
 		return true
@@ -159,6 +184,30 @@ func _get_traveller_id(body: Node) -> String:
 			return npc_id
 
 	return str(body.get_instance_id())
+
+
+func _capture_player_runtime_state() -> void:
+	var runtime := get_node_or_null("/root/PlayerRuntime")
+	if runtime == null or not runtime.has_method("capture_player"):
+		return
+
+	var player := _get_active_player()
+	if player == null:
+		return
+
+	runtime.call("capture_player", player, target_spawn_id)
+
+
+func _get_active_player() -> Node2D:
+	if active_player != null and is_instance_valid(active_player):
+		return active_player
+
+	for body in get_overlapping_bodies():
+		var body_node := body as Node2D
+		if body_node != null and body_node.is_in_group(String(player_group)):
+			return body_node
+
+	return null
 
 
 func _preload_target_scene() -> void:
