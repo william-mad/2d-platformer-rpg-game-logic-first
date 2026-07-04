@@ -1,6 +1,7 @@
 class_name PlayerSpecialAttackBurst extends Area2D
 
 @export var damage: float = 15.0
+@export var knockout_damage: float = 0.0
 @export var radius: float = 360.0
 @export var pulse_count: int = 2
 @export var pulse_interval: float = 0.16
@@ -41,10 +42,12 @@ func launch(
 	attack_lifetime: float = 0.55,
 	attack_collision_mask: int = 128,
 	attack_shake_strength: float = 8.0,
-	attack_shake_duration: float = 0.28
+	attack_shake_duration: float = 0.28,
+	attack_knockout_damage: float = 0.0
 ) -> void:
 	source_player = attack_source
 	damage = attack_damage
+	knockout_damage = maxf(attack_knockout_damage, 0.0)
 	radius = maxf(attack_radius, 1.0)
 	pulse_count = maxi(attack_pulse_count, 1)
 	pulse_interval = maxf(attack_pulse_interval, 0.0)
@@ -68,6 +71,10 @@ func launch(
 
 func get_damage_source() -> Node:
 	return source_player if source_player != null else self
+
+
+func get_knockout_damage() -> float:
+	return knockout_damage
 
 
 func _process(delta: float) -> void:
@@ -145,7 +152,7 @@ func _damage_radius_once() -> void:
 		if collider is Damage_Area:
 			collider.take_damage(self)
 		elif collider.has_method("take_damage"):
-			collider.call("take_damage", damage, global_position, get_damage_source())
+			collider.call("take_damage", damage, global_position, get_damage_source(), knockout_damage)
 
 
 func _get_hit_victim(hit_node: Node) -> Node:

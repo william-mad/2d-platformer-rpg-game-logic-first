@@ -2,6 +2,7 @@ class_name Attack_1 extends Area2D
 
 
 @export var damage : float = 1
+@export var knockout_damage: float = 25.0
 
 # when scene starts, set monitoring and visible to false until further notice
 func _ready() -> void:

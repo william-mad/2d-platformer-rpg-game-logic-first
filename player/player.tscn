@@ -19,6 +19,7 @@
 [ext_resource type="Script" uid="uid://dpchrg7gp26h4" path="res://player/states/special_attack.gd" id="15_special"]
 [ext_resource type="Script" uid="uid://d0fnw643glyvm" path="res://player/states/dash.gd" id="16_dash"]
 [ext_resource type="Script" path="res://player/scripts/npc_talk_interactor.gd" id="17_talk_interactor"]
+[ext_resource type="Script" path="res://player/states/downed.gd" id="18_downed"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_wodsf"]
 radius = 35.0
@@ -267,6 +268,10 @@ script = ExtResource("5_g6k8r")
 [node name="Dash" type="Node" parent="States" unique_id=876601785]
 unique_name_in_owner = true
 script = ExtResource("16_dash")
+
+[node name="Downed" type="Node" parent="States"]
+unique_name_in_owner = true
+script = ExtResource("18_downed")
 
 [node name="Jump" type="Node" parent="States" unique_id=1311053870]
 unique_name_in_owner = true

@@ -1,6 +1,7 @@
 class_name PlayerSpecialAttackWall extends Area2D
 
 @export var damage: float = 25.0
+@export var knockout_damage: float = 0.0
 @export var speed: float = 320.0
 @export var lifetime: float = 0.9
 @export var grow_time: float = 0.35
@@ -44,10 +45,12 @@ func launch(
 	attack_start_size: Vector2 = Vector2(17.0, 35.0),
 	attack_final_size: Vector2 = Vector2(68.0, 140.0),
 	attack_push_speed: float = 460.0,
-	attack_collision_mask: int = 129
+	attack_collision_mask: int = 129,
+	attack_knockout_damage: float = 0.0
 ) -> void:
 	source_player = attack_source
 	damage = attack_damage
+	knockout_damage = maxf(attack_knockout_damage, 0.0)
 	speed = maxf(attack_speed, 0.0)
 	lifetime = maxf(attack_lifetime, 0.01)
 	grow_time = maxf(attack_grow_time, 0.0)
@@ -75,6 +78,10 @@ func launch(
 
 func get_damage_source() -> Node:
 	return source_player if source_player != null else self
+
+
+func get_knockout_damage() -> float:
+	return knockout_damage
 
 
 func _physics_process(delta: float) -> void:
@@ -126,7 +133,7 @@ func _try_hit(hit_node: Node) -> void:
 	if hit_node is Damage_Area:
 		hit_node.take_damage(self)
 	elif hit_node.has_method("take_damage"):
-		hit_node.call("take_damage", damage, global_position, get_damage_source())
+		hit_node.call("take_damage", damage, global_position, get_damage_source(), knockout_damage)
 
 
 func _get_hit_victim(hit_node: Node) -> Node:

@@ -11,6 +11,7 @@ social_stats = {
 "favor": 62.0,
 "fear": 0.0,
 "hp": 100.0,
+"knockout": 0.0,
 "hunger": 35.0,
 "lonely": 0.0,
 "love": 5.0,
@@ -65,6 +66,12 @@ value_state_rules = {
 "state": "DisabledDead",
 "truthy": true,
 "value": "disabled"
+},
+"knockout_downed": {
+"at_least": 100.0,
+"priority": 99,
+"state": "Downed",
+"value": "knockout"
 },
 "favor_dropped": {
 "delta_at_most": -1.0,

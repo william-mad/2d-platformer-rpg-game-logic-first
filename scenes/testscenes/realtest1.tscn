@@ -21,7 +21,7 @@
 [ext_resource type="Resource" path="res://data/npc_spots/mom_eat_prep.tres" id="24_mom_eat_prep_definition"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_recreation_spot.tscn" id="25_recreation_spot"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_rest_spot.tscn" id="26_rest_spot"]
-[ext_resource type="Script" path="res://scripts/instances/player_spawn.gd" id="27_player_spawn"]
+[ext_resource type="Script" uid="uid://bamkt5f56h1bc" path="res://scripts/instances/player_spawn.gd" id="27_player_spawn"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_q8s1k"]
 texture = ExtResource("9_fddca")

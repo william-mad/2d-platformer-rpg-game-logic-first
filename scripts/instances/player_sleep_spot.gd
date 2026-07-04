@@ -157,6 +157,7 @@ func _run_sleep_transition(slept_player: Node2D) -> void:
 	var sleep_skip := _get_sleep_skip_totals()
 	var skipped_game_hours := float(sleep_skip.get("skipped_game_hours", 0.0))
 	_apply_player_sleep_results(slept_player, skipped_game_hours)
+	_restore_live_character_health_after_sleep(slept_player)
 	_simulate_npc_sleep_skip(sleep_skip)
 	_apply_world_sleep_time(sleep_skip)
 
@@ -203,6 +204,77 @@ func _apply_player_sleep_results(player: Node2D, skipped_game_hours: float) -> v
 		player.call("apply_hunger_delta", hunger_rate * skipped_game_hours)
 	if player.has_method("apply_sleep_need_delta"):
 		player.call("apply_sleep_need_delta", -absf(sleep_need_drop))
+	if player.has_method("restore_full_health"):
+		player.call("restore_full_health")
+
+
+func _restore_live_character_health_after_sleep(slept_player: Node2D) -> void:
+	var restored_instance_ids := {}
+	_restore_character_health(slept_player, restored_instance_ids)
+
+	var tree := get_tree()
+	if tree == null:
+		return
+
+	for group_name in [&"player", &"npc", &"social_npc"]:
+		for body in tree.get_nodes_in_group(group_name):
+			_restore_character_health(body, restored_instance_ids)
+
+	var current_scene := tree.current_scene
+	if current_scene != null:
+		_restore_character_health_recursive(current_scene, restored_instance_ids)
+
+
+func _restore_character_health_recursive(root: Node, restored_instance_ids: Dictionary) -> void:
+	if root == null:
+		return
+
+	_restore_character_health(root, restored_instance_ids)
+	for child in root.get_children():
+		_restore_character_health_recursive(child, restored_instance_ids)
+
+
+func _restore_character_health(candidate: Node, restored_instance_ids: Dictionary) -> void:
+	if candidate == null or not is_instance_valid(candidate):
+		return
+
+	var instance_id := candidate.get_instance_id()
+	if restored_instance_ids.has(instance_id):
+		return
+	restored_instance_ids[instance_id] = true
+
+	if candidate.has_method("restore_full_health"):
+		candidate.call("restore_full_health")
+		return
+
+	var max_hp = _get_object_property(candidate, &"max_hp", null)
+	if max_hp == null:
+		return
+
+	var max_hp_value := maxf(float(max_hp), 0.0)
+	if max_hp_value <= 0.0:
+		return
+
+	var current_hp := _get_character_hp(candidate)
+	if current_hp <= 0.0 or current_hp >= max_hp_value:
+		return
+
+	if candidate.has_method("heal"):
+		candidate.call("heal", max_hp_value - current_hp)
+		return
+
+	if _has_object_property(candidate, &"hp"):
+		candidate.set("hp", max_hp_value)
+		if candidate.has_method("update_hp_bar"):
+			candidate.call("update_hp_bar")
+
+
+func _get_character_hp(candidate: Node) -> float:
+	if candidate.has_method("get_hp"):
+		return float(candidate.call("get_hp"))
+
+	var hp = _get_object_property(candidate, &"hp", 0.0)
+	return float(hp)
 
 
 func _simulate_npc_sleep_skip(sleep_skip: Dictionary) -> void:
@@ -287,3 +359,14 @@ func _get_object_property(object: Object, property_name: StringName, fallback):
 			return object.get(property_name)
 
 	return fallback
+
+
+func _has_object_property(object: Object, property_name: StringName) -> bool:
+	if object == null:
+		return false
+
+	for property in object.get_property_list():
+		if String(property.get("name", "")) == String(property_name):
+			return true
+
+	return false

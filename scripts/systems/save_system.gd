@@ -12,30 +12,36 @@ const NPC_LOCATIONS_PATH: String = "/root/NpcLocations"
 const NPC_WORLD_SIMULATION_PATH: String = "/root/NpcWorldSimulation"
 const RELATIONSHIPS_PATH: String = "/root/Relationships"
 
+@export_range(1, 9, 1) var save_slot_count: int = 3
+
 var global_values: Dictionary = {}
 var pending_save_data: Dictionary = {}
 var active_slot: String = DEFAULT_SLOT
 
 
-func save_game(slot: String = DEFAULT_SLOT) -> bool:
-	active_slot = slot
+func save_game(slot: String = "") -> bool:
+	var normalized_slot := _normalize_slot(slot)
+	active_slot = normalized_slot
 
 	var save_data := _build_save_data()
-	var save_path := get_save_path(slot)
+	save_data["slot"] = normalized_slot
+
+	var save_path := get_save_path(normalized_slot)
 	var success := _write_save_file(save_path, save_data)
 
 	save_finished.emit(success, save_path)
 	return success
 
 
-func save_current_game(slot: String = DEFAULT_SLOT) -> bool:
+func save_current_game(slot: String = "") -> bool:
 	return save_game(slot)
 
 
-func load_game(slot: String = DEFAULT_SLOT) -> bool:
-	active_slot = slot
+func load_game(slot: String = "") -> bool:
+	var normalized_slot := _normalize_slot(slot)
+	active_slot = normalized_slot
 
-	var save_path := get_save_path(slot)
+	var save_path := get_save_path(normalized_slot)
 	var save_data := _read_save_file(save_path)
 	if save_data.is_empty():
 		load_finished.emit(false, save_path)
@@ -68,15 +74,15 @@ func load_game(slot: String = DEFAULT_SLOT) -> bool:
 	return true
 
 
-func continue_game(slot: String = DEFAULT_SLOT) -> bool:
+func continue_game(slot: String = "") -> bool:
 	return load_game(slot)
 
 
-func save_exists(slot: String = DEFAULT_SLOT) -> bool:
+func save_exists(slot: String = "") -> bool:
 	return FileAccess.file_exists(get_save_path(slot))
 
 
-func delete_save(slot: String = DEFAULT_SLOT) -> bool:
+func delete_save(slot: String = "") -> bool:
 	var save_path := get_save_path(slot)
 	if not FileAccess.file_exists(save_path):
 		return true
@@ -85,8 +91,103 @@ func delete_save(slot: String = DEFAULT_SLOT) -> bool:
 	return error == OK
 
 
-func get_save_path(slot: String = DEFAULT_SLOT) -> String:
-	return "%s/%s.json" % [SAVE_DIR, slot]
+func get_save_path(slot: String = "") -> String:
+	return "%s/%s.json" % [SAVE_DIR, _normalize_slot(slot)]
+
+
+func set_active_slot(slot: String) -> void:
+	active_slot = _normalize_slot(slot)
+
+
+func get_active_slot() -> String:
+	return _normalize_slot(active_slot)
+
+
+func get_save_slots() -> Array[String]:
+	var slots: Array[String] = []
+	var slot_count := save_slot_count
+	if slot_count < 1:
+		slot_count = 1
+
+	for index in range(slot_count):
+		slots.append("slot_%d" % [index + 1])
+
+	return slots
+
+
+func has_any_save() -> bool:
+	for slot in get_save_slots():
+		if save_exists(slot):
+			return true
+
+	return false
+
+
+func get_save_summaries() -> Array[Dictionary]:
+	var summaries: Array[Dictionary] = []
+	for slot in get_save_slots():
+		summaries.append(get_save_summary(slot))
+
+	return summaries
+
+
+func get_save_summary(slot: String = "") -> Dictionary:
+	var normalized_slot := _normalize_slot(slot)
+	var save_path := get_save_path(normalized_slot)
+	var summary := {
+		"slot": normalized_slot,
+		"display_name": get_save_slot_display_name(normalized_slot),
+		"save_path": save_path,
+		"exists": FileAccess.file_exists(save_path),
+		"valid": false,
+		"version": 0,
+		"scene_path": "",
+		"scene_name": "",
+		"saved_at_unix_time": 0.0,
+	}
+
+	if not bool(summary["exists"]):
+		return summary
+
+	var save_data := _read_save_file(save_path)
+	if save_data.is_empty():
+		return summary
+
+	var scene_path := String(save_data.get("scene_path", ""))
+	summary["valid"] = true
+	summary["version"] = int(save_data.get("version", 0))
+	summary["scene_path"] = scene_path
+	summary["scene_name"] = _get_scene_display_name(scene_path)
+	summary["saved_at_unix_time"] = float(save_data.get("saved_at_unix_time", 0.0))
+	return summary
+
+
+func get_save_slot_display_name(slot: String = "") -> String:
+	var normalized_slot := _normalize_slot(slot)
+	if normalized_slot.begins_with("slot_"):
+		var number_text := normalized_slot.substr(5)
+		if number_text.is_valid_int():
+			return "File %d" % int(number_text)
+
+	return normalized_slot.replace("_", " ").capitalize()
+
+
+func format_save_summary(summary: Dictionary, empty_label: String = "Empty") -> String:
+	var display_name := String(summary.get("display_name", "Save File"))
+	if not bool(summary.get("exists", false)):
+		return "%s - %s" % [display_name, empty_label]
+	if not bool(summary.get("valid", false)):
+		return "%s - Unreadable save" % display_name
+
+	var scene_name := String(summary.get("scene_name", ""))
+	if scene_name.is_empty():
+		scene_name = "Unknown scene"
+
+	var saved_at := _format_saved_time(float(summary.get("saved_at_unix_time", 0.0)))
+	if saved_at.is_empty():
+		return "%s - %s" % [display_name, scene_name]
+
+	return "%s - %s - %s" % [display_name, scene_name, saved_at]
 
 
 func set_value(key: StringName, value) -> void:
@@ -312,6 +413,51 @@ func _read_save_file(save_path: String) -> Dictionary:
 		return {}
 
 	return parsed
+
+
+func _normalize_slot(slot: String = "") -> String:
+	var normalized_slot := slot.strip_edges()
+	if normalized_slot.is_empty():
+		normalized_slot = active_slot.strip_edges()
+	if normalized_slot.is_empty():
+		normalized_slot = DEFAULT_SLOT
+
+	if not _is_safe_slot_name(normalized_slot):
+		push_warning("Unsafe save slot name ignored: %s" % normalized_slot)
+		return DEFAULT_SLOT
+
+	return normalized_slot
+
+
+func _is_safe_slot_name(slot: String) -> bool:
+	return (
+		not slot.is_empty()
+		and slot.find("/") == -1
+		and slot.find("\\") == -1
+		and slot.find("..") == -1
+		and slot.get_extension().is_empty()
+	)
+
+
+func _get_scene_display_name(scene_path: String) -> String:
+	if scene_path.is_empty():
+		return ""
+
+	return scene_path.get_file().get_basename().replace("_", " ").capitalize()
+
+
+func _format_saved_time(unix_time: float) -> String:
+	if unix_time <= 0.0:
+		return ""
+
+	var datetime := Time.get_datetime_dict_from_unix_time(int(unix_time))
+	return "%04d-%02d-%02d %02d:%02d" % [
+		int(datetime.get("year", 0)),
+		int(datetime.get("month", 0)),
+		int(datetime.get("day", 0)),
+		int(datetime.get("hour", 0)),
+		int(datetime.get("minute", 0)),
+	]
 
 
 func _encode_value(value):

@@ -17,6 +17,11 @@ class_name NpcSpotDefinition extends Resource
 @export var finish_when_npc_value_sated: bool = true
 @export var timed_need_thresholds: Array[Dictionary] = []
 
+@export_group("Routine Task")
+@export var routine_animation_name: StringName = &""
+@export_range(0.0, 1440.0, 1.0, "suffix:min") var routine_game_minutes: float = 30.0
+@export var routine_finish_when_value_sated: bool = true
+
 @export_group("Mutable Spot Value")
 @export var spot_value_name: StringName = &""
 @export var spot_value_initial: float = 0.0
@@ -41,6 +46,7 @@ class_name NpcSpotDefinition extends Resource
 @export var owner_ids: Array[StringName] = []
 # Legacy NPC-only list. Use owner_ids for new spots, especially when the player can also use it.
 @export var owner_npc_ids: Array[StringName] = []
+@export var called_npc_ids: Array[StringName] = []
 @export_range(0, 32, 1) var capacity: int = 1
 
 @export_group("Schedule")
@@ -52,6 +58,9 @@ func is_valid_definition() -> bool:
 
 
 func allows_npc_id(npc_id: StringName) -> bool:
+	if not called_npc_ids.is_empty():
+		return _id_is_in_list(npc_id, called_npc_ids)
+
 	return allows_owner_id(npc_id)
 
 
@@ -77,6 +86,23 @@ func get_owner_ids() -> Array[StringName]:
 			configured_owner_ids.append(owner_id)
 
 	return configured_owner_ids
+
+
+func get_called_npc_ids() -> Array[StringName]:
+	var configured_called_ids: Array[StringName] = []
+	for called_id in called_npc_ids:
+		if not configured_called_ids.has(called_id):
+			configured_called_ids.append(called_id)
+
+	return configured_called_ids
+
+
+func _id_is_in_list(npc_id: StringName, ids: Array[StringName]) -> bool:
+	for configured_id in ids:
+		if String(configured_id) == String(npc_id):
+			return true
+
+	return false
 
 
 func is_active_at(hour: float) -> bool:

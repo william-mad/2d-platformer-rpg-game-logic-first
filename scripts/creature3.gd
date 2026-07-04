@@ -6,7 +6,8 @@ enum State {
 	HOME_IDLE,
 	FOLLOW,
 	DEFEND,
-	FIGHT
+	FIGHT,
+	DOWNED
 }
 
 @export_group("Movement")
@@ -21,12 +22,18 @@ enum State {
 
 @export_group("Combat")
 @export var attack_damage: int = 1
+@export var attack_knockout_damage: float = 0.0
 @export var attack_distance: float = 80.0
 @export var attack_windup: float = 0.2
 @export var attack_cooldown: float = 0.8
 @export var max_hp: float = 100.0
+@export_range(1.0, 100.0, 0.1, "suffix:hp/day") var passive_healing_per_game_day: float = 10.0
 @export var knockback_force: Vector2 = Vector2(180, -120)
 @export var knockback_time: float = 0.15
+@export_group("Knockout")
+@export var max_knockout: float = 100.0
+@export var knockout_decay_per_second: float = 55.0
+@export var downed_decay_per_second: float = 32.0
 
 @export_group("Prototype Dialog")
 @export_enum("follow", "kiss", "none") var prototype_dialog_choice: String = "follow"
@@ -38,9 +45,11 @@ enum State {
 @onready var attack_area: Area2D = $AttackArea
 @onready var rope_attach_point: Marker2D = %RopeAttachPoint
 @onready var hp_bar: CreatureHpBar = get_node_or_null("HPBar") as CreatureHpBar
+@onready var knockout_bar: ProgressBar = get_node_or_null("KnockoutBar") as ProgressBar
 
 var state: State = State.HOME_IDLE
 var state_after_fight: State = State.HOME_IDLE
+var state_before_downed: State = State.HOME_IDLE
 var home_position: Vector2
 var player: Node2D = null
 var direction: int = 1
@@ -50,11 +59,14 @@ var can_attack: bool = true
 var is_attacking: bool = false
 var hp: float = 0.0
 var knockback_timer: float = 0.0
+var knockout_amount: float = 0.0
+var knockout_bar_active: bool = false
 
 
 func _ready() -> void:
 	hp = max_hp
 	setup_hp_bar()
+	setup_knockout_bar()
 	home_position = global_position
 	interaction_area.body_entered.connect(_on_interaction_area_body_entered)
 	interaction_area.body_exited.connect(_on_interaction_area_body_exited)
@@ -77,6 +89,13 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _physics_process(delta: float) -> void:
 	_apply_gravity(delta)
+	process_knockout(delta)
+	process_passive_healing(delta)
+
+	if state == State.DOWNED:
+		velocity.x = 0.0
+		move_and_slide()
+		return
 
 	if knockback_timer > 0.0:
 		knockback_timer -= delta
@@ -135,7 +154,12 @@ func take_damage_from_player(_attack) -> void:
 		_change_state(State.DEFEND)
 
 
-func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO, damage_source: Node = null) -> void:
+func take_damage(
+	amount: float,
+	damage_source_position: Vector2 = Vector2.ZERO,
+	damage_source: Node = null,
+	knockout_damage: float = 0.0
+) -> void:
 	var previous_hp := hp
 	hp = maxf(hp - amount, 0.0)
 	var damage_taken := previous_hp - hp
@@ -145,6 +169,10 @@ func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO, 
 
 	if hp <= 0.0:
 		die()
+		return
+
+	apply_knockout(knockout_damage)
+	if state == State.DOWNED:
 		return
 
 	apply_knockback(damage_source_position)
@@ -191,6 +219,11 @@ func _change_state(new_state: State) -> void:
 			_play_animation("idle")
 		State.FIGHT:
 			_play_animation("run")
+		State.DOWNED:
+			is_attacking = false
+			knockback_timer = 0.0
+			velocity.x = 0.0
+			_play_animation("idle")
 
 
 func _process_home_idle() -> void:
@@ -314,7 +347,7 @@ func _start_attack(monster: Node2D) -> void:
 
 func _damage_monster(monster: Node) -> void:
 	if monster.has_method("take_damage"):
-		monster.take_damage(attack_damage, global_position, self)
+		monster.take_damage(attack_damage, global_position, self, attack_knockout_damage)
 	elif monster.has_method("damage"):
 		monster.damage(attack_damage)
 		DamageEvents.emit_damage_dealt(attack_damage, self, monster)
@@ -406,3 +439,92 @@ func setup_hp_bar() -> void:
 func update_hp_bar() -> void:
 	if hp_bar != null:
 		hp_bar.set_hp(hp)
+
+
+func heal(amount: float) -> void:
+	if amount <= 0.0 or hp <= 0.0:
+		return
+	hp = minf(hp + amount, max_hp)
+	update_hp_bar()
+
+
+func restore_full_health() -> void:
+	heal(max_hp - hp)
+
+
+func process_passive_healing(delta: float) -> void:
+	if passive_healing_per_game_day <= 0.0 or hp <= 0.0 or hp >= max_hp:
+		return
+
+	var game_hours := _get_game_hours_for_real_seconds(delta)
+	if game_hours <= 0.0:
+		return
+
+	heal((passive_healing_per_game_day / 24.0) * game_hours)
+
+
+func _get_game_hours_for_real_seconds(real_seconds: float) -> float:
+	var world_time := get_node_or_null("/root/WorldTime")
+	if world_time == null:
+		return 0.0
+
+	var real_seconds_per_day := float(world_time.get("real_seconds_per_day"))
+	if real_seconds_per_day <= 0.0:
+		return 0.0
+
+	return (maxf(real_seconds, 0.0) / real_seconds_per_day) * 24.0
+
+
+func setup_knockout_bar() -> void:
+	if knockout_bar == null:
+		knockout_bar = ProgressBar.new()
+		knockout_bar.name = "KnockoutBar"
+		knockout_bar.offset_left = -36.0
+		knockout_bar.offset_top = -109.0
+		knockout_bar.offset_right = 36.0
+		knockout_bar.offset_bottom = -105.0
+		knockout_bar.show_percentage = false
+		add_child(knockout_bar)
+
+	knockout_bar.min_value = 0.0
+	knockout_bar.max_value = maxf(max_knockout, 1.0)
+	update_knockout_bar()
+
+
+func update_knockout_bar() -> void:
+	if knockout_bar == null:
+		return
+
+	knockout_bar.value = clampf(knockout_amount, 0.0, maxf(max_knockout, 1.0))
+	knockout_bar.visible = knockout_bar_active and knockout_amount > 0.0
+
+
+func apply_knockout(amount: float) -> void:
+	if amount <= 0.0 or max_knockout <= 0.0:
+		return
+
+	knockout_amount = clampf(knockout_amount + amount, 0.0, max_knockout)
+	knockout_bar_active = knockout_amount > 0.0
+	if knockout_amount >= max_knockout:
+		enter_downed_state()
+	update_knockout_bar()
+
+
+func process_knockout(delta: float) -> void:
+	if not knockout_bar_active:
+		return
+
+	var decay_rate := downed_decay_per_second if state == State.DOWNED else knockout_decay_per_second
+	knockout_amount = move_toward(knockout_amount, 0.0, maxf(decay_rate, 0.0) * maxf(delta, 0.0))
+	if knockout_amount <= 0.0:
+		knockout_bar_active = false
+		if state == State.DOWNED:
+			_change_state(state_before_downed)
+
+	update_knockout_bar()
+
+
+func enter_downed_state() -> void:
+	if state != State.DOWNED:
+		state_before_downed = state
+	_change_state(State.DOWNED)

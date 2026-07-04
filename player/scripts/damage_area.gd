@@ -24,7 +24,12 @@ func take_damage(attack) -> void:
 	var damage_source := get_damage_source(attack)
 
 	if damage_owner != null and damage_owner.has_method("take_damage"):
-		damage_owner.take_damage(attack.damage, attack.global_position, damage_source)
+		damage_owner.take_damage(
+			attack.damage,
+			attack.global_position,
+			damage_source,
+			get_knockout_damage(attack)
+		)
 
 	pass
 
@@ -40,6 +45,20 @@ func get_damage_source(attack: Node) -> Node:
 
 	var attack_owner := attack.get_parent()
 	return attack_owner if attack_owner != null else attack
+
+
+func get_knockout_damage(attack: Node) -> float:
+	if attack == null:
+		return 0.0
+
+	if attack.has_method("get_knockout_damage"):
+		return maxf(float(attack.call("get_knockout_damage")), 0.0)
+
+	var value = attack.get("knockout_damage")
+	if typeof(value) == TYPE_FLOAT or typeof(value) == TYPE_INT:
+		return maxf(float(value), 0.0)
+
+	return 0.0
 
 
 func play_hit_sound() -> void:

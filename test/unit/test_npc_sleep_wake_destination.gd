@@ -172,6 +172,8 @@ func test_sleep_skip_caps_wake_hunger_at_sixty() -> void:
 	var record := {
 		"node_state": {
 			"social_stats": {
+				"hp": 25.0,
+				"disabled": 0.0,
 				"hunger": 50.0,
 				"sleep_need": 80.0,
 				"tired": 20.0,
@@ -189,6 +191,7 @@ func test_sleep_skip_caps_wake_hunger_at_sixty() -> void:
 	simulator._apply_sleep_skip_body_values("mom", record, 22.0, 10.0, 32.0, {})
 
 	var social_stats: Dictionary = record["node_state"]["social_stats"]
+	assert_eq(float(social_stats["hp"]), 100.0, "overnight sleep restores health")
 	assert_eq(float(social_stats["hunger"]), 60.0, "wake hunger should never exceed the sleep-skip cap")
 	assert_eq(float(social_stats["sleep_need"]), 0.0, "sleep still clears sleep need")
 	assert_eq(float(social_stats["tired"]), 0.0, "sleep still clears tired")

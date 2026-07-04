@@ -14,6 +14,8 @@ const VALUE_ALIASES := {
 const STATE_ALIASES := {
 	"ReactToPlayer": "ReactToEvent",
 	"NoticeActor": "ReactToEvent",
+	"routine_task": "RoutineTask",
+	"Routine Task": "RoutineTask",
 }
 
 @export_group("Setup")
@@ -50,11 +52,12 @@ const STATE_ALIASES := {
 @export_range(0.0, 100.0, 0.1, "suffix:/h") var boredom_growth_per_game_hour: float = 8.0
 @export_range(0.0, 100.0, 0.1) var talk_need_growth_per_interval: float = 8.0
 @export_range(0.1, 1440.0, 0.1, "suffix:min") var talk_need_growth_interval_game_minutes: float = 20.0
+@export_range(1.0, 100.0, 0.1, "suffix:hp/day") var passive_healing_per_game_day: float = 10.0
 @export var passive_needs_tick_seconds: float = 10.0
 @export var stagger_passive_need_ticks: bool = true
 @export var sleep_need_paused_states: Array[StringName] = [&"Sleep", &"Collapse"]
 @export var hunger_paused_states: Array[StringName] = [&"Eat"]
-@export var boredom_paused_states: Array[StringName] = [&"Work", &"Recreation"]
+@export var boredom_paused_states: Array[StringName] = [&"Work", &"Recreation", &"RoutineTask"]
 @export var talk_need_paused_states: Array[StringName] = [&"Talk"]
 
 @export_group("Action Fatigue")
@@ -67,6 +70,7 @@ const STATE_ALIASES := {
 	&"Idle",
 	&"Sleep",
 	&"Collapse",
+	&"Downed",
 	&"DisabledDead",
 ]
 
@@ -131,6 +135,7 @@ const STATE_ALIASES := {
 	"suspicion": 0.0,
 	"curiosity": 0.0,
 	"hp": 100.0,
+	"knockout": 0.0,
 	"disabled": 0.0
 }
 
@@ -148,6 +153,12 @@ const STATE_ALIASES := {
 		"state": "DisabledDead",
 		"truthy": true,
 		"priority": 100
+	},
+	"knockout_downed": {
+		"value": "knockout",
+		"state": "Downed",
+		"at_least": 100.0,
+		"priority": 99
 	},
 	"high_fear": {
 		"value": "fear",
@@ -259,6 +270,7 @@ var work_target: Node2D
 var eat_target: Node2D
 var rest_target: Node2D
 var recreation_target: Node2D
+var routine_task_target: Node2D
 var sleep_target: Node2D
 var talk_target: Node2D
 var state_after_move: StringName = &"Idle"
@@ -671,6 +683,15 @@ func assign_recreation_target(new_target: Node2D, request_priority: int = 20) ->
 
 	recreation_target = new_target
 	return request_state(&"Recreation", new_target, "recreation_target", request_priority)
+
+
+func assign_routine_task_target(new_target: Node2D, request_priority: int = 20) -> bool:
+	# Stores a generic routine spot, such as shower or other non-work tasks.
+	if new_target == null or not is_instance_valid(new_target):
+		return false
+
+	routine_task_target = new_target
+	return request_state(&"RoutineTask", new_target, "routine_task_target", request_priority)
 
 
 func assign_sleep_target(new_target: Node2D, request_priority: int = 20) -> bool:
@@ -1304,6 +1325,10 @@ func _apply_passive_need_growth(real_seconds: float) -> void:
 			* (game_minutes / talk_need_growth_interval_game_minutes)
 		)
 
+	var healing_delta := _get_passive_healing_delta(game_hours)
+	if healing_delta > 0.0:
+		value_delta["hp"] = healing_delta
+
 	var tired_delta := _get_tired_delta(game_hours)
 	if not is_equal_approx(tired_delta, 0.0):
 		value_delta[String(tired_value_name)] = tired_delta
@@ -1363,6 +1388,19 @@ func _apply_passive_need_growth(real_seconds: float) -> void:
 		return
 
 	apply_value_delta(value_delta, null, true)
+
+
+func _get_passive_healing_delta(game_hours: float) -> float:
+	if passive_healing_per_game_day <= 0.0 or game_hours <= 0.0:
+		return 0.0
+
+	var current_hp := get_value(&"hp")
+	if current_hp <= 0.0 or current_hp >= 100.0:
+		return 0.0
+	if get_value(&"disabled") >= 1.0:
+		return 0.0
+
+	return minf(100.0 - current_hp, (passive_healing_per_game_day / 24.0) * game_hours)
 
 
 func _get_tired_delta(game_hours: float) -> float:
@@ -1557,6 +1595,8 @@ func _run_idle_value_reaction_check() -> void:
 	idle_value_reaction_queued = false
 	if suppress_next_idle_value_reaction_check:
 		suppress_next_idle_value_reaction_check = false
+		if is_inside_tree() and active and value_reactions_enabled:
+			evaluate_persistent_combat_reactions(last_actor)
 		return
 
 	if not is_inside_tree() or not active or not value_reactions_enabled or current_state == null:

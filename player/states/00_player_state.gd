@@ -18,6 +18,7 @@ var next_state : PlayerState
 @onready var special_attack_2: PlayerState = %SpecialAttack2
 @onready var special_attack_1: PlayerState = %SpecialAttack1
 @onready var ledge_grab: PlayerStateLedgeGrab = %LedgeGrab
+@onready var downed: PlayerStateDowned = %Downed
 
 
 

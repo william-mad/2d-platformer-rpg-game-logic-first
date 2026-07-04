@@ -6,6 +6,7 @@ signal activity_finished(npc_id: StringName, spot_id: StringName)
 const SPOT_DATA_DIRECTORY := "res://data/npc_spots"
 const PLAYER_SOCIAL_TARGET_ID := "__player__"
 const DEFAULT_SLEEP_SKIP_WAKE_HUNGER_MAX := 60.0
+const DEFAULT_PASSIVE_HEALING_PER_GAME_DAY := 10.0
 
 @export var simulation_interval_seconds: float = 10.0
 @export var simulated_talk_need_drop: float = 40.0
@@ -358,6 +359,7 @@ func _apply_sleep_skip_body_values(
 			continue
 		social_stats[value_name] = clampf(float(reset_values[value_key]), 0.0, 100.0)
 
+	_apply_full_sleep_health_restore(record, social_stats, options)
 	node_state["social_stats"] = social_stats
 	record["node_state"] = node_state
 	return _finalize_sleep_skip_record(npc_id, record, start_total_hours, end_total_hours)
@@ -758,6 +760,7 @@ func _simulate_offscreen_passive_values(
 		var next_value := current_value + growth
 		social_stats[value_name] = clampf(next_value, 0.0, 100.0)
 
+	_apply_offscreen_passive_healing(social_stats, profile, elapsed_game_hours)
 	_apply_offscreen_tired_change(
 		social_stats,
 		profile,
@@ -778,6 +781,52 @@ func _simulate_offscreen_passive_values(
 
 	node_state["social_stats"] = social_stats
 	record["node_state"] = node_state
+
+
+func _apply_full_sleep_health_restore(
+	record: Dictionary,
+	social_stats: Dictionary,
+	options: Dictionary
+) -> void:
+	if _record_is_disabled(record):
+		return
+
+	var health_value_name := String(options.get("health_value_name", "hp"))
+	if health_value_name.is_empty() or not social_stats.has(health_value_name):
+		return
+
+	var full_health := clampf(float(options.get("full_sleep_hp", 100.0)), 0.0, 100.0)
+	social_stats[health_value_name] = full_health
+
+
+func _apply_offscreen_passive_healing(
+	social_stats: Dictionary,
+	profile: Dictionary,
+	elapsed_game_hours: float
+) -> void:
+	if elapsed_game_hours <= 0.0:
+		return
+	if not social_stats.has("hp"):
+		return
+	if float(social_stats.get("disabled", 0.0)) >= 1.0:
+		return
+
+	var current_hp := float(social_stats.get("hp", 0.0))
+	if current_hp <= 0.0 or current_hp >= 100.0:
+		return
+
+	var healing_per_day := clampf(
+		float(profile.get("passive_healing_per_game_day", DEFAULT_PASSIVE_HEALING_PER_GAME_DAY)),
+		0.0,
+		100.0
+	)
+	if healing_per_day <= 0.0:
+		return
+
+	social_stats["hp"] = minf(
+		100.0,
+		current_hp + (healing_per_day / 24.0) * elapsed_game_hours
+	)
 
 
 func _consume_sleep_skip_wake_pause(
@@ -996,15 +1045,15 @@ func _decay_offscreen_relationships(
 
 
 func _passive_value_is_paused(value_name: String, state_name: StringName) -> bool:
-	var state_text := String(state_name)
+	var state_key := String(state_name).to_snake_case()
 	if value_name == "sleep_need":
-		return state_text == "Sleep" or state_text == "Collapse"
+		return state_key == "sleep" or state_key == "collapse"
 	if value_name == "hunger":
-		return state_text == "Eat"
+		return state_key == "eat"
 	if value_name == "boredom":
-		return state_text == "Work" or state_text == "Recreation"
+		return state_key == "work" or state_key == "recreation" or state_key == "routine_task"
 	if value_name == "talk_need":
-		return state_text == "Talk"
+		return state_key == "talk"
 
 	return false
 
@@ -1085,14 +1134,14 @@ func _npc_is_following_activity(
 	spot: Node2D
 ) -> bool:
 	var current_state = machine.get("current_state")
-	if current_state != null and String(current_state.name) == String(definition.state_name):
+	if current_state != null and _state_names_match(StringName(current_state.name), definition.state_name):
 		return true
 	if current_state == null or String(current_state.name) != "MoveToTarget":
 		return false
 
 	return (
 		machine.get("move_target") == spot
-		and String(machine.get("state_after_move")) == String(definition.state_name)
+		and _state_names_match(StringName(machine.get("state_after_move")), definition.state_name)
 	)
 
 
@@ -1939,6 +1988,13 @@ func _variant_array_has_string(values, expected: String) -> bool:
 		if String(value) == expected:
 			return true
 	return false
+
+
+func _state_names_match(left_state_name: StringName, right_state_name: StringName) -> bool:
+	if String(left_state_name) == String(right_state_name):
+		return true
+
+	return String(left_state_name).to_snake_case() == String(right_state_name).to_snake_case()
 
 
 func _get_effective_need_threshold(definition: NpcSpotDefinition, hour: float) -> float:

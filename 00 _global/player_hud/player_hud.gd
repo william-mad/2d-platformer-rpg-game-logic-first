@@ -9,6 +9,10 @@ const NEED_LABEL_X := 482.0
 const NEED_BAR_X := 535.0
 const NEED_BAR_SIZE := Vector2(118.0, 6.0)
 const NEED_ROW_GAP := 18.0
+const KNOCKOUT_LABEL_X := 482.0
+const KNOCKOUT_BAR_X := 535.0
+const KNOCKOUT_BAR_Y := 46.0
+const KNOCKOUT_BAR_SIZE := Vector2(118.0, 5.0)
 const MANA_ATTACK_NORMAL_COLOR := Color(0.28, 0.62, 1.0, 1.0)
 const MANA_ATTACK_SPECIAL_1_COLOR := Color(0.14, 0.92, 0.72, 1.0)
 const MANA_ATTACK_SPECIAL_2_COLOR := Color(1.0, 0.72, 0.18, 1.0)
@@ -16,6 +20,8 @@ const MANA_ATTACK_SPECIAL_3_COLOR := Color(1.0, 0.22, 0.58, 1.0)
 
 var hunger_bar: TextureProgressBar
 var sleep_need_bar: TextureProgressBar
+var knockout_label: Label
+var knockout_bar: TextureProgressBar
 var current_mana_attack_tier := -1
 
 
@@ -34,6 +40,20 @@ func set_hp(current_hp: float) -> void:
 		return
 
 	hpbar.value = next_value
+
+
+func setup_knockout(max_knockout: float, current_knockout: float, active: bool = false) -> void:
+	_ensure_knockout_bar()
+	knockout_bar.max_value = maxf(max_knockout, 1.0)
+	set_knockout(current_knockout, active)
+
+
+func set_knockout(current_knockout: float, active: bool = true) -> void:
+	_ensure_knockout_bar()
+	knockout_bar.value = clampf(current_knockout, 0.0, knockout_bar.max_value)
+	var should_show := active and knockout_bar.value > 0.0
+	knockout_label.visible = should_show
+	knockout_bar.visible = should_show
 
 
 func setup_mana(max_mana: float, current_mana: float, current_mana_2: float) -> void:
@@ -177,15 +197,60 @@ func _create_need_bar(
 	return bar
 
 
+func _ensure_knockout_bar() -> void:
+	if knockout_bar != null and is_instance_valid(knockout_bar):
+		return
+
+	knockout_label = Label.new()
+	knockout_label.name = "KnockoutBarLabel"
+	knockout_label.position = Vector2(KNOCKOUT_LABEL_X, KNOCKOUT_BAR_Y - 7.0)
+	knockout_label.size = Vector2(47.0, 14.0)
+	knockout_label.text = "KO"
+	knockout_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	knockout_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	knockout_label.add_theme_font_size_override("font_size", 8)
+	knockout_label.add_theme_color_override("font_color", Color(1.0, 0.86, 0.42, 1.0))
+	knockout_label.add_theme_color_override("font_shadow_color", Color.BLACK)
+	knockout_label.add_theme_constant_override("shadow_offset_x", 1)
+	knockout_label.add_theme_constant_override("shadow_offset_y", 1)
+	knockout_label.visible = false
+	control_root.add_child(knockout_label)
+
+	knockout_bar = TextureProgressBar.new()
+	knockout_bar.name = "KnockoutBar"
+	knockout_bar.position = Vector2(KNOCKOUT_BAR_X, KNOCKOUT_BAR_Y)
+	knockout_bar.size = KNOCKOUT_BAR_SIZE
+	knockout_bar.custom_minimum_size = KNOCKOUT_BAR_SIZE
+	knockout_bar.max_value = 100.0
+	knockout_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	knockout_bar.rounded = true
+	knockout_bar.texture_under = _make_status_texture(
+		KNOCKOUT_BAR_SIZE,
+		Color(0.015, 0.014, 0.018, 0.86),
+		Color(0.08, 0.075, 0.09, 0.86)
+	)
+	knockout_bar.texture_progress = _make_status_texture(
+		KNOCKOUT_BAR_SIZE,
+		Color(1.0, 0.48, 0.14, 1.0),
+		Color(1.0, 0.91, 0.24, 1.0)
+	)
+	knockout_bar.visible = false
+	control_root.add_child(knockout_bar)
+
+
 func _make_need_texture(left_color: Color, right_color: Color) -> GradientTexture2D:
+	return _make_status_texture(NEED_BAR_SIZE, left_color, right_color)
+
+
+func _make_status_texture(size: Vector2, left_color: Color, right_color: Color) -> GradientTexture2D:
 	var gradient := Gradient.new()
 	gradient.offsets = PackedFloat32Array([0.0, 1.0])
 	gradient.colors = PackedColorArray([left_color, right_color])
 
 	var texture := GradientTexture2D.new()
 	texture.gradient = gradient
-	texture.width = int(NEED_BAR_SIZE.x)
-	texture.height = int(NEED_BAR_SIZE.y)
+	texture.width = int(size.x)
+	texture.height = int(size.y)
 	texture.fill_from = Vector2(0.0, 0.5)
 	texture.fill_to = Vector2(1.0, 0.5)
 	return texture

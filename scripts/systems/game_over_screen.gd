@@ -1,7 +1,7 @@
 extends CanvasLayer
 
 # Autoload that listens for the player's player_defeated signal and shows a
-# minimal game-over overlay. Continue reloads the last save; Title returns to
+# minimal game-over overlay. Load Game reloads the last save; Title returns to
 # the main menu. Both reuse the existing SceneLoader + SaveSystem autoloads.
 #
 # The overlay is built entirely in code (mirroring SceneLoader's overlay) so no
@@ -57,7 +57,7 @@ func show_game_over() -> void:
 	var can_continue := has_node("/root/SaveSystem") and bool(SaveSystem.save_exists())
 	if continue_button != null:
 		continue_button.disabled = not can_continue
-		continue_button.text = "CONTINUE" if can_continue else "NO SAVE"
+		continue_button.text = "LOAD GAME" if can_continue else "NO SAVE"
 
 	visible = true
 	if continue_button != null:
@@ -184,7 +184,7 @@ func _build_overlay() -> void:
 	title_label.text = "YOU DIED"
 	center.add_child(title_label)
 
-	continue_button = _create_button("CONTINUE")
+	continue_button = _create_button("LOAD GAME")
 	continue_button.pressed.connect(hide_game_over_and_continue)
 	center.add_child(continue_button)
 

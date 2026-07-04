@@ -1,0 +1,71 @@
+[gd_scene load_steps=2 format=3 uid="uid://b6uelg5wsy8in"]
+
+[ext_resource type="Script" path="res://scripts/instances/start_game_intro.gd" id="1_intro"]
+
+[node name="StartGameIntro" type="Node2D"]
+script = ExtResource("1_intro")
+next_scene_path = "res://scenes/testscenes/realtest1.tscn"
+
+[node name="StageRoot" type="Node2D" parent="."]
+
+[node name="IntroCanvas" type="CanvasLayer" parent="."]
+
+[node name="Screen" type="Control" parent="IntroCanvas"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Background" type="ColorRect" parent="IntroCanvas/Screen"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.025, 0.028, 0.03, 1)
+
+[node name="Center" type="CenterContainer" parent="IntroCanvas/Screen"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="IntroStack" type="VBoxContainer" parent="IntroCanvas/Screen/Center"]
+custom_minimum_size = Vector2(360, 0)
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="IntroCaption" type="Label" parent="IntroCanvas/Screen/Center/IntroStack"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.94, 0.9, 0.76, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.8)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_font_sizes/font_size = 28
+text = "A QUIET MORNING"
+horizontal_alignment = 1
+
+[node name="IntroSubtitle" type="Label" parent="IntroCanvas/Screen/Center/IntroStack"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.74, 0.86, 0.82, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.72)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 16
+text = "The day begins."
+horizontal_alignment = 1
+
+[node name="IntroAnimationPlayer" type="AnimationPlayer" parent="."]
+unique_name_in_owner = true
+
+[node name="ProgrammedIntroBehaviours" type="Node" parent="."]
+unique_name_in_owner = true

@@ -21,6 +21,7 @@ class_name NpcStateValueDisplay extends Label
 	"suspicion",
 	"curiosity",
 	"hp",
+	"knockout",
 	"disabled"
 ]
 

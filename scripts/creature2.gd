@@ -6,6 +6,7 @@ enum State {
 	CHASE,
 	ATTACK,
 	HURT,
+	DOWNED,
 	DEAD
 }
 
@@ -17,11 +18,17 @@ enum State {
 
 @export_group("Combat")
 @export var max_hp: float = 100.0
+@export_range(1.0, 100.0, 0.1, "suffix:hp/day") var passive_healing_per_game_day: float = 10.0
 @export var damage: int = 1
 @export var attack_cooldown: float = 1.0
 @export var attack_windup: float = 0.25
 @export var hurt_time: float = 0.25
 @export var knockback_force: Vector2 = Vector2(180, -120)
+@export var attack_knockout_damage: float = 0.0
+@export_group("Knockout")
+@export var max_knockout: float = 100.0
+@export var knockout_decay_per_second: float = 55.0
+@export var downed_decay_per_second: float = 32.0
 
 @export_group("Behavior")
 @export var starts_moving_right: bool = true
@@ -35,6 +42,7 @@ enum State {
 @onready var attack_area: Area2D = $AttackArea
 @onready var attack_area_collision: CollisionShape2D = $AttackArea/CollisionShape2D
 @onready var hp_bar: CreatureHpBar = get_node_or_null("HPBar") as CreatureHpBar
+@onready var knockout_bar: ProgressBar = get_node_or_null("KnockoutBar") as ProgressBar
 
 #rope stuff
 @export var friction: float = 900.0
@@ -49,11 +57,14 @@ var hp: float
 var player: Node2D = null
 var can_attack: bool = true
 var is_attacking: bool = false
+var knockout_amount: float = 0.0
+var knockout_bar_active: bool = false
 
 
 func _ready() -> void:
 	hp = max_hp
 	setup_hp_bar()
+	setup_knockout_bar()
 	direction = 1 if starts_moving_right else -1
 
 	player_detect.body_entered.connect(_on_player_detect_body_entered)
@@ -69,6 +80,13 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_apply_gravity(delta)
+	process_knockout(delta)
+	process_passive_healing(delta)
+
+	if state == State.DOWNED:
+		velocity.x = 0.0
+		move_and_slide()
+		return
 
 	match state:
 		State.IDLE:
@@ -81,6 +99,8 @@ func _physics_process(delta: float) -> void:
 			_process_attack()
 		State.HURT:
 			pass
+		State.DOWNED:
+			velocity.x = 0.0
 
 	move_and_slide()
 
@@ -190,6 +210,10 @@ func _change_state(new_state: State) -> void:
 			is_attacking = false
 			_start_hurt_timer()
 
+		State.DOWNED:
+			is_attacking = false
+			velocity.x = 0.0
+
 		State.DEAD:
 			_die()
 
@@ -228,13 +252,18 @@ func _start_attack() -> void:
 
 func _damage_player(target: Node) -> void:
 	if target.has_method("take_damage"):
-		target.take_damage(damage, global_position, self)
+		target.take_damage(damage, global_position, self, attack_knockout_damage)
 	elif target.has_method("damage"):
 		target.damage(damage)
 		DamageEvents.emit_damage_dealt(damage, self, target)
 
 
-func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO, damage_source: Node = null) -> void:
+func take_damage(
+	amount: float,
+	damage_source_position: Vector2 = Vector2.ZERO,
+	damage_source: Node = null,
+	knockout_damage: float = 0.0
+) -> void:
 	if state == State.DEAD:
 		return
 
@@ -247,6 +276,10 @@ func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO, 
 
 	if hp <= 0.0:
 		_change_state(State.DEAD)
+		return
+
+	apply_knockout(knockout_damage)
+	if state == State.DOWNED:
 		return
 
 	var knockback_direction: int = int(sign(global_position.x - damage_source_position.x))
@@ -278,7 +311,7 @@ func _on_player_detect_body_entered(body: Node2D) -> void:
 	if body.is_in_group("player"):
 		player = body
 
-		if chase_player and state not in [State.ATTACK, State.HURT, State.DEAD]:
+		if chase_player and state not in [State.ATTACK, State.HURT, State.DOWNED, State.DEAD]:
 			_change_state(State.CHASE)
 
 
@@ -286,7 +319,7 @@ func _on_player_detect_body_exited(body: Node2D) -> void:
 	if body == player:
 		player = null
 
-		if state not in [State.ATTACK, State.HURT, State.DEAD]:
+		if state not in [State.ATTACK, State.HURT, State.DOWNED, State.DEAD]:
 			_change_state(State.PATROL)
 
 
@@ -294,7 +327,7 @@ func _on_attack_area_body_entered(body: Node2D) -> void:
 	if body.is_in_group("player"):
 		player = body
 
-		if can_attack and state not in [State.ATTACK, State.HURT, State.DEAD]:
+		if can_attack and state not in [State.ATTACK, State.HURT, State.DOWNED, State.DEAD]:
 			_change_state(State.ATTACK)
 
 
@@ -311,3 +344,89 @@ func setup_hp_bar() -> void:
 func update_hp_bar() -> void:
 	if hp_bar != null:
 		hp_bar.set_hp(hp)
+
+
+func heal(amount: float) -> void:
+	if amount <= 0.0 or hp <= 0.0 or state == State.DEAD:
+		return
+	hp = minf(hp + amount, max_hp)
+	update_hp_bar()
+
+
+func restore_full_health() -> void:
+	heal(max_hp - hp)
+
+
+func process_passive_healing(delta: float) -> void:
+	if passive_healing_per_game_day <= 0.0 or hp <= 0.0 or hp >= max_hp:
+		return
+
+	var game_hours := _get_game_hours_for_real_seconds(delta)
+	if game_hours <= 0.0:
+		return
+
+	heal((passive_healing_per_game_day / 24.0) * game_hours)
+
+
+func _get_game_hours_for_real_seconds(real_seconds: float) -> float:
+	var world_time := get_node_or_null("/root/WorldTime")
+	if world_time == null:
+		return 0.0
+
+	var real_seconds_per_day := float(world_time.get("real_seconds_per_day"))
+	if real_seconds_per_day <= 0.0:
+		return 0.0
+
+	return (maxf(real_seconds, 0.0) / real_seconds_per_day) * 24.0
+
+
+func setup_knockout_bar() -> void:
+	if knockout_bar == null:
+		knockout_bar = ProgressBar.new()
+		knockout_bar.name = "KnockoutBar"
+		knockout_bar.offset_left = -36.0
+		knockout_bar.offset_top = -109.0
+		knockout_bar.offset_right = 36.0
+		knockout_bar.offset_bottom = -105.0
+		knockout_bar.show_percentage = false
+		add_child(knockout_bar)
+
+	knockout_bar.min_value = 0.0
+	knockout_bar.max_value = maxf(max_knockout, 1.0)
+	update_knockout_bar()
+
+
+func update_knockout_bar() -> void:
+	if knockout_bar == null:
+		return
+
+	knockout_bar.value = clampf(knockout_amount, 0.0, maxf(max_knockout, 1.0))
+	knockout_bar.visible = knockout_bar_active and knockout_amount > 0.0
+
+
+func apply_knockout(amount: float) -> void:
+	if amount <= 0.0 or max_knockout <= 0.0:
+		return
+
+	knockout_amount = clampf(knockout_amount + amount, 0.0, max_knockout)
+	knockout_bar_active = knockout_amount > 0.0
+	if knockout_amount >= max_knockout:
+		_change_state(State.DOWNED)
+	update_knockout_bar()
+
+
+func process_knockout(delta: float) -> void:
+	if not knockout_bar_active:
+		return
+
+	var decay_rate := downed_decay_per_second if state == State.DOWNED else knockout_decay_per_second
+	knockout_amount = move_toward(knockout_amount, 0.0, maxf(decay_rate, 0.0) * maxf(delta, 0.0))
+	if knockout_amount <= 0.0:
+		knockout_bar_active = false
+		if state == State.DOWNED:
+			if player and chase_player:
+				_change_state(State.CHASE)
+			else:
+				_change_state(State.PATROL)
+
+	update_knockout_bar()

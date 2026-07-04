@@ -21,6 +21,7 @@ class_name NpcStateFight extends NpcState
 @export var attack_range: float = 280.0
 @export var attack_min_range: float = 24.0
 @export var projectile_damage: float = 3.0
+@export var projectile_knockout_damage: float = 40.0
 @export var projectile_flight_time: float = 0.65
 @export var projectile_arc_height: float = 72.0
 @export var projectile_lifetime: float = 3.0
@@ -267,7 +268,8 @@ func _throw_attack(attack_target: Node2D) -> void:
 			projectile_collision_mask,
 			friendly_fire_favor_penalty,
 			attack_target,
-			anger_drop_on_target_hit
+			anger_drop_on_target_hit,
+			projectile_knockout_damage
 		)
 	else:
 		projectile.global_position = spawn_position

@@ -38,6 +38,7 @@ const STAT_KEY_ALIASES := {
 	"suspicion": 0.0,
 	"curiosity": 0.0,
 	"hp": 100.0,
+	"knockout": 0.0,
 	"disabled": 0.0
 }
 
@@ -70,6 +71,11 @@ const STAT_KEY_ALIASES := {
 @export var damage_favor_penalty: float = 2.0
 @export_range(0.0, 100.0, 0.1) var npc_relationship_fight_anger_threshold: float = 100.0
 @export_range(0.0, 100.0, 0.1) var npc_relationship_flee_fear_threshold: float = 70.0
+
+@export_group("Knockout")
+@export var max_knockout: float = 100.0
+@export var knockout_decay_per_second: float = 55.0
+@export var downed_decay_per_second: float = 32.0
 
 @export_group("Damage Hop")
 @export var damage_hop_enabled: bool = true
@@ -110,6 +116,7 @@ const STAT_KEY_ALIASES := {
 @onready var sight_area: Area2D = %SightArea
 @onready var favor_bar: ProgressBar = %FavorBar
 @onready var hp_bar: CreatureHpBar = get_node_or_null("HPBar") as CreatureHpBar
+@onready var knockout_bar: ProgressBar = get_node_or_null("KnockoutBar") as ProgressBar
 @onready var name_label: Label = get_node_or_null("NameLabel") as Label
 # Optional child component. If present, social values can drive the reusable NPC states.
 @onready var npc_state_machine: NpcStateMachine = get_node_or_null("NpcStateMachine") as NpcStateMachine
@@ -124,6 +131,8 @@ var syncing_state_machine_values: bool = false
 var perception_enabled: bool = true
 var sight_pivot_visible_before_sleep: bool = true
 var sight_area_monitoring_before_sleep: bool = true
+var knockout_bar_active: bool = false
+var is_downed: bool = false
 # Cached player reference so _update_favor_bar_visibility() does not scan the player
 # group on every NPC every physics frame. Refreshed lazily when it becomes invalid.
 var cached_player: Node2D
@@ -141,6 +150,7 @@ func _ready() -> void:
 
 	_ensure_social_stats()
 	setup_hp_bar()
+	setup_knockout_bar()
 	_update_facing()
 	_update_favor_bar()
 	_update_favor_bar_visibility()
@@ -163,10 +173,18 @@ func _exit_tree() -> void:
 func _physics_process(delta: float) -> void:
 	if _state_machine_active():
 		# When the reusable machine is active, it owns movement and move_and_slide().
+		_process_knockout_recovery(delta)
 		_update_favor_bar_visibility()
 		return
 
 	_apply_gravity(delta)
+	_process_knockout_recovery(delta)
+
+	if is_downed:
+		velocity.x = 0.0
+		_update_favor_bar_visibility()
+		move_and_slide()
+		return
 
 	if process_damage_hop(delta):
 		pass
@@ -225,7 +243,7 @@ func apply_social_event(
 		var key := String(stat_key)
 		var current_value := float(social_stats.get(key, 0.0))
 		var next_value := current_value + float(normalized_delta[stat_key])
-		var max_value := max_hp if key == "hp" else 100.0
+		var max_value := _get_stat_max_value(key)
 		social_stats[key] = clampf(next_value, 0.0, max_value)
 
 		var actual_delta := float(social_stats[key]) - current_value
@@ -233,6 +251,10 @@ func apply_social_event(
 			changed_stats[key] = actual_delta
 
 	update_hp_bar()
+	if changed_stats.has("knockout") and get_knockout() > 0.0:
+		knockout_bar_active = true
+	update_knockout_bar()
+	_update_knockout_state()
 	_update_favor_bar()
 	_update_visual_mood()
 
@@ -248,7 +270,12 @@ func apply_social_event(
 	return true
 
 
-func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO, damage_source: Node = null) -> void:
+func take_damage(
+	amount: float,
+	damage_source_position: Vector2 = Vector2.ZERO,
+	damage_source: Node = null,
+	knockout_damage: float = 0.0
+) -> void:
 	if amount <= 0.0 or get_hp() <= 0.0:
 		return
 
@@ -320,7 +347,9 @@ func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO, 
 			)
 
 	if damage_taken > 0.0 and get_hp() > 0.0:
-		start_damage_hop(damage_source_position)
+		apply_knockout(knockout_damage, damage_actor, true)
+		if not _is_in_downed_recovery():
+			start_damage_hop(damage_source_position)
 	DamageEvents.emit_damage_dealt(damage_taken, damage_source, self)
 
 	if get_hp() <= 0.0:
@@ -403,7 +432,10 @@ func die() -> void:
 		return
 
 	social_stats["disabled"] = 1.0
+	knockout_bar_active = false
+	is_downed = false
 	update_hp_bar()
+	update_knockout_bar()
 	social_stats_changed.emit(social_stats.duplicate())
 
 	# Add disabled/death animations here later:
@@ -492,6 +524,8 @@ func _get_world_simulation_profile() -> Dictionary:
 	)
 	return {
 		"passive_needs_enabled": npc_state_machine.passive_needs_enabled,
+		"passive_healing_per_game_day": npc_state_machine.passive_healing_per_game_day,
+		"max_hp": max_hp,
 		"rates_per_game_hour": {
 			"sleep_need": npc_state_machine.sleep_need_growth_per_game_hour,
 			"hunger": npc_state_machine.hunger_growth_per_game_hour,
@@ -704,6 +738,10 @@ func get_hp() -> float:
 	return clampf(float(social_stats.get("hp", max_hp)), 0.0, max_hp)
 
 
+func get_knockout() -> float:
+	return clampf(float(social_stats.get("knockout", 0.0)), 0.0, max_knockout)
+
+
 func get_display_name() -> String:
 	# Chooses the label text shown above the NPC, preferring explicit display_name.
 	if not display_name.is_empty():
@@ -732,6 +770,94 @@ func update_hp_bar() -> void:
 	hp_bar.set_hp(get_hp())
 
 
+func setup_knockout_bar() -> void:
+	if knockout_bar == null:
+		knockout_bar = ProgressBar.new()
+		knockout_bar.name = "KnockoutBar"
+		knockout_bar.offset_left = -36.0
+		knockout_bar.offset_top = -109.0
+		knockout_bar.offset_right = 36.0
+		knockout_bar.offset_bottom = -105.0
+		knockout_bar.show_percentage = false
+		add_child(knockout_bar)
+
+	knockout_bar.min_value = 0.0
+	knockout_bar.max_value = maxf(max_knockout, 1.0)
+	update_knockout_bar()
+
+
+func update_knockout_bar() -> void:
+	if knockout_bar == null:
+		return
+
+	var current_knockout := get_knockout()
+	knockout_bar.max_value = maxf(max_knockout, 1.0)
+	knockout_bar.value = current_knockout
+	knockout_bar.visible = knockout_bar_active and current_knockout > 0.0
+
+
+func apply_knockout(amount: float, actor: Node2D = null, evaluate_reactions: bool = true) -> void:
+	if amount <= 0.0 or get_hp() <= 0.0 or max_knockout <= 0.0:
+		return
+
+	knockout_bar_active = true
+	_set_knockout(get_knockout() + amount, actor, evaluate_reactions)
+
+
+func _process_knockout_recovery(delta: float) -> void:
+	if not knockout_bar_active:
+		return
+
+	var current_knockout := get_knockout()
+	if current_knockout <= 0.0:
+		knockout_bar_active = false
+		is_downed = false
+		update_knockout_bar()
+		return
+
+	var decay_rate := downed_decay_per_second if _is_in_downed_recovery() else knockout_decay_per_second
+	_set_knockout(
+		move_toward(current_knockout, 0.0, maxf(decay_rate, 0.0) * maxf(delta, 0.0)),
+		null,
+		false
+	)
+
+
+func _set_knockout(next_value: float, actor: Node2D = null, evaluate_reactions: bool = true) -> void:
+	var previous_value := get_knockout()
+	var clamped_value := clampf(next_value, 0.0, maxf(max_knockout, 1.0))
+	if is_equal_approx(previous_value, clamped_value):
+		update_knockout_bar()
+		return
+
+	social_stats["knockout"] = clamped_value
+	var changed_stats := {"knockout": clamped_value - previous_value}
+	_update_knockout_state()
+	update_knockout_bar()
+
+	if _state_machine_active():
+		syncing_state_machine_values = true
+		npc_state_machine.replace_values(social_stats, actor, changed_stats, evaluate_reactions)
+		syncing_state_machine_values = false
+
+	social_stats_changed.emit(social_stats.duplicate())
+
+
+func _update_knockout_state() -> void:
+	var current_knockout := get_knockout()
+	if current_knockout >= maxf(max_knockout, 1.0):
+		is_downed = true
+	elif current_knockout <= 0.0:
+		is_downed = false
+
+
+func _is_in_downed_recovery() -> bool:
+	if is_downed:
+		return true
+
+	return npc_state_machine != null and npc_state_machine.is_in_state(&"Downed")
+
+
 func _ensure_social_stats() -> void:
 	var default_stats := {
 		"favor": 50.0,
@@ -751,6 +877,7 @@ func _ensure_social_stats() -> void:
 		"suspicion": 0.0,
 		"curiosity": 0.0,
 		"hp": 100.0,
+		"knockout": 0.0,
 		"disabled": 0.0
 	}
 
@@ -761,6 +888,18 @@ func _ensure_social_stats() -> void:
 			social_stats[stat_key] = default_stats[stat_key]
 
 	social_stats["hp"] = clampf(float(social_stats.get("hp", max_hp)), 0.0, max_hp)
+	social_stats["knockout"] = clampf(float(social_stats.get("knockout", 0.0)), 0.0, max_knockout)
+	knockout_bar_active = get_knockout() > 0.0
+	_update_knockout_state()
+
+
+func _get_stat_max_value(stat_key: String) -> float:
+	if stat_key == "hp":
+		return max_hp
+	if stat_key == "knockout":
+		return maxf(max_knockout, 1.0)
+
+	return 100.0
 
 
 func _normalize_stat_values(values: Dictionary) -> Dictionary:
@@ -1291,6 +1430,10 @@ func _on_npc_state_machine_values_changed(
 	# States can also change values, so mirror them back into the social NPC display.
 	social_stats = values.duplicate(true)
 	update_hp_bar()
+	if social_stats.has("knockout"):
+		knockout_bar_active = knockout_bar_active or get_knockout() > 0.0
+		_update_knockout_state()
+	update_knockout_bar()
 	_update_favor_bar()
 	_update_visual_mood()
 	social_stats_changed.emit(social_stats.duplicate())

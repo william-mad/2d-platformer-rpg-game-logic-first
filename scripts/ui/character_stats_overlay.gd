@@ -27,6 +27,7 @@ class_name CharacterStatsOverlay extends CanvasLayer
 	"suspicion",
 	"curiosity",
 	"energy",
+	"knockout",
 	"disabled"
 ]
 
@@ -159,6 +160,7 @@ func _append_player_lines(lines: Array[String]) -> void:
 	var player_values := {
 		"hp": _get_property_if_present(player, &"hp"),
 		"max_hp": _get_property_if_present(player, &"max_hp"),
+		"knockout": _get_property_if_present(player, &"knockout_amount"),
 		"hunger": _get_property_if_present(player, &"hunger"),
 		"sleep_need": _get_property_if_present(player, &"sleep_need"),
 		"mana": _get_property_if_present(player, &"mana_amount"),

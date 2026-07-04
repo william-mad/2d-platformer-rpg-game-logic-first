@@ -118,22 +118,40 @@ default_flee_time = 4.0
 
 [node name="Fight" parent="NpcStateMachine"]
 script = ExtResource("5_mom_fight")
-target_groups = Array[StringName]([&"player"])
+target_groups = Array[StringName]([&"player", &"npc"])
 preferred_attack_distance = 150.0
 attack_position_tolerance = 18.0
 attack_range = 520.0
 attack_min_range = 8.0
 projectile_damage = 4.0
+projectile_knockout_damage = 40.0
 projectile_flight_time = 0.82
 projectile_arc_height = 58.0
 projectile_spawn_offset = Vector2(24, -48)
 melee_damage = 6.0
+melee_knockout_damage = 35.0
 melee_range_hitbox_multiplier = 3.0
 melee_windup_seconds = 0.18
 melee_cooldown_seconds = 0.85
+npc_relationship_anger_drop_on_target_hit = 20.0
+scream_charge_seconds = 0.45
+scream_close_speed_multiplier = 0.16
+scream_visual_start_scale = 0.03
 projectile_distance_threshold = 260.0
 projectile_aim_windup_seconds = 0.34
 projectile_cooldown_seconds = 1.35
+melee_followup_backstep_seconds = 0.75
+melee_followup_backstep_speed_multiplier = 0.18
+melee_followup_projectile_cooldown_seconds = 0.95
+ranged_followup_delay_seconds = 0.16
+ranged_followup_jump_velocity = 560.0
+ranged_followup_jump_lunge_seconds = 0.45
+ranged_followup_jump_target_fraction = 0.8
+ranged_followup_jump_max_horizontal_speed = 1100.0
+ranged_followup_flight_time = 0.34
+straight_hit_melee_walk_seconds = 1.0
+straight_hit_melee_speed_multiplier = 0.2
+straight_hit_melee_cooldown_seconds = 0.75
 
 [node name="StateLabel" type="Label" parent="."]
 offset_left = -46.0

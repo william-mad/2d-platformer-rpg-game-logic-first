@@ -29,10 +29,15 @@ signal player_defeated
 @export var move_speed : float = 700
 @export var knockback_force: Vector2 = Vector2(220, -160)
 @export var knockback_time: float = 0.15
+@export_group("Knockout")
+@export var max_knockout: float = 100.0
+@export var knockout_decay_per_second: float = 55.0
+@export var downed_decay_per_second: float = 32.0
 #endregion
 
 #region //playerstats:
 @export var max_hp : float = 20
+@export_range(1.0, 100.0, 0.1, "suffix:hp/day") var passive_healing_per_game_day: float = 10.0
 var hp : float = 20
 var mana_charge_rate : float = 100
 var max_mana : float = 300
@@ -52,6 +57,9 @@ var ground_slam: bool = false
 var transformation: bool = false
 # Set to true once hp reaches 0 so the player stops acting and take_damage becomes a no-op.
 var dead: bool = false
+var knockout_amount: float = 0.0
+var knockout_active: bool = false
+var is_downed: bool = false
 var active_spot_action: StringName = &""
 var active_spot: Node
 #endregion
@@ -87,6 +95,9 @@ func _ready() -> void:
 	rope_detector.body_exited.connect(_on_rope_detector_body_exited)
 	PlayerHud.visible = true
 	hp = max_hp
+	knockout_amount = 0.0
+	knockout_active = false
+	is_downed = false
 	mana_amount = 0.0
 	mana_2_amount = max_mana if mana_2_starts_full else 0.0
 	sync_stats_to_hud()
@@ -150,6 +161,9 @@ func apply_save_data(data: Dictionary) -> void:
 
 	velocity = Vector2.ZERO
 	knockback_timer = 0.0
+	knockout_amount = 0.0
+	knockout_active = false
+	is_downed = false
 	# A freshly loaded player is alive and responsive even if the previous run ended in defeat.
 	dead = false
 	set_physics_process(true)
@@ -173,6 +187,8 @@ func sync_stats_to_hud() -> void:
 
 	PlayerHud.setup_hp(max_hp, hp)
 	PlayerHud.setup_mana(max_mana, mana_amount, mana_2_amount)
+	if PlayerHud.has_method("setup_knockout"):
+		PlayerHud.call("setup_knockout", max_knockout, knockout_amount, knockout_active)
 	if PlayerHud.has_method("setup_needs"):
 		PlayerHud.call("setup_needs", 100.0, hunger, sleep_need)
 
@@ -202,6 +218,9 @@ func _has_player_property(property_name: StringName) -> bool:
 	return false
 	
 func _unhandled_input( event: InputEvent) -> void:
+	if is_downed:
+		return
+
 	change_state(current_state.handle_input( event ))
 	#REMOVEEEEE later for propper attack state.
 	if event.is_action_pressed("attach_rope"):
@@ -213,9 +232,11 @@ func _unhandled_input( event: InputEvent) -> void:
 
 func _process(_delta: float) -> void:
 	update_direction()
+	update_knockout(_delta)
 	update_mana_2_charge(_delta)
 	update_mana_charge(_delta)
 	update_player_needs(_delta)
+	update_passive_healing(_delta)
 	change_state(current_state.process(_delta))
 	
 	
@@ -350,7 +371,12 @@ func get_closest_attachable() -> Node2D:
 	return closest
 
 
-func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO, damage_source: Node = null) -> void:
+func take_damage(
+	amount: float,
+	damage_source_position: Vector2 = Vector2.ZERO,
+	damage_source: Node = null,
+	knockout_damage: float = 0.0
+) -> void:
 	# A defeated player ignores further damage so the death overlay is the only reaction.
 	if dead:
 		return
@@ -365,7 +391,9 @@ func take_damage(amount: float, damage_source_position: Vector2 = Vector2.ZERO, 
 		_defeat()
 		return
 
-	apply_knockback(damage_source_position)
+	apply_knockout(knockout_damage)
+	if not is_downed:
+		apply_knockback(damage_source_position)
 
 
 func _defeat() -> void:
@@ -383,8 +411,71 @@ func _defeat() -> void:
 
 
 func heal(amount: float) -> void:
+	if dead or amount <= 0.0:
+		return
 	hp = minf(hp + amount, max_hp)
 	PlayerHud.set_hp(hp)
+
+
+func restore_full_health() -> void:
+	if dead:
+		return
+	heal(max_hp - hp)
+
+
+func apply_knockout(amount: float) -> void:
+	if dead or amount <= 0.0 or max_knockout <= 0.0:
+		return
+
+	knockout_amount = clampf(knockout_amount + amount, 0.0, max_knockout)
+	knockout_active = knockout_amount > 0.0
+	sync_knockout_bar()
+
+	if knockout_amount >= max_knockout:
+		enter_downed_state()
+
+
+func update_knockout(delta: float) -> void:
+	if not knockout_active:
+		return
+
+	var decay_rate := downed_decay_per_second if is_downed else knockout_decay_per_second
+	knockout_amount = move_toward(knockout_amount, 0.0, maxf(decay_rate, 0.0) * maxf(delta, 0.0))
+	sync_knockout_bar()
+
+	if knockout_amount > 0.0:
+		return
+
+	knockout_active = false
+	if is_downed:
+		exit_downed_state()
+	sync_knockout_bar()
+
+
+func enter_downed_state() -> void:
+	if is_downed:
+		return
+
+	is_downed = true
+	knockback_timer = 0.0
+	velocity.x = 0.0
+	var downed_state := $States.get_node_or_null("Downed") as PlayerState
+	if downed_state != null:
+		change_state(downed_state)
+
+
+func exit_downed_state() -> void:
+	is_downed = false
+	if current_state is PlayerStateDowned:
+		if is_on_floor():
+			change_state($States/Idle)
+		else:
+			change_state($States/Fall)
+
+
+func sync_knockout_bar() -> void:
+	if PlayerHud.has_method("set_knockout"):
+		PlayerHud.call("set_knockout", knockout_amount, knockout_active)
 
 
 func update_player_needs(delta: float) -> void:
@@ -399,6 +490,17 @@ func update_player_needs(delta: float) -> void:
 		apply_hunger_delta(hunger_growth_per_game_hour * game_hours)
 	if active_spot_action != &"sleep":
 		apply_sleep_need_delta(sleep_need_growth_per_game_hour * game_hours)
+
+
+func update_passive_healing(delta: float) -> void:
+	if passive_healing_per_game_day <= 0.0 or hp <= 0.0 or hp >= max_hp:
+		return
+
+	var game_hours := _get_game_hours_for_real_seconds(delta)
+	if game_hours <= 0.0:
+		return
+
+	heal((passive_healing_per_game_day / 24.0) * game_hours)
 
 
 func apply_hunger_delta(delta: float) -> float:
@@ -463,6 +565,9 @@ func _get_game_hours_for_real_seconds(real_seconds: float) -> float:
 
 
 func update_mana_charge(delta: float) -> void:
+	if is_downed:
+		return
+
 	if current_state is PlayerAttack1 or current_state is PlayerAttack2 or current_state is PlayerAttack3 or current_state is PlayerSpecialAttack:
 		return
 
@@ -515,6 +620,23 @@ func apply_knockback(damage_source_position: Vector2) -> void:
 
 	velocity = Vector2(knockback_force.x * knockback_direction, knockback_force.y)
 	knockback_timer = knockback_time
+
+
+func force_flee_from(threat: Node2D, duration: float = 1.2, speed: float = 700.0) -> void:
+	if dead:
+		return
+
+	var threat_position := global_position
+	if threat != null and is_instance_valid(threat):
+		threat_position = threat.global_position
+
+	var flee_direction := signf(global_position.x - threat_position.x)
+	if flee_direction == 0.0:
+		flee_direction = -1.0 if sprite_2d.flip_h else 1.0
+
+	apply_facing_left(flee_direction < 0.0)
+	velocity.x = flee_direction * maxf(speed, 0.0)
+	knockback_timer = maxf(knockback_timer, maxf(duration, 0.0))
 
 
 func _on_rope_detector_body_entered(body: Node2D) -> void:

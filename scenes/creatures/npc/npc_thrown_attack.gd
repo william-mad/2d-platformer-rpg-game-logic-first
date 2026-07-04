@@ -1,6 +1,9 @@
 class_name NpcThrownAttack extends Area2D
 
+signal victim_hit(victim: Node, intended_target_hit: bool)
+
 @export var damage: float = 3.0
+@export var knockout_damage: float = 40.0
 @export var flight_time: float = 0.65
 @export var arc_height: float = 72.0
 @export var lifetime: float = 3.0
@@ -44,11 +47,13 @@ func launch(
 	attack_collision_mask: int,
 	attack_friendly_fire_penalty: float,
 	attack_intended_target: Node = null,
-	attack_anger_drop_on_hit: float = 8.0
+	attack_anger_drop_on_hit: float = 8.0,
+	attack_knockout_damage: float = 0.0
 ) -> void:
 	source_npc = attack_source
 	intended_target = attack_intended_target
 	damage = attack_damage
+	knockout_damage = maxf(attack_knockout_damage, 0.0)
 	flight_time = maxf(attack_flight_time, 0.001)
 	arc_height = maxf(attack_arc_height, 0.0)
 	lifetime = maxf(attack_lifetime, flight_time)
@@ -66,6 +71,10 @@ func launch(
 
 func get_damage_source() -> Node:
 	return source_npc if source_npc != null else self
+
+
+func get_knockout_damage() -> float:
+	return knockout_damage
 
 
 func _physics_process(delta: float) -> void:
@@ -109,10 +118,11 @@ func _try_hit(hit_node: Node) -> void:
 	if hit_node is Damage_Area:
 		hit_node.take_damage(self)
 	elif hit_node.has_method("take_damage"):
-		hit_node.call("take_damage", damage, global_position, source_npc)
+		hit_node.call("take_damage", damage, global_position, source_npc, knockout_damage)
 
 	_apply_friendly_fire_penalty(victim)
 	_apply_anger_hit_relief(victim)
+	victim_hit.emit(victim, _is_intended_target(victim))
 	queue_free()
 
 
@@ -179,6 +189,14 @@ func _apply_anger_hit_relief(victim: Node) -> void:
 
 	if source_npc.has_method("apply_social_event"):
 		source_npc.call("apply_social_event", {"anger": -absf(anger_drop_on_intended_target_hit)}, victim, false)
+
+
+func _is_intended_target(victim: Node) -> bool:
+	return (
+		intended_target != null
+		and is_instance_valid(intended_target)
+		and victim == intended_target
+	)
 
 
 func _stop_on_world_hit(hit_node: Node) -> void:

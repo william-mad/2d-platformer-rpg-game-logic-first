@@ -13,8 +13,10 @@
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/rest.gd" id="11_rest"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/collapse.gd" id="12_collapse"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/look_for_talk_target.gd" id="13_look_talk"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/downed.gd" id="14_downed"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/fight.gd" id="15_fight"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/recreation.gd" id="16_recreation"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/routine_task.gd" id="17_routine_task"]
 
 [node name="NpcStateMachine" type="Node"]
 script = ExtResource("1_machine")
@@ -59,6 +61,12 @@ animation_name = &"recreation"
 stop_horizontal_on_enter = true
 allows_scheduled_activity_interrupt = true
 
+[node name="RoutineTask" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("17_routine_task")
+stop_horizontal_on_enter = true
+allows_scheduled_activity_interrupt = true
+
 [node name="Talk" type="Node" parent="."]
 unique_name_in_owner = true
 script = ExtResource("5_talk")
@@ -86,6 +94,7 @@ animation_name = &"run"
 unique_name_in_owner = true
 script = ExtResource("15_fight")
 animation_name = &"run"
+projectile_knockout_damage = 40.0
 
 [node name="Sleep" type="Node" parent="."]
 unique_name_in_owner = true
@@ -98,6 +107,12 @@ allows_scheduled_activity_interrupt = true
 unique_name_in_owner = true
 script = ExtResource("12_collapse")
 animation_name = &"collapse"
+stop_horizontal_on_enter = true
+
+[node name="Downed" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("14_downed")
+animation_name = &"downed"
 stop_horizontal_on_enter = true
 
 [node name="DisabledDead" type="Node" parent="."]

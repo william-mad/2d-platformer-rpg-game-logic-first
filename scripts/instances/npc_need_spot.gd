@@ -37,8 +37,15 @@ const VALUE_ALIASES := {
 @export var request_priority: int = 20
 @export var request_reason: String = "need_spot"
 @export var target_assignment_method: StringName = &""
+@export var called_npc_ids: Array[StringName] = []
 @export var idle_state_name: StringName = &"Idle"
 @export var request_cooldown_seconds: float = 1.5
+
+@export_group("Routine Task")
+@export var routine_animation_name: StringName = &""
+@export_range(0.0, 1440.0, 1.0, "suffix:min") var routine_game_minutes: float = 30.0
+@export_range(-100.0, 100.0, 0.1, "suffix:/h") var routine_value_delta_per_game_hour: float = 0.0
+@export var routine_finish_when_value_sated: bool = true
 
 @export_group("Schedule")
 @export var active_time_windows: Array[Dictionary] = []
@@ -131,6 +138,11 @@ func _apply_world_definition() -> void:
 	request_priority = world_definition.priority
 	target_assignment_method = world_definition.target_assignment_method
 	require_target_need_threshold = world_definition.require_npc_value_threshold
+	routine_animation_name = world_definition.routine_animation_name
+	routine_game_minutes = world_definition.routine_game_minutes
+	routine_value_delta_per_game_hour = world_definition.value_delta_per_game_hour
+	routine_finish_when_value_sated = world_definition.routine_finish_when_value_sated
+	called_npc_ids = world_definition.get_called_npc_ids()
 	if not world_definition.owner_ids.is_empty():
 		owner_ids = world_definition.owner_ids.duplicate()
 	if not world_definition.owner_npc_ids.is_empty():
@@ -201,9 +213,42 @@ func _get_auto_request_npcs() -> Array[Node2D]:
 	if target_node != null and is_instance_valid(target_node) and not request_npcs.has(target_node):
 		request_npcs.append(target_node)
 
+	_append_live_called_npcs(request_npcs)
 	_append_live_owner_id_npcs(request_npcs)
 
 	return request_npcs
+
+
+func _append_live_called_npcs(request_npcs: Array[Node2D]) -> void:
+	if called_npc_ids.is_empty():
+		return
+
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations != null and locations.has_method("get_live_npc"):
+		for called_id in called_npc_ids:
+			var live_npc := locations.call("get_live_npc", String(called_id)) as Node2D
+			if live_npc == null or not is_instance_valid(live_npc):
+				continue
+			if not _npc_has_required_tags(live_npc):
+				continue
+			if not request_npcs.has(live_npc):
+				request_npcs.append(live_npc)
+
+	if not is_inside_tree():
+		return
+
+	for candidate in get_tree().get_nodes_in_group("npc"):
+		var npc_node := candidate as Node2D
+		if npc_node == null or not is_instance_valid(npc_node):
+			continue
+		if request_npcs.has(npc_node):
+			continue
+		if not _called_npc_id_is_configured(_get_npc_id(npc_node)):
+			continue
+		if not _npc_has_required_tags(npc_node):
+			continue
+
+		request_npcs.append(npc_node)
 
 
 func _append_live_owner_id_npcs(request_npcs: Array[Node2D]) -> void:
@@ -225,6 +270,14 @@ func _append_live_owner_id_npcs(request_npcs: Array[Node2D]) -> void:
 
 
 func _update_visual() -> void:
+	if not is_work_spot() and value_name == &"":
+		current_value = 0.0
+		if zone_visual != null:
+			zone_visual.color = low_need_color
+		if label != null:
+			label.text = _format_spot_label(label_prefix, "Ready")
+		return
+
 	# Multiple owners show the highest relevant need; ID owners can be read while off-screen.
 	var display_value := _get_owner_display_value()
 	if is_work_spot():
@@ -264,8 +317,8 @@ func _get_owner_display_value() -> Dictionary:
 
 	var locations := get_node_or_null("/root/NpcLocations")
 	if locations != null and locations.has_method("get_npc_location"):
-		for owner_id in _get_configured_owner_ids():
-			var record: Dictionary = locations.call("get_npc_location", String(owner_id))
+		for target_id in _get_configured_target_ids():
+			var record: Dictionary = locations.call("get_npc_location", String(target_id))
 			var saved_value = _get_saved_record_value(record)
 			if saved_value == null:
 				continue
@@ -288,6 +341,15 @@ func _get_configured_owner_ids() -> Array[StringName]:
 	for allowed_id in allowed_npc_ids:
 		if not configured_ids.has(allowed_id):
 			configured_ids.append(allowed_id)
+
+	return configured_ids
+
+
+func _get_configured_target_ids() -> Array[StringName]:
+	var configured_ids := _get_configured_owner_ids()
+	for called_id in called_npc_ids:
+		if not configured_ids.has(called_id):
+			configured_ids.append(called_id)
 
 	return configured_ids
 
@@ -316,6 +378,7 @@ func _has_explicit_owner_configuration() -> bool:
 		or not owner_ids.is_empty()
 		or not owner_npc_ids.is_empty()
 		or not allowed_npc_ids.is_empty()
+		or not called_npc_ids.is_empty()
 	)
 
 
@@ -442,7 +505,7 @@ func can_serve_npc_need(
 	if npc_node == null or not is_instance_valid(npc_node):
 		return false
 
-	if requested_state_name != &"" and String(request_state_name) != String(requested_state_name):
+	if requested_state_name != &"" and not _state_names_match(request_state_name, requested_state_name):
 		return false
 
 	if not _is_inside_active_time_window():
@@ -461,6 +524,9 @@ func can_serve_npc_need(
 
 
 func _npc_owner_is_allowed(npc_node: Node2D) -> bool:
+	if not called_npc_ids.is_empty():
+		return _called_npc_id_is_configured(_get_npc_id(npc_node))
+
 	# Empty owner lists mean "serve anyone" unless legacy target_npc_path restriction is set.
 	var has_legacy_target_owner := restrict_to_target_npc and String(target_npc_path) != ""
 	var has_owner_paths := not owner_npc_paths.is_empty()
@@ -492,7 +558,17 @@ func _owner_id_is_configured(owner_id: StringName) -> bool:
 	return false
 
 
+func _called_npc_id_is_configured(npc_id: StringName) -> bool:
+	for called_id in called_npc_ids:
+		if String(called_id) == String(npc_id):
+			return true
+
+	return false
+
+
 func _character_owner_id_is_allowed(owner_id: StringName) -> bool:
+	if not called_npc_ids.is_empty():
+		return _called_npc_id_is_configured(owner_id)
 	if owner_id == &"":
 		return not _has_explicit_owner_configuration()
 	if not _has_explicit_owner_configuration():
@@ -685,6 +761,26 @@ func is_work_spot() -> bool:
 	return false
 
 
+func get_routine_task_animation_name() -> StringName:
+	return routine_animation_name
+
+
+func get_routine_task_game_minutes() -> float:
+	return routine_game_minutes
+
+
+func get_routine_task_value_name() -> StringName:
+	return value_name
+
+
+func get_routine_task_value_delta_per_game_hour() -> float:
+	return routine_value_delta_per_game_hour
+
+
+func get_routine_task_finish_when_value_sated() -> bool:
+	return routine_finish_when_value_sated
+
+
 func _format_spot_label(title: String, value_text: String, owner_text: String = "") -> String:
 	if owner_text.is_empty():
 		owner_text = _get_owner_debug_text()
@@ -695,6 +791,13 @@ func _format_spot_label(title: String, value_text: String, owner_text: String = 
 
 
 func _get_owner_debug_text() -> String:
+	if not called_npc_ids.is_empty():
+		var called_texts: Array[String] = []
+		for called_id in called_npc_ids:
+			called_texts.append(String(called_id))
+
+		return "calls:%s" % ",".join(called_texts)
+
 	var configured_owner_ids := _get_configured_owner_ids()
 	if configured_owner_ids.is_empty():
 		return "owners:any"
@@ -713,6 +816,13 @@ func _canonical_value_key(value_key) -> String:
 		return String(VALUE_ALIASES[key])
 
 	return key
+
+
+func _state_names_match(configured_state_name: StringName, requested_state_name: StringName) -> bool:
+	if String(configured_state_name) == String(requested_state_name):
+		return true
+
+	return String(configured_state_name).to_snake_case() == String(requested_state_name).to_snake_case()
 
 
 func _record_watchdog_marker(source: StringName, detail: String = "") -> void:

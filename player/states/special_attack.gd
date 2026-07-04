@@ -18,6 +18,7 @@ enum Tier3Phase {
 @export_group("Tier 1 Projectile")
 @export var tier_1_windup: float = 0.18
 @export var tier_1_damage: float = 15.0
+@export var tier_1_knockout_damage: float = 0.0
 @export var tier_1_projectile_speed: float = 560.0
 @export var tier_1_projectile_lifetime: float = 1.1
 @export var tier_1_projectile_radius: float = 17.0
@@ -26,6 +27,7 @@ enum Tier3Phase {
 @export_group("Tier 2 Wall")
 @export var tier_2_windup: float = 0.2
 @export var tier_2_damage: float = 25.0
+@export var tier_2_knockout_damage: float = 0.0
 @export var tier_2_wall_speed: float = 320.0
 @export var tier_2_wall_lifetime: float = 0.9
 @export var tier_2_wall_grow_time: float = 0.35
@@ -39,6 +41,7 @@ enum Tier3Phase {
 @export var tier_3_recovery_time: float = 0.38
 @export var tier_3_air_slam_speed: float = 1500.0
 @export var tier_3_damage: float = 15.0
+@export var tier_3_knockout_damage: float = 0.0
 @export var tier_3_radius: float = 360.0
 @export var tier_3_pulse_count: int = 2
 @export var tier_3_pulse_interval: float = 0.16
@@ -220,7 +223,8 @@ func spawn_tier_1_projectile() -> void:
 		tier_1_projectile_speed,
 		tier_1_projectile_lifetime,
 		tier_1_projectile_radius,
-		tier_1_projectile_collision_mask
+		tier_1_projectile_collision_mask,
+		tier_1_knockout_damage
 	)
 
 
@@ -243,7 +247,8 @@ func spawn_tier_2_wall() -> void:
 		tier_2_wall_start_size,
 		tier_2_wall_final_size,
 		tier_2_wall_push_speed,
-		tier_2_wall_collision_mask
+		tier_2_wall_collision_mask,
+		tier_2_knockout_damage
 	)
 
 
@@ -265,7 +270,8 @@ func spawn_tier_3_burst() -> void:
 		tier_3_effect_lifetime,
 		tier_3_collision_mask,
 		tier_3_screen_shake_strength,
-		tier_3_screen_shake_duration
+		tier_3_screen_shake_duration,
+		tier_3_knockout_damage
 	)
 
 

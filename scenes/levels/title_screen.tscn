@@ -59,7 +59,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_title")
-start_scene_path = "res://scenes/levels/level_1.tscn"
+start_scene_path = "res://scenes/levels/start_game_intro.tscn"
 playground_scene_path = "res://scenes/levels/playground.tscn"
 
 [node name="Background" type="TextureRect" parent="."]
@@ -117,7 +117,7 @@ theme_override_styles/pressed = SubResource("StyleBoxFlat_button_pressed")
 theme_override_styles/focus = SubResource("StyleBoxFlat_button_focus")
 text = "START GAME"
 
-[node name="ContinueButton" type="Button" parent="Center/Stack"]
+[node name="LoadButton" type="Button" parent="Center/Stack"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(280, 62)
 layout_mode = 2
@@ -131,7 +131,7 @@ theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_button_pressed")
 theme_override_styles/focus = SubResource("StyleBoxFlat_button_focus")
 disabled = true
-text = "CONTINUE"
+text = "LOAD GAME"
 
 [node name="BottomArea" type="MarginContainer" parent="."]
 layout_mode = 1
@@ -158,3 +158,108 @@ theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_button_pressed")
 theme_override_styles/focus = SubResource("StyleBoxFlat_button_focus")
 text = "PLAYGROUND"
+
+[node name="SaveFileMenu" type="ColorRect" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+color = Color(0.015, 0.018, 0.02, 0.88)
+
+[node name="LoadMenuCenter" type="CenterContainer" parent="SaveFileMenu"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="LoadMenuStack" type="VBoxContainer" parent="SaveFileMenu/LoadMenuCenter"]
+custom_minimum_size = Vector2(420, 0)
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="LoadMenuTitle" type="Label" parent="SaveFileMenu/LoadMenuCenter/LoadMenuStack"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.98, 0.94, 0.82, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.72)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_font_sizes/font_size = 30
+text = "LOAD GAME"
+horizontal_alignment = 1
+
+[node name="NoSavesLabel" type="Label" parent="SaveFileMenu/LoadMenuCenter/LoadMenuStack"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.84, 0.86, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.72)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 16
+text = "No saved games yet."
+horizontal_alignment = 1
+
+[node name="SaveSlot1Button" type="Button" parent="SaveFileMenu/LoadMenuCenter/LoadMenuStack"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(420, 54)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.98, 0.94, 0.82, 1)
+theme_override_colors/font_hover_color = Color(1, 0.96, 0.78, 1)
+theme_override_colors/font_pressed_color = Color(0.54, 0.87, 0.68, 1)
+theme_override_colors/font_disabled_color = Color(0.48, 0.5, 0.5, 1)
+theme_override_font_sizes/font_size = 17
+theme_override_styles/normal = SubResource("StyleBoxFlat_button_normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_button_pressed")
+theme_override_styles/focus = SubResource("StyleBoxFlat_button_focus")
+text = "File 1 - Empty"
+
+[node name="SaveSlot2Button" type="Button" parent="SaveFileMenu/LoadMenuCenter/LoadMenuStack"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(420, 54)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.98, 0.94, 0.82, 1)
+theme_override_colors/font_hover_color = Color(1, 0.96, 0.78, 1)
+theme_override_colors/font_pressed_color = Color(0.54, 0.87, 0.68, 1)
+theme_override_colors/font_disabled_color = Color(0.48, 0.5, 0.5, 1)
+theme_override_font_sizes/font_size = 17
+theme_override_styles/normal = SubResource("StyleBoxFlat_button_normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_button_pressed")
+theme_override_styles/focus = SubResource("StyleBoxFlat_button_focus")
+text = "File 2 - Empty"
+
+[node name="SaveSlot3Button" type="Button" parent="SaveFileMenu/LoadMenuCenter/LoadMenuStack"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(420, 54)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.98, 0.94, 0.82, 1)
+theme_override_colors/font_hover_color = Color(1, 0.96, 0.78, 1)
+theme_override_colors/font_pressed_color = Color(0.54, 0.87, 0.68, 1)
+theme_override_colors/font_disabled_color = Color(0.48, 0.5, 0.5, 1)
+theme_override_font_sizes/font_size = 17
+theme_override_styles/normal = SubResource("StyleBoxFlat_button_normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_button_pressed")
+theme_override_styles/focus = SubResource("StyleBoxFlat_button_focus")
+text = "File 3 - Empty"
+
+[node name="CloseLoadMenuButton" type="Button" parent="SaveFileMenu/LoadMenuCenter/LoadMenuStack"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(420, 54)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.96, 1, 1)
+theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
+theme_override_colors/font_pressed_color = Color(0.54, 0.87, 0.68, 1)
+theme_override_font_sizes/font_size = 18
+theme_override_styles/normal = SubResource("StyleBoxFlat_button_normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_button_pressed")
+theme_override_styles/focus = SubResource("StyleBoxFlat_button_focus")
+text = "BACK"

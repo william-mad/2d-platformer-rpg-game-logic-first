@@ -1,6 +1,7 @@
 class_name PlayerSpecialAttackProjectile extends Area2D
 
 @export var damage: float = 15.0
+@export var knockout_damage: float = 0.0
 @export var speed: float = 560.0
 @export var lifetime: float = 1.1
 @export var collision_radius: float = 17.0
@@ -37,10 +38,12 @@ func launch(
 	attack_speed: float = 560.0,
 	attack_lifetime: float = 1.1,
 	attack_radius: float = 17.0,
-	attack_collision_mask: int = 129
+	attack_collision_mask: int = 129,
+	attack_knockout_damage: float = 0.0
 ) -> void:
 	source_player = attack_source
 	damage = attack_damage
+	knockout_damage = maxf(attack_knockout_damage, 0.0)
 	speed = maxf(attack_speed, 0.0)
 	lifetime = maxf(attack_lifetime, 0.01)
 	collision_radius = maxf(attack_radius, 1.0)
@@ -62,6 +65,10 @@ func launch(
 
 func get_damage_source() -> Node:
 	return source_player if source_player != null else self
+
+
+func get_knockout_damage() -> float:
+	return knockout_damage
 
 
 func _physics_process(delta: float) -> void:
@@ -105,7 +112,7 @@ func _try_hit(hit_node: Node) -> void:
 
 	if hit_node.has_method("take_damage"):
 		has_hit = true
-		hit_node.call("take_damage", damage, global_position, get_damage_source())
+		hit_node.call("take_damage", damage, global_position, get_damage_source(), knockout_damage)
 		queue_free()
 		return
 

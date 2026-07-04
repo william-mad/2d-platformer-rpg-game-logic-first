@@ -6,7 +6,10 @@ class_name NpcStateSleep extends NpcState
 @export var sleep_need_drop_per_full_sleep: float = 100.0
 @export var sleep_progress_tick_seconds: float = 1.0
 @export var refreshed_value_name: StringName = &"tired"
+@export var restore_full_health_on_successful_sleep: bool = true
+@export var health_value_name: StringName = &"hp"
 @export var wake_on_target_seen: bool = false
+@export var fight_interrupts_sleep: bool = true
 @export var wake_value_names: Array[StringName] = [&"hp", &"disabled"]
 
 var sleep_timer: float = 0.0
@@ -62,6 +65,9 @@ func exit() -> void:
 func physics_process(delta: float) -> NpcState:
 	# Sleep need drains gradually while the NPC stays asleep at the sleep spot.
 	stop_horizontal()
+	if _fight_should_interrupt_sleep():
+		return next_state
+
 	if active_sleep_target == null:
 		return get_state(&"Idle")
 
@@ -112,6 +118,9 @@ func values_changed(
 	changed_values: Dictionary,
 	_actor: Node2D
 ) -> NpcState:
+	if _fight_should_interrupt_sleep(_actor):
+		return next_state
+
 	# Direct damage and future explicitly configured impact values wake the NPC.
 	for value_name in wake_value_names:
 		var key := String(value_name)
@@ -122,6 +131,15 @@ func values_changed(
 		return get_state(&"ReactToEvent")
 
 	return next_state
+
+
+func _fight_should_interrupt_sleep(actor: Node2D = null) -> bool:
+	if not fight_interrupts_sleep:
+		return false
+	if machine == null or not machine.has_method("evaluate_persistent_combat_reactions"):
+		return false
+
+	return bool(machine.call("evaluate_persistent_combat_reactions", actor))
 
 
 func _resolve_sleep_target() -> Node2D:
@@ -192,12 +210,25 @@ func _sleep_need_is_sated() -> bool:
 
 func _finish_successful_sleep() -> void:
 	# A completed sleep fully clears action fatigue; interrupted sleep leaves it intact.
-	if refreshed_value_name == &"":
+	if refreshed_value_name != &"":
+		var current_value := machine.get_value(refreshed_value_name)
+		if current_value > 0.0:
+			machine.apply_value_delta({String(refreshed_value_name): -current_value}, null, false)
+
+	_restore_full_health()
+
+
+func _restore_full_health() -> void:
+	if not restore_full_health_on_successful_sleep or health_value_name == &"":
 		return
-	var current_value := machine.get_value(refreshed_value_name)
-	if current_value <= 0.0:
+
+	var current_hp := machine.get_value(health_value_name)
+	if current_hp <= 0.0 or current_hp >= 100.0:
 		return
-	machine.apply_value_delta({String(refreshed_value_name): -current_value}, null, false)
+	if machine.get_value(&"disabled") >= 1.0:
+		return
+
+	machine.set_value(health_value_name, 100.0, null, false)
 
 
 func _set_perception_enabled(enabled: bool) -> void:
