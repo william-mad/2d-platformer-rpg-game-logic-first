@@ -62,6 +62,8 @@ var knockout_active: bool = false
 var is_downed: bool = false
 var active_spot_action: StringName = &""
 var active_spot: Node
+var movement_lock_source: Node
+var movement_lock_action: StringName = &""
 #endregion
 
 #region //save system:
@@ -218,7 +220,7 @@ func _has_player_property(property_name: StringName) -> bool:
 	return false
 	
 func _unhandled_input( event: InputEvent) -> void:
-	if is_downed:
+	if is_downed or is_movement_locked():
 		return
 
 	change_state(current_state.handle_input( event ))
@@ -231,6 +233,15 @@ func _unhandled_input( event: InputEvent) -> void:
 
 
 func _process(_delta: float) -> void:
+	if is_movement_locked():
+		direction = Vector2.ZERO
+		velocity.x = 0.0
+		update_knockout(_delta)
+		update_mana_2_charge(_delta)
+		update_player_needs(_delta)
+		update_passive_healing(_delta)
+		return
+
 	update_direction()
 	update_knockout(_delta)
 	update_mana_2_charge(_delta)
@@ -242,6 +253,13 @@ func _process(_delta: float) -> void:
 	
 func _physics_process(_delta: float) -> void:
 	velocity.y += gravity * _delta * gravity_multiplier
+
+	if is_movement_locked():
+		velocity.x = 0.0
+		if knockback_timer > 0.0:
+			knockback_timer = maxf(knockback_timer - _delta, 0.0)
+		move_and_slide()
+		return
 
 	if knockback_timer > 0.0:
 		knockback_timer -= _delta
@@ -540,6 +558,46 @@ func end_spot_action(spot: Node, action_name: StringName, completed: bool) -> vo
 	_on_spot_action_finished(spot, action_name, completed)
 	active_spot = null
 	active_spot_action = &""
+
+
+func begin_movement_lock(source: Node, action_name: StringName) -> void:
+	if source == null or not is_instance_valid(source):
+		return
+
+	movement_lock_source = source
+	movement_lock_action = action_name
+	direction = Vector2.ZERO
+	velocity.x = 0.0
+	begin_spot_action(source, action_name)
+
+
+func end_movement_lock(
+	source: Node,
+	action_name: StringName = &"",
+	completed: bool = true
+) -> void:
+	if movement_lock_source != source:
+		return
+	if action_name != &"" and action_name != movement_lock_action:
+		return
+
+	var finished_action := movement_lock_action
+	movement_lock_source = null
+	movement_lock_action = &""
+	direction = Vector2.ZERO
+	velocity.x = 0.0
+	end_spot_action(source, finished_action, completed)
+
+
+func is_movement_locked() -> bool:
+	if movement_lock_source != null and not is_instance_valid(movement_lock_source):
+		movement_lock_source = null
+		movement_lock_action = &""
+		if active_spot_action == &"magic_lesson":
+			active_spot = null
+			active_spot_action = &""
+
+	return movement_lock_source != null
 
 
 func _on_spot_action_started(_spot: Node, _action_name: StringName) -> void:

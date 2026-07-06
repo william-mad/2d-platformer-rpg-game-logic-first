@@ -1,6 +1,6 @@
-[gd_resource type="Resource" script_class="NpcSpotDefinition" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="NpcSpotDefinition" format=3 uid="uid://bltr1rkw27va"]
 
-[ext_resource type="Script" path="res://scripts/resources/npc_spot_definition.gd" id="1_spot_definition"]
+[ext_resource type="Script" uid="uid://diuxbt87xbkkc" path="res://scripts/resources/npc_spot_definition.gd" id="1_spot_definition"]
 
 [resource]
 script = ExtResource("1_spot_definition")
@@ -16,16 +16,15 @@ require_npc_value_threshold = false
 finish_when_npc_value_sated = false
 spot_value_name = &"work_needed"
 spot_value_initial = 100.0
-spot_value_done_threshold = 0.0
-spot_value_delta_per_game_hour = -22.222222
+spot_value_delta_per_game_hour = -50.0
 spot_value_daily_growth = 50.0
 need_threshold_at_spot_value_maximum = 40.0
 owner_ids = Array[StringName]([&"mom", &"player"])
 capacity = 0
 active_time_windows = Array[Dictionary]([{
 "end_hour": 10.0,
-"start_hour": 8.0
+"start_hour": 9.0
 }, {
 "end_hour": 17.0,
-"start_hour": 14.0
+"start_hour": 15.0
 }])

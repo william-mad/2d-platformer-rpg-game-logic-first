@@ -53,6 +53,7 @@ const STATE_ALIASES := {
 @export_range(0.0, 100.0, 0.1) var talk_need_growth_per_interval: float = 8.0
 @export_range(0.1, 1440.0, 0.1, "suffix:min") var talk_need_growth_interval_game_minutes: float = 20.0
 @export_range(1.0, 100.0, 0.1, "suffix:hp/day") var passive_healing_per_game_day: float = 10.0
+@export_range(0.0, 100.0, 0.1, "suffix:hp/day") var starvation_damage_per_game_day: float = 5.0
 @export var passive_needs_tick_seconds: float = 10.0
 @export var stagger_passive_need_ticks: bool = true
 @export var sleep_need_paused_states: Array[StringName] = [&"Sleep", &"Collapse"]
@@ -86,11 +87,15 @@ const STATE_ALIASES := {
 @export_range(0, 100, 1) var cross_scene_talk_priority: int = 60
 @export_range(0.0, 100.0, 0.1) var cross_scene_minimum_npc_favor: float = 10.0
 @export_range(0.0, 1.0, 0.01) var cross_scene_player_target_chance: float = 0.35
+@export var block_talk_search_while_moving_to_target: bool = true
 
 @export_group("NPC Talk Handshake")
 @export var npc_talk_requires_mutual_favor: bool = true
 @export_range(0.0, 100.0, 0.1) var npc_talk_handshake_minimum_favor: float = 10.0
 @export_range(0, 1000, 1) var npc_talk_handshake_priority: int = 70
+@export var npc_talk_refuse_lower_priority_tasks: bool = true
+@export_range(0.0, 120.0, 0.1, "suffix:s") var npc_talk_refusal_cooldown_seconds: float = 8.0
+@export_range(0, 1000, 1) var npc_talk_moving_task_priority_bonus: int = 15
 
 @export_group("Player Interaction")
 @export_range(0.0, 30.0, 0.1, "suffix:s") var default_player_interaction_hold_seconds: float = 5.0
@@ -192,6 +197,7 @@ const STATE_ALIASES := {
 		"state": "Eat",
 		"at_least": 75.0,
 		"requires_idle": true,
+		"requires_need_spot": true,
 		"priority": 50
 	},
 	"casual_recreation": {
@@ -273,17 +279,24 @@ var recreation_target: Node2D
 var routine_task_target: Node2D
 var sleep_target: Node2D
 var talk_target: Node2D
+var invitation_spot: Node2D
 var state_after_move: StringName = &"Idle"
+var state_after_move_priority: int = 0
 var last_actor: Node2D
 var last_changed_values: Dictionary = {}
 var idle_value_reaction_queued: bool = false
 var suppress_next_idle_value_reaction_check: bool = false
 var passive_need_elapsed_seconds: float = 0.0
+var current_state_priority: int = 0
+var previous_state_priority: int = 0
+var pending_state_priority: int = -1
 var next_talk_need_payout_already_applied: bool = false
+var talk_refusal_cooldowns: Dictionary = {}
 var player_interaction_hold_timer: float = 0.0
 var player_interaction_hold_actor: Node2D
 var player_interaction_cooldown_timer: float = 0.0
 var player_interaction_cooldown_actor: Node2D
+var passive_need_skip_logged: bool = false
 
 var current_state: NpcState:
 	get:
@@ -322,6 +335,7 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_update_player_interaction_timers(delta)
+	_update_talk_refusal_cooldowns(delta)
 	apply_gravity(delta)
 	if _process_npc_damage_hop(delta):
 		_update_passive_needs(delta)
@@ -405,9 +419,20 @@ func change_state(
 		return false
 
 	if current_state != null and not current_state.can_exit_to(new_state, request_priority):
+		_breadcrumb(
+			"npc_state:change_reject",
+			"%s %s->%s reason=%s priority=%d" % [
+				_get_npc_label(),
+				String(current_state.name),
+				String(new_state.name),
+				reason,
+				request_priority,
+			]
+		)
 		state_request_failed.emit(StringName(new_state.name), reason)
 		return false
 
+	var applied_priority := _get_applied_state_priority(new_state, request_priority)
 	var previous_name := &""
 	if current_state != null:
 		previous_name = StringName(current_state.name)
@@ -416,14 +441,28 @@ func change_state(
 	state_history.push_front(new_state)
 	if state_history.size() > 3:
 		state_history.resize(3)
+	previous_state_priority = current_state_priority
+	current_state_priority = applied_priority
+	if String(new_state.name) != "MoveToTarget":
+		state_after_move_priority = 0
 	new_state.next_state = null
 	new_state.enter()
 
 	_update_debug_label()
+	_breadcrumb(
+		"npc_state:enter",
+		"%s %s->%s reason=%s priority=%d" % [
+			_get_npc_label(),
+			String(previous_name),
+			String(new_state.name),
+			reason,
+			applied_priority,
+		]
+	)
 	state_changed.emit(StringName(new_state.name), previous_name)
 
 	# Some need rules only run while idle. Re-check them after any state returns to Idle.
-	if value_reactions_enabled and String(new_state.name) == "Idle":
+	if _value_reactions_enabled() and String(new_state.name) == "Idle":
 		_queue_idle_value_reaction_check()
 
 	return true
@@ -445,6 +484,20 @@ func request_state(
 	return _request_state_direct(state_name, actor, reason, request_priority)
 
 
+func _get_applied_state_priority(new_state: NpcState, request_priority: int) -> int:
+	var applied_priority := request_priority
+	if pending_state_priority >= 0:
+		applied_priority = maxi(applied_priority, pending_state_priority)
+		pending_state_priority = -1
+	if new_state != null and String(new_state.name) == "MoveToTarget":
+		applied_priority = maxi(
+			applied_priority,
+			maxi(current_state_priority, state_after_move_priority)
+		)
+
+	return applied_priority
+
+
 func _request_state_direct(
 	state_name: StringName,
 	actor: Node2D = null,
@@ -457,10 +510,30 @@ func _request_state_direct(
 
 	var requested_state := get_state(state_name)
 	if requested_state == null:
+		_breadcrumb("npc_state:request_reject", "%s missing %s" % [_get_npc_label(), String(state_name)])
 		state_request_failed.emit(state_name, "Missing state: %s" % String(state_name))
 		return false
+	if String(requested_state.name) == "LookForTalkTarget":
+		if (
+			DebugToolsConfig.TROUBLESHOOTING_MODE
+			and DebugToolsConfig.DEBUG_DISABLE_TALK_SEARCH
+		):
+			_breadcrumb("npc_state:talk_search_skip", _get_npc_label())
+			state_request_failed.emit(state_name, "talk_search_disabled")
+			return false
+		if _current_look_for_talk_target_matches(actor):
+			return true
+		if not _can_start_look_for_talk_target():
+			_breadcrumb("npc_state:request_reject", "%s moving_to_target %s" % [_get_npc_label(), String(state_name)])
+			state_request_failed.emit(state_name, "moving_to_target")
+			return false
 
-	return change_state(requested_state, reason, request_priority)
+	var accepted := change_state(requested_state, reason, request_priority)
+	_breadcrumb(
+		"npc_state:request",
+		"%s %s %s" % [_get_npc_label(), String(state_name), "accept" if accepted else "reject"]
+	)
+	return accepted
 
 
 func notify_target_seen(seen_target: Node2D) -> void:
@@ -619,7 +692,7 @@ func get_fight_anger_threshold() -> float:
 
 
 func evaluate_persistent_combat_reactions(actor: Node2D = null) -> bool:
-	if not active or not value_reactions_enabled:
+	if not active or not _value_reactions_enabled():
 		return false
 
 	var fight_actor := actor
@@ -645,6 +718,7 @@ func assign_move_target(new_target: Node2D, arrive_state_name: StringName = &"Id
 
 	move_target = new_target
 	state_after_move = arrive_state_name
+	state_after_move_priority = 20
 	set_target(new_target)
 	return request_state(&"MoveToTarget", new_target, "move_target", 20)
 
@@ -655,6 +729,7 @@ func assign_work_target(new_target: Node2D, request_priority: int = 20) -> bool:
 		return false
 
 	work_target = new_target
+	state_after_move_priority = request_priority
 	return request_state(&"Work", new_target, "work_target", request_priority)
 
 
@@ -664,6 +739,7 @@ func assign_eat_target(new_target: Node2D, request_priority: int = 20) -> bool:
 		return false
 
 	eat_target = new_target
+	state_after_move_priority = request_priority
 	return request_state(&"Eat", new_target, "eat_target", request_priority)
 
 
@@ -673,6 +749,7 @@ func assign_rest_target(new_target: Node2D, request_priority: int = 20) -> bool:
 		return false
 
 	rest_target = new_target
+	state_after_move_priority = request_priority
 	return request_state(&"Rest", new_target, "rest_target", request_priority)
 
 
@@ -682,6 +759,7 @@ func assign_recreation_target(new_target: Node2D, request_priority: int = 20) ->
 		return false
 
 	recreation_target = new_target
+	state_after_move_priority = request_priority
 	return request_state(&"Recreation", new_target, "recreation_target", request_priority)
 
 
@@ -691,6 +769,7 @@ func assign_routine_task_target(new_target: Node2D, request_priority: int = 20) 
 		return false
 
 	routine_task_target = new_target
+	state_after_move_priority = request_priority
 	return request_state(&"RoutineTask", new_target, "routine_task_target", request_priority)
 
 
@@ -700,7 +779,24 @@ func assign_sleep_target(new_target: Node2D, request_priority: int = 20) -> bool
 		return false
 
 	sleep_target = new_target
+	state_after_move_priority = request_priority
 	return request_state(&"Sleep", new_target, "sleep_target", request_priority)
+
+
+func assign_invitation_spot(new_target: Node2D, request_priority: int = 75) -> bool:
+	# Stores a cooperative prompt spot; InvitePlayer will find the live player itself.
+	if (
+		DebugToolsConfig.TROUBLESHOOTING_MODE
+		and DebugToolsConfig.DEBUG_DISABLE_MAGIC_LESSON_ACTIVITY
+	):
+		_breadcrumb("npc_state:invitation_disabled", _get_npc_label())
+		return false
+	if new_target == null or not is_instance_valid(new_target):
+		return false
+
+	invitation_spot = new_target
+	state_after_move_priority = request_priority
+	return request_state(&"InvitePlayer", new_target, "invitation_spot", request_priority)
 
 
 func request_talk(
@@ -793,6 +889,10 @@ func is_talking_with(candidate: Node2D) -> bool:
 	return talk_target == candidate
 
 
+func is_handling_talk_request_with(candidate: Node2D) -> bool:
+	return _talk_request_is_already_being_handled(candidate)
+
+
 func cancel_talk_with(candidate: Node2D, reason: String = "cancelled") -> void:
 	if candidate == null or not is_instance_valid(candidate):
 		return
@@ -816,6 +916,9 @@ func _request_talk_state(
 		state_request_failed.emit(&"Talk", "invalid_talk_target")
 		return false
 
+	if _talk_request_is_already_being_handled(new_target):
+		return true
+
 	if is_ignoring_player_interaction(new_target) and not is_talking_with(new_target):
 		state_request_failed.emit(&"Talk", "player_interaction_cooldown")
 		return false
@@ -829,8 +932,6 @@ func _request_talk_state(
 	var priority := request_priority
 	if priority < 0:
 		priority = 0
-	if is_npc_partner:
-		priority = max(priority, npc_talk_handshake_priority)
 
 	if not is_npc_partner:
 		return _accept_talk_request(new_target, priority, reason)
@@ -841,6 +942,7 @@ func _request_talk_state(
 		and not _mutual_talk_favor_allows(new_target, partner_machine)
 	):
 		state_request_failed.emit(&"Talk", "mutual_favor_too_low")
+		_start_talk_refusal_cooldown(new_target)
 		return false
 
 	if not _can_enter_talk_with(new_target, priority):
@@ -848,9 +950,10 @@ func _request_talk_state(
 		return false
 
 	if not partner_machine.can_accept_talk_request(npc, priority):
-		state_request_failed.emit(&"Talk", "partner_cannot_enter_talk")
+		state_request_failed.emit(&"Talk", "partner_refused_talk")
 		if partner_machine.has_signal(&"state_request_failed"):
-			partner_machine.state_request_failed.emit(&"Talk", "partner_cannot_enter_talk")
+			partner_machine.state_request_failed.emit(&"Talk", "talk_refused")
+		_start_talk_refusal_cooldown(new_target)
 		return false
 
 	talk_target = new_target
@@ -861,6 +964,7 @@ func _request_talk_state(
 	var partner_started := partner_machine._accept_talk_request(npc, priority, "talk_handshake")
 	if not partner_started:
 		state_request_failed.emit(&"Talk", "partner_talk_start_failed")
+		_start_talk_refusal_cooldown(new_target)
 		if talk_target == new_target:
 			talk_target = null
 		return false
@@ -877,7 +981,7 @@ func _request_talk_state(
 
 
 func _accept_talk_request(new_target: Node2D, request_priority: int, reason: String) -> bool:
-	if is_talking_with(new_target):
+	if _talk_request_is_already_being_handled(new_target):
 		return true
 
 	talk_target = new_target
@@ -891,6 +995,9 @@ func _can_enter_talk_with(candidate: Node2D, request_priority: int) -> bool:
 	if is_talking_with(candidate):
 		return true
 
+	if _talk_request_is_already_being_handled(candidate):
+		return true
+
 	if current_state != null and String(current_state.name) == "Talk":
 		return false
 
@@ -898,10 +1005,75 @@ func _can_enter_talk_with(candidate: Node2D, request_priority: int) -> bool:
 	if talk_state == null:
 		return false
 
+	if _should_refuse_talk_for_priority(request_priority):
+		return false
+
 	if current_state != null and not current_state.can_exit_to(talk_state, request_priority):
 		return false
 
 	return true
+
+
+func _talk_request_is_already_being_handled(candidate: Node2D) -> bool:
+	if candidate == null or not is_instance_valid(candidate) or candidate == npc:
+		return false
+
+	if is_talking_with(candidate):
+		return true
+
+	if not _current_state_is(&"MoveToTarget"):
+		return false
+	if String(state_after_move) != "Talk":
+		return false
+
+	return move_target == candidate or talk_target == candidate or target == candidate
+
+
+func _current_look_for_talk_target_matches(candidate: Node2D) -> bool:
+	if candidate == null or not is_instance_valid(candidate) or candidate == npc:
+		return false
+	if not _current_state_is(&"LookForTalkTarget"):
+		return false
+	if current_state != null and current_state.has_method("is_searching_for_talk_target"):
+		return bool(current_state.call("is_searching_for_talk_target", candidate))
+
+	return false
+
+
+func _should_refuse_talk_for_priority(request_priority: int) -> bool:
+	if not npc_talk_refuse_lower_priority_tasks:
+		return false
+	if current_state == null:
+		return false
+	if _current_state_is(&"Idle") or _current_state_is(&"Talk"):
+		return false
+	if _current_state_can_continue_during_talk():
+		return false
+
+	var task_priority := get_effective_task_priority()
+	if _current_state_is(&"MoveToTarget"):
+		task_priority += npc_talk_moving_task_priority_bonus
+	if task_priority <= 0:
+		return false
+
+	return request_priority < task_priority
+
+
+func _current_state_can_continue_during_talk() -> bool:
+	if current_state == null:
+		return false
+	if not current_state.has_method("can_continue_during_talk"):
+		return false
+
+	return bool(current_state.call("can_continue_during_talk"))
+
+
+func get_effective_task_priority() -> int:
+	var priority := current_state_priority
+	if current_state != null and String(current_state.name) == "MoveToTarget":
+		priority = max(priority, state_after_move_priority)
+
+	return priority
 
 
 func _mutual_talk_favor_allows(candidate: Node2D, partner_machine: NpcStateMachine) -> bool:
@@ -938,6 +1110,55 @@ func _update_player_interaction_timers(delta: float) -> void:
 		player_interaction_cooldown_timer = maxf(player_interaction_cooldown_timer - delta, 0.0)
 		if player_interaction_cooldown_timer <= 0.0:
 			player_interaction_cooldown_actor = null
+
+
+func _update_talk_refusal_cooldowns(delta: float) -> void:
+	if talk_refusal_cooldowns.is_empty():
+		return
+
+	for key in talk_refusal_cooldowns.keys():
+		var next_time := float(talk_refusal_cooldowns[key]) - delta
+		if next_time <= 0.0:
+			talk_refusal_cooldowns.erase(key)
+		else:
+			talk_refusal_cooldowns[key] = next_time
+
+
+func _start_talk_refusal_cooldown(refused_target: Node2D) -> void:
+	if npc_talk_refusal_cooldown_seconds <= 0.0:
+		return
+
+	var key := _get_talk_refusal_cooldown_key(refused_target)
+	if key.is_empty():
+		return
+
+	talk_refusal_cooldowns[key] = maxf(
+		float(talk_refusal_cooldowns.get(key, 0.0)),
+		npc_talk_refusal_cooldown_seconds
+	)
+	if talk_target == refused_target:
+		talk_target = null
+	if target == refused_target:
+		set_target(null)
+
+
+func _get_talk_refusal_cooldown_key(candidate: Node2D) -> String:
+	if candidate == null or not is_instance_valid(candidate):
+		return ""
+	if candidate.is_in_group("player"):
+		return "player"
+	if candidate.has_method("get_npc_location_id"):
+		var npc_id := String(candidate.call("get_npc_location_id")).strip_edges()
+		if not npc_id.is_empty():
+			return "npc:%s" % npc_id
+	if candidate.has_meta("npc_location_id"):
+		var meta_id := String(candidate.get_meta("npc_location_id")).strip_edges()
+		if not meta_id.is_empty():
+			return "npc:%s" % meta_id
+	if candidate.is_inside_tree():
+		return "path:%s" % String(candidate.get_path())
+
+	return "instance:%s" % candidate.get_instance_id()
 
 
 func _player_interaction_hold_is_active() -> bool:
@@ -982,6 +1203,8 @@ func can_talk_to_target(
 
 	if is_ignoring_player_interaction(candidate):
 		return false
+	if is_talk_refusal_on_cooldown(candidate):
+		return false
 
 	if not candidate.is_in_group("npc"):
 		return true
@@ -990,6 +1213,14 @@ func can_talk_to_target(
 		return true
 
 	return _get_relationship_favor_for_target(candidate) > minimum_npc_favor
+
+
+func is_talk_refusal_on_cooldown(candidate: Node2D) -> bool:
+	var key := _get_talk_refusal_cooldown_key(candidate)
+	if key.is_empty():
+		return false
+
+	return float(talk_refusal_cooldowns.get(key, 0.0)) > 0.0
 
 
 func mark_next_talk_need_payout_applied() -> void:
@@ -1036,14 +1267,16 @@ func replace_values(
 	changed_values: Dictionary = {},
 	evaluate_reactions: bool = true
 ) -> void:
+	var previous_values := values.duplicate(true)
 	values = _normalize_value_dictionary(new_values)
 	last_actor = actor
 	last_changed_values = _normalize_value_delta(changed_values)
+	_record_value_threshold_crossings(previous_values, values, last_changed_values)
 	values_changed.emit(values.duplicate(true), last_changed_values.duplicate(true), actor)
 
 	_notify_current_state_values_changed(actor)
 
-	if evaluate_reactions and value_reactions_enabled:
+	if evaluate_reactions and _value_reactions_enabled():
 		evaluate_value_reactions(actor, last_changed_values)
 
 
@@ -1054,6 +1287,7 @@ func apply_value_delta(
 ) -> bool:
 	# Use deltas for events: {"fear": 20.0} raises fear and may trigger a rule.
 	values = _normalize_value_dictionary(values)
+	var previous_values := values.duplicate(true)
 	var normalized_delta := _normalize_value_delta(value_delta)
 	var changed_values: Dictionary = {}
 
@@ -1078,10 +1312,11 @@ func apply_value_delta(
 
 	last_actor = actor
 	last_changed_values = changed_values.duplicate(true)
+	_record_value_threshold_crossings(previous_values, values, changed_values)
 	values_changed.emit(values.duplicate(true), changed_values.duplicate(true), actor)
 	_notify_current_state_values_changed(actor)
 
-	if evaluate_reactions and value_reactions_enabled:
+	if evaluate_reactions and _value_reactions_enabled():
 		evaluate_value_reactions(actor, changed_values)
 
 	return true
@@ -1094,6 +1329,7 @@ func set_value(
 	evaluate_reactions: bool = true
 ) -> void:
 	values = _normalize_value_dictionary(values)
+	var previous_values := values.duplicate(true)
 	var key := _canonical_value_key(value_name)
 	var previous_value := _variant_to_float(values.get(key, 0.0))
 	var next_value := value
@@ -1114,10 +1350,11 @@ func set_value(
 
 	last_actor = actor
 	last_changed_values = changed_values.duplicate(true)
+	_record_value_threshold_crossings(previous_values, values, changed_values)
 	values_changed.emit(values.duplicate(true), changed_values.duplicate(true), actor)
 	_notify_current_state_values_changed(actor)
 
-	if evaluate_reactions and value_reactions_enabled:
+	if evaluate_reactions and _value_reactions_enabled():
 		evaluate_value_reactions(actor, changed_values)
 
 
@@ -1135,6 +1372,10 @@ func evaluate_value_reactions(
 	changed_values: Dictionary = {}
 ) -> bool:
 	# Picks the highest-priority matching rule, so Dead/Flee can outrank Talk/Work.
+	if not _value_reactions_enabled():
+		_breadcrumb("npc_state:value_reactions_skip", _get_npc_label())
+		return false
+
 	var safe_actor: Node2D = null
 	if actor != null and is_instance_valid(actor):
 		safe_actor = actor as Node2D
@@ -1142,6 +1383,10 @@ func evaluate_value_reactions(
 		last_actor = null
 
 	var matching_rule := _find_best_matching_rule(changed_values, safe_actor)
+	_breadcrumb(
+		"npc_state:value_reaction_check",
+		"%s -> %s" % [_get_npc_label(), String(matching_rule.get("state", "none"))]
+	)
 	if matching_rule.is_empty():
 		return false
 
@@ -1233,6 +1478,7 @@ func apply_gravity(delta: float) -> void:
 
 func consume_state_after_move(default_state_name: StringName = &"Idle") -> StringName:
 	var consumed_state := state_after_move
+	var consumed_priority := maxi(state_after_move_priority, current_state_priority)
 
 	if consumed_state == &"":
 		consumed_state = default_state_name
@@ -1240,8 +1486,14 @@ func consume_state_after_move(default_state_name: StringName = &"Idle") -> Strin
 	if consumed_state == &"":
 		consumed_state = &"Idle"
 
+	pending_state_priority = consumed_priority
 	state_after_move = &"Idle"
+	state_after_move_priority = 0
 	return consumed_state
+
+
+func preserve_next_state_priority(priority: int) -> void:
+	pending_state_priority = maxi(pending_state_priority, priority)
 
 
 func get_real_seconds_for_game_hours(game_hours: float, fallback_seconds: float) -> float:
@@ -1275,6 +1527,16 @@ func get_game_hours_for_real_seconds(real_seconds: float, fallback_game_hours: f
 
 func _update_passive_needs(delta: float) -> void:
 	# Raises background needs in game-time chunks instead of every physics frame.
+	if (
+		DebugToolsConfig.TROUBLESHOOTING_MODE
+		and DebugToolsConfig.DEBUG_DISABLE_PASSIVE_NEEDS
+	):
+		passive_need_elapsed_seconds = 0.0
+		if not passive_need_skip_logged:
+			_breadcrumb("npc_state:passive_needs_skip", _get_npc_label())
+			passive_need_skip_logged = true
+		return
+
 	if not passive_needs_enabled:
 		passive_need_elapsed_seconds = 0.0
 		return
@@ -1325,9 +1587,13 @@ func _apply_passive_need_growth(real_seconds: float) -> void:
 			* (game_minutes / talk_need_growth_interval_game_minutes)
 		)
 
-	var healing_delta := _get_passive_healing_delta(game_hours)
-	if healing_delta > 0.0:
-		value_delta["hp"] = healing_delta
+	var starvation_delta := _get_starvation_damage_delta(game_hours)
+	if starvation_delta < 0.0:
+		value_delta["hp"] = starvation_delta
+	else:
+		var healing_delta := _get_passive_healing_delta(game_hours)
+		if healing_delta > 0.0:
+			value_delta["hp"] = healing_delta
 
 	var tired_delta := _get_tired_delta(game_hours)
 	if not is_equal_approx(tired_delta, 0.0):
@@ -1393,6 +1659,8 @@ func _apply_passive_need_growth(real_seconds: float) -> void:
 func _get_passive_healing_delta(game_hours: float) -> float:
 	if passive_healing_per_game_day <= 0.0 or game_hours <= 0.0:
 		return 0.0
+	if get_value(&"hunger") >= 100.0:
+		return 0.0
 
 	var current_hp := get_value(&"hp")
 	if current_hp <= 0.0 or current_hp >= 100.0:
@@ -1401,6 +1669,38 @@ func _get_passive_healing_delta(game_hours: float) -> float:
 		return 0.0
 
 	return minf(100.0 - current_hp, (passive_healing_per_game_day / 24.0) * game_hours)
+
+
+func _get_starvation_damage_delta(game_hours: float) -> float:
+	if starvation_damage_per_game_day <= 0.0 or game_hours <= 0.0:
+		return 0.0
+	if _current_state_matches_any(hunger_paused_states):
+		return 0.0
+	if get_value(&"disabled") >= 1.0:
+		return 0.0
+
+	var current_hp := get_value(&"hp")
+	if current_hp <= 0.0:
+		return 0.0
+
+	var starvation_hours := _get_starvation_game_hours(game_hours)
+	if starvation_hours <= 0.0:
+		return 0.0
+
+	var damage := (starvation_damage_per_game_day / 24.0) * starvation_hours
+	return -minf(current_hp, damage)
+
+
+func _get_starvation_game_hours(game_hours: float) -> float:
+	var current_hunger := get_value(&"hunger")
+	if current_hunger >= 100.0:
+		return game_hours
+	if hunger_growth_per_game_hour <= 0.0:
+		return 0.0
+
+	var remaining_hunger := maxf(100.0 - current_hunger, 0.0)
+	var hours_to_starvation := remaining_hunger / hunger_growth_per_game_hour
+	return maxf(game_hours - hours_to_starvation, 0.0)
 
 
 func _get_tired_delta(game_hours: float) -> float:
@@ -1561,6 +1861,9 @@ func _current_state_matches_any(state_names: Array[StringName]) -> bool:
 	for state_name in state_names:
 		if _current_state_is(state_name):
 			return true
+		if current_state != null and current_state.has_method("continues_state_during_talk"):
+			if bool(current_state.call("continues_state_during_talk", state_name)):
+				return true
 
 	return false
 
@@ -1595,11 +1898,11 @@ func _run_idle_value_reaction_check() -> void:
 	idle_value_reaction_queued = false
 	if suppress_next_idle_value_reaction_check:
 		suppress_next_idle_value_reaction_check = false
-		if is_inside_tree() and active and value_reactions_enabled:
+		if is_inside_tree() and active and _value_reactions_enabled():
 			evaluate_persistent_combat_reactions(last_actor)
 		return
 
-	if not is_inside_tree() or not active or not value_reactions_enabled or current_state == null:
+	if not is_inside_tree() or not active or not _value_reactions_enabled() or current_state == null:
 		return
 
 	if String(current_state.name) != "Idle":
@@ -1658,6 +1961,9 @@ func _notify_current_state_values_changed(actor: Node2D) -> void:
 
 func _find_best_matching_rule(changed_values: Dictionary, actor: Node2D = null) -> Dictionary:
 	# Picks the highest-priority rule that can actually run right now.
+	if not _value_reactions_enabled():
+		return {}
+
 	var best_rule: Dictionary = {}
 	var best_priority := -999999
 
@@ -1679,8 +1985,24 @@ func _find_best_matching_rule(changed_values: Dictionary, actor: Node2D = null) 
 		if state_name == &"" or get_state(state_name) == null:
 			continue
 		if (
+			state_name == &"LookForTalkTarget"
+			and DebugToolsConfig.TROUBLESHOOTING_MODE
+			and DebugToolsConfig.DEBUG_DISABLE_TALK_SEARCH
+		):
+			continue
+		if state_name == &"LookForTalkTarget":
+			if not _can_start_look_for_talk_target():
+				continue
+			if not _has_available_autonomous_talk_target(rule_dictionary):
+				continue
+		if (
 			bool(rule_dictionary.get("requires_casual_spot", false))
 			and not _has_available_casual_spot(state_name)
+		):
+			continue
+		if (
+			bool(rule_dictionary.get("requires_need_spot", false))
+			and not _has_available_need_spot(state_name, StringName(value_key))
 		):
 			continue
 
@@ -1699,6 +2021,21 @@ func _find_best_matching_rule(changed_values: Dictionary, actor: Node2D = null) 
 	return best_rule
 
 
+func _has_available_need_spot(state_name: StringName, value_name: StringName = &"") -> bool:
+	if npc == null or not npc.is_inside_tree():
+		return false
+	for candidate in npc.get_tree().get_nodes_in_group("npc_need_spot"):
+		var spot := candidate as Node2D
+		if spot == null or not is_instance_valid(spot):
+			continue
+		if not spot.has_method("can_serve_npc_need"):
+			continue
+		if bool(spot.call("can_serve_npc_need", npc, state_name, value_name)):
+			return true
+
+	return false
+
+
 func _has_available_casual_spot(state_name: StringName) -> bool:
 	if npc == null or not npc.is_inside_tree():
 		return false
@@ -1710,6 +2047,32 @@ func _has_available_casual_spot(state_name: StringName) -> bool:
 			continue
 		if bool(spot.call("can_serve_npc_casual_activity", npc, state_name)):
 			return true
+
+	return false
+
+
+func _can_start_look_for_talk_target() -> bool:
+	if not block_talk_search_while_moving_to_target:
+		return true
+	if not _current_state_is(&"MoveToTarget"):
+		return true
+
+	return state_after_move == &"Talk" or state_after_move == &"LookForTalkTarget"
+
+
+func _has_available_autonomous_talk_target(rule: Dictionary) -> bool:
+	if npc == null or not npc.is_inside_tree():
+		return false
+
+	var allowed_groups = rule.get("target_groups", [&"npc", &"player"])
+	if not (allowed_groups is Array) or allowed_groups.is_empty():
+		allowed_groups = [&"npc", &"player"]
+
+	for group_name in allowed_groups:
+		for candidate in npc.get_tree().get_nodes_in_group(String(group_name)):
+			var candidate_node := candidate as Node2D
+			if _rule_allows_target(rule, candidate_node):
+				return true
 
 	return false
 
@@ -1819,6 +2182,8 @@ func _rule_allows_target(rule: Dictionary, candidate: Node2D) -> bool:
 	if candidate == npc:
 		return false
 	if is_ignoring_player_interaction(candidate):
+		return false
+	if is_talk_refusal_on_cooldown(candidate):
 		return false
 
 	var allowed_groups = rule.get("target_groups", [])
@@ -2072,3 +2437,96 @@ func _update_debug_label() -> void:
 		return
 
 	_debug_label.text = current_state.name
+
+
+func _value_reactions_enabled() -> bool:
+	if not value_reactions_enabled:
+		return false
+	return not (
+		DebugToolsConfig.TROUBLESHOOTING_MODE
+		and DebugToolsConfig.DEBUG_DISABLE_VALUE_REACTIONS
+	)
+
+
+func _record_value_threshold_crossings(
+	previous_values: Dictionary,
+	next_values: Dictionary,
+	changed_values: Dictionary
+) -> void:
+	if not (
+		DebugToolsConfig.TROUBLESHOOTING_MODE
+		and DebugToolsConfig.DEBUG_ENABLE_VERBOSE_NPC_LOGS
+	):
+		return
+	if changed_values.is_empty():
+		return
+
+	for changed_key in changed_values.keys():
+		var value_key := _canonical_value_key(changed_key)
+		var thresholds := _get_breadcrumb_thresholds(value_key)
+		if thresholds.is_empty():
+			continue
+
+		var previous_value := _variant_to_float(previous_values.get(value_key, 0.0))
+		var next_value := _variant_to_float(next_values.get(value_key, previous_value))
+		if is_equal_approx(previous_value, next_value):
+			continue
+
+		for threshold in thresholds:
+			var threshold_value := float(threshold)
+			if previous_value < threshold_value and next_value >= threshold_value:
+				_breadcrumb(
+					"npc_state:value_cross_up",
+					"%s %s %.2f->%.2f >= %.1f" % [
+						_get_npc_label(),
+						value_key,
+						previous_value,
+						next_value,
+						threshold_value,
+					]
+				)
+			elif previous_value > threshold_value and next_value <= threshold_value:
+				_breadcrumb(
+					"npc_state:value_cross_down",
+					"%s %s %.2f->%.2f <= %.1f" % [
+						_get_npc_label(),
+						value_key,
+						previous_value,
+						next_value,
+						threshold_value,
+					]
+				)
+
+
+func _get_breadcrumb_thresholds(value_key: String) -> Array:
+	match value_key:
+		"hunger":
+			return [100.0, 90.0, 75.0, 70.0, 0.0]
+		"tired":
+			return [100.0, 75.0, 50.0, 45.0]
+		"sleep_need":
+			return [100.0, 90.0]
+		"talk_need":
+			return [100.0, 70.0, 50.0]
+		"boredom":
+			return [100.0, 75.0, 50.0]
+	return []
+
+
+func _get_npc_label() -> String:
+	if npc != null and is_instance_valid(npc):
+		if npc.has_method("get_npc_location_id"):
+			var npc_id := String(npc.call("get_npc_location_id")).strip_edges()
+			if not npc_id.is_empty():
+				return "%s(%s)" % [npc.name, npc_id]
+		if npc.has_meta("npc_location_id"):
+			var meta_id := String(npc.get_meta("npc_location_id")).strip_edges()
+			if not meta_id.is_empty():
+				return "%s(%s)" % [npc.name, meta_id]
+		return npc.name
+
+	return name
+
+
+func _breadcrumb(source: String, detail: String = "") -> void:
+	CrashBreadcrumbs.mark(source, detail)

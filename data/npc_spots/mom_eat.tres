@@ -12,7 +12,12 @@ value_name = &"hunger"
 need_threshold = 75.0
 value_delta_per_game_hour = -200.0
 priority = 50
+require_npc_value_threshold = false
 timed_need_thresholds = Array[Dictionary]([{
+"end_hour": 8.0,
+"need_threshold": 20.0,
+"start_hour": 7.0
+}, {
 "end_hour": 13.0,
 "need_threshold": 20.0,
 "start_hour": 12.0
@@ -24,8 +29,10 @@ timed_need_thresholds = Array[Dictionary]([{
 spot_value_name = &"food_available"
 spot_value_initial = 0.0
 spot_value_done_threshold = 0.0
-spot_value_delta_per_game_hour = -50.0
+spot_value_delta_per_game_hour = 0.0
 next_spot_id_when_done = &"mom_eat_prep"
 next_spot_value_when_done = 100.0
+meal_cycle_id = &"mom_meal_cycle"
+meal_cycle_stage = &"food"
 owner_ids = Array[StringName]([&"mom", &"player"])
 capacity = 0

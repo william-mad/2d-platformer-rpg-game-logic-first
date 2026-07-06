@@ -8,6 +8,7 @@ const MENU_CLOSED := &""
 const MENU_INTERACTION := &"interaction"
 const MENU_TALK := &"talk"
 const MENU_GOSSIP := &"gossip"
+const MENU_NPC_PROMPT := &"npc_prompt"
 
 @export_group("Interaction")
 @export var interaction_action: StringName = &"up"
@@ -100,6 +101,12 @@ var menu_panel: PanelContainer
 var menu_title_label: Label
 var menu_feedback_label: Label
 var menu_option_labels: Array[Label] = []
+var current_menu_option_count: int = 0
+var prompt_id: StringName = &""
+var prompt_callback_target: Node
+var prompt_accept_method: StringName = &""
+var prompt_decline_method: StringName = &""
+var prompt_completed: bool = false
 
 
 func _ready() -> void:
@@ -171,6 +178,62 @@ func _try_open_interaction_menu() -> void:
 	cooldown = cooldown_seconds
 
 
+func show_npc_prompt(
+	npc: Node2D,
+	prompt_id_value: StringName,
+	title: String,
+	options: PackedStringArray,
+	callback_target: Node,
+	accept_method: StringName,
+	decline_method: StringName,
+	timeout_seconds: float = -1.0
+) -> bool:
+	if npc == null or not is_instance_valid(npc):
+		return false
+	if player == null or not is_instance_valid(player):
+		return false
+	if callback_target == null or not is_instance_valid(callback_target):
+		return false
+	if accept_method == &"" or decline_method == &"":
+		return false
+	if options.is_empty():
+		return false
+	if _menu_is_open():
+		return (
+			active_menu == MENU_NPC_PROMPT
+			and menu_target_npc == npc
+			and prompt_id == prompt_id_value
+		)
+	if not _is_valid_npc_candidate(npc):
+		return false
+
+	menu_target_npc = npc
+	active_menu = MENU_NPC_PROMPT
+	prompt_id = prompt_id_value
+	prompt_callback_target = callback_target
+	prompt_accept_method = accept_method
+	prompt_decline_method = decline_method
+	prompt_completed = false
+	_show_menu(title, options, "")
+	if timeout_seconds >= 0.0:
+		menu_timer = timeout_seconds
+		_begin_target_menu_hold(npc, timeout_seconds)
+	cooldown = cooldown_seconds
+	return true
+
+
+func show_magic_lesson_invite(mom: Node2D, lesson_spot: Node) -> bool:
+	return show_npc_prompt(
+		mom,
+		&"mom_magic_lesson",
+		"Study magic with Mom?",
+		PackedStringArray(["Yes", "Not now"]),
+		lesson_spot,
+		&"accept_lesson",
+		&"decline_lesson"
+	)
+
+
 func _show_interaction_menu(feedback: String = "") -> void:
 	var npc_label := _get_npc_label(menu_target_npc)
 	_show_menu("Interact: %s" % npc_label, interaction_option_texts, feedback)
@@ -213,6 +276,7 @@ func _show_menu(title: String, options: PackedStringArray, feedback: String) -> 
 		menu_feedback_label.visible = not feedback.is_empty()
 
 	var option_count: int = mini(options.size(), option_actions.size())
+	current_menu_option_count = option_count
 	for index in menu_option_labels.size():
 		var label: Label = menu_option_labels[index]
 		label.visible = index < option_count
@@ -282,6 +346,10 @@ func _handle_menu_option_input() -> void:
 
 	if active_menu == MENU_GOSSIP:
 		_handle_gossip_option(selected_index)
+		return
+
+	if active_menu == MENU_NPC_PROMPT:
+		_handle_npc_prompt_option(selected_index)
 
 
 func _handle_interaction_option(selected_index: int) -> void:
@@ -335,6 +403,16 @@ func _handle_gossip_option(selected_index: int) -> void:
 	interaction_applied.emit(player, menu_target_npc, selected_interaction_id)
 	_finish_menu_attempt("", true)
 	cooldown = cooldown_seconds
+
+
+func _handle_npc_prompt_option(selected_index: int) -> void:
+	if selected_index < 0 or selected_index >= current_menu_option_count:
+		return
+	if not _menu_target_is_still_valid():
+		_finish_npc_prompt(false, "target_left")
+		return
+
+	_finish_npc_prompt(selected_index == 0)
 
 
 func _get_talk_option_delta(selected_index: int) -> Dictionary:
@@ -505,11 +583,15 @@ func _handle_menu_navigation_input() -> bool:
 
 
 func _tick_menu_timer(delta: float) -> void:
-	if menu_choice_timeout_seconds <= 0.0:
+	if menu_timer <= 0.0:
 		return
 
 	menu_timer = maxf(menu_timer - delta, 0.0)
 	if menu_timer > 0.0:
+		return
+
+	if active_menu == MENU_NPC_PROMPT:
+		_finish_npc_prompt(false, "prompt_timeout")
 		return
 
 	_finish_menu_attempt("interaction_timeout", true)
@@ -517,7 +599,48 @@ func _tick_menu_timer(delta: float) -> void:
 
 func _update_open_menu() -> void:
 	if not _menu_target_is_still_valid():
+		if active_menu == MENU_NPC_PROMPT:
+			_finish_npc_prompt(false, "target_left")
+			return
 		_finish_menu_attempt("target_left", true)
+
+
+func _finish_npc_prompt(accepted: bool, reason: String = "") -> void:
+	if active_menu != MENU_NPC_PROMPT:
+		_close_menu()
+		return
+	if prompt_completed:
+		return
+
+	prompt_completed = true
+	var target_npc := menu_target_npc
+	var callback_target := prompt_callback_target
+	var callback_method := prompt_accept_method if accepted else prompt_decline_method
+	var callback_prompt_id := prompt_id
+
+	if (
+		not reason.is_empty()
+		and target_npc != null
+		and is_instance_valid(target_npc)
+	):
+		interaction_blocked.emit(player, target_npc, callback_prompt_id, reason)
+
+	if (
+		callback_target != null
+		and is_instance_valid(callback_target)
+		and callback_method != &""
+		and callback_target.has_method(callback_method)
+		and target_npc != null
+		and is_instance_valid(target_npc)
+		and player != null
+		and is_instance_valid(player)
+	):
+		callback_target.call(callback_method, target_npc, player, callback_prompt_id)
+
+	if target_npc != null and is_instance_valid(target_npc):
+		_end_target_menu_hold(target_npc)
+	_close_menu(false)
+	cooldown = cooldown_seconds
 
 
 func _finish_menu_attempt(reason: String, apply_npc_cooldown: bool) -> void:
@@ -557,24 +680,35 @@ func _close_menu(release_target_hold: bool = true) -> void:
 
 	active_menu = MENU_CLOSED
 	menu_timer = 0.0
+	current_menu_option_count = 0
 	menu_target_npc = null
+	_clear_prompt_state()
 	if menu_layer != null and is_instance_valid(menu_layer):
 		menu_layer.visible = false
 	if menu_panel != null and is_instance_valid(menu_panel):
 		menu_panel.visible = false
 
 
-func _begin_target_menu_hold(target_npc: Node2D) -> void:
+func _clear_prompt_state() -> void:
+	prompt_id = &""
+	prompt_callback_target = null
+	prompt_accept_method = &""
+	prompt_decline_method = &""
+	prompt_completed = false
+
+
+func _begin_target_menu_hold(target_npc: Node2D, hold_seconds: float = -1.0) -> void:
 	if target_npc == null or not is_instance_valid(target_npc):
 		return
 
+	var hold_duration := menu_choice_timeout_seconds if hold_seconds < 0.0 else hold_seconds
 	if target_npc.has_method("begin_player_interaction_hold"):
-		target_npc.call("begin_player_interaction_hold", player, menu_choice_timeout_seconds)
+		target_npc.call("begin_player_interaction_hold", player, hold_duration)
 		return
 
 	var machine := _get_machine(target_npc)
 	if machine != null and machine.has_method("begin_player_interaction_hold"):
-		machine.call("begin_player_interaction_hold", player, menu_choice_timeout_seconds)
+		machine.call("begin_player_interaction_hold", player, hold_duration)
 
 
 func _end_target_menu_hold(target_npc: Node2D) -> void:
@@ -850,4 +984,7 @@ func _on_body_exited(body: Node2D) -> void:
 	# Removes bodies that leave the interaction area.
 	nearby_npcs.erase(body)
 	if close_menu_when_target_exits and body == menu_target_npc:
+		if active_menu == MENU_NPC_PROMPT:
+			_finish_npc_prompt(false, "target_left")
+			return
 		_close_menu()

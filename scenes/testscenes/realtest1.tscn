@@ -17,7 +17,7 @@
 [ext_resource type="PackedScene" path="res://scenes/things/npc_work_spot.tscn" id="20_work_spot"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_travel_door.tscn" id="21_home_door"]
 [ext_resource type="Resource" path="res://data/npc_spots/mom_eat.tres" id="22_mom_eat_definition"]
-[ext_resource type="Resource" path="res://data/npc_spots/mom_work.tres" id="23_mom_work_definition"]
+[ext_resource type="Resource" uid="uid://bltr1rkw27va" path="res://data/npc_spots/mom_work.tres" id="23_mom_work_definition"]
 [ext_resource type="Resource" path="res://data/npc_spots/mom_eat_prep.tres" id="24_mom_eat_prep_definition"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_recreation_spot.tscn" id="25_recreation_spot"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_rest_spot.tscn" id="26_rest_spot"]
@@ -301,10 +301,10 @@ owner_npc_ids = Array[StringName]([&"mom"])
 require_target_need_threshold = false
 active_time_windows = Array[Dictionary]([{
 "end_hour": 10.0,
-"start_hour": 8.0
+"start_hour": 9.0
 }, {
 "end_hour": 17.0,
-"start_hour": 14.0
+"start_hour": 15.0
 }])
 
 [node name="TalkPartnerNpc" parent="." unique_id=1577191316 instance=ExtResource("18_talk_npc")]

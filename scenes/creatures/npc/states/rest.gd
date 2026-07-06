@@ -17,10 +17,22 @@ func init() -> void:
 func enter() -> void:
 	# Chooses an assigned/preferred rest spot or occasionally rests where the NPC stands.
 	super.enter()
+	_breadcrumb(
+		"npc_rest:enter",
+		"%s tired=%.2f" % [_npc_label(), machine.get_value(rest_value_name)]
+	)
+	if _rest_state_disabled():
+		_breadcrumb("npc_rest:disabled", _npc_label())
+		active_rest_target = null
+		resting_in_place = false
+		next_state = get_state(&"Idle")
+		stop_horizontal()
+		return
 
 	active_rest_target = _resolve_rest_target()
 	resting_in_place = active_rest_target == null
 	if active_rest_target != null and not is_close_to(active_rest_target.global_position, machine.stop_distance):
+		_breadcrumb("npc_rest:walk_to_target", "%s -> %s" % [_npc_label(), active_rest_target.name])
 		machine.move_target = active_rest_target
 		machine.state_after_move = &"Rest"
 		machine.call_deferred(
@@ -35,11 +47,24 @@ func enter() -> void:
 	stop_horizontal()
 
 
+func exit() -> void:
+	_breadcrumb(
+		"npc_rest:exit",
+		"%s tired=%.2f in_place=%s" % [
+			_npc_label(),
+			machine.get_value(rest_value_name),
+			str(resting_in_place),
+		]
+	)
+	super.exit()
+
+
 func physics_process(_delta: float) -> NpcState:
 	# The state machine's 10-second fatigue tick lowers tired while this state remains active.
 	stop_horizontal()
 
 	if active_rest_target != null and not _target_can_be_rested_at(active_rest_target):
+		_breadcrumb("npc_rest:target_rejected", "%s %s" % [_npc_label(), active_rest_target.name])
 		machine.rest_target = null
 		active_rest_target = _resolve_rest_target()
 		resting_in_place = active_rest_target == null
@@ -72,18 +97,22 @@ func _resolve_rest_target() -> Node2D:
 	if String(rest_target_path) != "" and machine.npc != null:
 		var configured_target := machine.npc.get_node_or_null(rest_target_path) as Node2D
 		if _target_can_be_rested_at(configured_target):
+			_breadcrumb("npc_rest:target_configured", "%s -> %s" % [_npc_label(), configured_target.name])
 			return configured_target
 
 	if _target_can_be_rested_at(machine.rest_target):
+		_breadcrumb("npc_rest:target_assigned", "%s -> %s" % [_npc_label(), machine.rest_target.name])
 		return machine.rest_target
 
 	machine.rest_target = null
 	if choice_rng.randf() < clampf(rest_in_place_chance, 0.0, 1.0):
+		_breadcrumb("npc_rest:target_in_place", _npc_label())
 		return null
 
 	var preferred_spot := find_weighted_casual_spot(&"Rest", choice_rng)
 	if preferred_spot != null:
 		machine.rest_target = preferred_spot
+		_breadcrumb("npc_rest:target_weighted", "%s -> %s" % [_npc_label(), preferred_spot.name])
 		return preferred_spot
 
 	return null
@@ -94,6 +123,30 @@ func _target_can_be_rested_at(rest_target: Node2D) -> bool:
 		return false
 
 	if rest_target.has_method("can_serve_npc_casual_activity"):
-		return bool(rest_target.call("can_serve_npc_casual_activity", npc, &"Rest"))
+		var accepted := bool(rest_target.call("can_serve_npc_casual_activity", npc, &"Rest"))
+		if not accepted:
+			_breadcrumb("npc_rest:spot_reject", "%s %s" % [_npc_label(), rest_target.name])
+		return accepted
 
 	return true
+
+
+func _rest_state_disabled() -> bool:
+	return (
+		DebugToolsConfig.TROUBLESHOOTING_MODE
+		and DebugToolsConfig.DEBUG_DISABLE_REST_STATE
+	)
+
+
+func _npc_label() -> String:
+	if npc != null and is_instance_valid(npc):
+		if npc.has_method("get_npc_location_id"):
+			var npc_id := String(npc.call("get_npc_location_id")).strip_edges()
+			if not npc_id.is_empty():
+				return "%s(%s)" % [npc.name, npc_id]
+		return npc.name
+	return name
+
+
+func _breadcrumb(source: String, detail: String = "") -> void:
+	CrashBreadcrumbs.mark(source, detail)

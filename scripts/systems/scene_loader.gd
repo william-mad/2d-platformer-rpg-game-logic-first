@@ -34,9 +34,14 @@ func preload_scene(scene_path: String) -> bool:
 	if cached_scenes.has(normalized_path):
 		return true
 
+	if _debug_flag(&"DEBUG_DISABLE_SCENE_PRELOADS"):
+		_breadcrumb("scene_loader:preload_skip", normalized_path)
+		return false
+
 	if not use_threaded_loading:
 		return false
 
+	_breadcrumb("scene_loader:preload_status", normalized_path)
 	var status := ResourceLoader.load_threaded_get_status(normalized_path)
 	if status == ResourceLoader.THREAD_LOAD_LOADED:
 		return _cache_threaded_scene(normalized_path)
@@ -44,6 +49,7 @@ func preload_scene(scene_path: String) -> bool:
 		_track_preload(normalized_path)
 		return true
 
+	_breadcrumb("scene_loader:preload_request", normalized_path)
 	var error := ResourceLoader.load_threaded_request(
 		normalized_path,
 		"PackedScene",
@@ -67,10 +73,12 @@ func change_scene(scene_path: String) -> bool:
 	loading_scene_path = normalized_path
 	loading_in_progress = true
 	_show_loading_overlay(0.0)
+	_breadcrumb("scene_loader:start", normalized_path)
 	_record_watchdog_marker(&"scene_loader:start", normalized_path)
 	scene_load_started.emit(normalized_path)
 
-	if not use_threaded_loading:
+	if _debug_flag(&"DEBUG_FORCE_BLOCKING_SCENE_LOADS") or not use_threaded_loading:
+		_breadcrumb("scene_loader:force_blocking", normalized_path)
 		call_deferred("_change_scene_blocking", normalized_path)
 		return true
 
@@ -135,10 +143,13 @@ func get_debug_status() -> Dictionary:
 func _change_scene_to_cached(scene_path: String) -> void:
 	var packed_scene := cached_scenes.get(scene_path, null) as PackedScene
 	if packed_scene == null:
+		_breadcrumb("scene_loader:packed_missing", scene_path)
 		_finish_scene_load(false, scene_path)
 		return
 
+	_breadcrumb("scene_loader:change_packed_before", scene_path)
 	var error := get_tree().change_scene_to_packed(packed_scene)
+	_breadcrumb("scene_loader:change_packed_after", "%s error=%d" % [scene_path, error])
 	if error != OK:
 		push_warning("Could not change scene to loaded scene: %s" % scene_path)
 		_finish_scene_load(false, scene_path)
@@ -202,7 +213,9 @@ func _report_preload_progress(scene_path: String, progress: float) -> void:
 
 
 func _change_scene_blocking(scene_path: String) -> void:
+	_breadcrumb("scene_loader:change_file_before", scene_path)
 	var error := get_tree().change_scene_to_file(scene_path)
+	_breadcrumb("scene_loader:change_file_after", "%s error=%d" % [scene_path, error])
 	if error != OK:
 		push_warning("Could not change scene: %s" % scene_path)
 		_finish_scene_load(false, scene_path)
@@ -212,6 +225,7 @@ func _change_scene_blocking(scene_path: String) -> void:
 
 
 func _finish_scene_load(success: bool, scene_path: String) -> void:
+	_breadcrumb("scene_loader:finish", "%s %s" % ["ok" if success else "fail", scene_path])
 	_record_watchdog_marker(&"scene_loader:finish", "%s %s" % ["ok" if success else "fail", scene_path])
 	pending_preload_paths.erase(scene_path)
 	loading_in_progress = false
@@ -222,13 +236,16 @@ func _finish_scene_load(success: bool, scene_path: String) -> void:
 
 
 func _cache_threaded_scene(scene_path: String) -> bool:
+	_breadcrumb("scene_loader:threaded_get_before", scene_path)
 	var resource := ResourceLoader.load_threaded_get(scene_path)
 	var packed_scene := resource as PackedScene
 	if packed_scene == null:
+		_breadcrumb("scene_loader:threaded_get_failed", scene_path)
 		return false
 
 	pending_preload_paths.erase(scene_path)
 	cached_scenes[scene_path] = packed_scene
+	_breadcrumb("scene_loader:threaded_get_ok", scene_path)
 	return true
 
 
@@ -294,3 +311,18 @@ func _record_watchdog_marker(source: StringName, detail: String = "") -> void:
 	var watchdog := get_node_or_null("/root/PerformanceWatchdog")
 	if watchdog != null and watchdog.has_method("record_marker"):
 		watchdog.call("record_marker", source, detail)
+
+
+func _debug_flag(flag_name: StringName) -> bool:
+	if not DebugToolsConfig.TROUBLESHOOTING_MODE:
+		return false
+	match flag_name:
+		&"DEBUG_DISABLE_SCENE_PRELOADS":
+			return DebugToolsConfig.DEBUG_DISABLE_SCENE_PRELOADS
+		&"DEBUG_FORCE_BLOCKING_SCENE_LOADS":
+			return DebugToolsConfig.DEBUG_FORCE_BLOCKING_SCENE_LOADS
+	return false
+
+
+func _breadcrumb(source: String, detail: String = "") -> void:
+	CrashBreadcrumbs.mark(source, detail)

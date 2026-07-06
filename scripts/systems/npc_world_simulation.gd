@@ -7,6 +7,15 @@ const SPOT_DATA_DIRECTORY := "res://data/npc_spots"
 const PLAYER_SOCIAL_TARGET_ID := "__player__"
 const DEFAULT_SLEEP_SKIP_WAKE_HUNGER_MAX := 60.0
 const DEFAULT_PASSIVE_HEALING_PER_GAME_DAY := 10.0
+const DEFAULT_STARVATION_DAMAGE_PER_GAME_DAY := 5.0
+const MEAL_STAGE_PREP_WORK := "prep_work"
+const MEAL_STAGE_FOOD := "food"
+const MEAL_STAGE_CLEANUP_WORK := "cleanup_work"
+const MEAL_OWNER_PREP := "prep"
+const MEAL_OWNER_FOOD := "food"
+const MEAL_OWNER_CLEANUP := "cleanup"
+const MEAL_CYCLE_EPSILON := 0.001
+const INVITE_PLAYER_STATE := &"InvitePlayer"
 
 @export var simulation_interval_seconds: float = 10.0
 @export var simulated_talk_need_drop: float = 40.0
@@ -20,6 +29,7 @@ var spot_runtime_states: Dictionary = {}
 var simulation_timer: float = 0.0
 var simulation_queued: bool = false
 var social_rng := RandomNumberGenerator.new()
+var simulation_tick_skip_logged: bool = false
 
 
 func _ready() -> void:
@@ -36,6 +46,8 @@ func _ready() -> void:
 		var hour_callback := Callable(self, "_on_world_hour_changed")
 		if not world_time.is_connected(&"hour_changed", hour_callback):
 			world_time.connect(&"hour_changed", hour_callback)
+	if world_time != null and world_time.has_method("get_snapshot"):
+		_process_meal_cycle_schedule_until_snapshot(world_time.call("get_snapshot"))
 
 	var locations := get_node_or_null("/root/NpcLocations")
 	if locations != null and locations.has_signal(&"npc_registered"):
@@ -72,12 +84,17 @@ func register_work_spot_state(
 	var state = spot_runtime_states.get(state_key, {})
 	if not (state is Dictionary):
 		state = {}
-	state["kind"] = "work"
+	if bool(state.get("meal_cycle_enabled", false)):
+		state["kind"] = "meal_cycle"
+	else:
+		state["kind"] = "work"
 	state["minimum"] = lower
 	state["maximum"] = upper
 	state["daily_growth"] = daily_growth
 	state["value"] = clampf(float(state.get("value", initial_value)), lower, upper)
 	spot_runtime_states[state_key] = state
+	if bool(state.get("meal_cycle_enabled", false)):
+		_notify_meal_cycle_state(StringName(state_key))
 	return float(state["value"])
 
 
@@ -118,6 +135,20 @@ func set_spot_value(spot_id: StringName, value: float, allow_cycle_transition: b
 	state["value"] = next_value
 	spot_runtime_states[state_key] = state
 	_notify_live_spot_value(spot_id, next_value)
+
+	if _spot_state_is_meal_cycle_managed(state):
+		if (
+			allow_cycle_transition
+			and bool(state.get("meal_cycle_enabled", false))
+			and previous_value > done_threshold
+			and next_value <= done_threshold
+		):
+			_advance_meal_cycle_work_complete(spot_id)
+		elif bool(state.get("meal_cycle_enabled", false)):
+			_notify_meal_cycle_state(spot_id)
+		else:
+			_notify_meal_cycle_state(StringName(String(state.get("meal_cycle_controller_id", ""))))
+		return
 
 	if not allow_cycle_transition:
 		return
@@ -161,6 +192,8 @@ func _on_world_day_changed(_day: int, _snapshot: Dictionary) -> void:
 		var state = spot_runtime_states[spot_id_key]
 		if not (state is Dictionary):
 			continue
+		if _spot_state_is_meal_cycle_managed(state):
+			continue
 
 		var next_value := clampf(
 			float(state.get("value", 0.0)) + float(state.get("daily_growth", 0.0)),
@@ -172,8 +205,12 @@ func _on_world_day_changed(_day: int, _snapshot: Dictionary) -> void:
 	_queue_simulation()
 
 
-func _on_world_hour_changed(_hour: int, _snapshot: Dictionary) -> void:
+func _on_world_hour_changed(_hour: int, snapshot: Dictionary) -> void:
 	# Scheduled windows commonly open on the hour, so dispatch eligible owners immediately.
+	if _world_simulation_debug_disabled():
+		_log_world_simulation_disabled("hour_changed")
+		return
+	_process_meal_cycle_schedule_until_snapshot(snapshot)
 	_queue_simulation()
 
 
@@ -195,6 +232,9 @@ func _on_npc_state_changed(state_name: StringName, _previous_state_name: StringN
 
 
 func _queue_simulation() -> void:
+	if _world_simulation_debug_disabled():
+		_log_world_simulation_disabled("queue")
+		return
 	if simulation_queued:
 		return
 
@@ -203,11 +243,19 @@ func _queue_simulation() -> void:
 
 
 func _run_queued_simulation() -> void:
+	if _world_simulation_debug_disabled():
+		_log_world_simulation_disabled("queued")
+		simulation_queued = false
+		return
 	simulation_queued = false
 	simulate_now()
 
 
 func _process(delta: float) -> void:
+	if _world_simulation_debug_disabled():
+		_log_world_simulation_disabled("process")
+		return
+
 	simulation_timer -= delta
 	if simulation_timer > 0.0:
 		return
@@ -218,6 +266,10 @@ func _process(delta: float) -> void:
 
 func simulate_now() -> void:
 	# Only saved records are simulated; unloaded NPC scenes never need a running state machine.
+	if _world_simulation_debug_disabled():
+		_log_world_simulation_disabled("simulate_now")
+		return
+
 	var locations := get_node_or_null("/root/NpcLocations")
 	var world_time := get_node_or_null("/root/WorldTime")
 	if locations == null or world_time == null:
@@ -228,7 +280,9 @@ func simulate_now() -> void:
 	var snapshot: Dictionary = world_time.call("get_snapshot")
 	var total_hours := float(snapshot.get("total_hours", 0.0))
 	var hour := float(snapshot.get("time_of_day_hours", snapshot.get("hour", 0.0)))
+	_process_meal_cycle_schedule_until_snapshot(snapshot)
 	var records: Dictionary = locations.call("get_all_locations")
+	_breadcrumb("npc_world:simulate_start", "hour=%.3f records=%d" % [hour, records.size()])
 	_rebuild_spot_claims(records)
 
 	for npc_id_key in records.keys():
@@ -236,6 +290,23 @@ func simulate_now() -> void:
 		var record = records[npc_id_key]
 		if not (record is Dictionary):
 			continue
+		var record_dictionary: Dictionary = record
+		var activity_label := ""
+		var activity_value = record_dictionary.get("activity", {})
+		if activity_value is Dictionary:
+			activity_label = String(activity_value.get("spot_id", ""))
+		var pending_label := ""
+		var pending_value = record_dictionary.get("pending_travel", {})
+		if pending_value is Dictionary:
+			pending_label = String(pending_value.get("mode", ""))
+		_breadcrumb(
+			"npc_world:evaluate_npc",
+			"%s activity=%s pending=%s" % [
+				String(npc_id),
+				activity_label,
+				pending_label,
+			]
+		)
 
 		var npc_is_live := (
 			locations.has_method("is_npc_live")
@@ -262,6 +333,7 @@ func simulate_now() -> void:
 			if _consume_sleep_skip_wake_pause(npc_id, record, locations):
 				continue
 			_try_start_activity(npc_id, record, total_hours, hour, locations, records)
+	_breadcrumb("npc_world:simulate_end", "hour=%.3f" % hour)
 
 
 func simulate_player_sleep_skip(
@@ -371,113 +443,43 @@ func _finalize_sleep_skip_record(
 	start_total_hours: float,
 	end_total_hours: float
 ) -> bool:
-	record["last_simulated_total_hours"] = end_total_hours
-	var slept_during_skip := _clear_sleep_activity_after_skip(record)
-	if not slept_during_skip:
-		slept_during_skip = _move_record_to_sleep_definition_for_skip(
-			npc_id,
-			record,
-			start_total_hours,
-			end_total_hours
-		)
-	if slept_during_skip:
-		record["skip_next_activity_start_after_sleep"] = true
-	return slept_during_skip
+	return NpcSleepWakeResolver.finalize_sleep_skip_record(
+		npc_id,
+		record,
+		start_total_hours,
+		end_total_hours,
+		self
+	)
 
 
 func _clear_sleep_activity_after_skip(record: Dictionary) -> bool:
-	var moved_to_sleep_wake_destination := false
-	var activity = record.get("activity", {})
-	if activity is Dictionary and String(activity.get("state_name", "")) == "Sleep":
-		moved_to_sleep_wake_destination = _move_record_to_sleep_skip_wake_destination(record, activity)
-		record["activity"] = {}
-
-	var pending = record.get("pending_travel", {})
-	if not (pending is Dictionary) or pending.is_empty():
-		return moved_to_sleep_wake_destination
-	if String(pending.get("requested_state_name", "")) == "Sleep":
-		moved_to_sleep_wake_destination = _move_record_to_sleep_skip_wake_destination(
-			record,
-			_get_sleep_activity_from_pending(pending)
-		) or moved_to_sleep_wake_destination
-		record["pending_travel"] = {}
-		return moved_to_sleep_wake_destination
-
-	var pending_activity = pending.get("activity", {})
-	if pending_activity is Dictionary and String(pending_activity.get("state_name", "")) == "Sleep":
-		moved_to_sleep_wake_destination = _move_record_to_sleep_skip_wake_destination(
-			record,
-			pending_activity
-		) or moved_to_sleep_wake_destination
-		record["pending_travel"] = {}
-
-	return moved_to_sleep_wake_destination
+	return NpcSleepWakeResolver.clear_sleep_activity_after_skip(record, self)
 
 
 func _get_sleep_activity_from_pending(pending: Dictionary) -> Dictionary:
-	var pending_activity = pending.get("activity", {})
-	if pending_activity is Dictionary and not pending_activity.is_empty():
-		return pending_activity
-
-	return pending
+	return NpcSleepWakeResolver.get_sleep_activity_from_pending(pending)
 
 
 func _move_record_to_sleep_skip_wake_destination(
 	record: Dictionary,
 	sleep_activity: Dictionary
 ) -> bool:
-	var destination := _get_sleep_skip_wake_destination(record, sleep_activity)
-	if destination.is_empty():
-		return false
-
-	return _move_record_to_destination(record, destination)
+	return NpcSleepWakeResolver.move_record_to_sleep_skip_wake_destination(
+		record,
+		sleep_activity,
+		self
+	)
 
 
 func _move_record_to_destination(record: Dictionary, destination: Dictionary) -> bool:
-	var scene_path := String(destination.get("scene_path", ""))
-	var position = destination.get("position", null)
-	if scene_path.is_empty() or not (position is Vector2):
-		return false
-
-	record["activity"] = {}
-	record["pending_travel"] = {}
-	record["scene_path"] = scene_path
-	record["previous_scene_path"] = ""
-	record["last_position"] = position
-	record["spawn_random"] = false
-	record["social_visit_target_id"] = ""
-	record["last_travel_msec"] = Time.get_ticks_msec()
-	return true
+	return NpcSleepWakeResolver.move_record_to_destination(record, destination)
 
 
 func _get_sleep_skip_wake_destination(
 	record: Dictionary,
 	sleep_activity: Dictionary
 ) -> Dictionary:
-	var definition := _get_sleep_activity_definition(sleep_activity)
-	if definition != null:
-		var wake_spot_destination := _get_wake_spot_destination(definition)
-		if not wake_spot_destination.is_empty():
-			return wake_spot_destination
-
-		var explicit_wake_destination := _get_explicit_wake_destination(definition)
-		if not explicit_wake_destination.is_empty():
-			return explicit_wake_destination
-
-		if definition.wake_at_home_position:
-			var home_destination := _get_record_home_destination(record)
-			if not home_destination.is_empty():
-				return home_destination
-
-	var sleep_spot_destination := _get_activity_target_destination(sleep_activity)
-	if not sleep_spot_destination.is_empty():
-		return sleep_spot_destination
-
-	var fallback_home_destination := _get_record_home_destination(record)
-	if not fallback_home_destination.is_empty():
-		return fallback_home_destination
-
-	return _get_activity_return_destination(record, sleep_activity)
+	return NpcSleepWakeResolver.get_sleep_skip_wake_destination(record, sleep_activity, self)
 
 
 func _move_record_to_sleep_definition_for_skip(
@@ -486,19 +488,13 @@ func _move_record_to_sleep_definition_for_skip(
 	start_total_hours: float,
 	end_total_hours: float
 ) -> bool:
-	var definition := _find_sleep_definition_during_skip(
-		StringName(npc_id),
+	return NpcSleepWakeResolver.move_record_to_sleep_definition_for_skip(
+		npc_id,
 		record,
 		start_total_hours,
-		end_total_hours
+		end_total_hours,
+		self
 	)
-	if definition == null:
-		return false
-
-	return _move_record_to_destination(record, {
-		"scene_path": definition.scene_path,
-		"position": definition.position,
-	})
 
 
 func _find_sleep_definition_during_skip(
@@ -507,29 +503,13 @@ func _find_sleep_definition_during_skip(
 	start_total_hours: float,
 	end_total_hours: float
 ) -> NpcSpotDefinition:
-	if _record_is_disabled(record):
-		return null
-
-	var best_definition: NpcSpotDefinition = null
-	for definition_value in spot_definitions.values():
-		var definition := definition_value as NpcSpotDefinition
-		if definition == null or String(definition.state_name) != "Sleep":
-			continue
-		if not definition.allows_npc_id(npc_id):
-			continue
-		if not _definition_is_active_during_interval(definition, start_total_hours, end_total_hours):
-			continue
-		if (
-			best_definition == null
-			or definition.priority > best_definition.priority
-			or (
-				definition.priority == best_definition.priority
-				and String(definition.spot_id) < String(best_definition.spot_id)
-			)
-		):
-			best_definition = definition
-
-	return best_definition
+	return NpcSleepWakeResolver.find_sleep_definition_during_skip(
+		npc_id,
+		record,
+		start_total_hours,
+		end_total_hours,
+		self
+	)
 
 
 func _definition_is_active_during_interval(
@@ -537,21 +517,11 @@ func _definition_is_active_during_interval(
 	start_total_hours: float,
 	end_total_hours: float
 ) -> bool:
-	if end_total_hours <= start_total_hours:
-		return false
-	if definition.active_time_windows.is_empty():
-		return true
-
-	var first_day := int(floor(start_total_hours / 24.0)) - 1
-	var last_day := int(floor(end_total_hours / 24.0)) + 1
-	for day in range(first_day, last_day + 1):
-		for window in definition.active_time_windows:
-			if not (window is Dictionary):
-				continue
-			if _window_overlaps_interval(window, day, start_total_hours, end_total_hours):
-				return true
-
-	return false
+	return NpcSleepWakeResolver.definition_is_active_during_interval(
+		definition,
+		start_total_hours,
+		end_total_hours
+	)
 
 
 func _window_overlaps_interval(
@@ -560,107 +530,39 @@ func _window_overlaps_interval(
 	start_total_hours: float,
 	end_total_hours: float
 ) -> bool:
-	var start_hour := fposmod(float(window.get("start_hour", window.get("start", 0.0))), 24.0)
-	var end_hour := fposmod(float(window.get("end_hour", window.get("end", 24.0))), 24.0)
-	if is_equal_approx(start_hour, end_hour):
-		return true
-
-	var window_start := float(day) * 24.0 + start_hour
-	var window_end := float(day) * 24.0 + end_hour
-	if start_hour > end_hour:
-		window_end += 24.0
-
-	return window_start < end_total_hours and window_end > start_total_hours
+	return NpcSleepWakeResolver.window_overlaps_interval(
+		window,
+		day,
+		start_total_hours,
+		end_total_hours
+	)
 
 
 func _get_sleep_activity_definition(sleep_activity: Dictionary) -> NpcSpotDefinition:
-	var spot_id := StringName(String(sleep_activity.get("spot_id", "")))
-	if spot_id == &"":
-		return null
-
-	return spot_definitions.get(spot_id, null) as NpcSpotDefinition
+	return NpcSleepWakeResolver.get_sleep_activity_definition(sleep_activity, self)
 
 
 func _get_wake_spot_destination(definition: NpcSpotDefinition) -> Dictionary:
-	if definition == null or definition.wake_spot_id == &"":
-		return {}
-
-	var wake_definition := spot_definitions.get(definition.wake_spot_id, null) as NpcSpotDefinition
-	if wake_definition == null:
-		push_warning(
-			"NPC spot '%s' wake spot '%s' does not exist."
-			% [String(definition.spot_id), String(definition.wake_spot_id)]
-		)
-		return {}
-
-	return {
-		"scene_path": wake_definition.scene_path,
-		"position": wake_definition.position,
-	}
+	return NpcSleepWakeResolver.get_wake_spot_destination(definition, self)
 
 
 func _get_explicit_wake_destination(definition: NpcSpotDefinition) -> Dictionary:
-	if definition == null or definition.wake_scene_path.is_empty():
-		return {}
-
-	return {
-		"scene_path": definition.wake_scene_path,
-		"position": definition.wake_position,
-	}
+	return NpcSleepWakeResolver.get_explicit_wake_destination(definition)
 
 
 func _get_record_home_destination(record: Dictionary) -> Dictionary:
-	var scene_path := String(record.get("home_scene_path", ""))
-	if scene_path.is_empty():
-		scene_path = String(record.get("scene_path", ""))
-
-	var position = record.get("home_position", null)
-	if scene_path.is_empty() or not (position is Vector2):
-		return {}
-
-	return {
-		"scene_path": scene_path,
-		"position": position,
-	}
+	return NpcSleepWakeResolver.get_record_home_destination(record)
 
 
 func _get_activity_target_destination(activity: Dictionary) -> Dictionary:
-	var scene_path := String(activity.get("target_scene_path", ""))
-	var position = activity.get("target_position", null)
-
-	if scene_path.is_empty():
-		var definition := _get_sleep_activity_definition(activity)
-		if definition != null:
-			scene_path = definition.scene_path
-			position = definition.position
-
-	if scene_path.is_empty() or not (position is Vector2):
-		return {}
-
-	return {
-		"scene_path": scene_path,
-		"position": position,
-	}
+	return NpcSleepWakeResolver.get_activity_target_destination(activity, self)
 
 
 func _get_activity_return_destination(
 	record: Dictionary,
 	activity: Dictionary
 ) -> Dictionary:
-	var scene_path := String(activity.get("return_scene_path", record.get("scene_path", "")))
-	if scene_path.is_empty():
-		scene_path = String(record.get("scene_path", ""))
-
-	var position = activity.get("return_position", record.get("last_position", Vector2.ZERO))
-	if not (position is Vector2):
-		position = Vector2.ZERO
-	if scene_path.is_empty():
-		return {}
-
-	return {
-		"scene_path": scene_path,
-		"position": position,
-	}
+	return NpcSleepWakeResolver.get_activity_return_destination(record, activity)
 
 
 func _wake_live_npc_after_sleep_skip(live_npc: Node, slept_during_skip: bool = false) -> void:
@@ -745,6 +647,9 @@ func _simulate_offscreen_passive_values(
 		}
 	var talk_need_before_growth := float(social_stats.get("talk_need", 0.0))
 	var talk_need_rate := float(rates.get("talk_need", 0.0))
+	var hunger_before_growth := float(social_stats.get("hunger", 0.0))
+	var hunger_rate := float(rates.get("hunger", 0.0))
+	var hunger_paused := _passive_value_is_paused("hunger", paused_state_name)
 
 	for value_key in rates.keys():
 		var value_name := String(value_key)
@@ -760,7 +665,16 @@ func _simulate_offscreen_passive_values(
 		var next_value := current_value + growth
 		social_stats[value_name] = clampf(next_value, 0.0, 100.0)
 
-	_apply_offscreen_passive_healing(social_stats, profile, elapsed_game_hours)
+	var starvation_applied := _apply_offscreen_starvation_damage(
+		social_stats,
+		profile,
+		elapsed_game_hours,
+		hunger_before_growth,
+		hunger_rate,
+		hunger_paused
+	)
+	if not starvation_applied:
+		_apply_offscreen_passive_healing(social_stats, profile, elapsed_game_hours)
 	_apply_offscreen_tired_change(
 		social_stats,
 		profile,
@@ -799,6 +713,61 @@ func _apply_full_sleep_health_restore(
 	social_stats[health_value_name] = full_health
 
 
+func _apply_offscreen_starvation_damage(
+	social_stats: Dictionary,
+	profile: Dictionary,
+	elapsed_game_hours: float,
+	hunger_before_growth: float,
+	hunger_rate: float,
+	hunger_paused: bool
+) -> bool:
+	if elapsed_game_hours <= 0.0 or hunger_paused:
+		return false
+	if not social_stats.has("hp") or not social_stats.has("hunger"):
+		return false
+	if float(social_stats.get("disabled", 0.0)) >= 1.0:
+		return false
+
+	var current_hp := float(social_stats.get("hp", 0.0))
+	if current_hp <= 0.0:
+		return false
+
+	var damage_per_day := clampf(
+		float(profile.get("starvation_damage_per_game_day", DEFAULT_STARVATION_DAMAGE_PER_GAME_DAY)),
+		0.0,
+		100.0
+	)
+	if damage_per_day <= 0.0:
+		return false
+
+	var starvation_hours := _get_offscreen_starvation_game_hours(
+		elapsed_game_hours,
+		hunger_before_growth,
+		hunger_rate
+	)
+	if starvation_hours <= 0.0:
+		return false
+
+	var damage := (damage_per_day / 24.0) * starvation_hours
+	social_stats["hp"] = maxf(current_hp - damage, 0.0)
+	return true
+
+
+func _get_offscreen_starvation_game_hours(
+	elapsed_game_hours: float,
+	hunger_before_growth: float,
+	hunger_rate: float
+) -> float:
+	if hunger_before_growth >= 100.0:
+		return elapsed_game_hours
+	if hunger_rate <= 0.0:
+		return 0.0
+
+	var remaining_hunger := maxf(100.0 - hunger_before_growth, 0.0)
+	var hours_to_starvation := remaining_hunger / hunger_rate
+	return maxf(elapsed_game_hours - hours_to_starvation, 0.0)
+
+
 func _apply_offscreen_passive_healing(
 	social_stats: Dictionary,
 	profile: Dictionary,
@@ -807,6 +776,8 @@ func _apply_offscreen_passive_healing(
 	if elapsed_game_hours <= 0.0:
 		return
 	if not social_stats.has("hp"):
+		return
+	if float(social_stats.get("hunger", 0.0)) >= 100.0:
 		return
 	if float(social_stats.get("disabled", 0.0)) >= 1.0:
 		return
@@ -1061,6 +1032,10 @@ func _passive_value_is_paused(value_name: String, state_name: StringName) -> boo
 func register_live_spot(spot_id: StringName, spot: Node2D) -> void:
 	if spot_id == &"" or spot == null:
 		return
+	var definition := spot_definitions.get(spot_id, null) as NpcSpotDefinition
+	if _debug_definition_disabled(definition):
+		_breadcrumb("npc_world:register_spot_skip", String(spot_id))
+		return
 	var existing := live_spots.get(spot_id, null) as Node2D
 	if existing != null and is_instance_valid(existing) and existing != spot:
 		push_warning("Duplicate live NPC spot id '%s'; keeping the first spot." % String(spot_id))
@@ -1079,8 +1054,17 @@ func unregister_live_spot(spot_id: StringName, spot: Node2D) -> void:
 
 func resume_live_activity(npc_id: StringName, npc: Node) -> void:
 	# Reconnects a spawned NPC to the real spot and normal state machine for the loaded scene.
+	if (
+		DebugToolsConfig.TROUBLESHOOTING_MODE
+		and DebugToolsConfig.DEBUG_DISABLE_NPC_LIVE_ACTIVITY_RESUME
+	):
+		_breadcrumb("npc_world:resume_live_skip", String(npc_id))
+		return
+
+	_breadcrumb("npc_world:resume_live_start", String(npc_id))
 	var locations := get_node_or_null("/root/NpcLocations")
 	if locations == null or not locations.has_method("get_npc_location"):
+		_breadcrumb("npc_world:resume_live_no_locations", String(npc_id))
 		return
 
 	var record: Dictionary = locations.call("get_npc_location", String(npc_id))
@@ -1091,21 +1075,35 @@ func resume_live_activity(npc_id: StringName, npc: Node) -> void:
 
 	var activity = record.get("activity", {})
 	if not (activity is Dictionary) or activity.is_empty():
+		_breadcrumb("npc_world:resume_live_no_activity", String(npc_id))
 		return
 
 	var spot_id := StringName(String(activity.get("spot_id", "")))
 	var spot := live_spots.get(spot_id, null) as Node2D
 	if spot == null or not is_instance_valid(spot):
+		_breadcrumb("npc_world:resume_live_missing_spot", "%s %s" % [String(npc_id), String(spot_id)])
 		return
 
 	var definition := spot_definitions.get(spot_id, null) as NpcSpotDefinition
 	if definition == null:
+		_breadcrumb("npc_world:resume_live_missing_definition", "%s %s" % [String(npc_id), String(spot_id)])
+		return
+	if _debug_definition_disabled(definition):
+		_breadcrumb("npc_world:resume_live_disabled_definition", "%s %s" % [String(npc_id), String(spot_id)])
+		_finish_activity(npc_id, record, activity, spot_id, locations)
+		return
+	var hour := _get_current_time_of_day_hours()
+	if not _activity_can_continue(npc_id, record, definition, hour):
+		_breadcrumb("npc_world:resume_live_finish_invalid", "%s %s" % [String(npc_id), String(spot_id)])
+		_finish_activity(npc_id, record, activity, spot_id, locations)
 		return
 
 	var machine := npc.get_node_or_null("NpcStateMachine")
 	if machine == null:
+		_breadcrumb("npc_world:resume_live_no_machine", String(npc_id))
 		return
 	if _npc_is_following_activity(machine, definition, spot):
+		_breadcrumb("npc_world:resume_live_already_following", "%s %s" % [String(npc_id), String(spot_id)])
 		return
 	if locations.has_method("is_npc_available_for_scheduled_activity"):
 		if not bool(locations.call(
@@ -1114,18 +1112,22 @@ func resume_live_activity(npc_id: StringName, npc: Node) -> void:
 			definition.state_name,
 			definition.priority
 		)):
+			_breadcrumb("npc_world:resume_live_unavailable", "%s %s" % [String(npc_id), String(spot_id)])
 			return
 
 	var assignment_method := definition.get_assignment_method()
 	if assignment_method != &"" and machine.has_method(assignment_method):
 		if bool(machine.call(assignment_method, spot, definition.priority)):
+			_breadcrumb("npc_world:resume_live_assigned", "%s %s" % [String(npc_id), String(spot_id)])
 			return
 	elif machine.has_method("request_state"):
 		machine.call("request_state", definition.state_name, spot, "world_activity", definition.priority)
+		_breadcrumb("npc_world:resume_live_requested", "%s %s" % [String(npc_id), String(spot_id)])
 		return
 
 	if machine.has_method("request_state"):
 		machine.call("request_state", definition.state_name, spot, "world_activity", definition.priority)
+		_breadcrumb("npc_world:resume_live_requested", "%s %s" % [String(npc_id), String(spot_id)])
 
 
 func _npc_is_following_activity(
@@ -1143,6 +1145,34 @@ func _npc_is_following_activity(
 		machine.get("move_target") == spot
 		and _state_names_match(StringName(machine.get("state_after_move")), definition.state_name)
 	)
+
+
+func _activity_can_continue(
+	npc_id: StringName,
+	record: Dictionary,
+	definition: NpcSpotDefinition,
+	hour: float
+) -> bool:
+	if definition == null or not definition.is_active_at(hour):
+		return false
+	if not _spot_runtime_is_available(definition):
+		return false
+	if (
+		_definition_is_meal_cycle_managed(definition)
+		and not _meal_cycle_definition_can_start(definition, npc_id, hour)
+	):
+		return false
+
+	var value_name := String(definition.value_name)
+	if (
+		definition.finish_when_npc_value_sated
+		and not value_name.is_empty()
+		and _get_saved_stat(record, value_name) <= 0.0
+	):
+		_mark_meal_owner_sated_if_needed(definition, npc_id, StringName(value_name))
+		return false
+
+	return true
 
 
 func get_spot_definition(spot_id: StringName) -> NpcSpotDefinition:
@@ -1208,7 +1238,262 @@ func _initialize_definition_runtime_states() -> void:
 		)
 		spot_runtime_states[state_key] = state
 
+	_initialize_meal_cycle_runtime_states()
 	_repair_stalled_linked_spot_cycles()
+
+
+func get_meal_cycle_state(spot_id: StringName) -> Dictionary:
+	return NpcMealCycleRuntime.get_meal_cycle_state(self, spot_id)
+
+
+func mark_meal_owner_sated(
+	spot_id: StringName,
+	owner_id: StringName,
+	value_name: StringName = &"hunger"
+) -> bool:
+	return NpcMealCycleRuntime.mark_meal_owner_sated(self, spot_id, owner_id, value_name)
+
+
+func _initialize_meal_cycle_runtime_states() -> void:
+	if _meal_cycle_debug_disabled():
+		_breadcrumb("npc_world:meal_cycle_init_skip", "")
+		return
+	NpcMealCycleRuntime._initialize_meal_cycle_runtime_states(self)
+
+
+func _process_meal_cycle_schedule_until_snapshot(snapshot: Dictionary) -> void:
+	if _meal_cycle_debug_disabled():
+		_breadcrumb("npc_world:meal_cycle_schedule_skip", "")
+		return
+	NpcMealCycleRuntime._process_meal_cycle_schedule_until_snapshot(self, snapshot)
+
+
+func _collect_meal_cycle_schedule_events(
+	controller: NpcSpotDefinition,
+	previous_total_hours: float,
+	current_total_hours: float
+) -> Array[Dictionary]:
+	return NpcMealCycleRuntime._collect_meal_cycle_schedule_events(
+		controller,
+		previous_total_hours,
+		current_total_hours
+	)
+
+
+func _append_meal_cycle_schedule_event(
+	events: Array[Dictionary],
+	schedule: Dictionary,
+	day: int,
+	event_type: String,
+	hour_key: String,
+	order: int,
+	previous_total_hours: float,
+	current_total_hours: float
+) -> void:
+	NpcMealCycleRuntime._append_meal_cycle_schedule_event(
+		events,
+		schedule,
+		day,
+		event_type,
+		hour_key,
+		order,
+		previous_total_hours,
+		current_total_hours
+	)
+
+
+func _meal_cycle_event_comes_before(left: Dictionary, right: Dictionary) -> bool:
+	return NpcMealCycleRuntime._meal_cycle_event_comes_before(left, right)
+
+
+func _process_meal_cycle_schedule_event(
+	controller: NpcSpotDefinition,
+	event: Dictionary
+) -> void:
+	NpcMealCycleRuntime._process_meal_cycle_schedule_event(self, controller, event)
+
+
+func _start_meal_cycle_prep(
+	controller: NpcSpotDefinition,
+	meal: String,
+	event_total_hours: float
+) -> void:
+	NpcMealCycleRuntime._start_meal_cycle_prep(self, controller, meal, event_total_hours)
+
+
+func _call_meal_cycle_food(
+	controller: NpcSpotDefinition,
+	meal: String,
+	event_total_hours: float
+) -> void:
+	NpcMealCycleRuntime._call_meal_cycle_food(self, controller, meal, event_total_hours)
+
+
+func _start_meal_cycle_cleanup(
+	controller: NpcSpotDefinition,
+	meal: String,
+	event_total_hours: float
+) -> void:
+	NpcMealCycleRuntime._start_meal_cycle_cleanup(self, controller, meal, event_total_hours)
+
+
+func _advance_meal_cycle_work_complete(controller_spot_id: StringName) -> void:
+	if _meal_cycle_debug_disabled():
+		_breadcrumb("npc_world:meal_cycle_advance_skip", String(controller_spot_id))
+		return
+	NpcMealCycleRuntime._advance_meal_cycle_work_complete(self, controller_spot_id)
+
+
+func _apply_meal_cycle_work_progress(
+	definition: NpcSpotDefinition,
+	game_hours: float,
+	total_hours: float
+) -> void:
+	if _meal_cycle_debug_disabled():
+		_breadcrumb("npc_world:meal_cycle_progress_skip", String(definition.spot_id))
+		return
+	NpcMealCycleRuntime._apply_meal_cycle_work_progress(self, definition, game_hours, total_hours)
+
+
+func _set_meal_cycle_controller_state(
+	controller: NpcSpotDefinition,
+	state: Dictionary
+) -> void:
+	NpcMealCycleRuntime._set_meal_cycle_controller_state(self, controller, state)
+
+
+func _sync_meal_cycle_food_state(
+	controller: NpcSpotDefinition,
+	controller_state: Dictionary
+) -> void:
+	NpcMealCycleRuntime._sync_meal_cycle_food_state(self, controller, controller_state)
+
+
+func _notify_meal_cycle_state(controller_spot_id: StringName) -> void:
+	NpcMealCycleRuntime._notify_meal_cycle_state(self, controller_spot_id)
+
+
+func _notify_live_spot_meal_cycle_state(
+	spot: Node,
+	controller_spot_id: StringName,
+	state: Dictionary
+) -> void:
+	NpcMealCycleRuntime._notify_live_spot_meal_cycle_state(spot, controller_spot_id, state)
+
+
+func _meal_cycle_definition_can_start(
+	definition: NpcSpotDefinition,
+	npc_id: StringName,
+	hour: float
+) -> bool:
+	return NpcMealCycleRuntime._meal_cycle_definition_can_start(self, definition, npc_id, hour)
+
+
+func _meal_cycle_definition_is_available(definition: NpcSpotDefinition) -> bool:
+	return NpcMealCycleRuntime._meal_cycle_definition_is_available(self, definition)
+
+
+func _record_breakfast_owner_flags(state: Dictionary) -> void:
+	NpcMealCycleRuntime._record_breakfast_owner_flags(state)
+
+
+func _get_meal_cycle_controller_definitions() -> Array[NpcSpotDefinition]:
+	return NpcMealCycleRuntime._get_meal_cycle_controller_definitions(self)
+
+
+func _definition_is_meal_cycle_managed(definition: NpcSpotDefinition) -> bool:
+	return NpcMealCycleRuntime._definition_is_meal_cycle_managed(definition)
+
+
+func _definition_is_meal_cycle_controller(definition: NpcSpotDefinition) -> bool:
+	return NpcMealCycleRuntime._definition_is_meal_cycle_controller(definition)
+
+
+func _definition_is_meal_cycle_food(definition: NpcSpotDefinition) -> bool:
+	return NpcMealCycleRuntime._definition_is_meal_cycle_food(definition)
+
+
+func _get_meal_cycle_controller_id_for_spot(spot_id: StringName) -> StringName:
+	return NpcMealCycleRuntime._get_meal_cycle_controller_id_for_spot(self, spot_id)
+
+
+func _get_meal_cycle_controller_id_for_definition(
+	definition: NpcSpotDefinition
+) -> StringName:
+	return NpcMealCycleRuntime._get_meal_cycle_controller_id_for_definition(self, definition)
+
+
+func _get_meal_cycle_controller_state(controller_id: StringName) -> Dictionary:
+	return NpcMealCycleRuntime._get_meal_cycle_controller_state(self, controller_id)
+
+
+func _get_meal_cycle_food_spot_id(controller: NpcSpotDefinition) -> StringName:
+	return NpcMealCycleRuntime._get_meal_cycle_food_spot_id(controller)
+
+
+func _get_meal_cycle_food_definition_owner_ids(
+	controller: NpcSpotDefinition
+) -> Array[StringName]:
+	return NpcMealCycleRuntime._get_meal_cycle_food_definition_owner_ids(self, controller)
+
+
+func _get_meal_cycle_reset_work_value(controller: NpcSpotDefinition) -> float:
+	return NpcMealCycleRuntime._get_meal_cycle_reset_work_value(controller)
+
+
+func _get_meal_cycle_owner_ids(
+	state: Dictionary,
+	owner_type: String
+) -> Array[StringName]:
+	return NpcMealCycleRuntime._get_meal_cycle_owner_ids(state, owner_type)
+
+
+func _meal_cycle_owner_allows(
+	state: Dictionary,
+	owner_type: String,
+	owner_id: StringName
+) -> bool:
+	return NpcMealCycleRuntime._meal_cycle_owner_allows(state, owner_type, owner_id)
+
+
+func _string_names_to_strings(
+	values: Array,
+	fallback_values: Array
+) -> Array[String]:
+	return NpcMealCycleRuntime._string_names_to_strings(values, fallback_values)
+
+
+func _normalize_meal_cycle_stage(stage: String) -> String:
+	return NpcMealCycleRuntime._normalize_meal_cycle_stage(stage)
+
+
+func _spot_state_is_meal_cycle_managed(state: Dictionary) -> bool:
+	return NpcMealCycleRuntime._spot_state_is_meal_cycle_managed(state)
+
+
+func _snapshot_total_hours(snapshot: Dictionary) -> float:
+	if snapshot.has("total_hours"):
+		return float(snapshot["total_hours"])
+	return float(snapshot.get("day", 0)) * 24.0 + float(snapshot.get(
+		"time_of_day_hours",
+		snapshot.get("hour", 0.0)
+	))
+
+
+func _get_current_total_hours() -> float:
+	var world_time := get_node_or_null("/root/WorldTime")
+	if world_time == null or not world_time.has_method("get_snapshot"):
+		return 0.0
+	var snapshot: Dictionary = world_time.call("get_snapshot")
+	return _snapshot_total_hours(snapshot)
+
+
+func _get_current_time_of_day_hours() -> float:
+	var world_time := get_node_or_null("/root/WorldTime")
+	if world_time == null or not world_time.has_method("get_snapshot"):
+		return 0.0
+	var snapshot: Dictionary = world_time.call("get_snapshot")
+	return float(snapshot.get("time_of_day_hours", snapshot.get("hour", 0.0)))
 
 
 func _repair_stalled_linked_spot_cycles() -> void:
@@ -1218,7 +1503,11 @@ func _repair_stalled_linked_spot_cycles() -> void:
 	var visited_cycles: Dictionary = {}
 	for definition_value in spot_definitions.values():
 		var definition := definition_value as NpcSpotDefinition
-		if definition == null or definition.next_spot_id_when_done == &"":
+		if (
+			definition == null
+			or definition.next_spot_id_when_done == &""
+			or _definition_is_meal_cycle_managed(definition)
+		):
 			continue
 
 		var cycle := _collect_linked_spot_cycle(definition.spot_id)
@@ -1331,6 +1620,12 @@ func _try_start_social_seek(
 	locations: Node,
 	blocking_priority: int
 ) -> bool:
+	if _record_has_non_social_pending_travel(record):
+		return false
+	if DebugToolsConfig.TROUBLESHOOTING_MODE and DebugToolsConfig.DEBUG_DISABLE_TALK_SEARCH:
+		_breadcrumb("npc_world:social_seek_skip", String(npc_id))
+		return false
+
 	var settings := _get_social_seek_settings(record)
 	if not bool(settings.get("enabled", true)):
 		return false
@@ -1347,6 +1642,13 @@ func _try_start_social_seek(
 	var target_scene_path := String(candidate.get("scene_path", ""))
 	var seeker_scene_path := String(record.get("scene_path", ""))
 	if target_scene_path.is_empty() or seeker_scene_path.is_empty():
+		return false
+	if (
+		DebugToolsConfig.TROUBLESHOOTING_MODE
+		and DebugToolsConfig.DEBUG_DISABLE_CROSS_SCENE_TALK
+		and target_scene_path != seeker_scene_path
+	):
+		_breadcrumb("npc_world:cross_scene_talk_skip", "%s -> %s" % [String(npc_id), target_scene_path.get_file()])
 		return false
 	var target_position = candidate.get("position", Vector2.ZERO)
 	if not (target_position is Vector2):
@@ -1412,6 +1714,16 @@ func _try_start_social_seek(
 			social_target_id
 		))
 	return false
+
+
+func _record_has_non_social_pending_travel(record: Dictionary) -> bool:
+	var pending = record.get("pending_travel", {})
+	if not (pending is Dictionary) or pending.is_empty():
+		return false
+
+	var pending_mode := String(pending.get("mode", ""))
+	var pending_state := String(pending.get("requested_state_name", ""))
+	return pending_mode != "social" and not ["Talk", "LookForTalkTarget"].has(pending_state)
 
 
 func _get_social_seek_settings(record: Dictionary) -> Dictionary:
@@ -1612,8 +1924,21 @@ func _try_start_activity(
 ) -> void:
 	if _record_is_disabled(record):
 		return
+	if (
+		DebugToolsConfig.TROUBLESHOOTING_MODE
+		and DebugToolsConfig.DEBUG_DISABLE_NPC_SCHEDULED_ACTIVITY_STARTS
+	):
+		_breadcrumb("npc_world:start_activity_skip", String(npc_id))
+		return
 
 	var definition := _find_best_definition(npc_id, record, hour)
+	if _debug_definition_disabled(definition):
+		_breadcrumb("npc_world:best_activity_disabled", "%s -> %s" % [String(npc_id), String(definition.spot_id)])
+		definition = null
+	_breadcrumb(
+		"npc_world:best_activity",
+		"%s -> %s" % [String(npc_id), String(definition.spot_id) if definition != null else "none"]
+	)
 	var blocking_priority := definition.priority if definition != null else -1
 	if _try_start_social_seek(npc_id, record, records, locations, blocking_priority):
 		return
@@ -1663,6 +1988,7 @@ func _try_start_activity(
 			departure_door
 		)):
 			_claim_spot(definition.spot_id)
+			_breadcrumb("npc_world:start_activity_travel", "%s %s" % [String(npc_id), String(definition.spot_id)])
 			activity_started.emit(npc_id, definition.spot_id)
 		return
 
@@ -1678,6 +2004,7 @@ func _try_start_activity(
 		return
 
 	_claim_spot(definition.spot_id)
+	_breadcrumb("npc_world:start_activity", "%s %s" % [String(npc_id), String(definition.spot_id)])
 	activity_started.emit(npc_id, definition.spot_id)
 
 
@@ -1693,7 +2020,16 @@ func _update_pending_travel(
 		var pending_activity = pending_travel.get("activity", {})
 		var spot_id := StringName(String(pending_activity.get("spot_id", "")))
 		var definition := spot_definitions.get(spot_id, null) as NpcSpotDefinition
-		if definition == null or not definition.is_active_at(hour):
+		if definition == null or _debug_definition_disabled(definition) or not definition.is_active_at(hour):
+			if locations.has_method("cancel_pending_scheduled_travel"):
+				if definition != null and _debug_definition_disabled(definition):
+					_breadcrumb("npc_world:pending_disabled_definition", "%s %s" % [String(npc_id), String(spot_id)])
+				locations.call("cancel_pending_scheduled_travel", String(npc_id))
+			return
+		if (
+			_definition_is_meal_cycle_managed(definition)
+			and not _meal_cycle_definition_can_start(definition, npc_id, hour)
+		):
 			if locations.has_method("cancel_pending_scheduled_travel"):
 				locations.call("cancel_pending_scheduled_travel", String(npc_id))
 			return
@@ -1769,6 +2105,11 @@ func _commit_pending_travel_offscreen(
 
 	var activity = pending_travel.get("activity", {})
 	if activity is Dictionary and not activity.is_empty():
+		var spot_id := StringName(String(activity.get("spot_id", "")))
+		var definition := spot_definitions.get(spot_id, null) as NpcSpotDefinition
+		if _debug_definition_disabled(definition):
+			_breadcrumb("npc_world:commit_travel_disabled_definition", "%s %s" % [String(npc_id), String(spot_id)])
+			return
 		if locations.has_method("begin_scheduled_activity"):
 			locations.call(
 				"begin_scheduled_activity",
@@ -1788,12 +2129,24 @@ func _update_activity(
 	locations: Node
 ) -> void:
 	var spot_id := StringName(String(activity.get("spot_id", "")))
+	_breadcrumb("npc_world:update_activity", "%s %s" % [String(npc_id), String(spot_id)])
 	var definition := spot_definitions.get(spot_id, null) as NpcSpotDefinition
-	if definition == null or not definition.is_active_at(hour):
+	if _debug_definition_disabled(definition):
+		_breadcrumb("npc_world:update_disabled_definition", "%s %s" % [String(npc_id), String(spot_id)])
 		_finish_activity(npc_id, record, activity, spot_id, locations)
 		return
-	if not _spot_runtime_is_available(definition):
+	if not _activity_can_continue(npc_id, record, definition, hour):
 		_finish_activity(npc_id, record, activity, spot_id, locations)
+		return
+	var interrupt_definition := _find_invitation_interrupt_definition(
+		npc_id,
+		record,
+		hour,
+		definition
+	)
+	if interrupt_definition != null:
+		_finish_activity(npc_id, record, activity, spot_id, locations)
+		_queue_simulation()
 		return
 
 	var value_name := String(definition.value_name)
@@ -1802,6 +2155,7 @@ func _update_activity(
 		and not value_name.is_empty()
 		and _get_saved_stat(record, value_name) <= 0.0
 	):
+		_mark_meal_owner_sated_if_needed(definition, npc_id, StringName(value_name))
 		_finish_activity(npc_id, record, activity, spot_id, locations)
 		return
 
@@ -1823,22 +2177,32 @@ func _update_activity(
 			value_name,
 			_get_saved_stat(record, value_name) + definition.value_delta_per_game_hour * elapsed_game_hours
 		)
-	_apply_spot_runtime_progress(definition, elapsed_game_hours)
+	_apply_spot_runtime_progress(definition, elapsed_game_hours, total_hours)
 
 	record["activity"] = activity
 	record["last_position"] = definition.position
 	if locations.has_method("update_simulated_record"):
 		locations.call("update_simulated_record", String(npc_id), record)
 
-	if (
-		(
-			definition.finish_when_npc_value_sated
-			and not value_name.is_empty()
-			and _get_saved_stat(record, value_name) <= 0.0
-		)
-		or not _spot_runtime_is_available(definition)
-	):
+	var npc_value_sated := (
+		definition.finish_when_npc_value_sated
+		and not value_name.is_empty()
+		and _get_saved_stat(record, value_name) <= 0.0
+	)
+	if npc_value_sated:
+		_mark_meal_owner_sated_if_needed(definition, npc_id, StringName(value_name))
+	if npc_value_sated or not _spot_runtime_is_available(definition):
 		_finish_activity(npc_id, record, activity, spot_id, locations)
+
+
+func _mark_meal_owner_sated_if_needed(
+	definition: NpcSpotDefinition,
+	npc_id: StringName,
+	value_name: StringName
+) -> void:
+	if not _definition_is_meal_cycle_food(definition):
+		return
+	mark_meal_owner_sated(definition.spot_id, npc_id, value_name)
 
 
 func _finish_activity(
@@ -1848,6 +2212,7 @@ func _finish_activity(
 	spot_id: StringName,
 	locations: Node
 ) -> void:
+	_breadcrumb("npc_world:finish_activity", "%s %s" % [String(npc_id), String(spot_id)])
 	if String(activity.get("state_name", "")) == "Sleep":
 		_set_saved_stat(record, "tired", 0.0)
 		if locations.has_method("update_simulated_record"):
@@ -1882,14 +2247,40 @@ func _finish_activity(
 		)
 		return
 
+	var finished := false
 	if locations.has_method("finish_scheduled_activity"):
-		locations.call(
+		finished = bool(locations.call(
 			"finish_scheduled_activity",
 			String(npc_id),
 			return_scene_path,
 			return_position
-		)
-	activity_finished.emit(npc_id, spot_id)
+		))
+	if finished:
+		_detach_live_npc_from_finished_activity(live_npc, spot_id)
+		activity_finished.emit(npc_id, spot_id)
+
+
+func _detach_live_npc_from_finished_activity(
+	live_npc: Node2D,
+	spot_id: StringName
+) -> void:
+	if live_npc == null or not is_instance_valid(live_npc):
+		return
+
+	var definition := spot_definitions.get(spot_id, null) as NpcSpotDefinition
+	if definition == null:
+		return
+	var spot := live_spots.get(spot_id, null) as Node2D
+	if spot == null or not is_instance_valid(spot):
+		return
+
+	var machine := live_npc.get_node_or_null("NpcStateMachine")
+	if machine == null or not machine.has_method("request_state"):
+		return
+	if not _npc_is_following_activity(machine, definition, spot):
+		return
+
+	machine.call("request_state", &"Idle", null, "world_activity_finished", definition.priority)
 
 
 func _find_departure_door(target_scene_path: String, npc: Node2D) -> Node2D:
@@ -1931,52 +2322,38 @@ func _find_best_definition(
 	record: Dictionary,
 	hour: float
 ) -> NpcSpotDefinition:
-	var best_definition: NpcSpotDefinition = null
-	var best_urgency := -INF
-	for definition_value in spot_definitions.values():
-		var definition := definition_value as NpcSpotDefinition
-		if definition == null or not definition.allows_npc_id(npc_id):
-			continue
-		if not _spot_has_capacity(definition):
-			continue
-		if not _spot_runtime_is_available(definition):
-			continue
-		if not definition.is_active_at(hour):
-			continue
-		if definition.value_name != &"":
-			if (
-				definition.require_npc_value_threshold
-				and not _saved_stat_exists(record, String(definition.value_name))
-			):
-				continue
-			var current_value := _get_saved_stat(record, String(definition.value_name))
-			var effective_threshold := _get_effective_need_threshold(definition, hour)
-			var urgency := _get_definition_urgency(definition)
-			if definition.require_npc_value_threshold:
-				if current_value < effective_threshold:
-					continue
-				if definition.need_maximum >= 0.0 and current_value > definition.need_maximum:
-					continue
-				urgency = current_value - effective_threshold
-			if (
-				best_definition == null
-				or definition.priority > best_definition.priority
-				or (
-					definition.priority == best_definition.priority
-					and urgency > best_urgency
-				)
-				or (
-					definition.priority == best_definition.priority
-					and is_equal_approx(urgency, best_urgency)
-					and String(definition.spot_id) < String(best_definition.spot_id)
-				)
-			):
-				best_definition = definition
-				best_urgency = urgency
-			continue
-		if best_definition == null or definition.priority > best_definition.priority:
-			best_definition = definition
-			best_urgency = 0.0
+	return NpcActivitySelector.find_best_definition(
+		spot_definitions,
+		npc_id,
+		record,
+		hour,
+		self
+	)
+
+
+func _find_invitation_interrupt_definition(
+	npc_id: StringName,
+	record: Dictionary,
+	hour: float,
+	current_definition: NpcSpotDefinition
+) -> NpcSpotDefinition:
+	if current_definition == null:
+		return null
+	if current_definition.state_name == INVITE_PLAYER_STATE:
+		return null
+
+	var best_definition := _find_best_definition(npc_id, record, hour)
+	if best_definition == null:
+		return null
+	if _debug_definition_disabled(best_definition):
+		_breadcrumb("npc_world:invitation_interrupt_disabled", "%s %s" % [String(npc_id), String(best_definition.spot_id)])
+		return null
+	if best_definition.spot_id == current_definition.spot_id:
+		return null
+	if best_definition.state_name != INVITE_PLAYER_STATE:
+		return null
+	if best_definition.priority <= current_definition.priority:
+		return null
 
 	return best_definition
 
@@ -1998,77 +2375,19 @@ func _state_names_match(left_state_name: StringName, right_state_name: StringNam
 
 
 func _get_effective_need_threshold(definition: NpcSpotDefinition, hour: float) -> float:
-	# A mutable spot can lower its need threshold as its backlog approaches maximum.
-	var threshold := _get_timed_need_threshold(definition, hour)
-	if (
-		definition.spot_value_name == &""
-		or definition.need_threshold_at_spot_value_maximum < 0.0
-	):
-		return threshold
-
-	var state = spot_runtime_states.get(String(definition.spot_id), {})
-	if not (state is Dictionary):
-		return threshold
-
-	var minimum := float(state.get("minimum", definition.spot_value_minimum))
-	var maximum := float(state.get("maximum", definition.spot_value_maximum))
-	if is_equal_approx(minimum, maximum):
-		return threshold
-
-	var current := float(state.get("value", definition.spot_value_initial))
-	var backlog_ratio := clampf(inverse_lerp(minimum, maximum, current), 0.0, 1.0)
-	return lerpf(
-		threshold,
-		definition.need_threshold_at_spot_value_maximum,
-		backlog_ratio
-	)
+	return NpcActivitySelector.get_effective_need_threshold(definition, hour, self)
 
 
 func _get_timed_need_threshold(definition: NpcSpotDefinition, hour: float) -> float:
-	# Meal-style windows can temporarily lower a need threshold without making the spot inactive.
-	for window in definition.timed_need_thresholds:
-		if not (window is Dictionary):
-			continue
-		var window_dictionary: Dictionary = window
-		if not _time_window_contains_hour(window_dictionary, hour):
-			continue
-		return float(window_dictionary.get(
-			"need_threshold",
-			window_dictionary.get("threshold", definition.need_threshold)
-		))
-
-	return definition.need_threshold
+	return NpcActivitySelector.get_timed_need_threshold(definition, hour)
 
 
 func _time_window_contains_hour(window: Dictionary, hour: float) -> bool:
-	var start_hour := fposmod(float(window.get("start_hour", window.get("start", 0.0))), 24.0)
-	var end_hour := fposmod(float(window.get("end_hour", window.get("end", 24.0))), 24.0)
-	var normalized_hour := fposmod(hour, 24.0)
-
-	if is_equal_approx(start_hour, end_hour):
-		return true
-	if start_hour < end_hour:
-		return normalized_hour >= start_hour and normalized_hour < end_hour
-
-	return normalized_hour >= start_hour or normalized_hour < end_hour
+	return NpcActivitySelector.time_window_contains_hour(window, hour)
 
 
 func _get_definition_urgency(definition: NpcSpotDefinition) -> float:
-	# For work-gated activities, backlog is the urgency when NPC need is not the gate.
-	if definition.spot_value_name == &"":
-		return 0.0
-
-	var state = spot_runtime_states.get(String(definition.spot_id), {})
-	if not (state is Dictionary):
-		return 0.0
-
-	var minimum := float(state.get("minimum", definition.spot_value_minimum))
-	var maximum := float(state.get("maximum", definition.spot_value_maximum))
-	if is_equal_approx(minimum, maximum):
-		return 0.0
-
-	var current := float(state.get("value", definition.spot_value_initial))
-	return clampf(inverse_lerp(minimum, maximum, current), 0.0, 1.0) * 100.0
+	return NpcActivitySelector.get_definition_urgency(definition, self)
 
 
 func _rebuild_spot_claims(records: Dictionary) -> void:
@@ -2097,27 +2416,29 @@ func _claim_spot(spot_id: StringName) -> void:
 
 
 func _spot_has_capacity(definition: NpcSpotDefinition) -> bool:
-	if definition.capacity <= 0:
-		return true
-	return int(spot_claim_counts.get(definition.spot_id, 0)) < definition.capacity
+	return NpcActivitySelector.spot_has_capacity(definition, self)
 
 
 func _spot_runtime_is_available(definition: NpcSpotDefinition) -> bool:
-	if definition.spot_value_name == &"":
-		return true
-	var state = spot_runtime_states.get(String(definition.spot_id), {})
-	if not (state is Dictionary):
+	if _debug_definition_disabled(definition):
 		return false
-	return float(state.get("value", 0.0)) > float(
-		state.get("done_threshold", definition.spot_value_done_threshold)
-	)
+	return NpcActivitySelector.spot_runtime_is_available(definition, self)
 
 
 func _apply_spot_runtime_progress(
 	definition: NpcSpotDefinition,
-	game_hours: float
+	game_hours: float,
+	total_hours: float = -1.0
 ) -> void:
+	if _debug_definition_disabled(definition):
+		_breadcrumb("npc_world:runtime_progress_disabled", String(definition.spot_id) if definition != null else "")
+		return
 	if definition.spot_value_name == &"" or game_hours <= 0.0:
+		return
+	if _definition_is_meal_cycle_food(definition):
+		return
+	if _definition_is_meal_cycle_controller(definition):
+		_apply_meal_cycle_work_progress(definition, game_hours, total_hours)
 		return
 	apply_spot_value_delta(
 		definition.spot_id,
@@ -2125,12 +2446,32 @@ func _apply_spot_runtime_progress(
 	)
 
 
+func _meal_cycle_debug_disabled() -> bool:
+	return (
+		DebugToolsConfig.TROUBLESHOOTING_MODE
+		and DebugToolsConfig.DEBUG_DISABLE_NPC_MEAL_CYCLE_RUNTIME
+	)
+
+
+func _world_simulation_debug_disabled() -> bool:
+	return (
+		DebugToolsConfig.TROUBLESHOOTING_MODE
+		and DebugToolsConfig.DEBUG_DISABLE_NPC_WORLD_SIMULATION_TICK
+	)
+
+
+func _log_world_simulation_disabled(context: String) -> void:
+	if simulation_tick_skip_logged:
+		return
+	_breadcrumb(
+		"npc_world:tick_skip",
+		"%s DEBUG_DISABLE_NPC_WORLD_SIMULATION_TICK" % context
+	)
+	simulation_tick_skip_logged = true
+
+
 func _saved_stat_exists(record: Dictionary, value_name: String) -> bool:
-	var node_state = record.get("node_state", {})
-	if not (node_state is Dictionary):
-		return false
-	var social_stats = node_state.get("social_stats", {})
-	return social_stats is Dictionary and social_stats.has(value_name)
+	return NpcActivitySelector.saved_stat_exists(record, value_name)
 
 
 func _validate_live_spot_alignment(spot_id: StringName, spot: Node2D) -> void:
@@ -2178,3 +2519,36 @@ func _set_saved_stat(record: Dictionary, value_name: String, value: float) -> vo
 	social_stats[value_name] = clampf(value, 0.0, 100.0)
 	node_state["social_stats"] = social_stats
 	record["node_state"] = node_state
+
+
+func _debug_definition_disabled(definition: NpcSpotDefinition) -> bool:
+	if definition == null:
+		return false
+	if not DebugToolsConfig.TROUBLESHOOTING_MODE:
+		return false
+
+	var definition_spot_id := definition.spot_id
+	if (
+		DebugToolsConfig.DEBUG_DISABLE_MAGIC_LESSON_ACTIVITY
+		and (
+			definition_spot_id == &"mom_magic_lesson"
+			or definition.state_name == INVITE_PLAYER_STATE
+		)
+	):
+		return true
+
+	if definition.scene_path != "res://scenes/testscenes/realtest1.tscn":
+		return false
+
+	if DebugToolsConfig.DEBUG_DISABLE_REALTEST1_WORK_SPOT and definition_spot_id == &"mom_work":
+		return true
+
+	if not DebugToolsConfig.DEBUG_DISABLE_REALTEST1_MEAL_SPOT:
+		return false
+	if definition_spot_id == &"mom_eat" or definition_spot_id == &"mom_eat_prep":
+		return true
+	return definition.meal_cycle_id == &"mom_meal_cycle"
+
+
+func _breadcrumb(source: String, detail: String = "") -> void:
+	CrashBreadcrumbs.mark(source, detail)

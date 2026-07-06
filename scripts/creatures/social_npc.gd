@@ -525,6 +525,7 @@ func _get_world_simulation_profile() -> Dictionary:
 	return {
 		"passive_needs_enabled": npc_state_machine.passive_needs_enabled,
 		"passive_healing_per_game_day": npc_state_machine.passive_healing_per_game_day,
+		"starvation_damage_per_game_day": npc_state_machine.starvation_damage_per_game_day,
 		"max_hp": max_hp,
 		"rates_per_game_hour": {
 			"sleep_need": npc_state_machine.sleep_need_growth_per_game_hour,

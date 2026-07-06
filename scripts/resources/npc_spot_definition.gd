@@ -36,6 +36,15 @@ class_name NpcSpotDefinition extends Resource
 @export var next_spot_id_when_done: StringName = &""
 @export var next_spot_value_when_done: float = 100.0
 
+@export_group("Meal Cycle")
+@export var meal_cycle_id: StringName = &""
+@export var meal_cycle_stage: StringName = &""
+@export var meal_cycle_food_spot_id: StringName = &""
+@export var meal_cycle_schedule: Array[Dictionary] = []
+@export var meal_cycle_prep_owner_ids: Array[StringName] = []
+@export var meal_cycle_food_owner_ids: Array[StringName] = []
+@export var meal_cycle_cleanup_owner_ids: Array[StringName] = []
+
 @export_group("Sleep Skip Wake")
 @export var wake_at_home_position: bool = true
 @export var wake_spot_id: StringName = &""

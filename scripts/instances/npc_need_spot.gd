@@ -470,6 +470,8 @@ func _request_target_state(request_machine: NpcStateMachine) -> bool:
 	# Prefer specific assignment helpers so states know this exact spot is their target.
 	var assignment_method := _get_target_assignment_method()
 	if assignment_method != &"" and request_machine.has_method(assignment_method):
+		if _assignment_method_accepts_request_priority(assignment_method):
+			return bool(request_machine.call(assignment_method, self, request_priority))
 		return bool(request_machine.call(assignment_method, self))
 
 	if request_machine.has_method("request_state"):
@@ -481,6 +483,23 @@ func _request_target_state(request_machine: NpcStateMachine) -> bool:
 			request_priority
 		))
 
+	return false
+
+
+func _assignment_method_accepts_request_priority(assignment_method: StringName) -> bool:
+	match assignment_method:
+		&"assign_work_target":
+			return true
+		&"assign_eat_target":
+			return true
+		&"assign_rest_target":
+			return true
+		&"assign_recreation_target":
+			return true
+		&"assign_routine_task_target":
+			return true
+		&"assign_sleep_target":
+			return true
 	return false
 
 

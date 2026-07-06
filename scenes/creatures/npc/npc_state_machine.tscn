@@ -17,6 +17,7 @@
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/fight.gd" id="15_fight"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/recreation.gd" id="16_recreation"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/routine_task.gd" id="17_routine_task"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/invite_player.gd" id="18_invite_player"]
 
 [node name="NpcStateMachine" type="Node"]
 script = ExtResource("1_machine")
@@ -72,13 +73,17 @@ unique_name_in_owner = true
 script = ExtResource("5_talk")
 animation_name = &"talk"
 stop_horizontal_on_enter = true
-allows_scheduled_activity_interrupt = true
 
 [node name="LookForTalkTarget" type="Node" parent="."]
 unique_name_in_owner = true
 script = ExtResource("13_look_talk")
 animation_name = &"walk"
 allows_scheduled_activity_interrupt = true
+
+[node name="InvitePlayer" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("18_invite_player")
+animation_name = &"walk"
 
 [node name="ReactToEvent" type="Node" parent="."]
 unique_name_in_owner = true

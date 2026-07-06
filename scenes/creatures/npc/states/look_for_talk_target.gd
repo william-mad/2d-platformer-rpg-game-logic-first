@@ -14,39 +14,69 @@ var talk_target: Node2D
 func enter() -> void:
 	# Picks the best available person and starts a limited search/move timer.
 	super.enter()
+	if _talk_search_disabled():
+		_breadcrumb("npc_talk_search:disabled", _npc_label())
+		talk_target = null
+		search_timer = 0.0
+		next_state = get_state(end_state_name)
+		stop_horizontal()
+		return
+
 	talk_target = _find_talk_target()
 	search_timer = search_duration
 
 	if search_timer < 0.0:
 		search_timer = machine.default_look_for_talk_time
+	_breadcrumb(
+		"npc_talk_search:enter",
+		"%s target=%s seconds=%.2f" % [_npc_label(), _target_label(talk_target), search_timer]
+	)
 
 
 func physics_process(delta: float) -> NpcState:
 	# Moves toward the chosen person; once close enough, hands off to Talk.
+	if _talk_search_disabled():
+		_breadcrumb("npc_talk_search:disabled_tick", _npc_label())
+		return get_state(end_state_name)
 	if talk_target == null or not is_instance_valid(talk_target):
+		_breadcrumb("npc_talk_search:no_target", _npc_label())
 		return get_state(end_state_name)
 
 	search_timer -= delta
 	if search_timer <= 0.0:
+		_breadcrumb("npc_talk_search:timeout", "%s target=%s" % [_npc_label(), _target_label(talk_target)])
 		return get_state(end_state_name)
 
 	var approach_distance := _get_talk_approach_distance()
 	if is_close_to(talk_target.global_position, approach_distance):
-		if machine != null and machine.request_talk(talk_target):
+		var talk_priority := machine.get_effective_task_priority() if machine != null else -1
+		if machine != null and machine.request_talk(talk_target, talk_priority):
+			_breadcrumb("npc_talk_search:talk_start", "%s target=%s" % [_npc_label(), _target_label(talk_target)])
 			return next_state
 
+		_breadcrumb("npc_talk_search:talk_reject", "%s target=%s" % [_npc_label(), _target_label(talk_target)])
 		return get_state(end_state_name)
 
 	move_toward_position(talk_target.global_position, machine.walk_speed, approach_distance)
 	return next_state
 
 
+func is_searching_for_talk_target(candidate: Node2D) -> bool:
+	return (
+		candidate != null
+		and is_instance_valid(candidate)
+		and talk_target == candidate
+	)
+
+
 func _find_talk_target() -> Node2D:
 	# Prefer known active targets, then scan allowed groups for the closest person.
 	if machine != null and _is_allowed_talk_target(machine.target):
+		_breadcrumb("npc_talk_search:target_current", "%s -> %s" % [_npc_label(), _target_label(machine.target)])
 		return machine.target
 
 	if machine != null and _is_allowed_talk_target(machine.last_actor):
+		_breadcrumb("npc_talk_search:target_last_actor", "%s -> %s" % [_npc_label(), _target_label(machine.last_actor)])
 		return machine.last_actor
 
 	if npc == null or not npc.is_inside_tree():
@@ -68,6 +98,8 @@ func _find_talk_target() -> Node2D:
 			closest_distance = distance
 			closest_target = candidate_node
 
+	if closest_target != null:
+		_breadcrumb("npc_talk_search:target_closest", "%s -> %s" % [_npc_label(), _target_label(closest_target)])
 	return closest_target
 
 
@@ -86,6 +118,13 @@ func _is_allowed_talk_target(candidate: Node2D) -> bool:
 			break
 
 	if not group_allowed:
+		return false
+
+	if machine != null and not machine.can_talk_to_target(
+		candidate,
+		minimum_relationship_favor,
+		require_relationship_favor_for_npcs
+	):
 		return false
 
 	if require_relationship_favor_for_npcs and candidate.is_in_group("npc"):
@@ -114,3 +153,34 @@ func _get_talk_approach_distance() -> float:
 		return maxf(float(talk_state.call("get_talk_approach_distance")), fallback_distance)
 
 	return fallback_distance
+
+
+func _talk_search_disabled() -> bool:
+	return (
+		DebugToolsConfig.TROUBLESHOOTING_MODE
+		and DebugToolsConfig.DEBUG_DISABLE_TALK_SEARCH
+	)
+
+
+func _npc_label() -> String:
+	if npc != null and is_instance_valid(npc):
+		if npc.has_method("get_npc_location_id"):
+			var npc_id := String(npc.call("get_npc_location_id")).strip_edges()
+			if not npc_id.is_empty():
+				return "%s(%s)" % [npc.name, npc_id]
+		return npc.name
+	return name
+
+
+func _target_label(target: Node2D) -> String:
+	if target == null or not is_instance_valid(target):
+		return "none"
+	if target.has_method("get_npc_location_id"):
+		var npc_id := String(target.call("get_npc_location_id")).strip_edges()
+		if not npc_id.is_empty():
+			return "%s(%s)" % [target.name, npc_id]
+	return target.name
+
+
+func _breadcrumb(source: String, detail: String = "") -> void:
+	CrashBreadcrumbs.mark(source, detail)

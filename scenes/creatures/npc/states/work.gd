@@ -67,6 +67,45 @@ func physics_process(delta: float) -> NpcState:
 	return next_state
 
 
+func can_continue_during_talk() -> bool:
+	var work_target := active_work_target
+	if work_target == null or not is_instance_valid(work_target):
+		work_target = _resolve_work_target()
+
+	return (
+		work_target != null
+		and is_instance_valid(work_target)
+		and _target_can_be_worked(work_target)
+		and is_close_to(work_target.global_position, machine.stop_distance)
+		and not _target_work_is_done(work_target)
+	)
+
+
+func process_talk_overlay(delta: float) -> StringName:
+	stop_horizontal()
+
+	if active_work_target == null or not is_instance_valid(active_work_target):
+		active_work_target = _resolve_work_target()
+
+	if active_work_target == null:
+		return &"Idle"
+
+	if _target_work_is_done(active_work_target):
+		return &"Idle"
+
+	if not is_close_to(active_work_target.global_position, machine.stop_distance):
+		return &"Work"
+
+	if not _target_can_be_worked(active_work_target):
+		return &"Work"
+
+	_apply_work_progress(delta, active_work_target)
+	if _target_work_is_done(active_work_target):
+		return &"Idle"
+
+	return &"Work"
+
+
 func _apply_work_progress(delta: float, work_target: Node2D) -> void:
 	# The area's actual clamped work change determines how much boredom can fall.
 	work_progress_elapsed += delta
@@ -77,10 +116,8 @@ func _apply_work_progress(delta: float, work_target: Node2D) -> void:
 	var progress_delta := work_progress_elapsed
 	work_progress_elapsed = 0.0
 
-	var full_work_seconds := _get_seconds_to_clear_full_work(work_target)
 	var work_capacity := _get_target_work_capacity(work_target)
-	var requested_work_delta := -(work_capacity / full_work_seconds) * progress_delta
-	var actual_work_delta := _apply_target_work_delta(work_target, requested_work_delta)
+	var actual_work_delta := _apply_worker_work_progress(work_target, progress_delta)
 
 	if is_equal_approx(actual_work_delta, 0.0):
 		return
@@ -164,6 +201,16 @@ func _apply_target_work_delta(work_target: Node2D, requested_delta: float) -> fl
 	return 0.0
 
 
+func _apply_worker_work_progress(work_target: Node2D, progress_delta: float) -> float:
+	if work_target != null and work_target.has_method("apply_worker_work_progress"):
+		return float(work_target.call("apply_worker_work_progress", npc, progress_delta, 1.0))
+
+	var full_work_seconds := _get_seconds_to_clear_full_work(work_target)
+	var work_capacity := _get_target_work_capacity(work_target)
+	var requested_work_delta := -(work_capacity / full_work_seconds) * progress_delta
+	return _apply_target_work_delta(work_target, requested_work_delta)
+
+
 func _get_target_work_capacity(work_target: Node2D) -> float:
 	if work_target != null and work_target.has_method("get_work_needed_capacity"):
 		return maxf(float(work_target.call("get_work_needed_capacity")), 0.001)
@@ -173,6 +220,11 @@ func _get_target_work_capacity(work_target: Node2D) -> float:
 
 func _get_seconds_to_clear_full_work(work_target: Node2D) -> float:
 	# Prefer the spot's rate so short chores and long jobs can share the same Work state.
+	if work_target != null and work_target.has_method("get_full_work_real_seconds"):
+		var spot_seconds := float(work_target.call("get_full_work_real_seconds"))
+		if spot_seconds > 0.0:
+			return maxf(spot_seconds, 0.001)
+
 	if machine == null:
 		return maxf(fallback_work_needed_capacity, 0.001)
 

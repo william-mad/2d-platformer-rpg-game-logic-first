@@ -39,6 +39,7 @@ func register_npc(npc: Node) -> bool:
 	if npc_id.is_empty():
 		return true
 
+	_breadcrumb("npc_locations:register_start", npc_id)
 	var current_scene_path := get_current_scene_path()
 	var npc_scene_path := _get_npc_scene_path(npc)
 	var created_record := false
@@ -52,6 +53,10 @@ func register_npc(npc: Node) -> bool:
 	var record: Dictionary = npc_records[npc_id]
 	var expected_scene_path := String(record.get("scene_path", current_scene_path))
 	if not expected_scene_path.is_empty() and expected_scene_path != current_scene_path:
+		_breadcrumb(
+			"npc_locations:register_scene_mismatch",
+			"%s expected=%s current=%s" % [npc_id, expected_scene_path.get_file(), current_scene_path.get_file()]
+		)
 		return false
 
 	if not created_record:
@@ -62,6 +67,7 @@ func register_npc(npc: Node) -> bool:
 
 	var existing_npc = live_npcs.get(npc_id, null) as Node
 	if existing_npc != null and is_instance_valid(existing_npc) and not existing_npc.is_queued_for_deletion() and existing_npc != npc:
+		_breadcrumb("npc_locations:register_duplicate", npc_id)
 		return false
 
 	live_npcs[npc_id] = npc
@@ -73,6 +79,7 @@ func register_npc(npc: Node) -> bool:
 
 	npc_registered.emit(npc_id, npc, current_scene_path)
 	_resume_scheduled_activity_deferred(npc_id, npc)
+	_breadcrumb("npc_locations:register_end", "%s %s" % [npc_id, current_scene_path.get_file()])
 	_record_watchdog_marker(&"npc_locations:register", "%s %s" % [npc_id, current_scene_path.get_file()])
 	return true
 
@@ -87,6 +94,7 @@ func unregister_npc(npc: Node) -> void:
 
 	var existing_npc = live_npcs.get(npc_id, null) as Node
 	if existing_npc == npc:
+		_breadcrumb("npc_locations:unregister", npc_id)
 		if npc_records.has(npc_id):
 			var record: Dictionary = npc_records[npc_id]
 			record["node_state"] = _get_npc_state(npc)
@@ -139,6 +147,7 @@ func request_travel(npc: Node, target_scene_path: String) -> bool:
 func activate_scene(scene_context: Node) -> void:
 	active_scene_context = scene_context
 	active_scene_path = _get_context_scene_path(scene_context)
+	_breadcrumb("npc_locations:activate", "%s records=%d" % [active_scene_path.get_file(), npc_records.size()])
 	_record_watchdog_marker(&"npc_locations:activate", "%s records=%d" % [active_scene_path.get_file(), npc_records.size()])
 	call_deferred("_spawn_missing_npcs_for_active_scene")
 
@@ -176,28 +185,43 @@ func is_npc_available_for_scheduled_activity(
 	# Off-screen NPCs are represented by their record and are available by default.
 	var npc := get_live_npc(npc_id)
 	if npc == null:
+		_breadcrumb("npc_locations:availability", "%s offscreen accept" % npc_id)
 		return true
 
 	var machine := npc.get_node_or_null("NpcStateMachine")
 	if machine == null:
+		_breadcrumb("npc_locations:availability", "%s no_machine accept" % npc_id)
 		return true
 
 	var current_state = machine.get("current_state")
 	if current_state == null or String(current_state.name) == "Idle":
+		_breadcrumb("npc_locations:availability", "%s idle accept %s" % [npc_id, String(requested_state_name)])
 		return true
 
 	var current_state_name := String(current_state.name)
 	if requested_state_name != &"" and current_state_name == String(requested_state_name):
+		_breadcrumb("npc_locations:availability", "%s already_%s accept" % [npc_id, current_state_name])
 		return true
 
 	# Each state declares this itself, so even low-priority routines such as Work can
 	# interrupt opt-in states without overriding danger, combat, collapse, or death.
 	if current_state.has_method("can_be_interrupted_by_scheduled_activity"):
-		return bool(current_state.call(
+		var accepted := bool(current_state.call(
 			"can_be_interrupted_by_scheduled_activity",
 			requested_priority
 		))
+		_breadcrumb(
+			"npc_locations:availability",
+			"%s %s->%s %s" % [
+				npc_id,
+				current_state_name,
+				String(requested_state_name),
+				"accept" if accepted else "reject",
+			]
+		)
+		return accepted
 
+	_breadcrumb("npc_locations:availability", "%s %s reject" % [npc_id, current_state_name])
 	return false
 
 
@@ -208,12 +232,15 @@ func prepare_scheduled_travel(
 ) -> bool:
 	# Keeps the NPC in its current scene until it physically reaches the departure door.
 	if not npc_records.has(npc_id) or pending_travel.is_empty():
+		_breadcrumb("npc_locations:prepare_travel_reject", npc_id)
 		return false
 
 	var target_scene_path := String(pending_travel.get("target_scene_path", ""))
 	if target_scene_path.is_empty():
+		_breadcrumb("npc_locations:prepare_travel_empty_target", npc_id)
 		return false
 
+	_breadcrumb("npc_locations:prepare_travel", "%s -> %s" % [npc_id, target_scene_path.get_file()])
 	_refresh_live_record(npc_id)
 	var record: Dictionary = npc_records[npc_id]
 	record["pending_travel"] = pending_travel.duplicate(true)
@@ -225,18 +252,23 @@ func prepare_scheduled_travel(
 func resume_pending_scheduled_travel(npc_id: String, departure_door: Node2D) -> bool:
 	var npc := get_live_npc(npc_id) as Node2D
 	if npc == null or departure_door == null or not is_instance_valid(departure_door):
+		_breadcrumb("npc_locations:resume_pending_reject", npc_id)
 		return false
 
 	if departure_door is Area2D and (departure_door as Area2D).overlaps_body(npc):
 		if departure_door.has_method("try_travel_npc"):
+			_breadcrumb("npc_locations:resume_pending_door", npc_id)
 			departure_door.call_deferred("try_travel_npc", npc)
 			return true
 
 	var machine := npc.get_node_or_null("NpcStateMachine")
 	if machine == null or not machine.has_method("assign_move_target"):
+		_breadcrumb("npc_locations:resume_pending_no_machine", npc_id)
 		return false
 
-	return bool(machine.call("assign_move_target", departure_door, &"Idle"))
+	var accepted := bool(machine.call("assign_move_target", departure_door, &"Idle"))
+	_breadcrumb("npc_locations:resume_pending_move", "%s %s" % [npc_id, "accept" if accepted else "reject"])
+	return accepted
 
 
 func complete_pending_scheduled_travel(npc: Node, door_target_scene_path: String) -> bool:
@@ -349,8 +381,13 @@ func begin_scheduled_activity(
 	target_position: Vector2
 ) -> bool:
 	if not npc_records.has(npc_id) or target_scene_path.is_empty() or activity.is_empty():
+		_breadcrumb("npc_locations:begin_activity_reject", npc_id)
 		return false
 
+	_breadcrumb(
+		"npc_locations:begin_activity_start",
+		"%s %s -> %s" % [npc_id, String(activity.get("spot_id", "")), target_scene_path.get_file()]
+	)
 	_refresh_live_record(npc_id)
 	var record: Dictionary = npc_records[npc_id]
 	var from_scene_path := String(record.get("scene_path", ""))
@@ -393,6 +430,7 @@ func begin_scheduled_activity(
 			call_deferred("_spawn_missing_npcs_for_active_scene")
 
 	_update_return_processing()
+	_breadcrumb("npc_locations:begin_activity_end", "%s %s" % [npc_id, String(activity.get("spot_id", ""))])
 	return true
 
 
@@ -454,8 +492,10 @@ func finish_scheduled_activity(
 	return_position: Vector2
 ) -> bool:
 	if not npc_records.has(npc_id):
+		_breadcrumb("npc_locations:finish_activity_reject", npc_id)
 		return false
 
+	_breadcrumb("npc_locations:finish_activity_start", "%s -> %s" % [npc_id, return_scene_path.get_file()])
 	_refresh_live_record(npc_id)
 	var record: Dictionary = npc_records[npc_id]
 	var from_scene_path := String(record.get("scene_path", ""))
@@ -498,6 +538,7 @@ func finish_scheduled_activity(
 			call_deferred("_spawn_missing_npcs_for_active_scene")
 
 	_update_return_processing()
+	_breadcrumb("npc_locations:finish_activity_end", "%s -> %s" % [npc_id, destination_scene_path.get_file()])
 	return true
 
 
@@ -511,6 +552,7 @@ func get_save_data() -> Dictionary:
 
 
 func apply_save_data(data: Dictionary) -> void:
+	_breadcrumb("npc_locations:apply_save_start", "")
 	live_npcs.clear()
 	npc_records.clear()
 	active_scene_context = null
@@ -533,9 +575,11 @@ func apply_save_data(data: Dictionary) -> void:
 		if npc_id.is_empty():
 			continue
 
+		_breadcrumb("npc_locations:restore_record", npc_id)
 		npc_records[npc_id] = _normalize_loaded_record(npc_id, saved_record)
 
 	_update_return_processing()
+	_breadcrumb("npc_locations:apply_save_end", "records=%d" % npc_records.size())
 
 
 func get_npc_id(npc: Node) -> String:
@@ -819,13 +863,18 @@ func _return_npc_to_previous_scene(npc_id: String, record: Dictionary) -> void:
 
 func _spawn_missing_npcs_for_active_scene() -> void:
 	if active_scene_context == null or not is_instance_valid(active_scene_context):
+		_breadcrumb("npc_locations:spawn_missing_no_context", active_scene_path.get_file())
 		return
 
+	_breadcrumb("npc_locations:spawn_missing_start", active_scene_path.get_file())
 	var spawned_count := 0
 	var refreshed_count := 0
 	for npc_id in npc_records.keys():
 		var record: Dictionary = npc_records[npc_id]
 		if String(record.get("scene_path", "")) != active_scene_path:
+			continue
+		if _realtest1_npc_is_disabled(String(npc_id)):
+			_breadcrumb("npc_locations:spawn_skip_realtest1", String(npc_id))
 			continue
 
 		var live_npc = live_npcs.get(npc_id, null) as Node
@@ -848,20 +897,25 @@ func _spawn_missing_npcs_for_active_scene() -> void:
 			&"npc_locations:spawn_missing",
 			"spawned=%d refreshed=%d" % [spawned_count, refreshed_count]
 		)
+	_breadcrumb("npc_locations:spawn_missing_end", "spawned=%d refreshed=%d" % [spawned_count, refreshed_count])
 
 
 func _spawn_record_in_active_scene(npc_id: String, record: Dictionary) -> bool:
+	_breadcrumb("npc_locations:spawn_record_start", npc_id)
 	var npc_scene_path := String(record.get("npc_scene_path", ""))
 	if npc_scene_path.is_empty():
+		_breadcrumb("npc_locations:spawn_record_no_scene", npc_id)
 		return false
 
 	var packed_scene := load(npc_scene_path) as PackedScene
 	if packed_scene == null:
 		push_warning("Could not load NPC scene: %s" % npc_scene_path)
+		_breadcrumb("npc_locations:spawn_record_load_failed", "%s %s" % [npc_id, npc_scene_path])
 		return false
 
 	var parent := _get_context_spawn_parent(active_scene_context)
 	if parent == null:
+		_breadcrumb("npc_locations:spawn_record_no_parent", npc_id)
 		return false
 
 	var npc := packed_scene.instantiate()
@@ -897,6 +951,7 @@ func _spawn_record_in_active_scene(npc_id: String, record: Dictionary) -> bool:
 
 	npc_spawned.emit(npc_id, npc, active_scene_path)
 	_resume_scheduled_activity_deferred(npc_id, npc)
+	_breadcrumb("npc_locations:spawn_record_end", npc_id)
 	return true
 
 
@@ -1054,8 +1109,10 @@ func _has_property(object: Object, property_name: StringName) -> bool:
 func _resume_scheduled_activity_deferred(npc_id: String, npc: Node) -> void:
 	var simulator := get_node_or_null("/root/NpcWorldSimulation")
 	if simulator == null or not simulator.has_method("resume_live_activity"):
+		_breadcrumb("npc_locations:resume_activity_no_sim", npc_id)
 		return
 
+	_breadcrumb("npc_locations:resume_activity_deferred", npc_id)
 	simulator.call_deferred("resume_live_activity", StringName(npc_id), npc)
 
 
@@ -1083,3 +1140,19 @@ func _record_watchdog_marker(source: StringName, detail: String = "") -> void:
 	var watchdog := get_node_or_null("/root/PerformanceWatchdog")
 	if watchdog != null and watchdog.has_method("record_marker"):
 		watchdog.call("record_marker", source, detail)
+
+
+func _realtest1_npc_is_disabled(npc_id: String) -> bool:
+	if not DebugToolsConfig.TROUBLESHOOTING_MODE:
+		return false
+	if active_scene_path != "res://scenes/testscenes/realtest1.tscn":
+		return false
+	if npc_id == "mom" and DebugToolsConfig.DEBUG_DISABLE_REALTEST1_MOM_NPC:
+		return true
+	if npc_id == "talk_partner_npc" and DebugToolsConfig.DEBUG_DISABLE_REALTEST1_TALK_PARTNER:
+		return true
+	return false
+
+
+func _breadcrumb(source: String, detail: String = "") -> void:
+	CrashBreadcrumbs.mark(source, detail)

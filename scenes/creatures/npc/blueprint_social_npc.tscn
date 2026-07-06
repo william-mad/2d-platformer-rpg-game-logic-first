@@ -97,6 +97,7 @@ value_state_rules = {
 "at_least": 75.0,
 "priority": 50,
 "requires_idle": true,
+"requires_need_spot": true,
 "state": "Eat",
 "value": "hunger"
 },

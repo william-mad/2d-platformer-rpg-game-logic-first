@@ -4,6 +4,17 @@ signal talk_started(talker: Node2D, partner: Node2D)
 signal talk_finished(talker: Node2D, partner: Node2D, changed_values: Dictionary)
 signal talk_cancelled(talker: Node2D, partner: Node2D, reason: String)
 
+const ROUTINE_INTERRUPT_STATES: Array[StringName] = [
+	&"Work",
+	&"Eat",
+	&"Sleep",
+	&"Rest",
+	&"Recreation",
+	&"RoutineTask",
+	&"MoveToTarget",
+	&"LookForTalkTarget",
+]
+
 @export_group("Timing and Range")
 # Negative duration uses the owning state machine's game-time-scaled Talk duration.
 @export_range(-1.0, 60.0, 0.1, "suffix:s") var talk_duration: float = -1.0
@@ -16,6 +27,7 @@ signal talk_cancelled(talker: Node2D, partner: Node2D, reason: String)
 @export_range(0.0, 200.0, 1.0, "suffix:px/s") var talk_follow_speed: float = 20.0
 @export_range(0.0, 200.0, 1.0, "suffix:px/s") var talk_approach_speed: float = 65.0
 @export_range(0.0, 30.0, 0.1, "suffix:s") var talk_approach_timeout: float = 8.0
+@export_range(0.0, 30.0, 0.1, "suffix:s") var maximum_talk_distance_cancel_seconds: float = 2.0
 @export var follow_animation_name: StringName = &"walk"
 
 @export_group("Visible Limits")
@@ -51,6 +63,16 @@ signal talk_cancelled(talker: Node2D, partner: Node2D, reason: String)
 @export var talk_action_name: StringName = &"talk"
 @export var end_state_name: StringName = &"Idle"
 
+@export_group("Interrupts")
+@export_range(0, 1000, 1) var minimum_emergency_interrupt_priority: int = 90
+@export var emergency_interrupt_states: Array[StringName] = [
+	&"DisabledDead",
+	&"Downed",
+	&"Collapse",
+	&"Flee",
+	&"Fight",
+]
+
 var talk_timer: float = 0.0
 var talk_total_duration: float = 0.0
 var talk_partner: Node2D
@@ -59,6 +81,11 @@ var talk_finished_handled: bool = false
 var following_partner: bool = false
 var approaching_partner: bool = false
 var approach_timer: float = 0.0
+var maximum_distance_cancel_timer: float = 0.0
+var continued_task_state: NpcState
+var continued_task_return_state_name: StringName = &"Idle"
+var continued_task_priority: int = 0
+var static_task_talk: bool = false
 var talk_limits_label: Label
 var spread_rng := RandomNumberGenerator.new()
 
@@ -72,11 +99,16 @@ func enter() -> void:
 	# Starts a timed talk with the assigned partner or the machine's active target.
 	super.enter()
 	talk_partner = machine.talk_target if machine.talk_target != null else machine.get_active_target()
+	continued_task_state = _get_continued_task_state()
+	continued_task_return_state_name = _get_continued_task_state_name()
+	continued_task_priority = machine.previous_state_priority if machine != null else 0
+	static_task_talk = continued_task_state != null
 	talk_started_handled = false
 	talk_finished_handled = false
 	following_partner = false
 	approaching_partner = false
 	approach_timer = talk_approach_timeout
+	maximum_distance_cancel_timer = maximum_talk_distance_cancel_seconds
 	talk_timer = talk_duration
 
 	if talk_timer < 0.0:
@@ -98,7 +130,7 @@ func enter() -> void:
 	_update_talk_limits()
 	if _needs_talk_approach():
 		approaching_partner = true
-		if follow_animation_name != &"":
+		if not static_task_talk and follow_animation_name != &"":
 			play_animation(follow_animation_name)
 		return
 
@@ -113,35 +145,42 @@ func exit() -> void:
 	_hide_talk_limits()
 	if talk_started_handled and not talk_finished_handled:
 		_cancel_talk_action("state_exit")
+	_clear_continued_task_state()
 
 
 func physics_process(delta: float) -> NpcState:
 	# The timed window continues while the NPC slowly follows a drifting partner.
 	if require_talk_partner and not _is_valid_talk_partner(talk_partner):
 		_cancel_talk_action("missing_partner")
-		return get_state(end_state_name)
+		return _get_after_talk_state()
 
-	if _partner_is_beyond_maximum_distance():
-		_cancel_talk_action("partner_out_of_range")
-		return get_state(end_state_name)
+	if talk_started_handled and _update_maximum_talk_distance_cancel(delta):
+		return _get_after_talk_state()
+
+	_update_continued_task_progress(delta)
 
 	if approaching_partner:
 		if _update_talk_approach(delta):
 			_start_talk_action()
 		if talk_finished_handled:
-			return get_state(end_state_name)
+			return _get_after_talk_state()
 		_update_talk_limits()
 		return next_state
 
-	_update_talk_movement()
+	if static_task_talk:
+		stop_horizontal()
+	else:
+		_update_talk_movement()
 	_face_talk_partner()
 	_update_talk_limits()
 	if _talk_is_outside_active_range():
+		if static_task_talk:
+			_start_static_partner_wait()
 		return next_state
 
 	if talk_timer <= 0.0:
 		_finish_talk_action()
-		return get_state(end_state_name)
+		return _get_after_talk_state()
 
 	talk_timer -= delta
 	_update_talk_limits()
@@ -149,7 +188,7 @@ func physics_process(delta: float) -> NpcState:
 		return next_state
 
 	_finish_talk_action()
-	return get_state(end_state_name)
+	return _get_after_talk_state()
 
 
 func target_lost(lost_target: Node2D) -> NpcState:
@@ -171,9 +210,113 @@ func cancel_talk_with(candidate: Node2D, reason: String = "cancelled") -> void:
 	_cancel_talk_action(reason)
 
 
+func can_be_interrupted_by_scheduled_activity(_request_priority: int) -> bool:
+	if talk_finished_handled:
+		return true
+
+	return false
+
+
+func can_exit_to(new_state: NpcState, request_priority: int) -> bool:
+	if talk_finished_handled:
+		return true
+	if new_state == null:
+		return false
+
+	var new_state_name := StringName(String(new_state.name))
+	if _is_emergency_interrupt_state(new_state_name):
+		return true
+	if _is_routine_interrupt_state(new_state_name):
+		return false
+
+	return request_priority >= minimum_emergency_interrupt_priority
+
+
 func get_talk_approach_distance() -> float:
 	# Search states use this smaller distance so NPCs do not stop at the range edge.
 	return maxf(talk_range * preferred_talk_distance_ratio, 0.0)
+
+
+func continues_state_during_talk(state_name: StringName) -> bool:
+	return static_task_talk and continued_task_return_state_name == state_name
+
+
+func _get_continued_task_state() -> NpcState:
+	if machine == null or machine.state_history.size() < 2:
+		return null
+
+	var previous_state := machine.state_history[1] as NpcState
+	if previous_state == null or not is_instance_valid(previous_state):
+		return null
+	if not previous_state.has_method("process_talk_overlay"):
+		return null
+	if previous_state.has_method("can_continue_during_talk"):
+		if not bool(previous_state.call("can_continue_during_talk")):
+			return null
+
+	return previous_state
+
+
+func _get_continued_task_state_name() -> StringName:
+	if continued_task_state == null or not is_instance_valid(continued_task_state):
+		return end_state_name
+
+	return StringName(continued_task_state.name)
+
+
+func _clear_continued_task_state() -> void:
+	continued_task_state = null
+	continued_task_return_state_name = &"Idle"
+	continued_task_priority = 0
+	static_task_talk = false
+
+
+func _update_continued_task_progress(delta: float) -> void:
+	if continued_task_state == null or not is_instance_valid(continued_task_state):
+		_clear_continued_task_state()
+		return
+	if not continued_task_state.has_method("process_talk_overlay"):
+		_clear_continued_task_state()
+		return
+
+	var next_state_name = continued_task_state.call("process_talk_overlay", delta)
+	if typeof(next_state_name) == TYPE_NIL:
+		return
+
+	var next_name := StringName(String(next_state_name))
+	if next_name != &"":
+		continued_task_return_state_name = next_name
+
+
+func _get_after_talk_state() -> NpcState:
+	var next_state_name := end_state_name
+	if static_task_talk and continued_task_return_state_name != &"":
+		next_state_name = continued_task_return_state_name
+
+	if (
+		static_task_talk
+		and continued_task_state != null
+		and is_instance_valid(continued_task_state)
+		and next_state_name == StringName(continued_task_state.name)
+	):
+		if continued_task_state.has_method("prepare_resume_from_talk_overlay"):
+			continued_task_state.call("prepare_resume_from_talk_overlay")
+		if machine != null and machine.has_method("preserve_next_state_priority"):
+			machine.call("preserve_next_state_priority", continued_task_priority)
+
+	var after_state := get_state(next_state_name)
+	if after_state != null:
+		return after_state
+
+	return get_state(end_state_name)
+
+
+func _start_static_partner_wait() -> void:
+	if approaching_partner:
+		return
+
+	approaching_partner = true
+	approach_timer = talk_approach_timeout
 
 
 func _start_talk_action() -> void:
@@ -659,7 +802,24 @@ func _partner_is_beyond_maximum_distance() -> bool:
 	if maximum_talk_distance <= 0.0 or npc == null or not _is_valid_talk_partner(talk_partner):
 		return false
 
-	return _get_talk_distance_to_partner() > maximum_talk_distance
+	return _get_maximum_talk_distance_to_partner() > maximum_talk_distance
+
+
+func _update_maximum_talk_distance_cancel(delta: float) -> bool:
+	if not _partner_is_beyond_maximum_distance():
+		maximum_distance_cancel_timer = maximum_talk_distance_cancel_seconds
+		return false
+
+	if maximum_talk_distance_cancel_seconds <= 0.0:
+		_cancel_talk_action("out_of_range")
+		return true
+
+	maximum_distance_cancel_timer -= delta
+	if maximum_distance_cancel_timer > 0.0:
+		return false
+
+	_cancel_talk_action("out_of_range")
+	return true
 
 
 func _update_talk_movement() -> void:
@@ -731,6 +891,17 @@ func _get_talk_distance_to_partner() -> float:
 	return npc.global_position.distance_to(talk_partner.global_position)
 
 
+func _get_maximum_talk_distance_to_partner() -> float:
+	if npc == null or not _is_valid_talk_partner(talk_partner):
+		return 0.0
+
+	var full_distance := npc.global_position.distance_to(talk_partner.global_position)
+	if use_horizontal_talk_distance:
+		return maxf(full_distance, absf(talk_partner.global_position.x - npc.global_position.x))
+
+	return full_distance
+
+
 func _update_talk_approach(delta: float) -> bool:
 	# Direct Talk requests can come from sight reactions while the partner is still far away.
 	# Approach first, then start the actual timed conversation once the spacing is comfortable.
@@ -741,9 +912,19 @@ func _update_talk_approach(delta: float) -> bool:
 	if not _needs_talk_approach():
 		stop_horizontal()
 		approaching_partner = false
+		maximum_distance_cancel_timer = maximum_talk_distance_cancel_seconds
 		if animation_name != &"":
 			play_animation(animation_name)
 		return true
+
+	if static_task_talk:
+		stop_horizontal()
+		_face_talk_partner()
+		if talk_approach_timeout > 0.0:
+			approach_timer -= delta
+			if approach_timer <= 0.0:
+				_cancel_talk_action("approach_timeout")
+		return false
 
 	if talk_approach_timeout > 0.0:
 		approach_timer -= delta
@@ -766,6 +947,22 @@ func _get_talk_approach_speed() -> float:
 		approach_speed = machine.walk_speed
 
 	return maxf(approach_speed, talk_follow_speed)
+
+
+func _is_emergency_interrupt_state(state_name: StringName) -> bool:
+	for emergency_state_name in emergency_interrupt_states:
+		if String(emergency_state_name) == String(state_name):
+			return true
+
+	return false
+
+
+func _is_routine_interrupt_state(state_name: StringName) -> bool:
+	for routine_state_name in ROUTINE_INTERRUPT_STATES:
+		if String(routine_state_name) == String(state_name):
+			return true
+
+	return false
 
 
 func _is_valid_talk_partner(candidate) -> bool:
@@ -823,9 +1020,9 @@ func _update_talk_limits() -> void:
 	var break_distance := maxf(maximum_talk_distance, 0.0)
 	var mode_text := "Talk"
 	if approaching_partner:
-		mode_text = "Approach"
+		mode_text = "Wait" if static_task_talk else "Approach"
 	elif _talk_is_outside_active_range():
-		mode_text = "Reconnect"
+		mode_text = "Wait" if static_task_talk else "Reconnect"
 	talk_limits_label.text = "%s %.1f/%.1fs | %.0f/%.0fpx" % [
 		mode_text,
 		maxf(talk_timer, 0.0),

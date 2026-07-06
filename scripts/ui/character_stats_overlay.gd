@@ -43,7 +43,14 @@ var visible_before_pause: bool = false
 func _ready() -> void:
 	layer = 90
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	if not DebugToolsConfig.CHARACTER_STATS_OVERLAY_ENABLED:
+	if (
+		not DebugToolsConfig.CHARACTER_STATS_OVERLAY_ENABLED
+		or (
+			DebugToolsConfig.TROUBLESHOOTING_MODE
+			and DebugToolsConfig.DEBUG_DISABLE_CHARACTER_STATS_OVERLAY
+		)
+	):
+		CrashBreadcrumbs.mark("ui:stats_overlay_disabled", "config")
 		visible = false
 		set_process(false)
 		set_process_unhandled_input(false)

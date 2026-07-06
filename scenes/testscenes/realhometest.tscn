@@ -1,4 +1,4 @@
-[gd_scene load_steps=15 format=3]
+[gd_scene load_steps=17 format=3]
 
 [ext_resource type="PackedScene" path="res://player/player.tscn" id="1_player"]
 [ext_resource type="Script" path="res://scripts/systems/npc_location_scene.gd" id="2_location_scene"]
@@ -11,6 +11,8 @@
 [ext_resource type="Script" path="res://scripts/instances/player_spawn.gd" id="9_player_spawn"]
 [ext_resource type="Resource" path="res://data/npc_spots/mom_shower.tres" id="10_mom_shower"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_shower_spot.tscn" id="11_shower_spot"]
+[ext_resource type="Script" path="res://scripts/instances/magic_lesson_spot.gd" id="12_magic_lesson"]
+[ext_resource type="Resource" path="res://data/npc_spots/mom_magic_lesson.tres" id="13_mom_magic_lesson"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_floor"]
 size = Vector2(1152, 64)
@@ -148,5 +150,16 @@ owner_npc_ids = Array[StringName]([&"mom"])
 npc_preference_weights = {
 "mom": 4.0
 }
+
+[node name="MomMagicLessonSpot" type="Node2D" parent="."]
+position = Vector2(-250, 368)
+script = ExtResource("12_magic_lesson")
+world_definition = ExtResource("13_mom_magic_lesson")
+
+[node name="MomLessonPosition" type="Marker2D" parent="MomMagicLessonSpot"]
+position = Vector2(-28, 0)
+
+[node name="PlayerLessonPosition" type="Marker2D" parent="MomMagicLessonSpot"]
+position = Vector2(28, 0)
 
 [node name="CharacterStatsOverlay" parent="." instance=ExtResource("5_stats_overlay")]

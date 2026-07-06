@@ -4,22 +4,27 @@
 
 [resource]
 script = ExtResource("1_spot_definition")
-spot_id = &"mom_shower"
+spot_id = &"mom_magic_lesson"
 scene_path = "res://scenes/testscenes/realhometest.tscn"
-position = Vector2(440, 368)
-state_name = &"RoutineTask"
+position = Vector2(-250, 368)
+state_name = &"InvitePlayer"
 value_name = &""
 need_threshold = 0.0
 value_delta_per_game_hour = 0.0
-priority = 85
-target_assignment_method = &"assign_routine_task_target"
+priority = 75
+target_assignment_method = &"assign_invitation_spot"
 require_npc_value_threshold = false
 finish_when_npc_value_sated = false
-routine_animation_name = &"shower"
-routine_game_minutes = 30.0
-routine_finish_when_value_sated = false
+spot_value_name = &"lesson_available"
+spot_value_initial = 1.0
+spot_value_minimum = 0.0
+spot_value_maximum = 1.0
+spot_value_done_threshold = 0.0
+spot_value_daily_growth = 1.0
 called_npc_ids = Array[StringName]([&"mom"])
+owner_ids = Array[StringName]([&"mom", &"player"])
+capacity = 1
 active_time_windows = Array[Dictionary]([{
-"end_hour": 8.5,
-"start_hour": 8.0
+"end_hour": 16.0,
+"start_hour": 15.0
 }])
