@@ -81,7 +81,7 @@ func _update_idle_wander_motion() -> void:
 	var target_position := Vector2(wander_target_x, npc.global_position.y)
 	var arrived := move_toward_position(
 		target_position,
-		machine.walk_speed,
+		machine.get_effective_walk_speed(),
 		maxf(idle_wander_arrive_distance, 0.0)
 	)
 

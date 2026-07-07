@@ -209,15 +209,26 @@ func _apply_eat_progress(delta: float) -> void:
 		return
 
 	var requested_progress_fraction := maxf(delta / total_eat_seconds, 0.0)
-	var actual_progress_fraction := requested_progress_fraction
-	if active_eat_target != null and active_eat_target.has_method("consume_eat_progress"):
-		actual_progress_fraction = clampf(
+	var requested_hunger_drop := minf(
+		machine.get_value(eat_value_name),
+		absf(hunger_drop_per_full_eat) * requested_progress_fraction
+	)
+	var actual_hunger_drop := requested_hunger_drop
+	if active_eat_target != null and active_eat_target.has_method("consume_eat_amount"):
+		actual_hunger_drop = clampf(
+			float(active_eat_target.call("consume_eat_amount", requested_hunger_drop)),
+			0.0,
+			requested_hunger_drop
+		)
+	elif active_eat_target != null and active_eat_target.has_method("consume_eat_progress"):
+		var actual_progress_fraction := clampf(
 			float(active_eat_target.call("consume_eat_progress", requested_progress_fraction)),
 			0.0,
 			requested_progress_fraction
 		)
+		actual_hunger_drop = absf(hunger_drop_per_full_eat) * actual_progress_fraction
 
-	var hunger_delta := -absf(hunger_drop_per_full_eat) * actual_progress_fraction
+	var hunger_delta := -actual_hunger_drop
 	if is_equal_approx(hunger_delta, 0.0):
 		return
 

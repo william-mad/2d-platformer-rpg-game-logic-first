@@ -307,8 +307,8 @@ active_time_windows = Array[Dictionary]([{
 "end_hour": 10.0,
 "start_hour": 9.0
 }, {
-"end_hour": 17.0,
-"start_hour": 15.0
+"end_hour": 18.0,
+"start_hour": 16.0
 }])
 
 [node name="TalkPartnerNpc" parent="." unique_id=1577191316 instance=ExtResource("18_talk_npc")]

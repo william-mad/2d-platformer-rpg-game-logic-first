@@ -16,7 +16,7 @@ require_npc_value_threshold = false
 finish_when_npc_value_sated = false
 spot_value_name = &"work_needed"
 spot_value_initial = 100.0
-spot_value_delta_per_game_hour = -50.0
+spot_value_delta_per_game_hour = -200.0
 spot_value_daily_growth = 50.0
 need_threshold_at_spot_value_maximum = 40.0
 owner_ids = Array[StringName]([&"mom", &"player"])
@@ -25,6 +25,6 @@ active_time_windows = Array[Dictionary]([{
 "end_hour": 10.0,
 "start_hour": 9.0
 }, {
-"end_hour": 17.0,
-"start_hour": 15.0
+"end_hour": 18.0,
+"start_hour": 16.0
 }])

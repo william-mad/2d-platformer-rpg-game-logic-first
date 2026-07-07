@@ -278,6 +278,11 @@ static func _start_meal_cycle_cleanup(
 	var state := _get_meal_cycle_controller_state(runtime, controller.spot_id)
 	if state.is_empty():
 		return
+	if (
+		String(state.get("stage", "")) == MEAL_STAGE_CLEANUP_WORK
+		and String(state.get("meal", "")) == meal
+	):
+		return
 
 	CrashBreadcrumbs.mark("meal_cycle:cleanup", "%s %s" % [String(controller.spot_id), meal])
 	state["stage"] = MEAL_STAGE_CLEANUP_WORK
@@ -405,6 +410,27 @@ static func _sync_meal_cycle_food_state(
 		String(controller_state.get("stage", "")) == MEAL_STAGE_FOOD
 		and bool(controller_state.get("food_available", false))
 	)
+	var stage_started_total_hours := float(controller_state.get("stage_started_total_hours", -1.0))
+	var previous_stage_started_total_hours := float(food_state.get(
+		"meal_cycle_stage_started_total_hours",
+		-1.0
+	))
+	var previous_active := bool(food_state.get("meal_cycle_food_active", false))
+	var should_reset_food := (
+		food_is_available
+		and (
+			not previous_active
+			or not is_equal_approx(previous_stage_started_total_hours, stage_started_total_hours)
+		)
+	)
+	var next_value := lower
+	if food_is_available:
+		if should_reset_food:
+			next_value = upper
+		else:
+			next_value = clampf(float(food_state.get("value", upper)), lower, upper)
+		food_is_available = next_value > done_threshold
+
 	food_state["kind"] = "food_available"
 	food_state["meal_cycle_controller_id"] = String(controller.spot_id)
 	food_state["meal_cycle_id"] = String(controller.meal_cycle_id)
@@ -412,9 +438,40 @@ static func _sync_meal_cycle_food_state(
 	food_state["maximum"] = upper
 	food_state["done_threshold"] = done_threshold
 	food_state["daily_growth"] = 0.0
-	food_state["value"] = upper if food_is_available else lower
+	food_state["value"] = next_value
+	food_state["meal_cycle_food_active"] = food_is_available
+	food_state["meal_cycle_stage_started_total_hours"] = stage_started_total_hours
+	controller_state["food_available"] = food_is_available
+	controller_state["food_value"] = next_value
+	controller_state["food_limit"] = upper
+	runtime.spot_runtime_states[String(controller.spot_id)] = controller_state
 	runtime.spot_runtime_states[food_key] = food_state
 	runtime._notify_live_spot_value(food_spot_id, float(food_state["value"]))
+
+
+static func _deplete_meal_cycle_food(runtime, food_spot_id: StringName) -> void:
+	var controller_id := _get_meal_cycle_controller_id_for_spot(runtime, food_spot_id)
+	if controller_id == &"":
+		return
+	var controller := runtime.spot_definitions.get(controller_id, null) as NpcSpotDefinition
+	if controller == null:
+		return
+
+	var state := _get_meal_cycle_controller_state(runtime, controller_id)
+	if state.is_empty():
+		return
+	if String(state.get("stage", "")) != MEAL_STAGE_FOOD:
+		return
+
+	state["stage"] = MEAL_STAGE_CLEANUP_WORK
+	state["value"] = _get_meal_cycle_reset_work_value(controller)
+	state["work_call_active"] = true
+	state["meal_called"] = false
+	state["food_available"] = false
+	state["food_ready_total_hours"] = -1.0
+	state["stage_started_total_hours"] = runtime._get_current_total_hours()
+	state.erase("pending_work_completion_total_hours")
+	_set_meal_cycle_controller_state(runtime, controller, state)
 
 
 static func _notify_meal_cycle_state(runtime, controller_spot_id: StringName) -> void:
@@ -424,6 +481,7 @@ static func _notify_meal_cycle_state(runtime, controller_spot_id: StringName) ->
 	var state = runtime.spot_runtime_states.get(String(controller_spot_id), {})
 	if not (state is Dictionary):
 		return
+	state = _get_meal_cycle_state_with_food_value(runtime, controller_spot_id, state)
 
 	var notified_spots: Array[Node] = []
 	var controller_spot := runtime.live_spots.get(controller_spot_id, null) as Node
@@ -486,10 +544,12 @@ static func _meal_cycle_definition_is_available(runtime, definition: NpcSpotDefi
 		return false
 
 	if _definition_is_meal_cycle_food(definition):
+		var food_value := _get_meal_cycle_food_value(runtime, definition, state)
 		return (
 			String(state.get("stage", "")) == MEAL_STAGE_FOOD
 			and bool(state.get("food_available", false))
 			and bool(state.get("meal_called", false))
+			and food_value > definition.spot_value_done_threshold
 		)
 
 	if not _definition_is_meal_cycle_controller(definition):
@@ -504,6 +564,49 @@ static func _meal_cycle_definition_is_available(runtime, definition: NpcSpotDefi
 	return float(state.get("value", 0.0)) > float(
 		state.get("done_threshold", definition.spot_value_done_threshold)
 	)
+
+
+static func _get_meal_cycle_state_with_food_value(
+	runtime,
+	controller_spot_id: StringName,
+	state: Dictionary
+) -> Dictionary:
+	var enriched_state := state.duplicate(true)
+	var food_spot_id := StringName(String(enriched_state.get("food_spot_id", "")))
+	if food_spot_id == &"":
+		return enriched_state
+
+	var food_definition := runtime.spot_definitions.get(food_spot_id, null) as NpcSpotDefinition
+	var food_state = runtime.spot_runtime_states.get(String(food_spot_id), {})
+	var fallback_limit := 100.0
+	var done_threshold := 0.0
+	if food_definition != null:
+		fallback_limit = maxf(food_definition.spot_value_minimum, food_definition.spot_value_maximum)
+		done_threshold = food_definition.spot_value_done_threshold
+	var food_value := fallback_limit if bool(enriched_state.get("food_available", false)) else 0.0
+	if food_state is Dictionary:
+		food_value = float(food_state.get("value", food_value))
+
+	enriched_state["food_value"] = food_value
+	enriched_state["food_limit"] = fallback_limit
+	enriched_state["food_available"] = (
+		bool(enriched_state.get("food_available", false))
+		and food_value > done_threshold
+	)
+	return enriched_state
+
+
+static func _get_meal_cycle_food_value(
+	runtime,
+	definition: NpcSpotDefinition,
+	state: Dictionary
+) -> float:
+	var food_spot_id := definition.spot_id
+	var food_state = runtime.spot_runtime_states.get(String(food_spot_id), {})
+	if food_state is Dictionary:
+		return float(food_state.get("value", 0.0))
+
+	return float(state.get("food_value", 0.0))
 
 
 static func mark_meal_owner_sated(

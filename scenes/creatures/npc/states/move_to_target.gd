@@ -31,7 +31,7 @@ func physics_process(delta: float) -> NpcState:
 
 	var speed := speed_override
 	if speed <= 0.0:
-		speed = machine.walk_speed
+		speed = machine.get_effective_walk_speed()
 
 	if move_toward_position(cached_target_position, speed, machine.stop_distance):
 		return get_state(machine.consume_state_after_move(arrive_state_name))

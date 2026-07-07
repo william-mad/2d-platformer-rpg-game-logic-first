@@ -12,7 +12,7 @@ const STAT_KEY_ALIASES := {
 
 @export_group("Movement")
 @export var gravity: float = 1200.0
-@export var walk_speed: float = 45.0
+@export var walk_speed: float = 63.0
 @export var patrol_range: float = 240.0
 @export var starts_moving_right: bool = true
 
@@ -350,7 +350,9 @@ func take_damage(
 		apply_knockout(knockout_damage, damage_actor, true)
 		if not _is_in_downed_recovery():
 			start_damage_hop(damage_source_position)
-	DamageEvents.emit_damage_dealt(damage_taken, damage_source, self)
+	var damage_events := get_node_or_null("/root/DamageEvents")
+	if damage_events != null and damage_events.has_method("emit_damage_dealt"):
+		damage_events.call("emit_damage_dealt", damage_taken, damage_source, self)
 
 	if get_hp() <= 0.0:
 		die()
@@ -385,14 +387,15 @@ func process_damage_hop(delta: float) -> bool:
 
 
 func _get_damage_emotion_stats(amount: float, previous_hp: float) -> Dictionary:
-	# Above the danger threshold, hits annoy the NPC; below it, fear rises with injury.
+	# Above the danger threshold, hits annoy the NPC; below it, fear joins that anger.
 	var next_hp := clampf(previous_hp - amount, 0.0, max_hp)
 	var damage_taken := maxf(previous_hp - next_hp, 0.0)
 	var health_percent := _get_health_percent(next_hp)
-	if health_percent >= damage_fear_health_threshold_percent:
-		return {
-			"anger": damage_taken * damage_anger_multiplier,
+	var emotion_stats := {
+		"anger": damage_taken * damage_anger_multiplier,
 	}
+	if health_percent >= damage_fear_health_threshold_percent:
+		return emotion_stats
 
 	var danger_ratio := _get_low_health_danger_ratio(health_percent)
 	var fear_scale := lerpf(
@@ -400,9 +403,8 @@ func _get_damage_emotion_stats(amount: float, previous_hp: float) -> Dictionary:
 		maxf(low_health_fear_max_scale, low_health_fear_min_scale),
 		danger_ratio
 	)
-	return {
-		"fear": damage_taken * damage_fear_multiplier * fear_scale,
-	}
+	emotion_stats["fear"] = damage_taken * damage_fear_multiplier * fear_scale
+	return emotion_stats
 
 
 func _get_health_percent(hp_value: float) -> float:

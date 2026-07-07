@@ -28,6 +28,8 @@ timed_need_thresholds = Array[Dictionary]([{
 }])
 spot_value_name = &"food_available"
 spot_value_initial = 0.0
+spot_value_minimum = 0.0
+spot_value_maximum = 100.0
 spot_value_done_threshold = 0.0
 spot_value_delta_per_game_hour = 0.0
 next_spot_id_when_done = &"mom_eat_prep"

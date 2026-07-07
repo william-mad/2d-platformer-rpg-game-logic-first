@@ -58,7 +58,11 @@ func _prepare_reaction() -> void:
 	if favor_delta < 0.0:
 		var flee_direction := -direction_to_actor
 		face_x_direction(flee_direction)
-		reaction_velocity_x = flee_direction * machine.walk_speed * negative_favor_speed_multiplier
+		reaction_velocity_x = (
+			flee_direction
+			* machine.get_effective_walk_speed()
+			* negative_favor_speed_multiplier
+		)
 	else:
 		face_x_direction(direction_to_actor)
 		reaction_velocity_x = 0.0

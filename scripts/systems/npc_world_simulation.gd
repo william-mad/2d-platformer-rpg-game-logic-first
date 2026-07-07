@@ -144,6 +144,13 @@ func set_spot_value(spot_id: StringName, value: float, allow_cycle_transition: b
 			and next_value <= done_threshold
 		):
 			_advance_meal_cycle_work_complete(spot_id)
+		elif (
+			allow_cycle_transition
+			and state.has("meal_cycle_controller_id")
+			and previous_value > done_threshold
+			and next_value <= done_threshold
+		):
+			_deplete_meal_cycle_food(spot_id)
 		elif bool(state.get("meal_cycle_enabled", false)):
 			_notify_meal_cycle_state(spot_id)
 		else:
@@ -1153,7 +1160,17 @@ func _activity_can_continue(
 	definition: NpcSpotDefinition,
 	hour: float
 ) -> bool:
-	if definition == null or not definition.is_active_at(hour):
+	if definition == null:
+		return false
+	var activity = record.get("activity", {})
+	var lesson_phase := ""
+	if activity is Dictionary:
+		lesson_phase = String(activity.get("lesson_phase", "inviting"))
+	var invite_lesson_is_running := (
+		definition.state_name == INVITE_PLAYER_STATE
+		and lesson_phase == "running"
+	)
+	if not invite_lesson_is_running and not definition.is_active_at(hour):
 		return false
 	if not _spot_runtime_is_available(definition):
 		return false
@@ -1226,16 +1243,17 @@ func _initialize_definition_runtime_states() -> void:
 			state = {}
 		var lower := minf(definition.spot_value_minimum, definition.spot_value_maximum)
 		var upper := maxf(definition.spot_value_minimum, definition.spot_value_maximum)
+		var previous_kind := String(state.get("kind", ""))
+		var next_kind := String(definition.spot_value_name)
+		var stored_value := float(state.get("value", definition.spot_value_initial))
+		if not previous_kind.is_empty() and previous_kind != next_kind:
+			stored_value = definition.spot_value_initial
 		state["kind"] = String(definition.spot_value_name)
 		state["minimum"] = lower
 		state["maximum"] = upper
 		state["done_threshold"] = definition.spot_value_done_threshold
 		state["daily_growth"] = definition.spot_value_daily_growth
-		state["value"] = clampf(
-			float(state.get("value", definition.spot_value_initial)),
-			lower,
-			upper
-		)
+		state["value"] = clampf(stored_value, lower, upper)
 		spot_runtime_states[state_key] = state
 
 	_initialize_meal_cycle_runtime_states()
@@ -1342,6 +1360,13 @@ func _advance_meal_cycle_work_complete(controller_spot_id: StringName) -> void:
 		_breadcrumb("npc_world:meal_cycle_advance_skip", String(controller_spot_id))
 		return
 	NpcMealCycleRuntime._advance_meal_cycle_work_complete(self, controller_spot_id)
+
+
+func _deplete_meal_cycle_food(food_spot_id: StringName) -> void:
+	if _meal_cycle_debug_disabled():
+		_breadcrumb("npc_world:meal_cycle_food_deplete_skip", String(food_spot_id))
+		return
+	NpcMealCycleRuntime._deplete_meal_cycle_food(self, food_spot_id)
 
 
 func _apply_meal_cycle_work_progress(
@@ -1954,29 +1979,37 @@ func _try_start_activity(
 		)):
 			return
 
+	var target_scene_path := definition.scene_path
+	var target_position := definition.position
+	if definition.state_name == INVITE_PLAYER_STATE:
+		target_position = _get_invitation_activity_start_position(record, definition)
 	var activity := {
 		"spot_id": String(definition.spot_id),
 		"state_name": String(definition.state_name),
 		"value_name": String(definition.value_name),
-		"target_scene_path": definition.scene_path,
-		"target_position": definition.position,
+		"target_scene_path": target_scene_path,
+		"target_position": target_position,
 		"last_total_hours": total_hours,
 		"return_scene_path": String(record.get("scene_path", "")),
 		"return_position": record.get("last_position", Vector2.ZERO),
 	}
+	if definition.state_name == INVITE_PLAYER_STATE:
+		activity["lesson_phase"] = "inviting"
+		activity["lesson_scene_path"] = definition.scene_path
+		activity["lesson_position"] = definition.position
 
 	var live_npc: Node2D
 	if locations.has_method("get_live_npc"):
 		live_npc = locations.call("get_live_npc", String(npc_id)) as Node2D
-	if live_npc != null and String(record.get("scene_path", "")) != definition.scene_path:
-		var departure_door := _find_departure_door(definition.scene_path, live_npc)
+	if live_npc != null and String(record.get("scene_path", "")) != target_scene_path:
+		var departure_door := _find_departure_door(target_scene_path, live_npc)
 		if departure_door == null or not locations.has_method("prepare_scheduled_travel"):
 			return
 
 		var pending_travel := {
 			"mode": "start",
-			"target_scene_path": definition.scene_path,
-			"target_position": definition.position,
+			"target_scene_path": target_scene_path,
+			"target_position": target_position,
 			"requested_state_name": String(definition.state_name),
 			"requested_priority": definition.priority,
 			"activity": activity,
@@ -1998,14 +2031,29 @@ func _try_start_activity(
 		"begin_scheduled_activity",
 		String(npc_id),
 		activity,
-		definition.scene_path,
-		definition.position
+		target_scene_path,
+		target_position
 	)):
 		return
 
 	_claim_spot(definition.spot_id)
 	_breadcrumb("npc_world:start_activity", "%s %s" % [String(npc_id), String(definition.spot_id)])
 	activity_started.emit(npc_id, definition.spot_id)
+
+
+func _get_invitation_activity_start_position(
+	record: Dictionary,
+	definition: NpcSpotDefinition
+) -> Vector2:
+	var current_scene_path := String(record.get("scene_path", ""))
+	if current_scene_path != definition.scene_path:
+		return definition.position
+
+	var last_position = record.get("last_position", definition.position)
+	if last_position is Vector2:
+		return last_position
+
+	return definition.position
 
 
 func _update_pending_travel(
@@ -2172,15 +2220,19 @@ func _update_activity(
 	activity["last_total_hours"] = total_hours
 
 	if elapsed_game_hours > 0.0 and not value_name.is_empty():
-		_set_saved_stat(
-			record,
-			value_name,
-			_get_saved_stat(record, value_name) + definition.value_delta_per_game_hour * elapsed_game_hours
-		)
-	_apply_spot_runtime_progress(definition, elapsed_game_hours, total_hours)
+		if _definition_consumes_food_for_hunger(definition, value_name):
+			_apply_offscreen_food_eat_progress(record, definition, value_name, elapsed_game_hours)
+		else:
+			_set_saved_stat(
+				record,
+				value_name,
+				_get_saved_stat(record, value_name) + definition.value_delta_per_game_hour * elapsed_game_hours
+			)
+	if _activity_should_apply_spot_runtime_progress(npc_id, activity, definition, locations):
+		_apply_spot_runtime_progress(definition, elapsed_game_hours, total_hours)
 
 	record["activity"] = activity
-	record["last_position"] = definition.position
+	record["last_position"] = _get_activity_simulated_position(activity, definition)
 	if locations.has_method("update_simulated_record"):
 		locations.call("update_simulated_record", String(npc_id), record)
 
@@ -2193,6 +2245,99 @@ func _update_activity(
 		_mark_meal_owner_sated_if_needed(definition, npc_id, StringName(value_name))
 	if npc_value_sated or not _spot_runtime_is_available(definition):
 		_finish_activity(npc_id, record, activity, spot_id, locations)
+
+
+func _definition_consumes_food_for_hunger(
+	definition: NpcSpotDefinition,
+	value_name: String
+) -> bool:
+	return (
+		definition != null
+		and definition.state_name == &"Eat"
+		and value_name == "hunger"
+		and definition.spot_value_name != &""
+	)
+
+
+func _apply_offscreen_food_eat_progress(
+	record: Dictionary,
+	definition: NpcSpotDefinition,
+	value_name: String,
+	elapsed_game_hours: float
+) -> void:
+	var current_hunger := _get_saved_stat(record, value_name)
+	if current_hunger <= 0.0:
+		return
+
+	var requested_hunger_drop := minf(
+		current_hunger,
+		absf(definition.value_delta_per_game_hour) * elapsed_game_hours
+	)
+	if requested_hunger_drop <= 0.0:
+		return
+
+	var supplied_food := _consume_spot_food_amount(definition, requested_hunger_drop)
+	if supplied_food <= 0.0:
+		return
+
+	_set_saved_stat(record, value_name, current_hunger - supplied_food)
+
+
+func _consume_spot_food_amount(
+	definition: NpcSpotDefinition,
+	requested_amount: float
+) -> float:
+	if definition == null or requested_amount <= 0.0:
+		return 0.0
+	if not spot_runtime_states.has(String(definition.spot_id)):
+		return 0.0
+
+	var available_food := get_spot_value(definition.spot_id, definition.spot_value_initial)
+	var done_threshold := definition.spot_value_done_threshold
+	var consumable_food := maxf(available_food - done_threshold, 0.0)
+	if consumable_food <= 0.0:
+		return 0.0
+
+	var requested_food := minf(requested_amount, consumable_food)
+	var actual_delta := apply_spot_value_delta(definition.spot_id, -requested_food)
+	return minf(absf(actual_delta), requested_food)
+
+
+func _activity_should_apply_spot_runtime_progress(
+	npc_id: StringName,
+	activity: Dictionary,
+	definition: NpcSpotDefinition,
+	locations: Node
+) -> bool:
+	if definition == null:
+		return false
+	if _definition_consumes_food_for_hunger(definition, String(definition.value_name)):
+		return false
+	if definition.state_name != INVITE_PLAYER_STATE:
+		return true
+	if locations.has_method("is_npc_live") and bool(locations.call("is_npc_live", String(npc_id))):
+		return false
+
+	return String(activity.get("lesson_phase", "inviting")) == "running"
+
+
+func _get_activity_simulated_position(
+	activity: Dictionary,
+	definition: NpcSpotDefinition
+) -> Vector2:
+	if definition == null:
+		return Vector2.ZERO
+	if definition.state_name != INVITE_PLAYER_STATE:
+		return definition.position
+
+	var position_key := "target_position"
+	if String(activity.get("lesson_phase", "inviting")) == "running":
+		position_key = "lesson_position"
+	var position_value = activity.get(position_key, definition.position)
+	if position_value is Vector2:
+		return position_value
+
+	return definition.position
 
 
 func _mark_meal_owner_sated_if_needed(

@@ -24,8 +24,8 @@ const ROUTINE_INTERRUPT_STATES: Array[StringName] = [
 @export_range(0.0, 64.0, 1.0, "suffix:px") var talk_follow_resume_margin: float = 6.0
 @export var use_horizontal_talk_distance: bool = true
 @export var follow_partner_while_talking: bool = true
-@export_range(0.0, 200.0, 1.0, "suffix:px/s") var talk_follow_speed: float = 20.0
-@export_range(0.0, 200.0, 1.0, "suffix:px/s") var talk_approach_speed: float = 65.0
+@export_range(0.0, 200.0, 1.0, "suffix:px/s") var talk_follow_speed: float = 28.0
+@export_range(0.0, 200.0, 1.0, "suffix:px/s") var talk_approach_speed: float = 91.0
 @export_range(0.0, 30.0, 0.1, "suffix:s") var talk_approach_timeout: float = 8.0
 @export_range(0.0, 30.0, 0.1, "suffix:s") var maximum_talk_distance_cancel_seconds: float = 2.0
 @export var follow_animation_name: StringName = &"walk"
@@ -853,7 +853,7 @@ func _update_talk_movement() -> void:
 	if not following_partner and follow_animation_name != &"":
 		play_animation(follow_animation_name)
 	following_partner = true
-	move_toward_position(talk_partner.global_position, talk_follow_speed, desired_range)
+	move_toward_position(talk_partner.global_position, _get_talk_follow_speed(), desired_range)
 
 
 func _talk_is_outside_active_range() -> bool:
@@ -944,9 +944,21 @@ func _update_talk_approach(delta: float) -> bool:
 func _get_talk_approach_speed() -> float:
 	var approach_speed := talk_approach_speed
 	if approach_speed <= 0.0 and machine != null:
-		approach_speed = machine.walk_speed
+		approach_speed = machine.get_effective_walk_speed()
+		return maxf(approach_speed, _get_talk_follow_speed())
 
-	return maxf(approach_speed, talk_follow_speed)
+	var base_speed := maxf(approach_speed, talk_follow_speed)
+	if machine != null:
+		return base_speed * machine.get_fatigue_speed_multiplier()
+
+	return base_speed
+
+
+func _get_talk_follow_speed() -> float:
+	if machine != null:
+		return maxf(talk_follow_speed * machine.get_fatigue_speed_multiplier(), 0.0)
+
+	return maxf(talk_follow_speed, 0.0)
 
 
 func _is_emergency_interrupt_state(state_name: StringName) -> bool:

@@ -57,7 +57,7 @@ func physics_process(delta: float) -> NpcState:
 		_breadcrumb("npc_talk_search:talk_reject", "%s target=%s" % [_npc_label(), _target_label(talk_target)])
 		return get_state(end_state_name)
 
-	move_toward_position(talk_target.global_position, machine.walk_speed, approach_distance)
+	move_toward_position(talk_target.global_position, machine.get_effective_walk_speed(), approach_distance)
 	return next_state
 
 

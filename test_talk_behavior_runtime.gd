@@ -53,6 +53,7 @@ func _run_tests() -> void:
 	_test_hungry_reaction_waits_without_usable_eat_spot()
 	_test_hungry_reaction_uses_available_eat_spot()
 	_test_starvation_damage_starts_at_hunger_cap()
+	_test_tired_speed_scaling()
 	_test_npc_prompt_calls_accept_once()
 	_test_magic_lesson_accept_and_decline_paths()
 	_test_title_scene_instantiates_without_crashing()
@@ -195,6 +196,36 @@ func _test_starvation_damage_starts_at_hunger_cap() -> void:
 	_free_setup(setup)
 
 
+func _test_tired_speed_scaling() -> void:
+	var machine := NpcStateMachine.new()
+	machine.walk_speed = 100.0
+	machine.run_speed = 200.0
+	machine.minimum_fatigue_speed_multiplier = 0.6
+	machine.fatigue_speed_curve = 1.4
+	root.add_child(machine)
+
+	machine.set_value(&"tired", 0.0, null, false)
+	_expect_approx(machine.get_fatigue_speed_multiplier(), 1.0, 0.001, "tired 0 keeps full movement speed")
+	_expect_approx(machine.get_effective_walk_speed(), 100.0, 0.001, "effective walk uses full speed when fresh")
+
+	machine.set_value(&"tired", 50.0, null, false)
+	var half_tired_multiplier := machine.get_fatigue_speed_multiplier()
+	_expect_true(half_tired_multiplier < 1.0, "tired 50 slows movement")
+	_expect_true(half_tired_multiplier > 0.6, "tired 50 stays above minimum speed")
+
+	machine.set_value(&"tired", 100.0, null, false)
+	_expect_approx(machine.get_fatigue_speed_multiplier(), 0.6, 0.001, "tired 100 uses minimum speed")
+	_expect_approx(machine.get_effective_run_speed(), 120.0, 0.001, "effective run uses minimum multiplier")
+
+	var exhausted_walk_speed := machine.get_effective_walk_speed()
+	machine.set_value(&"tired", 20.0, null, false)
+	_expect_true(
+		machine.get_effective_walk_speed() > exhausted_walk_speed,
+		"lower tired increases effective movement speed again"
+	)
+	machine.free()
+
+
 func _test_npc_prompt_calls_accept_once() -> void:
 	var setup := _create_prompt_setup()
 	var interactor: PlayerNpcTalkInteractor = setup["interactor"]
@@ -220,6 +251,12 @@ func _test_npc_prompt_calls_accept_once() -> void:
 
 
 func _test_magic_lesson_accept_and_decline_paths() -> void:
+	var world_time := root.get_node_or_null("WorldTime")
+	var original_real_seconds_per_day := 0.0
+	if world_time != null:
+		original_real_seconds_per_day = float(world_time.get("real_seconds_per_day"))
+		world_time.set("real_seconds_per_day", 24.0)
+
 	var accept_setup := _create_magic_lesson_setup(&"test_magic_lesson_accept")
 	var accept_spot: MagicLessonSpot = accept_setup["spot"]
 	var accept_interactor: PlayerNpcTalkInteractor = accept_setup["interactor"]
@@ -235,6 +272,13 @@ func _test_magic_lesson_accept_and_decline_paths() -> void:
 	_expect_equal(String(accept_spot.get_lesson_state()), "running", "accept starts lesson")
 	_expect_equal(accept_player.global_position, Vector2(128.0, 64.0), "accept places player")
 	_expect_equal(accept_mom.global_position, Vector2(72.0, 64.0), "accept places mom")
+	var progress_before := accept_spot.get_lesson_progress()
+	accept_spot._process(0.25)
+	_expect_approx(accept_spot.get_lesson_progress(), progress_before - 25.0, 0.001, "lesson progresses by game time")
+	_expect_true(accept_spot.label != null, "lesson spot creates a visible label")
+	if accept_spot.label != null:
+		_expect_true(accept_spot.label.text.contains("75"), "lesson label shows remaining progress")
+		_expect_true(accept_spot.label.text.contains("class"), "lesson label shows running class state")
 	accept_spot.complete_lesson()
 	_expect_equal(String(accept_spot.get_lesson_state()), "completed", "lesson completes")
 	_expect_equal(float(accept_player.get_meta("magic_xp")), 1.0, "lesson grants player reward")
@@ -262,6 +306,9 @@ func _test_magic_lesson_accept_and_decline_paths() -> void:
 		"decline prevents another same-day lesson"
 	)
 	_free_setup(decline_setup)
+
+	if world_time != null and original_real_seconds_per_day > 0.0:
+		world_time.set("real_seconds_per_day", original_real_seconds_per_day)
 
 
 func _test_title_scene_instantiates_without_crashing() -> void:

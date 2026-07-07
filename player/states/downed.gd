@@ -7,7 +7,7 @@ func enter() -> void:
 	next_state = null
 	player.velocity.x = 0.0
 	player.knockback_timer = 0.0
-	player.ledgegrabcolider.disabled = true
+	player.ledgegrabcolider.set_deferred("disabled", true)
 	if animation_name != &"" and player.animation_player.has_animation(animation_name):
 		player.animation_player.play(animation_name)
 	elif player.animation_player.has_animation("idle"):

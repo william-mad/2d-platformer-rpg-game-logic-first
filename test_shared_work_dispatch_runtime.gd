@@ -44,6 +44,8 @@ func _run_tests() -> void:
 	_test_player_and_npc_progress_is_additive()
 	_test_player_work_respects_meal_stage()
 	_test_player_work_respects_cleanup_owner()
+	_test_player_eat_progress_is_visible()
+	_test_live_eat_consumes_food_one_to_one()
 	_test_practice_dummy_player_hit_updates_counters()
 	_test_practice_dummy_practice_times_out()
 	_test_practice_dummy_npc_hit_does_not_count_as_player_practice()
@@ -51,6 +53,8 @@ func _run_tests() -> void:
 	_test_practice_dummy_scene_wiring()
 	_test_practice_dummy_fight_target_filter()
 	_test_practice_dummy_damage_does_not_emit_social_damage_event()
+	_test_social_npc_low_health_damage_adds_anger_and_fear()
+	_test_mom_work_schedule_avoids_lessons_and_dinner()
 
 
 func _test_single_player_matches_one_worker_rate() -> void:
@@ -127,6 +131,46 @@ func _test_player_work_respects_cleanup_owner() -> void:
 		0.001,
 		"cleanup owner gate blocks player progress"
 	)
+	_free_setup(setup)
+
+
+func _test_player_eat_progress_is_visible() -> void:
+	var setup := _create_work_setup()
+	var spot: NpcWorkSpot = setup["spot"]
+
+	var label := Label.new()
+	spot.add_child(label)
+	spot.label = label
+	spot.meal_cycle_enabled = true
+	spot.meal_cycle_stage = "food"
+	spot.meal_cycle_meal = "breakfast"
+	spot.meal_cycle_food_available = true
+	spot.meal_cycle_meal_called = true
+	spot.active_player_action = &"eat"
+	spot.active_player_action_duration = 2.0
+	spot.active_player_action_timer = 1.0
+
+	spot._update_visual()
+	_expect_true(label.text.contains("breakfast ready"), "food label keeps meal availability text")
+	_expect_true(label.text.contains("player eating 50%"), "food label shows player eating progress")
+	_free_setup(setup)
+
+
+func _test_live_eat_consumes_food_one_to_one() -> void:
+	var setup := _create_work_setup()
+	var spot: NpcWorkSpot = setup["spot"]
+	spot.eat_world_definition = _make_food_definition()
+	spot.meal_cycle_enabled = true
+	spot.meal_cycle_stage = "food"
+	spot.meal_cycle_food_available = true
+	spot.meal_cycle_meal_called = true
+	spot.food_available = 20.0
+
+	_expect_approx(spot.consume_eat_amount(12.0), 12.0, 0.001, "live eat supplies requested food")
+	_expect_approx(spot.get_food_available(), 8.0, 0.001, "live eat drains food one to one")
+	_expect_approx(spot.consume_eat_amount(20.0), 8.0, 0.001, "live eat is capped by remaining food")
+	_expect_approx(spot.get_food_available(), 0.0, 0.001, "live eat can empty the food pool")
+	_expect_equal(spot.meal_cycle_stage, "cleanup_work", "empty live meal starts cleanup")
 	_free_setup(setup)
 
 
@@ -279,6 +323,45 @@ func _on_damage_dealt(_amount: float, _attacker: Node, _target: Node) -> void:
 	_damage_events_seen += 1
 
 
+func _test_social_npc_low_health_damage_adds_anger_and_fear() -> void:
+	var npc := SocialNpc.new()
+	npc.max_hp = 100.0
+	npc.damage_anger_multiplier = 4.0
+	npc.damage_fear_multiplier = 4.0
+	npc.damage_fear_health_threshold_percent = 50.0
+	npc.low_health_fear_min_scale = 1.0
+	npc.low_health_fear_max_scale = 2.0
+
+	var high_health_stats: Dictionary = npc.call("_get_damage_emotion_stats", 10.0, 80.0)
+	_expect_approx(float(high_health_stats.get("anger", 0.0)), 40.0, 0.001, "high-health damage adds anger")
+	_expect_false(high_health_stats.has("fear"), "high-health damage does not add fear")
+
+	var low_health_stats: Dictionary = npc.call("_get_damage_emotion_stats", 10.0, 45.0)
+	_expect_approx(float(low_health_stats.get("anger", 0.0)), 40.0, 0.001, "low-health damage still adds anger")
+	_expect_approx(float(low_health_stats.get("fear", 0.0)), 52.0, 0.001, "low-health damage adds scaled fear")
+
+	npc.free()
+
+
+func _test_mom_work_schedule_avoids_lessons_and_dinner() -> void:
+	var definition := load("res://data/npc_spots/mom_work.tres") as NpcSpotDefinition
+	_expect_true(definition != null, "mom work definition loads")
+	if definition == null:
+		return
+
+	_expect_true(definition.is_active_at(9.5), "mom work keeps morning work window")
+	_expect_false(definition.is_active_at(15.5), "mom work avoids magic class")
+	_expect_true(definition.is_active_at(17.0), "mom work keeps an afternoon work window after class")
+	_expect_false(definition.is_active_at(19.5), "mom work avoids dinner duties")
+	_expect_approx(definition.spot_value_delta_per_game_hour, -200.0, 0.001, "mom work clears faster")
+
+	var spot := NpcWorkSpot.new()
+	spot.world_definition = definition
+	spot.call("_apply_world_definition")
+	_expect_approx(spot.get_full_work_game_hours(), 0.5, 0.001, "mom work takes half a game hour for one worker")
+	spot.free()
+
+
 func _create_work_setup() -> Dictionary:
 	var spot := NpcWorkSpot.new()
 	spot.name = "SharedWorkSpot"
@@ -317,6 +400,20 @@ func _make_work_definition() -> NpcSpotDefinition:
 	definition.spot_value_maximum = 100.0
 	definition.spot_value_done_threshold = 0.0
 	definition.spot_value_delta_per_game_hour = -100.0
+	return definition
+
+
+func _make_food_definition() -> NpcSpotDefinition:
+	var definition := NpcSpotDefinition.new()
+	definition.spot_id = &"test_shared_food"
+	definition.scene_path = "res://test_shared_work_dispatch_runtime.gd"
+	definition.state_name = &"Eat"
+	definition.value_name = &"hunger"
+	definition.spot_value_name = &"food_available"
+	definition.spot_value_initial = 0.0
+	definition.spot_value_minimum = 0.0
+	definition.spot_value_maximum = 100.0
+	definition.spot_value_done_threshold = 0.0
 	return definition
 
 

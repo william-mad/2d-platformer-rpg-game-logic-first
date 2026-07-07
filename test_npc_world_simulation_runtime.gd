@@ -66,10 +66,12 @@ func _run_tests() -> void:
 	_test_skipped_time_forces_cleanup(simulator, world_time)
 	_test_cleanup_owner_filter(simulator, world_time)
 	_test_sated_meal_owner_is_not_called_again(simulator, world_time)
+	_test_offscreen_eating_consumes_food_one_to_one(simulator, world_time)
 	_test_activity_selector_delegate_matches_helper(simulator)
 	_test_sleep_wake_delegate_routes_home(simulator)
 	_test_sleep_window_skip_routes_to_bed(simulator)
 	_test_magic_lesson_can_interrupt_afternoon_work(simulator)
+	_test_magic_lesson_invite_waits_for_acceptance(simulator)
 	_test_loaded_afternoon_save_tick_is_stable(simulator, world_time, locations)
 	_test_offscreen_starvation_damages_at_hunger_cap(simulator)
 
@@ -94,6 +96,7 @@ func _test_breakfast_stage_order(simulator: Node, world_time: Node) -> void:
 	_expect_equal(state.get("stage", ""), STAGE_FOOD, "prep completion switches to food")
 	_expect_true(bool(state.get("food_available", false)), "prep completion makes food available")
 	_expect_false(bool(state.get("meal_called", false)), "food ready does not call eaters early")
+	_expect_equal(float(state.get("food_value", 0.0)), 100.0, "prep completion fills the food limit")
 	_expect_equal(float(simulator.call("get_spot_value", FOOD_SPOT_ID, 0.0)), 100.0, "food flag is available")
 
 	world_time.call("set_total_hours", 7.0)
@@ -202,6 +205,12 @@ func _test_sated_meal_owner_is_not_called_again(simulator: Node, world_time: Nod
 	var state: Dictionary = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
 	var owner_data = state.get("owner_meal_data", {})
 	_expect_true(offscreen_activity_finished, "offscreen eating finishes when hunger reaches zero")
+	_expect_approx(
+		float(simulator.call("get_spot_value", FOOD_SPOT_ID, 0.0)),
+		90.0,
+		0.001,
+		"offscreen eating consumes only the hunger it sates"
+	)
 	_expect_true(
 		owner_data is Dictionary
 		and owner_data.has("mom")
@@ -216,6 +225,52 @@ func _test_sated_meal_owner_is_not_called_again(simulator: Node, world_time: Nod
 		bool(simulator.call("_meal_cycle_definition_can_start", food_definition, &"player", 7.2)),
 		"another food owner can still answer the meal call"
 	)
+
+
+func _test_offscreen_eating_consumes_food_one_to_one(simulator: Node, world_time: Node) -> void:
+	_reset_meal_cycle(simulator, world_time, 6.0)
+	world_time.call("set_total_hours", 6.5)
+	simulator.call("set_spot_value", PREP_SPOT_ID, 0.0)
+	world_time.call("set_total_hours", 7.0)
+	simulator.call("_process_meal_cycle_schedule_until_snapshot", world_time.call("get_snapshot"))
+	simulator.call("set_spot_value", FOOD_SPOT_ID, 15.0)
+
+	var activity := {
+		"spot_id": String(FOOD_SPOT_ID),
+		"state_name": "Eat",
+		"value_name": "hunger",
+		"target_scene_path": "res://scenes/testscenes/realtest1.tscn",
+		"target_position": Vector2.ZERO,
+		"last_total_hours": 7.0,
+		"return_scene_path": "res://yard.tscn",
+		"return_position": Vector2(3.0, 4.0),
+	}
+	var record := {
+		"scene_path": "res://scenes/testscenes/realtest1.tscn",
+		"last_position": Vector2.ZERO,
+		"node_state": {
+			"social_stats": {
+				"hunger": 30.0,
+			},
+		},
+		"activity": activity.duplicate(true),
+		"pending_travel": {},
+	}
+	var locations := MockLocations.new()
+	simulator.call("_update_activity", &"mom", record, activity, 7.1, 7.1, locations)
+	var state: Dictionary = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	var owner_data = state.get("owner_meal_data", {})
+
+	_expect_approx(float(record["node_state"]["social_stats"]["hunger"]), 15.0, 0.001, "offscreen eating is limited by food")
+	_expect_approx(float(simulator.call("get_spot_value", FOOD_SPOT_ID, 0.0)), 0.0, 0.001, "offscreen eating can empty food")
+	_expect_equal(state.get("stage", ""), STAGE_CLEANUP, "empty offscreen food starts cleanup")
+	_expect_true(locations.finished, "offscreen eater leaves when food is empty")
+	if owner_data is Dictionary and owner_data.has("mom"):
+		_expect_false(
+			bool(owner_data["mom"].get("has_had_breakfast", false)),
+			"partially fed mom is not marked as having eaten"
+		)
+	locations.free()
 
 
 func _test_activity_selector_delegate_matches_helper(simulator: Node) -> void:
@@ -358,7 +413,7 @@ func _test_sleep_window_skip_routes_to_bed(simulator: Node) -> void:
 func _test_magic_lesson_can_interrupt_afternoon_work(simulator: Node) -> void:
 	simulator.call("_initialize_definition_runtime_states")
 	if simulator.has_method("set_spot_value"):
-		simulator.call("set_spot_value", &"mom_magic_lesson", 1.0, false)
+		simulator.call("set_spot_value", &"mom_magic_lesson", 100.0, false)
 
 	var lesson_definition = simulator.call("get_spot_definition", &"mom_magic_lesson")
 	var work_definition = simulator.call("get_spot_definition", &"mom_work")
@@ -407,6 +462,80 @@ func _test_magic_lesson_can_interrupt_afternoon_work(simulator: Node) -> void:
 			"mom_magic_lesson",
 			"work interruption targets magic lesson"
 		)
+
+
+func _test_magic_lesson_invite_waits_for_acceptance(simulator: Node) -> void:
+	var original_runtime_states: Dictionary = simulator.spot_runtime_states.duplicate(true)
+	simulator.call("_initialize_definition_runtime_states")
+	simulator.call("set_spot_value", &"mom_magic_lesson", 100.0, false)
+
+	var definition = simulator.call("get_spot_definition", &"mom_magic_lesson")
+	_expect_true(definition != null, "magic lesson definition is available for progress test")
+	if definition == null:
+		simulator.spot_runtime_states = original_runtime_states
+		return
+
+	var activity := {
+		"spot_id": "mom_magic_lesson",
+		"state_name": "InvitePlayer",
+		"value_name": "",
+		"target_scene_path": definition.scene_path,
+		"target_position": Vector2(10.0, 20.0),
+		"lesson_phase": "inviting",
+		"lesson_scene_path": definition.scene_path,
+		"lesson_position": definition.position,
+		"last_total_hours": 15.0,
+		"return_scene_path": "res://yard.tscn",
+		"return_position": Vector2(3.0, 4.0),
+	}
+	var record := {
+		"scene_path": definition.scene_path,
+		"last_position": Vector2(10.0, 20.0),
+		"node_state": {
+			"social_stats": {
+				"hp": 100.0,
+				"disabled": 0.0,
+			},
+		},
+		"activity": activity.duplicate(true),
+		"pending_travel": {},
+	}
+	var locations := MockLocations.new()
+	simulator.call("_update_activity", &"mom", record, activity, 15.25, 15.25, locations)
+	_expect_approx(
+		float(simulator.call("get_spot_value", &"mom_magic_lesson", 0.0)),
+		100.0,
+		0.001,
+		"magic lesson invite phase does not spend class progress"
+	)
+	_expect_equal(
+		record.get("last_position", Vector2.ZERO),
+		Vector2(10.0, 20.0),
+		"magic lesson invite keeps Mom at her invitation position"
+	)
+
+	var running_activity: Dictionary = record.get("activity", {}).duplicate(true)
+	running_activity["lesson_phase"] = "running"
+	running_activity["last_total_hours"] = 15.25
+	record["activity"] = running_activity
+	locations.updated_records.clear()
+	simulator.call("_update_activity", &"mom", record, running_activity, 16.25, 16.25, locations)
+	_expect_approx(
+		float(simulator.call("get_spot_value", &"mom_magic_lesson", 0.0)),
+		0.0,
+		0.001,
+		"magic lesson running phase gets a full hour past the invite window"
+	)
+	_expect_equal(
+		record.get("last_position", Vector2.ZERO),
+		definition.position,
+		"magic lesson running phase simulates Mom at the class spot"
+	)
+	_expect_true(locations.finished, "magic lesson running phase finishes after the full hour")
+
+	locations.free()
+	simulator.spot_runtime_states = original_runtime_states
+	simulator.call("_initialize_definition_runtime_states")
 
 
 func _test_loaded_afternoon_save_tick_is_stable(

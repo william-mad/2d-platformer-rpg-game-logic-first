@@ -109,8 +109,8 @@ script = ExtResource("3_hp_bar")
 
 [node name="NpcStateMachine" parent="." instance=ExtResource("4_state_machine")]
 debug_label_path = NodePath("StateLabel")
-walk_speed = 55.0
-run_speed = 115.0
+walk_speed = 77.0
+run_speed = 161.0
 default_reaction_time = 0.8
 default_work_time = 2.5
 default_talk_time = 2.0

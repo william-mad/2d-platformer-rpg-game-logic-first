@@ -33,6 +33,8 @@ signal player_defeated
 @export var max_knockout: float = 100.0
 @export var knockout_decay_per_second: float = 55.0
 @export var downed_decay_per_second: float = 32.0
+@export var charged_mana_damage_causes_knockout: bool = true
+@export_range(0.0, 1.0, 0.01) var charged_mana_knockout_threshold_ratio: float = 0.3334
 #endregion
 
 #region //playerstats:
@@ -409,6 +411,9 @@ func take_damage(
 		_defeat()
 		return
 
+	if damage_taken > 0.0 and apply_charged_mana_damage_penalty():
+		return
+
 	apply_knockout(knockout_damage)
 	if not is_downed:
 		apply_knockback(damage_source_position)
@@ -451,6 +456,33 @@ func apply_knockout(amount: float) -> void:
 
 	if knockout_amount >= max_knockout:
 		enter_downed_state()
+
+
+func has_dangerous_mana_charge() -> bool:
+	if max_mana <= 0.0:
+		return false
+
+	return mana_amount > max_mana * charged_mana_knockout_threshold_ratio
+
+
+func apply_charged_mana_damage_penalty() -> bool:
+	if not charged_mana_damage_causes_knockout:
+		return false
+	if not has_dangerous_mana_charge():
+		return false
+
+	var charged_mana_lost := mana_amount
+	clear_mana_charge()
+	spend_mana_2(charged_mana_lost)
+
+	if is_downed:
+		return false
+
+	knockout_amount = maxf(max_knockout, 0.0)
+	knockout_active = knockout_amount > 0.0
+	sync_knockout_bar()
+	enter_downed_state()
+	return true
 
 
 func update_knockout(delta: float) -> void:

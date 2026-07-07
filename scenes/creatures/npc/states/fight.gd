@@ -214,7 +214,7 @@ func _update_chase() -> void:
 		face_x_direction(direction_to_target)
 
 	if distance < attack_min_range:
-		move_away_from_position(fight_target.global_position, machine.walk_speed)
+		move_away_from_position(fight_target.global_position, machine.get_effective_walk_speed())
 		return
 
 	var desired_distance := maxf(preferred_attack_distance, attack_min_range)
@@ -225,7 +225,7 @@ func _update_chase() -> void:
 
 	var desired_x := fight_target.global_position.x - (direction_to_target * desired_distance)
 	var desired_position := Vector2(desired_x, npc.global_position.y)
-	var chase_speed := machine.run_speed * maxf(chase_speed_multiplier, 0.0)
+	var chase_speed := machine.get_effective_run_speed() * maxf(chase_speed_multiplier, 0.0)
 	move_toward_position(desired_position, chase_speed, tolerance)
 
 
@@ -341,7 +341,7 @@ func _update_search(delta: float) -> void:
 		and not is_close_to(last_known_position, machine.stop_distance)
 	):
 		paused_at_last_known_position = false
-		move_toward_position(last_known_position, machine.walk_speed, machine.stop_distance)
+		move_toward_position(last_known_position, machine.get_effective_walk_speed(), machine.stop_distance)
 		return
 
 	if has_last_known_position and not paused_at_last_known_position:
@@ -360,7 +360,7 @@ func _update_search(delta: float) -> void:
 		_pick_search_wander_target()
 
 	var target_position := Vector2(search_target_x, npc.global_position.y)
-	if move_toward_position(target_position, machine.walk_speed, machine.stop_distance):
+	if move_toward_position(target_position, machine.get_effective_walk_speed(), machine.stop_distance):
 		stop_horizontal()
 
 

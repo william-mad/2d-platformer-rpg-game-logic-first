@@ -3,6 +3,7 @@ class_name NpcStateFlee extends NpcState
 @export var flee_duration: float = -1.0
 @export var safe_distance_from_threat: float = 280.0
 @export var stop_when_safe_distance_reached: bool = true
+@export_range(0.1, 3.0, 0.05) var flee_speed_multiplier: float = 1.4
 @export var minimum_interrupt_priority: int = 95
 @export var allow_fight_interrupt: bool = true
 
@@ -26,7 +27,10 @@ func physics_process(delta: float) -> NpcState:
 		stop_horizontal()
 		return get_state(&"Idle")
 
-	move_away_from_position(threat.global_position, machine.run_speed)
+	move_away_from_position(
+		threat.global_position,
+		machine.get_effective_run_speed() * maxf(flee_speed_multiplier, 0.0)
+	)
 	return next_state
 
 

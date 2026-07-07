@@ -284,15 +284,19 @@ func perform_player_eat(player: Node2D) -> float:
 	if not _player_can_eat(player):
 		return 0.0
 
-	var food_fraction := consume_eat_progress(1.0)
-	if food_fraction <= 0.0:
+	var requested_hunger_drop := minf(
+		absf(player_hunger_drop_per_meal),
+		_get_player_hunger(player, absf(player_hunger_drop_per_meal))
+	)
+	var supplied_food := consume_eat_amount(requested_hunger_drop)
+	if supplied_food <= 0.0:
 		return 0.0
 
-	var hunger_drop := absf(player_hunger_drop_per_meal) * food_fraction
 	if player.has_method("apply_hunger_delta"):
-		player.call("apply_hunger_delta", -hunger_drop)
+		player.call("apply_hunger_delta", -supplied_food)
 	player_work_cooldown = player_work_cooldown_seconds
-	return hunger_drop
+	_queue_visual_update()
+	return supplied_food
 
 
 func can_player_work(player: Node2D) -> bool:
@@ -365,7 +369,9 @@ func apply_world_meal_cycle_state(controller_spot_id: StringName, state: Diction
 
 func get_food_available() -> float:
 	if meal_cycle_enabled:
-		return 1.0 if has_food_available() else 0.0
+		if meal_cycle_stage != MEAL_STAGE_FOOD or not meal_cycle_food_available:
+			return 0.0
+		return maxf(food_available, 0.0)
 	return food_available
 
 
@@ -374,10 +380,14 @@ func has_food_available() -> bool:
 		_log_debug_disabled_once()
 		return false
 	if meal_cycle_enabled:
-		return meal_cycle_stage == MEAL_STAGE_FOOD and meal_cycle_food_available
+		return (
+			meal_cycle_stage == MEAL_STAGE_FOOD
+			and meal_cycle_food_available
+			and food_available > _get_food_done_threshold()
+		)
 	if eat_world_definition == null:
 		return false
-	return food_available > eat_world_definition.spot_value_done_threshold
+	return food_available > _get_food_done_threshold()
 
 
 func get_full_eat_game_hours(requested_hunger_drop: float) -> float:
@@ -393,20 +403,27 @@ func get_full_eat_game_hours(requested_hunger_drop: float) -> float:
 	return absf(requested_hunger_drop) / hunger_rate
 
 
-func consume_eat_progress(requested_progress_fraction: float) -> float:
-	# Returns the fraction of a full meal actually supplied, so hunger relief matches real food.
+func consume_eat_amount(requested_hunger_amount: float) -> float:
+	# Food points are hunger points: 12 food consumed lowers hunger by 12.
 	if _debug_realtest1_meal_spot_disabled():
 		_log_debug_disabled_once()
 		return 0.0
-	if not has_food_available() or requested_progress_fraction <= 0.0:
+	if eat_world_definition == null:
 		return 0.0
-	if meal_cycle_enabled:
-		return requested_progress_fraction
+	if not has_food_available() or requested_hunger_amount <= 0.0:
+		return 0.0
 
-	var requested_food_delta := -food_consumed_per_full_eat * requested_progress_fraction
+	var requested_food_delta := -minf(
+		requested_hunger_amount,
+		maxf(get_food_available() - _get_food_done_threshold(), 0.0)
+	)
 	var actual_food_delta := requested_food_delta
 	var simulator := get_node_or_null("/root/NpcWorldSimulation")
-	if simulator != null and simulator.has_method("apply_spot_value_delta"):
+	if (
+		simulator != null
+		and simulator.has_method("apply_spot_value_delta")
+		and _simulator_has_spot_state(simulator, eat_world_definition.spot_id)
+	):
 		actual_food_delta = float(simulator.call(
 			"apply_spot_value_delta",
 			eat_world_definition.spot_id,
@@ -414,8 +431,14 @@ func consume_eat_progress(requested_progress_fraction: float) -> float:
 		))
 	else:
 		var previous_food := food_available
-		food_available = maxf(food_available + requested_food_delta, 0.0)
+		food_available = clampf(
+			food_available + requested_food_delta,
+			_get_food_floor(),
+			_get_food_ceiling()
+		)
 		actual_food_delta = food_available - previous_food
+		if food_available <= _get_food_done_threshold():
+			_start_local_meal_cycle_cleanup_if_food_depleted()
 
 	if is_equal_approx(actual_food_delta, 0.0):
 		return 0.0
@@ -424,13 +447,25 @@ func consume_eat_progress(requested_progress_fraction: float) -> float:
 		"work_spot:eat_progress",
 		"%s requested=%.3f actual=%.3f food=%.2f" % [
 			name,
-			requested_progress_fraction,
-			absf(actual_food_delta) / maxf(food_consumed_per_full_eat, 0.001),
+			requested_hunger_amount,
+			absf(actual_food_delta),
 			food_available,
 		]
 	)
 	_queue_visual_update()
-	return absf(actual_food_delta) / maxf(food_consumed_per_full_eat, 0.001)
+	return absf(actual_food_delta)
+
+
+func consume_eat_progress(requested_progress_fraction: float) -> float:
+	# Older callers request a fraction of a meal; newer callers use consume_eat_amount().
+	var full_meal_amount := maxf(food_consumed_per_full_eat, 0.001)
+	var supplied_food := consume_eat_amount(full_meal_amount * requested_progress_fraction)
+	return supplied_food / full_meal_amount
+
+
+func _simulator_has_spot_state(simulator: Node, requested_spot_id: StringName) -> bool:
+	var runtime_states = simulator.get("spot_runtime_states")
+	return runtime_states is Dictionary and runtime_states.has(String(requested_spot_id))
 
 
 func is_work_spot() -> bool:
@@ -735,6 +770,13 @@ func _apply_meal_cycle_state(state: Dictionary) -> void:
 	meal_cycle_cleanup_owner_ids = _variant_owner_ids_to_string_names(state.get("cleanup_owner_ids", []))
 	var owner_meal_data = state.get("owner_meal_data", {})
 	meal_cycle_owner_meal_data = owner_meal_data.duplicate(true) if owner_meal_data is Dictionary else {}
+	var fallback_food_value := food_available if meal_cycle_stage == MEAL_STAGE_FOOD else 0.0
+	food_available = clampf(
+		float(state.get("food_value", fallback_food_value)),
+		_get_food_floor(),
+		_get_food_ceiling()
+	)
+	meal_cycle_food_available = meal_cycle_food_available and food_available > _get_food_done_threshold()
 
 	var previous_work_needed := work_needed
 	work_needed = clampf(
@@ -742,14 +784,13 @@ func _apply_meal_cycle_state(state: Dictionary) -> void:
 		_get_work_needed_floor(),
 		_get_work_needed_ceiling()
 	)
-	food_available = 1.0 if has_food_available() else 0.0
 	if not is_equal_approx(previous_work_needed, work_needed):
 		work_needed_changed.emit(work_needed, work_needed - previous_work_needed)
 
 	var state_label := "%s %s food=%s called=%s work=%s value=%.2f" % [
 		meal_cycle_stage,
 		meal_cycle_meal,
-		str(meal_cycle_food_available),
+		"%.2f" % food_available,
 		str(meal_cycle_meal_called),
 		str(meal_cycle_work_call_active),
 		work_needed,
@@ -961,6 +1002,17 @@ func _get_player_owner_id(player: Node2D) -> StringName:
 	return player_owner_id
 
 
+func _get_player_hunger(player: Node2D, fallback: float) -> float:
+	if player == null:
+		return fallback
+
+	var hunger_value = player.get("hunger")
+	if typeof(hunger_value) == TYPE_FLOAT or typeof(hunger_value) == TYPE_INT:
+		return clampf(float(hunger_value), 0.0, 100.0)
+
+	return fallback
+
+
 func _get_meal_cycle_current_work_owner_type() -> String:
 	if meal_cycle_stage == MEAL_STAGE_CLEANUP_WORK:
 		return MEAL_OWNER_CLEANUP
@@ -1014,6 +1066,19 @@ func _variant_owner_ids_to_string_names(values) -> Array[StringName]:
 	return ids
 
 
+func _start_local_meal_cycle_cleanup_if_food_depleted() -> void:
+	if not meal_cycle_enabled or meal_cycle_stage != MEAL_STAGE_FOOD:
+		return
+	if food_available > _get_food_done_threshold():
+		return
+
+	meal_cycle_stage = MEAL_STAGE_CLEANUP_WORK
+	meal_cycle_food_available = false
+	meal_cycle_meal_called = false
+	meal_cycle_work_call_active = true
+	work_needed = _get_work_needed_ceiling()
+
+
 func _update_visual() -> void:
 	if meal_cycle_enabled:
 		_update_meal_cycle_visual()
@@ -1052,13 +1117,15 @@ func _update_visual() -> void:
 
 func _update_meal_cycle_visual() -> void:
 	if meal_cycle_stage == MEAL_STAGE_FOOD:
-		current_value = 1.0 if meal_cycle_food_available else 0.0
+		current_value = get_food_available()
 		if zone_visual != null:
-			zone_visual.color = high_need_color.lerp(low_need_color, current_value)
+			zone_visual.color = high_need_color.lerp(low_need_color, _get_food_ratio(current_value))
 		if label != null:
 			var value_text := "ready" if meal_cycle_food_available else "waiting"
 			if not meal_cycle_meal.is_empty():
 				value_text = "%s %s" % [meal_cycle_meal, value_text]
+			value_text = "%s %d" % [value_text, int(round(current_value))]
+			value_text = _get_player_action_value_text(value_text)
 			label.text = _format_spot_label(
 				"Food",
 				value_text,
@@ -1092,9 +1159,36 @@ func _get_phase_value_text(value: float) -> String:
 		return "%d | player working" % int(round(value))
 	if active_player_action != &"" and active_player_action_duration > 0.0:
 		var progress := 1.0 - clampf(active_player_action_timer / active_player_action_duration, 0.0, 1.0)
-		return "%d | player %d%%" % [int(round(value)), int(round(progress * 100.0))]
+		return "%d | player %s %d%%" % [
+			int(round(value)),
+			_get_player_action_label(active_player_action),
+			int(round(progress * 100.0)),
+		]
 
 	return str(int(round(value)))
+
+
+func _get_player_action_value_text(base_text: String) -> String:
+	if active_player_action == &"work":
+		return "%s | player working" % base_text
+	if active_player_action != &"" and active_player_action_duration > 0.0:
+		var progress := 1.0 - clampf(active_player_action_timer / active_player_action_duration, 0.0, 1.0)
+		return "%s | player %s %d%%" % [
+			base_text,
+			_get_player_action_label(active_player_action),
+			int(round(progress * 100.0)),
+		]
+
+	return base_text
+
+
+func _get_player_action_label(action_name: StringName) -> String:
+	if action_name == &"eat":
+		return "eating"
+	if action_name == &"work":
+		return "working"
+
+	return String(action_name)
 
 
 func _get_eat_owner_debug_text() -> String:
@@ -1125,11 +1219,32 @@ func _get_meal_cycle_owner_debug_text(owner_type: String) -> String:
 func _get_food_ratio(value: float) -> float:
 	if eat_world_definition == null:
 		return 0.0
-	var minimum := minf(eat_world_definition.spot_value_minimum, eat_world_definition.spot_value_maximum)
-	var maximum := maxf(eat_world_definition.spot_value_minimum, eat_world_definition.spot_value_maximum)
+	var minimum := _get_food_floor()
+	var maximum := _get_food_ceiling()
 	if is_equal_approx(minimum, maximum):
 		return 0.0
 	return clampf(inverse_lerp(minimum, maximum, value), 0.0, 1.0)
+
+
+func _get_food_floor() -> float:
+	if eat_world_definition == null:
+		return 0.0
+
+	return minf(eat_world_definition.spot_value_minimum, eat_world_definition.spot_value_maximum)
+
+
+func _get_food_ceiling() -> float:
+	if eat_world_definition == null:
+		return 100.0
+
+	return maxf(eat_world_definition.spot_value_minimum, eat_world_definition.spot_value_maximum)
+
+
+func _get_food_done_threshold() -> float:
+	if eat_world_definition == null:
+		return 0.0
+
+	return eat_world_definition.spot_value_done_threshold
 
 
 func _get_work_needed_ratio(value: float) -> float:

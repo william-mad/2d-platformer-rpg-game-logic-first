@@ -112,7 +112,7 @@ func _process_approach(delta: float) -> NpcState:
 			_cancel_if_possible(&"approach_timeout")
 			return get_state(end_state_name)
 
-		move_toward_position(player.global_position, machine.walk_speed, invitation_distance)
+		move_toward_position(player.global_position, machine.get_effective_walk_speed(), invitation_distance)
 		return next_state
 
 	_hold_inviter()

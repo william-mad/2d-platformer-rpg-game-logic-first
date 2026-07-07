@@ -441,6 +441,27 @@ func update_simulated_record(npc_id: String, record: Dictionary) -> void:
 	npc_records[npc_id] = record.duplicate(true)
 
 
+func set_scheduled_activity_field(
+	npc_id: String,
+	field_name: StringName,
+	value
+) -> bool:
+	if not npc_records.has(npc_id) or field_name == &"":
+		return false
+
+	_refresh_live_record(npc_id)
+	var record: Dictionary = npc_records[npc_id]
+	var activity = record.get("activity", {})
+	if not (activity is Dictionary) or activity.is_empty():
+		return false
+
+	var updated_activity: Dictionary = activity
+	updated_activity[String(field_name)] = value
+	record["activity"] = updated_activity
+	npc_records[npc_id] = record
+	return true
+
+
 func apply_simulated_record(
 	npc_id: String,
 	record: Dictionary,

@@ -26,9 +26,14 @@ const STATE_ALIASES := {
 
 @export_group("Movement")
 @export var gravity: float = 1200.0
-@export var walk_speed: float = 45.0
-@export var run_speed: float = 90.0
+@export var walk_speed: float = 63.0
+@export var run_speed: float = 126.0
 @export var stop_distance: float = 12.0
+
+@export_group("Movement Fatigue")
+@export var fatigue_affects_movement: bool = true
+@export_range(0.1, 1.0, 0.01) var minimum_fatigue_speed_multiplier: float = 0.6
+@export_range(0.2, 4.0, 0.05) var fatigue_speed_curve: float = 1.4
 
 @export_group("Default Durations")
 @export var default_reaction_time: float = 0.6
@@ -1361,6 +1366,36 @@ func set_value(
 func get_value(value_name: StringName, default_value: float = 0.0) -> float:
 	values = _normalize_value_dictionary(values)
 	return _variant_to_float(values.get(_canonical_value_key(value_name), default_value))
+
+
+func get_fatigue_speed_multiplier() -> float:
+	if not fatigue_affects_movement:
+		return 1.0
+	if not tired_enabled:
+		return 1.0
+	if tired_value_name == &"":
+		return 1.0
+
+	var tired := clampf(get_value(tired_value_name), 0.0, 100.0)
+	var normalized := tired / 100.0
+	var curved := pow(normalized, maxf(fatigue_speed_curve, 0.001))
+	return lerpf(1.0, minimum_fatigue_speed_multiplier, curved)
+
+
+func get_effective_walk_speed() -> float:
+	return maxf(walk_speed * get_fatigue_speed_multiplier(), 0.0)
+
+
+func get_effective_run_speed() -> float:
+	return maxf(run_speed * get_fatigue_speed_multiplier(), 0.0)
+
+
+func get_debug_movement_speed_text() -> String:
+	return "tired=%.1f speed=%.2f walk=%.1f" % [
+		get_value(tired_value_name),
+		get_fatigue_speed_multiplier(),
+		get_effective_walk_speed(),
+	]
 
 
 func get_last_delta(value_name: StringName, default_value: float = 0.0) -> float:
