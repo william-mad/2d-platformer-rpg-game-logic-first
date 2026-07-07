@@ -563,6 +563,9 @@ func _on_projectile_victim_hit(
 
 
 func _apply_melee_anger_hit_relief(victim: Node) -> void:
+	if _victim_is_training_target(victim):
+		return
+
 	var anger_drop := _get_anger_drop_for_victim(victim)
 	if anger_drop <= 0.0:
 		return
@@ -588,10 +591,18 @@ func _apply_melee_anger_hit_relief(victim: Node) -> void:
 
 
 func _get_anger_drop_for_victim(victim: Node) -> float:
+	if _victim_is_training_target(victim):
+		return 0.0
+
 	if victim != null and is_instance_valid(victim) and victim.is_in_group("npc"):
 		return maxf(npc_relationship_anger_drop_on_target_hit, 0.0)
 
 	return maxf(anger_drop_on_target_hit, 0.0)
+
+
+func _victim_is_training_target(victim: Node) -> bool:
+	var victim_node := victim as Node2D
+	return _target_is_training_target(victim_node)
 
 
 func _update_projectile_aim() -> void:

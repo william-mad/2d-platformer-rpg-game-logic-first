@@ -3,6 +3,7 @@ class_name NpcStateFight extends NpcState
 @export var anger_value_name: StringName = &"anger"
 @export_range(0.0, 100.0, 0.1) var calm_anger_threshold: float = 60.0
 @export var target_groups: Array[StringName] = [&"player", &"npc"]
+@export var training_target_groups: Array[StringName] = [&"training_dummy", &"attack_target"]
 @export var require_player_normal_layer: bool = true
 @export_range(1, 32, 1) var normal_player_layer: int = 2
 @export var target_refresh_seconds: float = 0.25
@@ -149,6 +150,8 @@ func _can_target_for_fight(candidate: Node2D) -> bool:
 
 	if not _target_group_is_allowed(candidate):
 		return false
+	if _target_is_training_target(candidate):
+		return candidate.has_method("take_damage")
 	if candidate.is_in_group("npc"):
 		return (
 			npc != null
@@ -302,6 +305,11 @@ func _get_projectile_spawn_position(target_position: Vector2) -> Vector2:
 func _get_attack_aim_position(attack_target: Node2D) -> Vector2:
 	# Aim at the visible body center now, not just the older remembered location.
 	var aim_position := attack_target.global_position
+	if attack_target.has_method("get_attack_aim_position"):
+		var target_aim_position = attack_target.call("get_attack_aim_position")
+		if target_aim_position is Vector2:
+			return target_aim_position
+
 	var collision_shape := _get_attack_target_collision_shape(attack_target)
 	if collision_shape != null and not collision_shape.disabled:
 		aim_position = collision_shape.global_position
@@ -364,6 +372,8 @@ func _pick_search_wander_target() -> void:
 
 
 func _anger_is_calm() -> bool:
+	if _target_is_training_target(fight_target):
+		return false
 	if machine == null or anger_value_name == &"":
 		return false
 	if (
@@ -379,3 +389,14 @@ func _anger_is_calm() -> bool:
 		)
 
 	return machine.get_value(anger_value_name) <= calm_anger_threshold
+
+
+func _target_is_training_target(candidate: Node2D) -> bool:
+	if candidate == null or not is_instance_valid(candidate):
+		return false
+
+	for group_name in training_target_groups:
+		if candidate.is_in_group(String(group_name)):
+			return true
+
+	return false

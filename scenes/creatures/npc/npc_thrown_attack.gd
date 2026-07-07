@@ -166,6 +166,8 @@ func _apply_friendly_fire_penalty(victim: Node) -> void:
 func _apply_anger_hit_relief(victim: Node) -> void:
 	if anger_drop_on_intended_target_hit <= 0.0:
 		return
+	if _victim_is_training_target(victim):
+		return
 	if source_npc == null or not is_instance_valid(source_npc):
 		return
 	if victim == null or not is_instance_valid(victim):
@@ -189,6 +191,17 @@ func _apply_anger_hit_relief(victim: Node) -> void:
 
 	if source_npc.has_method("apply_social_event"):
 		source_npc.call("apply_social_event", {"anger": -absf(anger_drop_on_intended_target_hit)}, victim, false)
+
+
+func _victim_is_training_target(victim: Node) -> bool:
+	return (
+		victim != null
+		and is_instance_valid(victim)
+		and (
+			victim.is_in_group("training_dummy")
+			or victim.is_in_group("attack_target")
+		)
+	)
 
 
 func _is_intended_target(victim: Node) -> bool:

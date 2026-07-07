@@ -39,9 +39,11 @@ window/stretch/mode="viewport"
 
 [global_group]
 
+attack_target=""
 player=""
 rope_attachable=""
 saveable=""
+training_dummy=""
 
 [input]
 
