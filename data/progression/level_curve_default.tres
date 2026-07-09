@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="GlobalLevelCurve" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/progression/global_level_curve.gd" id="1_level_curve"]
+
+[resource]
+script = ExtResource("1_level_curve")
+starting_level = 1
+max_level = 30
+use_generated_level_curve = true
+first_level_up_xp = 50
+level_up_xp_multiplier = 2.0
+xp_required_by_level = Array[int]([0, 50, 125, 240, 400, 620, 900, 1250, 1680, 2200, 2820, 3550, 4400, 5380, 6500, 7770, 9200, 10800, 12580, 14550, 16720, 19100, 21700, 24530, 27600, 30920, 34500, 38350, 42480, 46900])
+fallback_level_xp_step = 4500
+fallback_level_xp_step_growth = 450
+base_damage_multiplier = 1.0
+damage_multiplier_per_level = 0.08
+max_hp_bonus_per_level = 5
+max_mana_bonus_per_level = 15

@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="AbilityDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/progression/ability_definition.gd" id="1_ability"]
+
+[resource]
+script = ExtResource("1_ability")
+id = &"mana_focus"
+display_name = "Mana Focus"
+description = "A manually unlockable mana-control milestone for future spending systems."
+category = &"mana"
+required_global_level = 1
+required_global_xp = 0
+required_skill_xp = {
+"mana": 75
+}
+prerequisite_ability_ids = Array[StringName]([&"basic_magic"])
+auto_unlock = false
+action_id = &"mana_focus"
+player_state_name = &""

@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="XPRewardDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/progression/xp_reward_definition.gd" id="1_reward"]
+
+[resource]
+script = ExtResource("1_reward")
+id = &"class.work_basics"
+display_name = "Work Class Time"
+description = "Batched XP for future work-focused classes or training."
+source_type = &"class_time"
+tags = Array[StringName]([&"class", &"work"])
+global_xp_amount = 0
+skill_xp_amounts = {
+"class": 2,
+"work": 4
+}
+per_minute = true

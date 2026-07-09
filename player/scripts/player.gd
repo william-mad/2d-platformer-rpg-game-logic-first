@@ -35,6 +35,13 @@ signal player_defeated
 @export var downed_decay_per_second: float = 32.0
 @export var charged_mana_damage_causes_knockout: bool = true
 @export_range(0.0, 1.0, 0.01) var charged_mana_knockout_threshold_ratio: float = 0.3334
+@export_group("Defeat")
+@export_range(0.0, 5.0, 0.05, "suffix:s") var defeat_game_over_delay_seconds: float = 1.15
+@export_range(0.05, 5.0, 0.05, "suffix:s") var defeat_screen_fade_seconds: float = 0.9
+@export_range(0, 200, 1) var defeat_screen_fade_layer: int = 110
+@export var defeat_screen_fade_color: Color = Color(0.0, 0.0, 0.0, 1.0)
+@export_range(0, 256, 1) var defeat_particle_amount: int = 42
+@export var defeat_particle_color: Color = Color(0.9, 0.04, 0.02, 0.9)
 #endregion
 
 #region //playerstats:
@@ -420,7 +427,7 @@ func take_damage(
 
 
 func _defeat() -> void:
-	# Called once when hp hits 0. Stops movement, freezes input, and lets GameOverScreen react.
+	# Called once when hp hits 0. Stops movement, freezes input, then lets GameOverScreen react.
 	if dead:
 		return
 
@@ -430,6 +437,18 @@ func _defeat() -> void:
 	set_physics_process(false)
 	set_process(false)
 	set_process_unhandled_input(false)
+	_start_defeat_transition()
+
+
+func _start_defeat_transition() -> void:
+	_spawn_defeat_particles()
+	_fade_defeat_screen()
+
+	if not is_inside_tree() or defeat_game_over_delay_seconds <= 0.0:
+		player_defeated.emit()
+		return
+
+	await get_tree().create_timer(defeat_game_over_delay_seconds).timeout
 	player_defeated.emit()
 
 
@@ -677,6 +696,9 @@ func update_mana_2_charge(delta: float) -> void:
 		return
 
 	if is_equal_approx(mana_2_amount, max_mana):
+		if mana_2_amount != max_mana:
+			mana_2_amount = max_mana
+			sync_mana_2_bar()
 		return
 
 	mana_2_amount = move_toward(mana_2_amount, max_mana, mana_2_charge_rate * delta)
@@ -701,6 +723,73 @@ func spend_mana_2(amount: float) -> void:
 func clear_mana_charge() -> void:
 	mana_amount = 0.0
 	PlayerHud.set_mana(mana_amount)
+
+
+func _fade_defeat_screen() -> void:
+	if not is_inside_tree():
+		return
+
+	var fade_layer := CanvasLayer.new()
+	fade_layer.name = "DefeatScreenFade"
+	fade_layer.layer = defeat_screen_fade_layer
+	add_child(fade_layer)
+
+	var fade_rect := ColorRect.new()
+	fade_rect.name = "Fade"
+	fade_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fade_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	var start_color := defeat_screen_fade_color
+	start_color.a = 0.0
+	fade_rect.color = start_color
+	fade_layer.add_child(fade_rect)
+
+	var target_color := defeat_screen_fade_color
+	target_color.a = clampf(target_color.a, 0.0, 1.0)
+	var fade_seconds := maxf(defeat_screen_fade_seconds, 0.05)
+	var tween := fade_rect.create_tween()
+	tween.tween_property(fade_rect, "color", target_color, fade_seconds).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+
+
+func _spawn_defeat_particles() -> void:
+	if defeat_particle_amount <= 0 or sprite_2d == null or not is_inside_tree():
+		return
+
+	var particles := CPUParticles2D.new()
+	particles.name = "DefeatParticles"
+	particles.position = sprite_2d.position
+	particles.z_index = sprite_2d.z_index + 2
+	particles.amount = defeat_particle_amount
+	particles.lifetime = maxf(defeat_game_over_delay_seconds, 0.4)
+	particles.one_shot = true
+	particles.explosiveness = 0.92
+	particles.randomness = 0.48
+	particles.direction = Vector2.UP
+	particles.spread = 82.0
+	particles.gravity = Vector2(0.0, -120.0)
+	particles.initial_velocity_min = 55.0
+	particles.initial_velocity_max = 180.0
+	particles.scale_amount_min = 2.0
+	particles.scale_amount_max = 5.0
+	particles.color = defeat_particle_color
+	particles.texture = _create_defeat_particle_texture()
+	add_child(particles)
+	particles.emitting = true
+
+	var cleanup := particles.create_tween()
+	cleanup.tween_interval(particles.lifetime + 0.1)
+	cleanup.tween_callback(particles.queue_free)
+
+
+func _create_defeat_particle_texture() -> Texture2D:
+	var image := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+	for y in range(8):
+		for x in range(8):
+			var point := Vector2(float(x) - 3.5, float(y) - 3.5)
+			var distance := point.length()
+			var alpha := clampf(1.0 - (distance / 4.0), 0.0, 1.0)
+			image.set_pixel(x, y, Color(1.0, 1.0, 1.0, alpha))
+
+	return ImageTexture.create_from_image(image)
 
 
 func apply_knockback(damage_source_position: Vector2) -> void:

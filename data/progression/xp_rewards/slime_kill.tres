@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="XPRewardDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/progression/xp_reward_definition.gd" id="1_reward"]
+
+[resource]
+script = ExtResource("1_reward")
+id = &"enemy_kill.slime"
+display_name = "Slime Kill"
+description = "Default reward for defeating a slime."
+source_type = &"enemy_kill"
+tags = Array[StringName]([&"enemy", &"slime", &"combat"])
+global_xp_amount = 3
+skill_xp_amounts = {
+"combat": 5
+}
+tagged_skill_xp_amounts = {
+"magic": {
+"magic": 3
+}
+}

@@ -1,5 +1,7 @@
 class_name Damage_Area extends Area2D
 
+const CombatLayers := preload("res://scripts/systems/combat_layers.gd")
+
 @export var hit_sound_enabled: bool = true
 @export var hit_sound_volume: float = 0.18
 @export var hit_sound_pitch: float = 520.0
@@ -22,8 +24,11 @@ func take_damage(attack) -> void:
 	play_hit_sound()
 	var damage_owner := get_parent()
 	var damage_source := get_damage_source(attack)
+	var attack_tags := get_attack_tags(attack)
 
 	if damage_owner != null and damage_owner.has_method("take_damage"):
+		if damage_owner.has_method("set_last_damage_tags"):
+			damage_owner.call("set_last_damage_tags", attack_tags)
 		damage_owner.take_damage(
 			attack.damage,
 			attack.global_position,
@@ -59,6 +64,27 @@ func get_knockout_damage(attack: Node) -> float:
 		return maxf(float(value), 0.0)
 
 	return 0.0
+
+
+func get_attack_tags(attack: Node) -> Array[StringName]:
+	var tags: Array[StringName] = []
+	if attack == null:
+		return tags
+
+	if attack is CollisionObject2D:
+		var collision_object := attack as CollisionObject2D
+		if collision_object.collision_layer & CombatLayers.ATTACK_SPELL_DETECTION_LAYER:
+			tags.append(&"magic")
+
+	if attack.has_meta("progression_tags"):
+		var meta_tags = attack.get_meta("progression_tags")
+		if meta_tags is Array:
+			for raw_tag in meta_tags:
+				var tag := StringName(String(raw_tag))
+				if tag != &"" and not tags.has(tag):
+					tags.append(tag)
+
+	return tags
 
 
 func play_hit_sound() -> void:

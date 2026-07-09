@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="AbilityDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/progression/ability_definition.gd" id="1_ability"]
+
+[resource]
+script = ExtResource("1_ability")
+id = &"dash"
+display_name = "Dash"
+description = "Allows the player to trigger the existing double-tap dash state."
+category = &"movement"
+required_global_level = 1
+required_global_xp = 0
+required_skill_xp = {}
+prerequisite_ability_ids = Array[StringName]([])
+auto_unlock = true
+action_id = &"dash"
+player_state_name = &"Dash"

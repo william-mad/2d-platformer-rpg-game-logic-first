@@ -1,0 +1,63 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/monsters/manual_slime_spawner.gd" id="1_spawner"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_spawner"]
+size = Vector2(112, 84)
+
+[node name="SlimeSpawner" type="Area2D"]
+collision_layer = 0
+collision_mask = 2
+monitorable = false
+script = ExtResource("1_spawner")
+spawn_offset = Vector2(-520, 0)
+
+[node name="ZoneVisual" type="Polygon2D" parent="."]
+unique_name_in_owner = true
+color = Color(0.35, 0.72, 0.36, 0.36)
+polygon = PackedVector2Array(-56, -42, 56, -42, 56, 42, -56, 42)
+
+[node name="SpawnLink" type="Line2D" parent="."]
+unique_name_in_owner = true
+points = PackedVector2Array(0, 0, -520, 0)
+width = 3.0
+default_color = Color(0.35, 0.9, 0.42, 0.45)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_spawner")
+debug_color = Color(0.35, 0.72, 0.36, 0.25)
+
+[node name="Label" type="Label" parent="."]
+unique_name_in_owner = true
+offset_left = -82.0
+offset_top = -72.0
+offset_right = 82.0
+offset_bottom = -47.0
+text = "UP: SLIME"
+horizontal_alignment = 1
+vertical_alignment = 1
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+
+[node name="SpawnPoint" type="Marker2D" parent="."]
+unique_name_in_owner = true
+position = Vector2(-520, 0)
+
+[node name="SpawnVisual" type="Polygon2D" parent="SpawnPoint"]
+color = Color(0.38, 0.9, 0.42, 0.5)
+polygon = PackedVector2Array(0, -32, 36, 0, 0, 32, -36, 0)
+
+[node name="SpawnLabel" type="Label" parent="SpawnPoint"]
+offset_left = -78.0
+offset_top = -70.0
+offset_right = 78.0
+offset_bottom = -45.0
+text = "SLIME SPAWN"
+horizontal_alignment = 1
+vertical_alignment = 1
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1

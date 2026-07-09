@@ -3,10 +3,12 @@ class_name NpcStateFight extends NpcState
 @export var anger_value_name: StringName = &"anger"
 @export_range(0.0, 100.0, 0.1) var calm_anger_threshold: float = 60.0
 @export var target_groups: Array[StringName] = [&"player", &"npc"]
+@export var monster_target_groups: Array[StringName] = [&"monster", &"monsters", &"enemy", &"enemies"]
 @export var training_target_groups: Array[StringName] = [&"training_dummy", &"attack_target"]
 @export var require_player_normal_layer: bool = true
 @export_range(1, 32, 1) var normal_player_layer: int = 2
 @export var target_refresh_seconds: float = 0.25
+@export_range(0.0, 100.0, 0.1, "suffix:%") var stop_fighting_below_health_percent: float = 20.0
 
 @export_group("Movement")
 @export var chase_speed_multiplier: float = 1.08
@@ -44,6 +46,7 @@ var paused_at_last_known_position: bool = false
 var search_wander_timer: float = 0.0
 var search_target_x: float = 0.0
 var rng := RandomNumberGenerator.new()
+var fight_target_was_monster: bool = false
 
 
 func enter() -> void:
@@ -55,7 +58,8 @@ func enter() -> void:
 	last_known_pause_timer = 0.0
 	paused_at_last_known_position = false
 	search_wander_timer = 0.0
-	fight_target = _find_fight_target()
+	fight_target_was_monster = false
+	_set_fight_target(_find_fight_target())
 	_remember_target_position()
 
 
@@ -68,6 +72,11 @@ func values_changed(
 	_changed_values: Dictionary,
 	_actor: Node2D
 ) -> NpcState:
+	var finished_state := _get_finished_fight_state()
+	if finished_state != null:
+		return finished_state
+	if _should_stop_for_low_health():
+		return get_state(&"Idle")
 	if _anger_is_calm():
 		return get_state(&"Idle")
 
@@ -75,6 +84,11 @@ func values_changed(
 
 
 func physics_process(delta: float) -> NpcState:
+	var finished_state := _get_finished_fight_state()
+	if finished_state != null:
+		return finished_state
+	if _should_stop_for_low_health():
+		return get_state(&"Idle")
 	if _anger_is_calm():
 		return get_state(&"Idle")
 
@@ -91,12 +105,18 @@ func physics_process(delta: float) -> NpcState:
 
 func can_exit_to(new_state: NpcState, request_priority: int) -> bool:
 	# Fight holds control until anger cools, but death/collapse-level requests can still win.
+	if _should_stop_for_low_health():
+		return true
 	if _anger_is_calm():
 		return true
 	if new_state != null and String(new_state.name) == "DisabledDead":
 		return true
 
 	return request_priority >= minimum_interrupt_priority
+
+
+func can_start_fight_with(candidate: Node2D) -> bool:
+	return not _should_stop_for_low_health() and _can_target_for_fight(candidate)
 
 
 func _update_target(delta: float) -> void:
@@ -108,7 +128,7 @@ func _update_target(delta: float) -> void:
 	if _has_fight_target():
 		return
 
-	fight_target = _find_fight_target()
+	_set_fight_target(_find_fight_target())
 
 
 func _find_fight_target() -> Node2D:
@@ -124,7 +144,7 @@ func _find_fight_target() -> Node2D:
 	var npc_position := npc.global_position
 	var closest_target: Node2D = null
 	var closest_distance_squared := INF
-	for group_name in target_groups:
+	for group_name in _get_target_search_groups():
 		# get_nodes_in_group accepts StringName directly; avoid per-iteration String coercion.
 		for candidate in npc.get_tree().get_nodes_in_group(group_name):
 			var candidate_node := candidate as Node2D
@@ -147,6 +167,11 @@ func _can_target_for_fight(candidate: Node2D) -> bool:
 		return false
 	if candidate == npc:
 		return false
+	if _target_is_defeated(candidate):
+		return false
+
+	if _target_is_monster(candidate):
+		return candidate.has_method("take_damage")
 
 	if not _target_group_is_allowed(candidate):
 		return false
@@ -167,6 +192,9 @@ func _can_target_for_fight(candidate: Node2D) -> bool:
 
 
 func _target_group_is_allowed(candidate: Node2D) -> bool:
+	if _target_is_monster(candidate):
+		return true
+
 	if target_groups.is_empty():
 		return true
 
@@ -372,6 +400,10 @@ func _pick_search_wander_target() -> void:
 
 
 func _anger_is_calm() -> bool:
+	if fight_target != null and _target_is_defeated(fight_target):
+		return true
+	if _target_is_monster(fight_target):
+		return false
 	if _target_is_training_target(fight_target):
 		return false
 	if machine == null or anger_value_name == &"":
@@ -389,6 +421,111 @@ func _anger_is_calm() -> bool:
 		)
 
 	return machine.get_value(anger_value_name) <= calm_anger_threshold
+
+
+func _get_finished_fight_state() -> NpcState:
+	if fight_target == null or not _target_is_defeated(fight_target):
+		return null
+	if (
+		(_target_is_monster(fight_target) or fight_target_was_monster)
+		and _should_look_for_monster_after_fight()
+	):
+		return get_state(machine.look_for_monster_state_name)
+
+	return get_state(&"Idle")
+
+
+func _set_fight_target(new_target: Node2D) -> void:
+	fight_target = new_target
+	if fight_target != null:
+		fight_target_was_monster = _target_is_monster(fight_target)
+
+
+func _should_look_for_monster_after_fight() -> bool:
+	if machine == null or not machine.has_method("should_look_for_monster_after_fight"):
+		return false
+
+	return bool(machine.call("should_look_for_monster_after_fight"))
+
+
+func _should_stop_for_low_health() -> bool:
+	if stop_fighting_below_health_percent <= 0.0:
+		return false
+
+	return _get_npc_health_percent() < stop_fighting_below_health_percent
+
+
+func _get_npc_health_percent() -> float:
+	var current_hp := 100.0
+	if npc != null and npc.has_method("get_hp"):
+		current_hp = float(npc.call("get_hp"))
+	elif machine != null:
+		current_hp = machine.get_value(&"hp", 100.0)
+
+	var max_hp := _get_node_float_property(npc, &"max_hp", 100.0)
+	if max_hp <= 0.0:
+		max_hp = 100.0
+
+	return (clampf(current_hp, 0.0, max_hp) / max_hp) * 100.0
+
+
+func _get_target_search_groups() -> Array[StringName]:
+	var groups: Array[StringName] = []
+	for group_name in target_groups:
+		if not groups.has(group_name):
+			groups.append(group_name)
+	return groups
+
+
+func _target_is_monster(candidate: Node) -> bool:
+	if candidate == null or not is_instance_valid(candidate):
+		return false
+
+	for group_name in monster_target_groups:
+		if candidate.is_in_group(String(group_name)):
+			return true
+
+	return false
+
+
+func _target_is_defeated(candidate: Node) -> bool:
+	if candidate == null or not is_instance_valid(candidate):
+		return true
+
+	var dead_value = candidate.get("dead")
+	if typeof(dead_value) == TYPE_BOOL and bool(dead_value):
+		return true
+
+	var disabled_value = candidate.get("disabled")
+	if typeof(disabled_value) == TYPE_BOOL and bool(disabled_value):
+		return true
+
+	if candidate.has_method("get_current_health"):
+		return float(candidate.call("get_current_health")) <= 0.0
+
+	if candidate.has_method("get_hp"):
+		return float(candidate.call("get_hp")) <= 0.0
+
+	var hp_value = candidate.get("hp")
+	if typeof(hp_value) == TYPE_FLOAT or typeof(hp_value) == TYPE_INT:
+		return float(hp_value) <= 0.0
+
+	return false
+
+
+func _get_node_float_property(node: Node, property_name: StringName, fallback: float) -> float:
+	if node == null:
+		return fallback
+
+	for property in node.get_property_list():
+		if String(property.get("name", "")) != String(property_name):
+			continue
+		var value = node.get(property_name)
+		if typeof(value) == TYPE_FLOAT or typeof(value) == TYPE_INT:
+			return float(value)
+		return fallback
+
+	return fallback
 
 
 func _target_is_training_target(candidate: Node2D) -> bool:

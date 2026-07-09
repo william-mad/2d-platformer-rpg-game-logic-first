@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="SkillDomainDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/progression/skill_domain_definition.gd" id="1_domain"]
+
+[resource]
+script = ExtResource("1_domain")
+id = &"mana"
+display_name = "Mana"
+description = "Practice with mana control, charging, and recovery."
+tags = Array[StringName]([&"mana", &"magic"])

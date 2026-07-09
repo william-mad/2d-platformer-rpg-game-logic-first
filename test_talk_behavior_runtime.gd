@@ -31,6 +31,41 @@ class LessonMom:
 		return "mom"
 
 
+class EmptyFoodSpot:
+	extends Node2D
+
+	func can_serve_npc_need(
+		_npc_node: Node2D,
+		_requested_state_name: StringName,
+		_requested_value_name: StringName = &""
+	) -> bool:
+		return true
+
+	func consume_eat_amount(_requested_hunger_amount: float) -> float:
+		return 0.0
+
+
+class TestMonster:
+	extends CharacterBody2D
+
+	var hp: float = 30.0
+	var dead: bool = false
+
+	func take_damage(
+		amount: float,
+		_damage_source_position: Vector2 = Vector2.ZERO,
+		_damage_source: Node = null,
+		_knockout_damage: float = 0.0
+	) -> void:
+		if dead:
+			return
+		hp = maxf(hp - amount, 0.0)
+		dead = hp <= 0.0
+
+	func get_current_health() -> float:
+		return hp
+
+
 func _initialize() -> void:
 	await process_frame
 	_run_tests()
@@ -52,8 +87,15 @@ func _run_tests() -> void:
 	_test_far_talk_request_approaches_without_cancel_loop()
 	_test_hungry_reaction_waits_without_usable_eat_spot()
 	_test_hungry_reaction_uses_available_eat_spot()
+	_test_eat_state_stops_when_food_spot_supplies_nothing()
 	_test_starvation_damage_starts_at_hunger_cap()
 	_test_tired_speed_scaling()
+	_test_seen_monster_starts_fight()
+	_test_seen_monster_can_flee_for_coward_npc()
+	_test_monster_damage_does_not_change_social_anger()
+	_test_monster_fight_respects_low_health_stop()
+	_test_look_for_monster_after_kill_finds_next_monster()
+	_test_unrelated_fight_does_not_scan_monsters_by_default()
 	_test_npc_prompt_calls_accept_once()
 	_test_magic_lesson_accept_and_decline_paths()
 	_test_title_scene_instantiates_without_crashing()
@@ -171,6 +213,25 @@ func _test_hungry_reaction_uses_available_eat_spot() -> void:
 	_free_setup(setup)
 
 
+func _test_eat_state_stops_when_food_spot_supplies_nothing() -> void:
+	var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var machine: NpcStateMachine = setup["machine"]
+	machine.values["hunger"] = 50.0
+
+	var empty_food := EmptyFoodSpot.new()
+	empty_food.name = "EmptyFood"
+	empty_food.global_position = Vector2.ZERO
+	root.add_child(empty_food)
+	setup["spot"] = empty_food
+
+	_expect_true(machine.assign_eat_target(empty_food, 50), "empty food spot can start Eat")
+	_expect_state(machine, "Eat", "NPC enters Eat before empty food is detected")
+	var next_state := machine.current_state.physics_process(0.1)
+	_expect_true(next_state != null and String(next_state.name) == "Idle", "Eat stops when food supplies no hunger")
+	_expect_approx(machine.get_value(&"hunger"), 50.0, 0.001, "empty food does not change hunger")
+	_free_setup(setup)
+
+
 func _test_starvation_damage_starts_at_hunger_cap() -> void:
 	var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
 	var machine: NpcStateMachine = setup["machine"]
@@ -226,6 +287,117 @@ func _test_tired_speed_scaling() -> void:
 	machine.free()
 
 
+func _test_seen_monster_starts_fight() -> void:
+	var setup := _create_combat_npc("Defender", Vector2.ZERO)
+	var machine: NpcStateMachine = setup["machine"]
+	var monster := _create_test_monster(Vector2(48.0, 0.0))
+	setup["monster"] = monster
+
+	machine.notify_target_seen(monster)
+
+	_expect_state(machine, "Fight", "seeing a monster starts Fight")
+	_expect_true(machine.target == monster, "seen monster is the fight target")
+	_free_setup(setup)
+
+
+func _test_seen_monster_can_flee_for_coward_npc() -> void:
+	var setup := _create_combat_npc("CowardDefender", Vector2.ZERO)
+	var machine: NpcStateMachine = setup["machine"]
+	var monster := _create_test_monster(Vector2(48.0, 0.0))
+	setup["monster"] = monster
+
+	machine.seen_monster_reaction = NpcStateMachine.MonsterSightReaction.FLEE
+	machine.notify_target_seen(monster)
+
+	_expect_state(machine, "Flee", "coward monster reaction starts Flee")
+	_expect_true(machine.target == monster, "coward NPC flees from the seen monster")
+	_free_setup(setup)
+
+
+func _test_monster_damage_does_not_change_social_anger() -> void:
+	var setup := _create_combat_npc("DamagedDefender", Vector2.ZERO)
+	var npc: SocialNpc = setup["npc"]
+	var machine: NpcStateMachine = setup["machine"]
+	var monster := _create_test_monster(Vector2(48.0, 0.0))
+	setup["monster"] = monster
+
+	var starting_favor := float(npc.social_stats.get("favor", 0.0))
+	var starting_anger := float(npc.social_stats.get("anger", 0.0))
+	npc.take_damage(10.0, monster.global_position, monster, 0.0)
+
+	_expect_approx(float(npc.social_stats.get("favor", 0.0)), starting_favor, 0.001, "monster damage does not lower player-style favor")
+	_expect_approx(float(npc.social_stats.get("anger", 0.0)), starting_anger, 0.001, "monster damage does not add player-style anger")
+	_expect_false(machine.is_in_state(&"Fight"), "monster damage alone waits for sight")
+	_free_setup(setup)
+
+
+func _test_monster_fight_respects_low_health_stop() -> void:
+	var setup := _create_combat_npc("LowHealthDefender", Vector2.ZERO)
+	var npc: SocialNpc = setup["npc"]
+	var machine: NpcStateMachine = setup["machine"]
+	var monster := _create_test_monster(Vector2(48.0, 0.0))
+	setup["monster"] = monster
+
+	npc.apply_social_event({"hp": -82.0}, null, false)
+	machine.notify_target_seen(monster)
+
+	_expect_false(machine.is_in_state(&"Fight"), "monster fight does not start below the editable health stop")
+	_free_setup(setup)
+
+
+func _test_look_for_monster_after_kill_finds_next_monster() -> void:
+	var setup := _create_combat_npc("HunterDefender", Vector2.ZERO)
+	var machine: NpcStateMachine = setup["machine"]
+	var first_monster := _create_test_monster(Vector2(48.0, 0.0))
+	var second_monster := _create_test_monster(Vector2(96.0, 0.0))
+	setup["monster"] = first_monster
+
+	var search_state := machine.get_state(&"LookForMonster") as NpcStateLookForMonster
+	_expect_true(search_state != null, "combat NPC has LookForMonster state")
+	if search_state != null:
+		search_state.require_visibility = false
+		search_state.use_search_wander = false
+
+	machine.notify_target_seen(first_monster)
+	_expect_state(machine, "Fight", "first seen monster starts Fight")
+
+	first_monster.dead = true
+	var next_state := machine.current_state.physics_process(0.1)
+	_expect_true(next_state != null and String(next_state.name) == "LookForMonster", "dead monster starts timed monster search")
+	if next_state != null:
+		machine.change_state(next_state, "test_monster_dead", 94)
+
+	_expect_state(machine, "LookForMonster", "NPC is searching for another monster")
+	machine.current_state.physics_process(0.1)
+	_expect_state(machine, "Fight", "monster search finds the next monster")
+	_expect_true(machine.target == second_monster, "monster search fights the next monster")
+
+	_free_nodes([second_monster])
+	_free_setup(setup)
+
+
+func _test_unrelated_fight_does_not_scan_monsters_by_default() -> void:
+	var setup := _create_combat_npc("AngryDefender", Vector2.ZERO)
+	var machine: NpcStateMachine = setup["machine"]
+	var monster := _create_test_monster(Vector2(8.0, 0.0))
+	setup["monster"] = monster
+
+	var player := CharacterBody2D.new()
+	player.name = "Player"
+	player.add_to_group("player")
+	player.collision_layer = 0
+	player.set_collision_layer_value(2, true)
+	player.global_position = Vector2(80.0, 0.0)
+	root.add_child(player)
+	setup["player"] = player
+
+	machine.values["anger"] = 100.0
+	_expect_true(machine.request_state(&"Fight", null, "global_anger_test", 94), "global anger can start Fight")
+	var fight_state := machine.current_state as NpcStateFight
+	_expect_true(fight_state != null and fight_state.fight_target == player, "default Fight search ignores unprovoked monsters")
+	_free_setup(setup)
+
+
 func _test_npc_prompt_calls_accept_once() -> void:
 	var setup := _create_prompt_setup()
 	var interactor: PlayerNpcTalkInteractor = setup["interactor"]
@@ -274,13 +446,16 @@ func _test_magic_lesson_accept_and_decline_paths() -> void:
 	_expect_equal(accept_mom.global_position, Vector2(72.0, 64.0), "accept places mom")
 	var progress_before := accept_spot.get_lesson_progress()
 	accept_spot._process(0.25)
-	_expect_approx(accept_spot.get_lesson_progress(), progress_before - 25.0, 0.001, "lesson progresses by game time")
+	_expect_approx(accept_spot.get_lesson_progress(), progress_before + 25.0, 0.001, "lesson score counts up by game time")
 	_expect_true(accept_spot.label != null, "lesson spot creates a visible label")
 	if accept_spot.label != null:
-		_expect_true(accept_spot.label.text.contains("75"), "lesson label shows remaining progress")
+		_expect_true(accept_spot.label.text.contains("25"), "lesson label shows earned score")
 		_expect_true(accept_spot.label.text.contains("class"), "lesson label shows running class state")
 	accept_spot.complete_lesson()
 	_expect_equal(String(accept_spot.get_lesson_state()), "completed", "lesson completes")
+	var lesson_result := accept_spot.get_last_lesson_result()
+	_expect_approx(float(lesson_result.get("score", -1.0)), 25.0, 0.001, "lesson records final score")
+	_expect_approx(float(accept_player.get_meta("last_magic_lesson_score")), 25.0, 0.001, "lesson stores player score hook")
 	_expect_equal(float(accept_player.get_meta("magic_xp")), 1.0, "lesson grants player reward")
 	_expect_equal(accept_mom.social_events.size(), 1, "lesson applies mom effect once")
 	accept_spot.complete_lesson()
@@ -359,6 +534,46 @@ func _create_talk_setup(npc_position: Vector2, partner_position: Vector2) -> Dic
 		"partner": partner,
 		"machine": machine,
 	}
+
+
+func _create_combat_npc(display_name: String, npc_position: Vector2) -> Dictionary:
+	var packed_scene := load("res://scenes/creatures/npc/stateful_social_npc.tscn") as PackedScene
+	_expect_true(packed_scene != null, "%s combat NPC scene loads" % display_name)
+	if packed_scene == null:
+		return {}
+
+	var npc := packed_scene.instantiate() as SocialNpc
+	_expect_true(npc != null, "%s combat NPC instantiates" % display_name)
+	if npc == null:
+		return {}
+
+	npc.name = display_name
+	npc.display_name = display_name
+	npc.location_id = StringName(display_name.to_snake_case())
+	npc.use_npc_location_tracking = false
+	npc.listen_to_event_bus = false
+	npc.global_position = npc_position
+	root.add_child(npc)
+
+	var machine := npc.get_node_or_null("NpcStateMachine") as NpcStateMachine
+	_expect_true(machine != null, "%s combat NPC has state machine" % display_name)
+	return {
+		"npc": npc,
+		"machine": machine,
+	}
+
+
+func _create_test_monster(monster_position: Vector2) -> TestMonster:
+	var monster := TestMonster.new()
+	monster.name = "TestMonster"
+	monster.global_position = monster_position
+	monster.add_to_group("monster")
+	monster.add_to_group("monsters")
+	monster.add_to_group("enemy")
+	monster.add_to_group("enemies")
+	monster.add_to_group("attack_target")
+	root.add_child(monster)
+	return monster
 
 
 func _create_prompt_setup() -> Dictionary:
@@ -473,7 +688,7 @@ func _create_eat_spot(spot_name: StringName, owner_ids: Array) -> NpcNeedSpot:
 
 func _free_setup(setup: Dictionary) -> void:
 	var freed: Array[Node] = []
-	for key in ["spot", "npc", "partner", "player", "callback"]:
+	for key in ["spot", "npc", "partner", "player", "callback", "monster"]:
 		var node = setup.get(key, null) as Node
 		if node == null or not is_instance_valid(node):
 			continue
@@ -481,6 +696,13 @@ func _free_setup(setup: Dictionary) -> void:
 			continue
 		freed.append(node)
 		node.free()
+
+
+func _free_nodes(nodes: Array) -> void:
+	for node_value in nodes:
+		var node := node_value as Node
+		if node != null and is_instance_valid(node):
+			node.free()
 
 
 func _expect_state(machine: NpcStateMachine, expected_state: String, label: String) -> void:

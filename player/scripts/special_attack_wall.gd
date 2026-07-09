@@ -1,5 +1,7 @@
 class_name PlayerSpecialAttackWall extends Area2D
 
+const CombatLayers := preload("res://scripts/systems/combat_layers.gd")
+
 @export var damage: float = 25.0
 @export var knockout_damage: float = 0.0
 @export var speed: float = 320.0
@@ -22,7 +24,7 @@ var damaged_victims: Array[Node] = []
 
 
 func _ready() -> void:
-	collision_layer = 0
+	CombatLayers.mark_attack_spell(self)
 	collision_mask = collision_mask_value
 	monitoring = true
 	monitorable = false

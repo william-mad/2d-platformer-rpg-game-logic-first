@@ -18,6 +18,13 @@ const STATE_ALIASES := {
 	"Routine Task": "RoutineTask",
 }
 
+enum MonsterSightReaction {
+	NONE,
+	FIGHT,
+	FLEE,
+	SCREAM,
+}
+
 @export_group("Setup")
 @export var npc_path: NodePath
 @export var initial_state_name: StringName = &"Idle"
@@ -45,6 +52,7 @@ const STATE_ALIASES := {
 @export var default_talk_time: float = 1.5
 @export_range(0.0, 1440.0, 1.0, "suffix:min") var default_talk_game_minutes: float = 10.0
 @export var default_look_for_talk_time: float = 4.0
+@export var default_look_for_monster_time: float = 4.0
 @export var default_flee_time: float = 4.0
 @export var default_sleep_time: float = 4.0
 @export_range(0.0, 24.0, 0.05, "suffix:h") var default_sleep_game_hours: float = 8.0
@@ -270,6 +278,17 @@ const STATE_ALIASES := {
 @export var flee_from_seen_player_when_afraid: bool = true
 @export var seen_player_flee_state_name: StringName = &"Flee"
 @export var seen_player_flee_priority: int = 90
+
+@export_group("Monster Sight")
+@export var react_to_seen_monsters: bool = true
+@export var monster_target_groups: Array[StringName] = [&"monster", &"monsters", &"enemy", &"enemies"]
+@export var seen_monster_reaction: MonsterSightReaction = MonsterSightReaction.FIGHT
+@export_range(0, 1000, 1) var seen_monster_reaction_priority: int = 94
+@export var seen_monster_fight_state_name: StringName = &"Fight"
+@export var seen_monster_flee_state_name: StringName = &"Flee"
+@export var seen_monster_scream_state_name: StringName = &""
+@export var look_for_monster_after_fight: bool = true
+@export var look_for_monster_state_name: StringName = &"LookForMonster"
 
 var npc: CharacterBody2D
 var states: Array[NpcState] = []
@@ -557,6 +576,8 @@ func notify_target_seen(seen_target: Node2D) -> void:
 		if requested_state != null and change_state(requested_state, "target_seen"):
 			return
 
+	if _maybe_react_to_seen_monster(seen_target):
+		return
 	if _maybe_fight_from_seen_target(seen_target):
 		return
 	if _maybe_flee_from_seen_player(seen_target):
@@ -569,6 +590,92 @@ func notify_target_seen(seen_target: Node2D) -> void:
 
 	if react_to_player_on_seen and seen_target.is_in_group("player"):
 		request_state(player_seen_state_name, seen_target, "player_seen", 10)
+
+
+func _maybe_react_to_seen_monster(seen_target: Node2D) -> bool:
+	if not react_to_seen_monsters:
+		return false
+	if not is_monster_target(seen_target):
+		return false
+
+	return request_monster_reaction(
+		seen_target,
+		"monster_seen",
+		seen_monster_reaction_priority
+	)
+
+
+func request_monster_reaction(
+	monster: Node2D,
+	reason: String = "monster_reaction",
+	request_priority: int = -1
+) -> bool:
+	if not active or not react_to_seen_monsters:
+		return false
+	if monster == null or not is_instance_valid(monster):
+		return false
+	if monster == npc:
+		return false
+	if not is_monster_target(monster):
+		return false
+
+	var applied_priority := seen_monster_reaction_priority
+	if request_priority >= 0:
+		applied_priority = request_priority
+
+	set_target(monster)
+	last_actor = monster
+
+	match seen_monster_reaction:
+		MonsterSightReaction.NONE:
+			return false
+		MonsterSightReaction.FIGHT:
+			return _request_monster_fight(monster, reason, applied_priority)
+		MonsterSightReaction.FLEE:
+			if seen_monster_flee_state_name == &"":
+				return false
+			return request_state(seen_monster_flee_state_name, monster, reason, applied_priority)
+		MonsterSightReaction.SCREAM:
+			if seen_monster_scream_state_name == &"":
+				return false
+			return request_state(seen_monster_scream_state_name, monster, reason, applied_priority)
+
+	return false
+
+
+func _request_monster_fight(monster: Node2D, reason: String, request_priority: int) -> bool:
+	if seen_monster_fight_state_name == &"":
+		return false
+
+	var fight_state := get_state(seen_monster_fight_state_name)
+	if fight_state == null:
+		return false
+	if fight_state.has_method("can_start_fight_with"):
+		if not bool(fight_state.call("can_start_fight_with", monster)):
+			return false
+
+	return request_state(seen_monster_fight_state_name, monster, reason, request_priority)
+
+
+func is_monster_target(candidate: Node) -> bool:
+	if candidate == null or not is_instance_valid(candidate):
+		return false
+
+	for group_name in monster_target_groups:
+		if candidate.is_in_group(String(group_name)):
+			return true
+
+	return false
+
+
+func should_look_for_monster_after_fight() -> bool:
+	return (
+		react_to_seen_monsters
+		and look_for_monster_after_fight
+		and look_for_monster_state_name != &""
+		and get_state(look_for_monster_state_name) != null
+		and seen_monster_reaction != MonsterSightReaction.NONE
+	)
 
 
 func _maybe_fight_from_seen_target(seen_target: Node2D) -> bool:

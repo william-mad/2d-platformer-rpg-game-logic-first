@@ -3,6 +3,7 @@ class_name MagicLessonSpot extends Node2D
 signal lesson_invitation_started(mom: Node2D, player: Node2D)
 signal lesson_started(mom: Node2D, player: Node2D)
 signal lesson_completed(mom: Node2D, player: Node2D)
+signal lesson_score_finalized(mom: Node2D, player: Node2D, score: float, result: Dictionary)
 signal lesson_cancelled(reason: StringName)
 signal lesson_declined(mom: Node2D, player: Node2D)
 
@@ -15,14 +16,21 @@ const STATE_CANCELLED := &"cancelled"
 
 @export var spot_id: StringName = &"mom_magic_lesson"
 @export var world_definition: NpcSpotDefinition
+@export var lesson_enabled: bool = true
 @export var lesson_id: StringName = &"mom_magic_lesson"
 @export_range(0.5, 120.0, 0.1, "suffix:s") var lesson_duration_seconds: float = 6.0
 @export_range(0.05, 24.0, 0.05, "suffix:h") var fallback_lesson_game_hours: float = 1.0
+@export_range(0.0, 10000.0, 0.1, "suffix:/h") var lesson_progress_per_game_hour: float = 100.0
+@export_range(0.0, 10000.0, 0.1) var lesson_progress_max: float = 100.0
+@export_range(0.0, 20.0, 0.01) var lesson_progress_multiplier: float = 1.0
 @export_range(0.5, 60.0, 0.1, "suffix:s") var prompt_timeout_seconds: float = 20.0
 @export var prompt_title: String = "Study magic with Mom?"
 @export var prompt_options: PackedStringArray = ["Yes", "Not now"]
 @export var mom_marker_path: NodePath = NodePath("MomLessonPosition")
 @export var player_marker_path: NodePath = NodePath("PlayerLessonPosition")
+@export var lesson_zone_half_extents: Vector2 = Vector2(256.0, 88.0)
+@export var require_player_in_lesson_zone: bool = true
+@export var lock_player_during_lesson: bool = false
 @export var label_prefix: String = "Magic Lesson"
 @export var show_owner_debug_label: bool = true
 @export var ready_color: Color = Color(0.18, 0.82, 0.28, 0.46)
@@ -41,6 +49,9 @@ var active_mom: Node2D
 var active_player: Node2D
 var lesson_timer: float = 0.0
 var lesson_progress: float = 0.0
+var availability_value: float = 0.0
+var last_lesson_result: Dictionary = {}
+var player_action_mode: StringName = &""
 var reward_applied: bool = false
 var completed_day: int = -1
 var skipped_day: int = -1
@@ -53,7 +64,13 @@ func _ready() -> void:
 	if world_definition != null and spot_id == &"":
 		spot_id = world_definition.spot_id
 	_ensure_visual_nodes()
-	_setup_lesson_progress()
+	_setup_lesson_state_values()
+	if not lesson_enabled:
+		_register_live_spot()
+		_breadcrumb("magic_lesson:disabled_ready", String(spot_id))
+		_update_visual()
+		set_process(false)
+		return
 	if _magic_lesson_disabled():
 		_breadcrumb("magic_lesson:disabled_ready", String(spot_id))
 		_update_visual()
@@ -75,6 +92,9 @@ func _process(delta: float) -> void:
 		return
 
 	if state != STATE_RUNNING:
+		if state == STATE_INVITING and not _lesson_schedule_is_active():
+			cancel_lesson(&"schedule_ended")
+			return
 		if state == STATE_INVITING and not _participants_valid():
 			cancel_lesson(&"invalid_participant")
 		return
@@ -83,10 +103,20 @@ func _process(delta: float) -> void:
 		cancel_lesson(&"invalid_participant")
 		return
 
-	_hold_participants()
-	_apply_lesson_progress(delta)
-	if _lesson_progress_is_done():
+	if not _lesson_schedule_is_active():
 		complete_lesson()
+		return
+
+	_hold_participants()
+	lesson_timer -= delta
+	if _schedule_fallback_timer_is_done():
+		complete_lesson()
+		return
+
+	if _participants_are_counting_progress():
+		_apply_lesson_progress(delta)
+	else:
+		_update_visual()
 
 
 func can_start_lesson(mom: Node2D, player: Node2D) -> bool:
@@ -178,6 +208,8 @@ func start_lesson(mom: Node2D, player: Node2D) -> void:
 	active_player = player
 	state = STATE_RUNNING
 	reward_applied = false
+	last_lesson_result = {}
+	lesson_progress = _get_lesson_progress_floor()
 	lesson_timer = _get_lesson_real_seconds()
 	_place_participants()
 	_lock_participants()
@@ -190,9 +222,10 @@ func complete_lesson() -> void:
 	if state == STATE_COMPLETED:
 		return
 
-	_apply_reward_once()
 	var completed_mom := active_mom
 	var completed_player := active_player
+	_finalize_lesson_score(completed_mom, completed_player)
+	_apply_reward_once()
 	completed_day = _get_current_day()
 	state = STATE_COMPLETED
 	_unlock_participants()
@@ -239,11 +272,19 @@ func get_lesson_progress() -> float:
 	return lesson_progress
 
 
+func get_last_lesson_result() -> Dictionary:
+	return last_lesson_result.duplicate(true)
+
+
+func is_lesson_spot_enabled() -> bool:
+	return not _magic_lesson_disabled()
+
+
 func apply_world_spot_value(changed_spot_id: StringName, new_value: float) -> void:
 	if changed_spot_id != spot_id:
 		return
 
-	lesson_progress = _clamp_lesson_progress(new_value)
+	availability_value = _clamp_availability_value(new_value)
 	_update_visual()
 
 
@@ -264,25 +305,29 @@ func _place_participants() -> void:
 
 
 func _lock_participants() -> void:
+	player_action_mode = &""
 	if active_player != null and is_instance_valid(active_player):
-		if active_player.has_method("begin_movement_lock"):
+		if lock_player_during_lesson and active_player.has_method("begin_movement_lock"):
 			active_player.call("begin_movement_lock", self, &"magic_lesson")
+			player_action_mode = &"movement_lock"
 		elif active_player.has_method("begin_spot_action"):
 			active_player.call("begin_spot_action", self, &"magic_lesson")
+			player_action_mode = &"spot_action"
 
 
 func _unlock_participants() -> void:
 	if active_player != null and is_instance_valid(active_player):
-		if active_player.has_method("end_movement_lock"):
+		if player_action_mode == &"movement_lock" and active_player.has_method("end_movement_lock"):
 			active_player.call("end_movement_lock", self, &"magic_lesson", state == STATE_COMPLETED)
-		elif active_player.has_method("end_spot_action"):
+		elif player_action_mode == &"spot_action" and active_player.has_method("end_spot_action"):
 			active_player.call("end_spot_action", self, &"magic_lesson", state == STATE_COMPLETED)
+	player_action_mode = &""
 
 
 func _hold_participants() -> void:
 	if active_mom != null and is_instance_valid(active_mom):
 		_stop_body(active_mom)
-	if active_player != null and is_instance_valid(active_player):
+	if lock_player_during_lesson and active_player != null and is_instance_valid(active_player):
 		_stop_body(active_player)
 
 
@@ -313,11 +358,34 @@ func _apply_reward_once() -> void:
 				machine.call("apply_value_delta", mom_reward_delta, active_player)
 
 
+func _finalize_lesson_score(mom: Node2D, player: Node2D) -> void:
+	last_lesson_result = {
+		"lesson_id": String(lesson_id),
+		"spot_id": String(spot_id),
+		"score": lesson_progress,
+		"completed_day": _get_current_day(),
+		"completed_total_hours": _get_current_total_hours(),
+		"progress_multiplier": _get_lesson_progress_multiplier(),
+	}
+	if player != null and is_instance_valid(player):
+		player.set_meta("last_magic_lesson_score", lesson_progress)
+		player.set_meta("last_magic_lesson_result", last_lesson_result.duplicate(true))
+	if mom != null and is_instance_valid(mom):
+		mom.set_meta("last_magic_lesson_score", lesson_progress)
+		_set_activity_lesson_score(lesson_progress)
+
+	var result_text := JSON.stringify(last_lesson_result)
+	print("magic_lesson_result: %s" % result_text)
+	_breadcrumb("magic_lesson:score", result_text)
+	if mom != null and is_instance_valid(mom) and player != null and is_instance_valid(player):
+		lesson_score_finalized.emit(mom, player, lesson_progress, last_lesson_result.duplicate(true))
+
+
 func _mark_attempt_consumed() -> void:
 	if not mark_spot_unavailable_after_attempt:
 		return
 
-	_set_lesson_progress(_get_lesson_done_threshold())
+	_set_availability_value(_get_lesson_done_threshold())
 
 
 func _set_activity_phase(phase: StringName) -> void:
@@ -336,12 +404,27 @@ func _set_activity_phase(phase: StringName) -> void:
 	locations.call("set_scheduled_activity_field", npc_id, &"last_total_hours", _get_current_total_hours())
 
 
-func _set_lesson_progress(new_value: float) -> void:
-	var clamped_value := _clamp_lesson_progress(new_value)
-	lesson_progress = clamped_value
+func _set_activity_lesson_score(score: float) -> void:
+	if active_mom == null or not is_instance_valid(active_mom):
+		return
+
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations == null or not locations.has_method("set_scheduled_activity_field"):
+		return
+
+	var npc_id := _get_mom_location_id()
+	if npc_id.is_empty():
+		return
+
+	locations.call("set_scheduled_activity_field", npc_id, &"lesson_score", score)
+
+
+func _set_availability_value(new_value: float) -> void:
+	var clamped_value := _clamp_availability_value(new_value)
+	availability_value = clamped_value
 	var simulator := get_node_or_null("/root/NpcWorldSimulation")
 	if world_definition != null and simulator != null and simulator.has_method("set_spot_value"):
-		simulator.call("set_spot_value", spot_id, clamped_value)
+		simulator.call("set_spot_value", spot_id, clamped_value, false)
 		return
 
 	_update_visual()
@@ -356,18 +439,20 @@ func _apply_lesson_progress(delta: float) -> void:
 	if is_equal_approx(delta_value, 0.0):
 		return
 
-	var simulator := get_node_or_null("/root/NpcWorldSimulation")
-	if world_definition != null and simulator != null and simulator.has_method("apply_spot_value_delta"):
-		var previous_progress := lesson_progress
-		var actual_delta := float(simulator.call(
-			"apply_spot_value_delta",
-			spot_id,
-			delta_value
-		))
-		lesson_progress = _clamp_lesson_progress(previous_progress + actual_delta)
-	else:
-		lesson_progress = _clamp_lesson_progress(lesson_progress + delta_value)
+	lesson_progress = _clamp_lesson_progress(lesson_progress + delta_value)
+	_award_lesson_time_xp(delta)
 	_update_visual()
+
+
+func _award_lesson_time_xp(delta: float) -> void:
+	var progression := get_node_or_null("/root/ProgressionSystem")
+	if progression == null or not progression.has_method("add_time_xp"):
+		return
+
+	progression.call("add_time_xp", &"class.magic_basics", delta, {
+		"lesson_id": String(lesson_id),
+		"spot_id": String(spot_id),
+	})
 
 
 func _finish_scheduled_activity() -> void:
@@ -391,7 +476,7 @@ func _finish_scheduled_activity() -> void:
 
 
 func _register_live_spot() -> void:
-	if _magic_lesson_disabled():
+	if _magic_lesson_debug_disabled():
 		_breadcrumb("magic_lesson:register_disabled", String(spot_id))
 		return
 	var simulator := get_node_or_null("/root/NpcWorldSimulation")
@@ -443,23 +528,28 @@ func _attempt_already_used_today() -> bool:
 
 
 func _world_spot_is_available() -> bool:
-	_setup_lesson_progress()
-	return lesson_progress > _get_lesson_done_threshold()
+	_refresh_availability_value()
+	return availability_value > _get_lesson_done_threshold()
 
 
-func _setup_lesson_progress() -> void:
-	lesson_progress = _get_lesson_progress_default()
+func _setup_lesson_state_values() -> void:
+	lesson_progress = _get_lesson_progress_floor()
+	_refresh_availability_value()
+
+
+func _refresh_availability_value() -> void:
+	availability_value = _get_availability_default()
 	var simulator := get_node_or_null("/root/NpcWorldSimulation")
 	if world_definition != null and simulator != null and simulator.has_method("get_spot_value"):
-		lesson_progress = float(simulator.call(
+		availability_value = float(simulator.call(
 			"get_spot_value",
 			spot_id,
-			_get_lesson_progress_default()
+			_get_availability_default()
 		))
-	lesson_progress = _clamp_lesson_progress(lesson_progress)
+	availability_value = _clamp_availability_value(availability_value)
 
 
-func _get_lesson_progress_default() -> float:
+func _get_availability_default() -> float:
 	if world_definition == null:
 		return 100.0
 
@@ -474,33 +564,44 @@ func _get_lesson_done_threshold() -> float:
 
 
 func _get_lesson_progress_floor() -> float:
-	if world_definition == null:
-		return 0.0
-
-	return minf(world_definition.spot_value_minimum, world_definition.spot_value_maximum)
+	return 0.0
 
 
 func _get_lesson_progress_ceiling() -> float:
-	if world_definition == null:
-		return 100.0
-
-	return maxf(world_definition.spot_value_minimum, world_definition.spot_value_maximum)
+	return maxf(lesson_progress_max, _get_lesson_progress_floor())
 
 
 func _get_lesson_delta_per_game_hour() -> float:
-	if world_definition != null and not is_equal_approx(world_definition.spot_value_delta_per_game_hour, 0.0):
-		return world_definition.spot_value_delta_per_game_hour
+	return lesson_progress_per_game_hour * _get_lesson_progress_multiplier()
 
-	var duration_hours := maxf(fallback_lesson_game_hours, 0.001)
-	return -(_get_lesson_progress_ceiling() - _get_lesson_progress_floor()) / duration_hours
 
+func _get_lesson_progress_multiplier() -> float:
+	var multiplier := maxf(lesson_progress_multiplier, 0.0)
+	if active_mom != null and is_instance_valid(active_mom):
+		if active_mom.has_method("get_magic_lesson_progress_multiplier"):
+			multiplier *= maxf(float(active_mom.call("get_magic_lesson_progress_multiplier")), 0.0)
+	if active_player != null and is_instance_valid(active_player):
+		if active_player.has_method("get_magic_lesson_progress_multiplier"):
+			multiplier *= maxf(float(active_player.call("get_magic_lesson_progress_multiplier")), 0.0)
+	return multiplier
 
 func _clamp_lesson_progress(value: float) -> float:
 	return clampf(value, _get_lesson_progress_floor(), _get_lesson_progress_ceiling())
 
 
-func _lesson_progress_is_done() -> bool:
-	return lesson_progress <= _get_lesson_done_threshold()
+func _clamp_availability_value(value: float) -> float:
+	if world_definition == null:
+		return clampf(value, 0.0, 100.0)
+
+	return clampf(
+		value,
+		minf(world_definition.spot_value_minimum, world_definition.spot_value_maximum),
+		maxf(world_definition.spot_value_minimum, world_definition.spot_value_maximum)
+	)
+
+
+func _lesson_attempt_is_unavailable() -> bool:
+	return availability_value <= _get_lesson_done_threshold()
 
 
 func _get_lesson_real_seconds() -> float:
@@ -513,14 +614,7 @@ func _get_lesson_real_seconds() -> float:
 
 
 func _get_lesson_game_hours() -> float:
-	var delta_per_hour := absf(_get_lesson_delta_per_game_hour())
-	if delta_per_hour <= 0.0:
-		return maxf(fallback_lesson_game_hours, 0.001)
-
-	return maxf(
-		(_get_lesson_progress_ceiling() - _get_lesson_done_threshold()) / delta_per_hour,
-		0.001
-	)
+	return maxf(fallback_lesson_game_hours, 0.001)
 
 
 func _get_real_seconds_per_day() -> float:
@@ -546,6 +640,61 @@ func _get_game_hours_for_real_seconds(real_seconds: float) -> float:
 	return (real_seconds / maxf(lesson_duration_seconds, 0.001)) * _get_lesson_game_hours()
 
 
+func _lesson_schedule_is_active() -> bool:
+	if not _schedule_controls_lesson():
+		return true
+
+	return world_definition.is_active_at(_get_current_time_of_day_hours())
+
+
+func _schedule_controls_lesson() -> bool:
+	return (
+		world_definition != null
+		and not world_definition.active_time_windows.is_empty()
+		and get_node_or_null("/root/WorldTime") != null
+	)
+
+
+func _schedule_fallback_timer_is_done() -> bool:
+	if _schedule_controls_lesson():
+		return false
+
+	return lesson_timer <= 0.0
+
+
+func _participants_are_counting_progress() -> bool:
+	if not _participants_valid():
+		return false
+	if not require_player_in_lesson_zone:
+		return true
+
+	return _participant_is_in_lesson_zone(active_mom) and _participant_is_in_lesson_zone(active_player)
+
+
+func _participant_is_in_lesson_zone(participant: Node2D) -> bool:
+	if participant == null or not is_instance_valid(participant):
+		return false
+	if not participant.is_inside_tree() or not is_inside_tree():
+		return false
+	if participant.get_tree() != get_tree():
+		return false
+
+	var local_position := to_local(participant.global_position)
+	return (
+		absf(local_position.x) <= lesson_zone_half_extents.x
+		and absf(local_position.y) <= lesson_zone_half_extents.y
+	)
+
+
+func _get_current_time_of_day_hours() -> float:
+	var world_time := get_node_or_null("/root/WorldTime")
+	if world_time != null and world_time.has_method("get_snapshot"):
+		var snapshot: Dictionary = world_time.call("get_snapshot")
+		return float(snapshot.get("time_of_day_hours", snapshot.get("hour", 0.0)))
+
+	return 0.0
+
+
 func _get_current_total_hours() -> float:
 	var world_time := get_node_or_null("/root/WorldTime")
 	if world_time != null and world_time.has_method("get_snapshot"):
@@ -567,23 +716,14 @@ func _ensure_visual_nodes() -> void:
 		zone_visual = Polygon2D.new()
 		zone_visual.name = "ZoneVisual"
 		zone_visual.color = ready_color
-		zone_visual.polygon = PackedVector2Array([
-			Vector2(-64.0, -44.0),
-			Vector2(64.0, -44.0),
-			Vector2(64.0, 44.0),
-			Vector2(-64.0, 44.0),
-		])
 		add_child(zone_visual)
 		move_child(zone_visual, 0)
+	_update_zone_polygon()
 
 	label = get_node_or_null("Label") as Label
 	if label == null:
 		label = Label.new()
 		label.name = "Label"
-		label.offset_left = -82.0
-		label.offset_top = -82.0
-		label.offset_right = 82.0
-		label.offset_bottom = -44.0
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		label.add_theme_color_override("font_color", Color.WHITE)
@@ -591,14 +731,43 @@ func _ensure_visual_nodes() -> void:
 		label.add_theme_constant_override("shadow_offset_x", 1)
 		label.add_theme_constant_override("shadow_offset_y", 1)
 		add_child(label)
+	_update_label_layout()
+
+
+func _update_zone_polygon() -> void:
+	if zone_visual == null:
+		return
+
+	var half_width := maxf(lesson_zone_half_extents.x, 1.0)
+	var half_height := maxf(lesson_zone_half_extents.y, 1.0)
+	zone_visual.polygon = PackedVector2Array([
+		Vector2(-half_width, -half_height),
+		Vector2(half_width, -half_height),
+		Vector2(half_width, half_height),
+		Vector2(-half_width, half_height),
+	])
+
+
+func _update_label_layout() -> void:
+	if label == null:
+		return
+
+	label.offset_left = -lesson_zone_half_extents.x
+	label.offset_top = -lesson_zone_half_extents.y - 44.0
+	label.offset_right = lesson_zone_half_extents.x
+	label.offset_bottom = -lesson_zone_half_extents.y + 4.0
 
 
 func _update_visual() -> void:
 	if zone_visual != null:
-		if _lesson_progress_is_done():
+		if state == STATE_RUNNING:
+			zone_visual.color = ready_color.lerp(busy_color, _get_lesson_progress_ratio())
+		elif _magic_lesson_disabled():
+			zone_visual.color = unavailable_color
+		elif _lesson_attempt_is_unavailable():
 			zone_visual.color = unavailable_color
 		else:
-			zone_visual.color = ready_color.lerp(busy_color, _get_lesson_progress_ratio())
+			zone_visual.color = ready_color
 
 	if label == null:
 		return
@@ -607,8 +776,13 @@ func _update_visual() -> void:
 	if state == STATE_INVITING:
 		value_text = "%s | inviting" % value_text
 	elif state == STATE_RUNNING:
-		value_text = "%s | class" % value_text
-	elif _lesson_progress_is_done():
+		if _participants_are_counting_progress():
+			value_text = "%s | class" % value_text
+		else:
+			value_text = "%s | waiting" % value_text
+	elif _magic_lesson_disabled():
+		value_text = "off"
+	elif _lesson_attempt_is_unavailable():
 		value_text = "done"
 
 	var lines: Array[String] = []
@@ -620,7 +794,7 @@ func _update_visual() -> void:
 
 
 func _get_lesson_progress_ratio() -> float:
-	var floor_value := _get_lesson_done_threshold()
+	var floor_value := _get_lesson_progress_floor()
 	var ceiling_value := _get_lesson_progress_ceiling()
 	if is_equal_approx(floor_value, ceiling_value):
 		return 0.0
@@ -657,6 +831,12 @@ func _get_mom_location_id() -> String:
 
 
 func _magic_lesson_disabled() -> bool:
+	if not lesson_enabled:
+		return true
+	return _magic_lesson_debug_disabled()
+
+
+func _magic_lesson_debug_disabled() -> bool:
 	return (
 		DebugToolsConfig.TROUBLESHOOTING_MODE
 		and DebugToolsConfig.DEBUG_DISABLE_MAGIC_LESSON_ACTIVITY

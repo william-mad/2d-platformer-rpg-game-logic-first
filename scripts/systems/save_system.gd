@@ -3,7 +3,7 @@ class_name GameSaveSystem extends Node
 signal save_finished(success: bool, save_path: String)
 signal load_finished(success: bool, save_path: String)
 
-const SAVE_VERSION: int = 4
+const SAVE_VERSION: int = 5
 const DEFAULT_SLOT: String = "slot_1"
 const SAVEABLE_GROUP: StringName = &"saveable"
 const SAVE_DIR: String = "user://saves"
@@ -11,6 +11,7 @@ const WORLD_TIME_PATH: String = "/root/WorldTime"
 const NPC_LOCATIONS_PATH: String = "/root/NpcLocations"
 const NPC_WORLD_SIMULATION_PATH: String = "/root/NpcWorldSimulation"
 const RELATIONSHIPS_PATH: String = "/root/Relationships"
+const PROGRESSION_PATH: String = "/root/ProgressionSystem"
 
 @export_range(1, 9, 1) var save_slot_count: int = 3
 
@@ -52,6 +53,7 @@ func load_game(slot: String = "") -> bool:
 	global_values = loaded_global_values if loaded_global_values is Dictionary else {}
 	_apply_system_save_data(WORLD_TIME_PATH, save_data.get("world_time", {}))
 	_apply_system_save_data(RELATIONSHIPS_PATH, save_data.get("relationships", {}))
+	_apply_system_save_data(PROGRESSION_PATH, save_data.get("progression", {}))
 	_apply_system_save_data(NPC_WORLD_SIMULATION_PATH, save_data.get("npc_world_simulation", {}))
 	_apply_system_save_data(NPC_LOCATIONS_PATH, save_data.get("npc_locations", {}))
 
@@ -144,6 +146,10 @@ func get_save_summary(slot: String = "") -> Dictionary:
 		"scene_path": "",
 		"scene_name": "",
 		"saved_at_unix_time": 0.0,
+		"has_progression": false,
+		"global_level": 1,
+		"global_xp": 0,
+		"progression": {},
 	}
 
 	if not bool(summary["exists"]):
@@ -159,6 +165,11 @@ func get_save_summary(slot: String = "") -> Dictionary:
 	summary["scene_path"] = scene_path
 	summary["scene_name"] = _get_scene_display_name(scene_path)
 	summary["saved_at_unix_time"] = float(save_data.get("saved_at_unix_time", 0.0))
+	var progression_summary := _get_progression_summary_from_save_data(save_data)
+	summary["progression"] = progression_summary
+	summary["has_progression"] = bool(progression_summary.get("has_progression", false))
+	summary["global_level"] = int(progression_summary.get("global_level", 1))
+	summary["global_xp"] = int(progression_summary.get("global_xp", 0))
 	return summary
 
 
@@ -183,7 +194,14 @@ func format_save_summary(summary: Dictionary, empty_label: String = "Empty") -> 
 	if scene_name.is_empty():
 		scene_name = "Unknown scene"
 
+	var progress_text := _format_progression_summary(summary)
 	var saved_at := _format_saved_time(float(summary.get("saved_at_unix_time", 0.0)))
+	if not progress_text.is_empty():
+		if saved_at.is_empty():
+			return "%s - %s - %s" % [display_name, progress_text, scene_name]
+
+		return "%s - %s - %s - %s" % [display_name, progress_text, scene_name, saved_at]
+
 	if saved_at.is_empty():
 		return "%s - %s" % [display_name, scene_name]
 
@@ -208,6 +226,7 @@ func clear_runtime_values() -> void:
 	pending_save_data.clear()
 	_apply_system_save_data(WORLD_TIME_PATH, {})
 	_apply_system_save_data(RELATIONSHIPS_PATH, {})
+	_apply_system_save_data(PROGRESSION_PATH, {})
 	_apply_system_save_data(NPC_WORLD_SIMULATION_PATH, {})
 	_apply_system_save_data(NPC_LOCATIONS_PATH, {})
 
@@ -227,6 +246,7 @@ func _build_save_data() -> Dictionary:
 		"npc_locations": _encode_value(_get_system_save_data(NPC_LOCATIONS_PATH)),
 		"npc_world_simulation": _encode_value(_get_system_save_data(NPC_WORLD_SIMULATION_PATH)),
 		"relationships": _encode_value(_get_system_save_data(RELATIONSHIPS_PATH)),
+		"progression": _encode_value(_get_system_save_data(PROGRESSION_PATH)),
 		"nodes": {},
 	}
 
@@ -444,6 +464,45 @@ func _get_scene_display_name(scene_path: String) -> String:
 		return ""
 
 	return scene_path.get_file().get_basename().replace("_", " ").capitalize()
+
+
+func _get_progression_summary_from_save_data(save_data: Dictionary) -> Dictionary:
+	var progression_data = _decode_value(save_data.get("progression", {}))
+	if not (progression_data is Dictionary):
+		return {}
+
+	var progression: Dictionary = progression_data
+	if progression.is_empty():
+		return {}
+
+	var summary = progression.get("summary", {})
+	var progression_summary: Dictionary = summary.duplicate(true) if summary is Dictionary else {}
+	progression_summary["has_progression"] = true
+	progression_summary["global_level"] = maxi(
+		int(progression_summary.get("global_level", progression.get("global_level", 1))),
+		1
+	)
+	progression_summary["global_xp"] = maxi(
+		int(progression_summary.get("global_xp", progression.get("global_xp", 0))),
+		0
+	)
+	return progression_summary
+
+
+func _format_progression_summary(summary: Dictionary) -> String:
+	if not bool(summary.get("has_progression", false)):
+		return ""
+
+	var level := maxi(int(summary.get("global_level", 1)), 1)
+	var progression = summary.get("progression", {})
+	var xp_text := ""
+	if progression is Dictionary:
+		var xp_into_level := int(progression.get("xp_into_level", -1))
+		var xp_for_next_level := int(progression.get("xp_for_next_level", -1))
+		if xp_into_level >= 0 and xp_for_next_level > 0:
+			xp_text = " %d/%d XP" % [xp_into_level, xp_for_next_level]
+
+	return "Lv %d%s" % [level, xp_text]
 
 
 func _format_saved_time(unix_time: float) -> String:

@@ -225,6 +225,7 @@ func apply_worker_work_progress(
 
 	if _worker_is_player(worker):
 		_notify_player_work_applied(worker as Node2D, absf(actual_delta))
+		_award_player_work_time_xp(worker as Node2D, delta, absf(actual_delta))
 	return actual_delta
 
 
@@ -620,6 +621,21 @@ func _notify_player_work_applied(player: Node2D, work_done: float) -> void:
 			work_done,
 			player_work_interaction_id
 		)
+
+
+func _award_player_work_time_xp(player: Node2D, delta: float, work_done: float) -> void:
+	if player == null or not is_instance_valid(player) or work_done <= 0.0:
+		return
+
+	var progression := get_node_or_null("/root/ProgressionSystem")
+	if progression == null or not progression.has_method("add_time_xp"):
+		return
+
+	progression.call("add_time_xp", &"work_activity.basic", delta, {
+		"spot_id": String(spot_id),
+		"work_done": work_done,
+		"interaction_id": String(player_work_interaction_id),
+	})
 
 
 func _worker_is_player(worker: Node) -> bool:

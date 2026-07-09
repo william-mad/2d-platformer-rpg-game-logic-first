@@ -1,0 +1,79 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/monsters/slime.gd" id="1_slime"]
+[ext_resource type="Script" path="res://player/scripts/damage_area.gd" id="2_damage_area"]
+[ext_resource type="Script" path="res://scripts/instances/creature_hp_bar.gd" id="3_hp_bar"]
+
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_body"]
+radius = 22.0
+height = 44.0
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_touch"]
+radius = 34.0
+
+[sub_resource type="Animation" id="Animation_reset"]
+length = 0.001
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_slime"]
+_data = {
+&"RESET": SubResource("Animation_reset")
+}
+
+[node name="Slime" type="CharacterBody2D" groups=["attack_target", "enemy", "enemies", "monster", "monsters", "slime"]]
+collision_layer = 4
+collision_mask = 161
+script = ExtResource("1_slime")
+target_groups = Array[StringName]([&"player", &"npc", &"training_dummy", &"attack_target"])
+touch_damage = 1.0
+touch_knockout_damage = 14.0
+
+[node name="BodyVisual" type="Node2D" parent="."]
+position = Vector2(0, -22)
+
+[node name="Shadow" type="Polygon2D" parent="BodyVisual"]
+position = Vector2(0, 22)
+color = Color(0, 0, 0, 0.22)
+polygon = PackedVector2Array(-25, -3, 25, -3, 31, 0, 25, 3, -25, 3, -31, 0)
+
+[node name="Body" type="Polygon2D" parent="BodyVisual"]
+color = Color(0.32, 0.82, 0.46, 1)
+polygon = PackedVector2Array(-29, 11, -24, -7, -11, -20, 8, -22, 24, -11, 31, 7, 21, 22, -20, 22)
+
+[node name="Highlight" type="Polygon2D" parent="BodyVisual"]
+position = Vector2(-9, -8)
+color = Color(0.78, 1, 0.82, 0.45)
+polygon = PackedVector2Array(-8, -3, 2, -8, 11, -4, 7, 4, -5, 5)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(0, -22)
+shape = SubResource("CapsuleShape2D_body")
+
+[node name="Damage_Area" type="Area2D" parent="."]
+position = Vector2(0, -22)
+collision_layer = 128
+collision_mask = 0
+script = ExtResource("2_damage_area")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Damage_Area"]
+shape = SubResource("CapsuleShape2D_body")
+
+[node name="TouchDamageArea" type="Area2D" parent="."]
+position = Vector2(0, -22)
+collision_layer = 0
+collision_mask = 134
+monitorable = false
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="TouchDamageArea"]
+shape = SubResource("CircleShape2D_touch")
+debug_color = Color(1, 0.34, 0.16, 0.28)
+
+[node name="HPBar" type="ProgressBar" parent="."]
+offset_left = -28.0
+offset_top = -67.0
+offset_right = 28.0
+offset_bottom = -61.0
+show_percentage = false
+script = ExtResource("3_hp_bar")
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+libraries/ = SubResource("AnimationLibrary_slime")

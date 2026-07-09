@@ -1,5 +1,8 @@
 class_name PlayerState extends Node
 
+const SPECIAL_MANA_THRESHOLD_MARGIN_RATIO := 0.001
+const SPECIAL_MANA_MIN_THRESHOLD_MARGIN := 0.01
+
 var player : Player
 var next_state : PlayerState
 
@@ -68,22 +71,37 @@ func get_attack_release_state() -> PlayerState:
 
 
 func get_special_attack_release_state() -> PlayerState:
+	if player.max_mana <= 0.0:
+		clear_attack_charge()
+		return null
+
 	var one_third_mana := player.max_mana / 3.0
 	var two_thirds_mana := one_third_mana * 2.0
 	var full_mana := player.max_mana
 	var current_mana := player.mana_amount
 
-	if current_mana >= full_mana:
+	if has_mana_for_special(current_mana, full_mana):
 		return use_special_attack(full_mana, special_attack_3)
 
-	if current_mana >= two_thirds_mana:
+	if has_mana_for_special(current_mana, two_thirds_mana):
 		return use_special_attack(two_thirds_mana, special_attack_2)
 
-	if current_mana >= one_third_mana:
+	if has_mana_for_special(current_mana, one_third_mana):
 		return use_special_attack(one_third_mana, special_attack_1)
 
 	clear_attack_charge()
 	return null
+
+
+func has_mana_for_special(current_mana: float, required_mana: float) -> bool:
+	if current_mana >= required_mana or is_equal_approx(current_mana, required_mana):
+		return true
+
+	return required_mana - current_mana <= get_special_mana_threshold_margin(required_mana)
+
+
+func get_special_mana_threshold_margin(required_mana: float) -> float:
+	return maxf(required_mana * SPECIAL_MANA_THRESHOLD_MARGIN_RATIO, SPECIAL_MANA_MIN_THRESHOLD_MARGIN)
 
 
 func clear_attack_charge() -> void:

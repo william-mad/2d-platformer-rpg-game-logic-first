@@ -16,6 +16,7 @@ const MEAL_OWNER_FOOD := "food"
 const MEAL_OWNER_CLEANUP := "cleanup"
 const MEAL_CYCLE_EPSILON := 0.001
 const INVITE_PLAYER_STATE := &"InvitePlayer"
+const MagicLessonRemoteInvitationScene := preload("res://scripts/instances/magic_lesson_remote_invitation.gd")
 
 @export var simulation_interval_seconds: float = 10.0
 @export var simulated_talk_need_drop: float = 40.0
@@ -1059,6 +1060,50 @@ func unregister_live_spot(spot_id: StringName, spot: Node2D) -> void:
 	live_spots.erase(spot_id)
 
 
+func _get_live_activity_spot(
+	spot_id: StringName,
+	definition: NpcSpotDefinition,
+	activity: Dictionary
+) -> Node2D:
+	var live_spot := live_spots.get(spot_id, null) as Node2D
+	if live_spot != null and is_instance_valid(live_spot):
+		return live_spot
+	if definition == null or definition.state_name != INVITE_PLAYER_STATE:
+		return null
+	if String(activity.get("lesson_phase", "inviting")) != "inviting":
+		return null
+
+	return _get_or_create_remote_invitation_spot(spot_id, definition, activity)
+
+
+func _get_or_create_remote_invitation_spot(
+	spot_id: StringName,
+	definition: NpcSpotDefinition,
+	activity: Dictionary
+) -> Node2D:
+	var scene_root := get_tree().current_scene
+	if scene_root == null:
+		return null
+
+	for node in get_tree().get_nodes_in_group("magic_lesson_remote_invitation"):
+		var remote := node as MagicLessonRemoteInvitation
+		if remote == null or not is_instance_valid(remote):
+			continue
+		if String(remote.spot_id) != String(spot_id):
+			continue
+		remote.configure(definition, activity)
+		return remote
+
+	var remote := MagicLessonRemoteInvitationScene.new() as MagicLessonRemoteInvitation
+	if remote == null:
+		return null
+	remote.name = "RemoteMagicLessonInvitation_%s" % String(spot_id)
+	remote.add_to_group("magic_lesson_remote_invitation")
+	remote.configure(definition, activity)
+	scene_root.add_child(remote)
+	return remote
+
+
 func resume_live_activity(npc_id: StringName, npc: Node) -> void:
 	# Reconnects a spawned NPC to the real spot and normal state machine for the loaded scene.
 	if (
@@ -1086,14 +1131,13 @@ func resume_live_activity(npc_id: StringName, npc: Node) -> void:
 		return
 
 	var spot_id := StringName(String(activity.get("spot_id", "")))
-	var spot := live_spots.get(spot_id, null) as Node2D
-	if spot == null or not is_instance_valid(spot):
-		_breadcrumb("npc_world:resume_live_missing_spot", "%s %s" % [String(npc_id), String(spot_id)])
-		return
-
 	var definition := spot_definitions.get(spot_id, null) as NpcSpotDefinition
 	if definition == null:
 		_breadcrumb("npc_world:resume_live_missing_definition", "%s %s" % [String(npc_id), String(spot_id)])
+		return
+	var spot := _get_live_activity_spot(spot_id, definition, activity)
+	if spot == null or not is_instance_valid(spot):
+		_breadcrumb("npc_world:resume_live_missing_spot", "%s %s" % [String(npc_id), String(spot_id)])
 		return
 	if _debug_definition_disabled(definition):
 		_breadcrumb("npc_world:resume_live_disabled_definition", "%s %s" % [String(npc_id), String(spot_id)])
@@ -1109,18 +1153,32 @@ func resume_live_activity(npc_id: StringName, npc: Node) -> void:
 	if machine == null:
 		_breadcrumb("npc_world:resume_live_no_machine", String(npc_id))
 		return
+	if not _live_activity_can_continue(npc_id, npc, machine, definition, spot):
+		_breadcrumb("npc_world:resume_live_finish_live_invalid", "%s %s" % [String(npc_id), String(spot_id)])
+		_finish_activity(npc_id, record, activity, spot_id, locations)
+		return
+	if not _npc_is_following_activity(machine, definition, spot):
+		if locations.has_method("is_npc_available_for_scheduled_activity"):
+			if not bool(locations.call(
+				"is_npc_available_for_scheduled_activity",
+				String(npc_id),
+				definition.state_name,
+				definition.priority
+			)):
+				_breadcrumb("npc_world:resume_live_unavailable", "%s %s" % [String(npc_id), String(spot_id)])
+				return
+	var accepted_invitation_running := _resume_accepted_invitation_activity(
+		npc_id,
+		npc,
+		definition,
+		spot,
+		activity
+	)
+	if accepted_invitation_running:
+		_breadcrumb("npc_world:resume_live_started_accepted_lesson", "%s %s" % [String(npc_id), String(spot_id)])
 	if _npc_is_following_activity(machine, definition, spot):
 		_breadcrumb("npc_world:resume_live_already_following", "%s %s" % [String(npc_id), String(spot_id)])
 		return
-	if locations.has_method("is_npc_available_for_scheduled_activity"):
-		if not bool(locations.call(
-			"is_npc_available_for_scheduled_activity",
-			String(npc_id),
-			definition.state_name,
-			definition.priority
-		)):
-			_breadcrumb("npc_world:resume_live_unavailable", "%s %s" % [String(npc_id), String(spot_id)])
-			return
 
 	var assignment_method := definition.get_assignment_method()
 	if assignment_method != &"" and machine.has_method(assignment_method):
@@ -1135,6 +1193,87 @@ func resume_live_activity(npc_id: StringName, npc: Node) -> void:
 	if machine.has_method("request_state"):
 		machine.call("request_state", definition.state_name, spot, "world_activity", definition.priority)
 		_breadcrumb("npc_world:resume_live_requested", "%s %s" % [String(npc_id), String(spot_id)])
+
+
+func _live_activity_can_continue(
+	npc_id: StringName,
+	npc: Node,
+	machine: Node,
+	definition: NpcSpotDefinition,
+	spot: Node2D
+) -> bool:
+	if definition == null:
+		return false
+
+	var value_name := String(definition.value_name)
+	if (
+		definition.finish_when_npc_value_sated
+		and not value_name.is_empty()
+		and machine.has_method("get_value")
+		and float(machine.call("get_value", StringName(value_name))) <= 0.0
+	):
+		_mark_meal_owner_sated_if_needed(definition, npc_id, StringName(value_name))
+		return false
+
+	if definition.state_name == INVITE_PLAYER_STATE:
+		if spot == null or not is_instance_valid(spot):
+			return false
+		if spot.has_method("is_lesson_spot_enabled"):
+			if not bool(spot.call("is_lesson_spot_enabled")):
+				return false
+		if not spot.has_method("can_start_lesson"):
+			return true
+		var inviter_2d := npc as Node2D
+		var player := get_tree().get_first_node_in_group("player") as Node2D
+		if inviter_2d == null or player == null:
+			return false
+		return bool(spot.call("can_start_lesson", inviter_2d, player))
+
+	if definition.state_name != &"Eat":
+		return true
+	if spot == null or not is_instance_valid(spot):
+		return false
+	if not spot.has_method("can_serve_npc_need"):
+		return true
+
+	var npc_2d := npc as Node2D
+	if npc_2d == null:
+		return false
+
+	return bool(spot.call(
+		"can_serve_npc_need",
+		npc_2d,
+		definition.state_name,
+		StringName(value_name)
+	))
+
+
+func _resume_accepted_invitation_activity(
+	_npc_id: StringName,
+	npc: Node,
+	definition: NpcSpotDefinition,
+	spot: Node2D,
+	activity: Dictionary
+) -> bool:
+	if definition == null or definition.state_name != INVITE_PLAYER_STATE:
+		return false
+	if String(activity.get("lesson_phase", "inviting")) != "running":
+		return false
+	if spot == null or not is_instance_valid(spot):
+		return false
+	if not spot.has_method("start_lesson"):
+		return false
+
+	var npc_2d := npc as Node2D
+	var player := get_tree().get_first_node_in_group("player") as Node2D
+	if npc_2d == null or player == null:
+		return false
+	if spot.has_method("is_lesson_active_for"):
+		if bool(spot.call("is_lesson_active_for", npc_2d, player)):
+			return true
+
+	spot.call("start_lesson", npc_2d, player)
+	return true
 
 
 func _npc_is_following_activity(
@@ -1162,15 +1301,7 @@ func _activity_can_continue(
 ) -> bool:
 	if definition == null:
 		return false
-	var activity = record.get("activity", {})
-	var lesson_phase := ""
-	if activity is Dictionary:
-		lesson_phase = String(activity.get("lesson_phase", "inviting"))
-	var invite_lesson_is_running := (
-		definition.state_name == INVITE_PLAYER_STATE
-		and lesson_phase == "running"
-	)
-	if not invite_lesson_is_running and not definition.is_active_at(hour):
+	if not definition.is_active_at(hour):
 		return false
 	if not _spot_runtime_is_available(definition):
 		return false
@@ -1982,7 +2113,15 @@ func _try_start_activity(
 	var target_scene_path := definition.scene_path
 	var target_position := definition.position
 	if definition.state_name == INVITE_PLAYER_STATE:
-		target_position = _get_invitation_activity_start_position(record, definition)
+		var invitation_destination := _get_invitation_activity_start_destination(
+			record,
+			definition,
+			locations
+		)
+		target_scene_path = String(invitation_destination.get("scene_path", target_scene_path))
+		var invitation_position = invitation_destination.get("position", target_position)
+		if invitation_position is Vector2:
+			target_position = invitation_position
 	var activity := {
 		"spot_id": String(definition.spot_id),
 		"state_name": String(definition.state_name),
@@ -2041,19 +2180,48 @@ func _try_start_activity(
 	activity_started.emit(npc_id, definition.spot_id)
 
 
-func _get_invitation_activity_start_position(
+func _get_invitation_activity_start_destination(
 	record: Dictionary,
-	definition: NpcSpotDefinition
-) -> Vector2:
+	definition: NpcSpotDefinition,
+	locations: Node
+) -> Dictionary:
+	var player_destination := _get_live_player_destination(locations)
+	if not player_destination.is_empty():
+		return player_destination
+
 	var current_scene_path := String(record.get("scene_path", ""))
-	if current_scene_path != definition.scene_path:
-		return definition.position
+	if current_scene_path == definition.scene_path:
+		var last_position = record.get("last_position", definition.position)
+		if last_position is Vector2:
+			return {
+				"scene_path": current_scene_path,
+				"position": last_position,
+			}
 
-	var last_position = record.get("last_position", definition.position)
-	if last_position is Vector2:
-		return last_position
+	return {
+		"scene_path": definition.scene_path,
+		"position": definition.position,
+	}
 
-	return definition.position
+
+func _get_live_player_destination(locations: Node) -> Dictionary:
+	var player := get_tree().get_first_node_in_group("player") as Node2D
+	if player == null or not is_instance_valid(player):
+		return {}
+
+	var scene_path := ""
+	var current_scene := get_tree().current_scene
+	if current_scene != null:
+		scene_path = current_scene.scene_file_path
+	if scene_path.is_empty() and locations != null and locations.has_method("get_current_scene_path"):
+		scene_path = String(locations.call("get_current_scene_path"))
+	if scene_path.is_empty():
+		return {}
+
+	return {
+		"scene_path": scene_path,
+		"position": player.global_position,
+	}
 
 
 func _update_pending_travel(
@@ -2304,21 +2472,19 @@ func _consume_spot_food_amount(
 
 
 func _activity_should_apply_spot_runtime_progress(
-	npc_id: StringName,
-	activity: Dictionary,
+	_npc_id: StringName,
+	_activity: Dictionary,
 	definition: NpcSpotDefinition,
-	locations: Node
+	_locations: Node
 ) -> bool:
 	if definition == null:
 		return false
 	if _definition_consumes_food_for_hunger(definition, String(definition.value_name)):
 		return false
-	if definition.state_name != INVITE_PLAYER_STATE:
-		return true
-	if locations.has_method("is_npc_live") and bool(locations.call("is_npc_live", String(npc_id))):
+	if definition.state_name == INVITE_PLAYER_STATE:
 		return false
 
-	return String(activity.get("lesson_phase", "inviting")) == "running"
+	return true
 
 
 func _get_activity_simulated_position(
@@ -2362,6 +2528,8 @@ func _finish_activity(
 		_set_saved_stat(record, "tired", 0.0)
 		if locations.has_method("update_simulated_record"):
 			locations.call("update_simulated_record", String(npc_id), record)
+	var definition := spot_definitions.get(spot_id, null) as NpcSpotDefinition
+	_consume_invitation_activity_availability(definition)
 
 	var return_scene_path := String(activity.get("return_scene_path", record.get("scene_path", "")))
 	var return_position = activity.get("return_position", record.get("last_position", Vector2.ZERO))
@@ -2403,6 +2571,17 @@ func _finish_activity(
 	if finished:
 		_detach_live_npc_from_finished_activity(live_npc, spot_id)
 		activity_finished.emit(npc_id, spot_id)
+
+
+func _consume_invitation_activity_availability(definition: NpcSpotDefinition) -> void:
+	if definition == null:
+		return
+	if definition.state_name != INVITE_PLAYER_STATE:
+		return
+	if definition.spot_value_name == &"":
+		return
+
+	set_spot_value(definition.spot_id, definition.spot_value_done_threshold, false)
 
 
 func _detach_live_npc_from_finished_activity(

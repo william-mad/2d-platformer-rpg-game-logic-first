@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="AbilityDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/progression/ability_definition.gd" id="1_ability"]
+
+[resource]
+script = ExtResource("1_ability")
+id = &"basic_magic"
+display_name = "Basic Magic"
+description = "Unlocks the player's magic special attack release."
+category = &"magic"
+required_global_level = 1
+required_global_xp = 0
+required_skill_xp = {}
+prerequisite_ability_ids = Array[StringName]([])
+auto_unlock = true
+action_id = &"special_attack"
+player_state_name = &"SpecialAttack"

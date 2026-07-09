@@ -113,7 +113,10 @@ func physics_process(delta: float) -> NpcState:
 		return get_state(&"Idle")
 
 	eat_timer -= delta
-	_apply_eat_progress(delta)
+	var made_progress := _apply_eat_progress(delta)
+	if not made_progress and not _hunger_is_sated():
+		_breadcrumb("npc_eat:no_progress", _npc_label())
+		return get_state(&"Idle")
 
 	if _hunger_is_sated() or eat_timer <= 0.0:
 		return get_state(&"Idle")
@@ -154,7 +157,9 @@ func process_talk_overlay(delta: float) -> StringName:
 		return &"Idle"
 
 	eat_timer -= delta
-	_apply_eat_progress(delta)
+	var made_progress := _apply_eat_progress(delta)
+	if not made_progress and not _hunger_is_sated():
+		return &"Idle"
 
 	if _hunger_is_sated() or eat_timer <= 0.0:
 		return &"Idle"
@@ -204,15 +209,18 @@ func _target_can_be_eaten_at(eat_target: Node2D) -> bool:
 	return true
 
 
-func _apply_eat_progress(delta: float) -> void:
+func _apply_eat_progress(delta: float) -> bool:
 	if eat_value_name == &"":
-		return
+		return true
 
 	var requested_progress_fraction := maxf(delta / total_eat_seconds, 0.0)
 	var requested_hunger_drop := minf(
 		machine.get_value(eat_value_name),
 		absf(hunger_drop_per_full_eat) * requested_progress_fraction
 	)
+	if requested_hunger_drop <= 0.0:
+		return _hunger_is_sated()
+
 	var actual_hunger_drop := requested_hunger_drop
 	if active_eat_target != null and active_eat_target.has_method("consume_eat_amount"):
 		actual_hunger_drop = clampf(
@@ -230,7 +238,7 @@ func _apply_eat_progress(delta: float) -> void:
 
 	var hunger_delta := -actual_hunger_drop
 	if is_equal_approx(hunger_delta, 0.0):
-		return
+		return false
 
 	var previous_hunger := machine.get_value(eat_value_name)
 	machine.apply_value_delta({String(eat_value_name): hunger_delta}, null, false)
@@ -238,6 +246,7 @@ func _apply_eat_progress(delta: float) -> void:
 	_log_hunger_progress(previous_hunger, next_hunger)
 	if _hunger_is_sated():
 		_mark_meal_sated_if_needed()
+	return next_hunger < previous_hunger or _hunger_is_sated()
 
 
 func _mark_meal_sated_if_needed() -> void:

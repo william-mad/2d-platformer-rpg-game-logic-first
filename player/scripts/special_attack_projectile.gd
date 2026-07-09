@@ -1,5 +1,7 @@
 class_name PlayerSpecialAttackProjectile extends Area2D
 
+const CombatLayers := preload("res://scripts/systems/combat_layers.gd")
+
 @export var damage: float = 15.0
 @export var knockout_damage: float = 0.0
 @export var speed: float = 560.0
@@ -18,7 +20,7 @@ var has_hit: bool = false
 
 
 func _ready() -> void:
-	collision_layer = 0
+	CombatLayers.mark_attack_spell(self)
 	collision_mask = collision_mask_value
 	monitoring = true
 	monitorable = false

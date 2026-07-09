@@ -1,10 +1,14 @@
 extends CanvasLayer
 
 @onready var hpbar: TextureProgressBar = $"Control/hp margin cont/NinePatchRect/hpbar"
+@onready var hp_container: MarginContainer = $"Control/hp margin cont"
 @onready var mana_bar: TextureProgressBar = $"Control/mana margin cont/mana_2/mana"
 @onready var mana_2_bar: TextureProgressBar = $"Control/mana margin cont/mana_2"
 @onready var control_root: Control = $Control
 
+const LEVEL_LABEL_SIZE := Vector2(48.0, 18.0)
+const LEVEL_LABEL_GAP := 6.0
+const LEVEL_XP_BAR_HEIGHT := 3.0
 const NEED_LABEL_X := 482.0
 const NEED_BAR_X := 535.0
 const NEED_BAR_SIZE := Vector2(118.0, 6.0)
@@ -22,10 +26,16 @@ var hunger_bar: TextureProgressBar
 var sleep_need_bar: TextureProgressBar
 var knockout_label: Label
 var knockout_bar: TextureProgressBar
+var level_label: Label
+var level_xp_back: ColorRect
+var level_xp_fill: ColorRect
 var current_mana_attack_tier := -1
 
 
 func _ready() -> void:
+	_ensure_progression_widgets()
+	_connect_progression_system()
+	_refresh_progression_widgets()
 	_update_mana_attack_color(mana_bar.value)
 
 
@@ -254,3 +264,101 @@ func _make_status_texture(size: Vector2, left_color: Color, right_color: Color) 
 	texture.fill_from = Vector2(0.0, 0.5)
 	texture.fill_to = Vector2(1.0, 0.5)
 	return texture
+
+
+func _ensure_progression_widgets() -> void:
+	if level_label != null and is_instance_valid(level_label):
+		return
+
+	if hp_container != null:
+		var shift := LEVEL_LABEL_SIZE.x + LEVEL_LABEL_GAP
+		hp_container.position.x = shift
+		hp_container.size.x = maxf(hp_container.size.x - shift, 320.0)
+
+	level_label = Label.new()
+	level_label.name = "LevelLabel"
+	level_label.position = Vector2(0.0, 7.0)
+	level_label.size = LEVEL_LABEL_SIZE
+	level_label.text = "Lv 1"
+	level_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	level_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	level_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	level_label.add_theme_font_size_override("font_size", 12)
+	level_label.add_theme_color_override("font_color", Color(0.92, 0.78, 1.0, 1.0))
+	level_label.add_theme_color_override("font_shadow_color", Color.BLACK)
+	level_label.add_theme_constant_override("shadow_offset_x", 1)
+	level_label.add_theme_constant_override("shadow_offset_y", 1)
+	control_root.add_child(level_label)
+
+	level_xp_back = ColorRect.new()
+	level_xp_back.name = "LevelXPBarBack"
+	level_xp_back.anchor_right = 1.0
+	level_xp_back.anchor_top = 1.0
+	level_xp_back.anchor_bottom = 1.0
+	level_xp_back.offset_left = -control_root.offset_left
+	level_xp_back.offset_top = -LEVEL_XP_BAR_HEIGHT - control_root.offset_bottom
+	level_xp_back.offset_right = -control_root.offset_right
+	level_xp_back.offset_bottom = -control_root.offset_bottom
+	level_xp_back.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	level_xp_back.color = Color(0.08, 0.02, 0.12, 0.82)
+	control_root.add_child(level_xp_back)
+
+	level_xp_fill = ColorRect.new()
+	level_xp_fill.name = "LevelXPBarFill"
+	level_xp_fill.anchor_bottom = 1.0
+	level_xp_fill.offset_bottom = 0.0
+	level_xp_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	level_xp_fill.color = Color(0.66, 0.18, 1.0, 0.95)
+	level_xp_back.add_child(level_xp_fill)
+
+
+func _connect_progression_system() -> void:
+	var progression := get_node_or_null("/root/ProgressionSystem")
+	if progression == null:
+		return
+
+	var xp_callback := Callable(self, "_on_progression_xp_changed")
+	if progression.has_signal(&"global_xp_changed") and not progression.is_connected(&"global_xp_changed", xp_callback):
+		progression.connect(&"global_xp_changed", xp_callback)
+
+	var level_callback := Callable(self, "_on_progression_level_changed")
+	if progression.has_signal(&"global_level_changed") and not progression.is_connected(&"global_level_changed", level_callback):
+		progression.connect(&"global_level_changed", level_callback)
+
+
+func _on_progression_xp_changed(
+	_current_xp: int,
+	_delta: int,
+	_source_id: StringName,
+	_context: Dictionary
+) -> void:
+	_refresh_progression_widgets()
+
+
+func _on_progression_level_changed(_current_level: int, _previous_level: int) -> void:
+	_refresh_progression_widgets()
+
+
+func _refresh_progression_widgets() -> void:
+	_ensure_progression_widgets()
+
+	var level := 1
+	var progress_ratio := 0.0
+	var progression := get_node_or_null("/root/ProgressionSystem")
+	if progression != null:
+		level = int(progression.call("get_global_level"))
+		var current_xp := int(progression.call("get_global_xp"))
+		var current_level_xp := int(progression.call("get_xp_required_for_level", level))
+		var next_level_xp := int(progression.call("get_xp_required_for_level", level + 1))
+		if next_level_xp > current_level_xp:
+			progress_ratio = clampf(
+				float(current_xp - current_level_xp) / float(next_level_xp - current_level_xp),
+				0.0,
+				1.0
+			)
+		else:
+			progress_ratio = 1.0
+
+	level_label.text = "Lv %d" % level
+	level_xp_fill.anchor_right = progress_ratio
+	level_xp_fill.offset_right = 0.0

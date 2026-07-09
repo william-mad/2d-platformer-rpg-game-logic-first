@@ -15,7 +15,7 @@
 [ext_resource type="Resource" path="res://data/npc_spots/mom_magic_lesson.tres" id="13_mom_magic_lesson"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_floor"]
-size = Vector2(1152, 64)
+size = Vector2(2304, 64)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_left_wall"]
 size = Vector2(48, 720)
@@ -27,15 +27,15 @@ size = Vector2(48, 720)
 
 [node name="RoomWall" type="Polygon2D" parent="."]
 color = Color(0.34, 0.38, 0.4, 1)
-polygon = PackedVector2Array(-576, -320, 576, -320, 576, 368, -576, 368)
+polygon = PackedVector2Array(-1152, -320, 1152, -320, 1152, 368, -1152, 368)
 
 [node name="WallPanel" type="Polygon2D" parent="."]
 color = Color(0.48, 0.45, 0.39, 1)
-polygon = PackedVector2Array(-520, -250, 520, -250, 520, 310, -520, 310)
+polygon = PackedVector2Array(-1096, -250, 1096, -250, 1096, 310, -1096, 310)
 
 [node name="FloorVisual" type="Polygon2D" parent="."]
 color = Color(0.22, 0.25, 0.23, 1)
-polygon = PackedVector2Array(-576, 368, 576, 368, 576, 432, -576, 432)
+polygon = PackedVector2Array(-1152, 368, 1152, 368, 1152, 432, -1152, 432)
 
 [node name="BedFrame" type="Polygon2D" parent="."]
 position = Vector2(220, 331)
@@ -84,7 +84,7 @@ collision_mask = 6
 shape = SubResource("RectangleShape2D_floor")
 
 [node name="LeftWall" type="StaticBody2D" parent="."]
-position = Vector2(-600, 72)
+position = Vector2(-1176, 72)
 collision_layer = 1
 collision_mask = 6
 
@@ -92,7 +92,7 @@ collision_mask = 6
 shape = SubResource("RectangleShape2D_left_wall")
 
 [node name="RightWall" type="StaticBody2D" parent="."]
-position = Vector2(600, 72)
+position = Vector2(1176, 72)
 collision_layer = 1
 collision_mask = 6
 
@@ -103,17 +103,17 @@ shape = SubResource("RectangleShape2D_right_wall")
 script = ExtResource("2_location_scene")
 scene_path = "res://scenes/testscenes/realhometest.tscn"
 ground_y = 368.0
-spawn_x_min = -480.0
-spawn_x_max = 480.0
+spawn_x_min = -1050.0
+spawn_x_max = 1050.0
 
 [node name="Player" parent="." instance=ExtResource("1_player")]
 position = Vector2(-350, 368)
 
 [node name="Camera2D" type="Camera2D" parent="Player"]
 position = Vector2(0, -50)
-limit_left = -576
+limit_left = -1152
 limit_top = -320
-limit_right = 576
+limit_right = 1152
 limit_bottom = 432
 
 [node name="OutsideDoor" parent="." instance=ExtResource("3_door")]
@@ -152,14 +152,14 @@ npc_preference_weights = {
 }
 
 [node name="MomMagicLessonSpot" type="Node2D" parent="."]
-position = Vector2(-250, 368)
+position = Vector2(-860, 368)
 script = ExtResource("12_magic_lesson")
 world_definition = ExtResource("13_mom_magic_lesson")
 
 [node name="MomLessonPosition" type="Marker2D" parent="MomMagicLessonSpot"]
-position = Vector2(-28, 0)
+position = Vector2(-96, 0)
 
 [node name="PlayerLessonPosition" type="Marker2D" parent="MomMagicLessonSpot"]
-position = Vector2(28, 0)
+position = Vector2(96, 0)
 
 [node name="CharacterStatsOverlay" parent="." instance=ExtResource("5_stats_overlay")]

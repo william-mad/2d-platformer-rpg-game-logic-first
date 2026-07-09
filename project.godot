@@ -20,6 +20,7 @@ config/icon="res://icon.svg"
 SaveSystem="*res://scripts/systems/save_system.gd"
 DamageEvents="*res://scripts/systems/damage_events.gd"
 EventBus="*res://scripts/systems/event_bus.gd"
+ProgressionSystem="*res://scripts/progression/progression_system.gd"
 SceneLoader="*res://scripts/systems/scene_loader.gd"
 PauseSystem="*res://scripts/systems/pause_system.gd"
 WorldTime="*res://scripts/systems/world_time.gd"
@@ -144,6 +145,7 @@ option5={
 2d_physics/layer_8="attacks physical"
 2d_physics/layer_9="rope attachable objects"
 2d_physics/layer_10="one way platform - if necessary"
+2d_physics/layer_11="attack spell detection"
 
 [physics]
 

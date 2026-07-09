@@ -1,5 +1,7 @@
 class_name NpcThrownAttack extends Area2D
 
+const CombatLayers := preload("res://scripts/systems/combat_layers.gd")
+
 signal victim_hit(victim: Node, intended_target_hit: bool)
 
 @export var damage: float = 3.0
@@ -24,7 +26,7 @@ var has_hit: bool = false
 
 func _ready() -> void:
 	# Default projectile is built in code so Fight can work without a separate scene.
-	collision_layer = 0
+	CombatLayers.mark_attack_spell(self)
 	collision_mask = collision_mask_value
 	monitoring = true
 	monitorable = false

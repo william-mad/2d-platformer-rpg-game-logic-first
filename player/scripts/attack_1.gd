@@ -1,11 +1,13 @@
 class_name Attack_1 extends Area2D
 
+const CombatLayers := preload("res://scripts/systems/combat_layers.gd")
 
 @export var damage : float = 1
 @export var knockout_damage: float = 25.0
 
 # when scene starts, set monitoring and visible to false until further notice
 func _ready() -> void:
+	CombatLayers.mark_attack_spell(self)
 	body_entered.connect(_on_body_entered)
 	area_entered.connect(_on_body_entered)
 	visible =false

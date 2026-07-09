@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="SkillDomainDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/progression/skill_domain_definition.gd" id="1_domain"]
+
+[resource]
+script = ExtResource("1_domain")
+id = &"combat"
+display_name = "Combat"
+description = "Practice with direct fighting, monster pressure, and weapon timing."
+tags = Array[StringName]([&"combat"])

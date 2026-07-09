@@ -71,6 +71,7 @@ const STAT_KEY_ALIASES := {
 @export var damage_favor_penalty: float = 2.0
 @export_range(0.0, 100.0, 0.1) var npc_relationship_fight_anger_threshold: float = 100.0
 @export_range(0.0, 100.0, 0.1) var npc_relationship_flee_fear_threshold: float = 70.0
+@export var monster_damage_groups: Array[StringName] = [&"monster", &"monsters", &"enemy", &"enemies"]
 
 @export_group("Knockout")
 @export var max_knockout: float = 100.0
@@ -281,8 +282,15 @@ func take_damage(
 
 	var previous_hp := get_hp()
 	var damage_actor := damage_source as Node2D
-	var damage_came_from_npc := damage_actor != null and damage_actor.is_in_group("npc")
+	var damage_came_from_monster := _is_monster_damage_source(damage_source)
+	var damage_came_from_npc := (
+		damage_actor != null
+		and damage_actor.is_in_group("npc")
+		and not damage_came_from_monster
+	)
 	var emotion_stats := _get_damage_emotion_stats(amount, previous_hp)
+	if damage_came_from_monster:
+		emotion_stats.clear()
 	var relationship_anger_delta := 0.0
 	var relationship_fear_delta := 0.0
 	if damage_came_from_npc and emotion_stats.has("anger"):
@@ -295,7 +303,7 @@ func take_damage(
 	var damage_stats := {
 		"hp": -amount,
 	}
-	if not damage_came_from_npc:
+	if not damage_came_from_npc and not damage_came_from_monster:
 		damage_stats["favor"] = -amount * damage_favor_penalty
 	damage_stats.merge(emotion_stats, true)
 
@@ -1219,6 +1227,17 @@ func _on_event_bus_event(event_name: StringName, payload: Dictionary) -> void:
 			"event_bus:%s" % String(event_name),
 			int(reaction_rule.get("priority", 0))
 		)
+
+
+func _is_monster_damage_source(source: Node) -> bool:
+	if source == null or not is_instance_valid(source):
+		return false
+
+	for group_name in monster_damage_groups:
+		if source.is_in_group(String(group_name)):
+			return true
+
+	return false
 
 
 func _get_event_reaction_rule(event_name: StringName) -> Dictionary:

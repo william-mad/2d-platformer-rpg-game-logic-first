@@ -18,6 +18,7 @@
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/recreation.gd" id="16_recreation"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/routine_task.gd" id="17_routine_task"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/invite_player.gd" id="18_invite_player"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/look_for_monster.gd" id="19_look_monster"]
 
 [node name="NpcStateMachine" type="Node"]
 script = ExtResource("1_machine")
@@ -77,6 +78,12 @@ stop_horizontal_on_enter = true
 [node name="LookForTalkTarget" type="Node" parent="."]
 unique_name_in_owner = true
 script = ExtResource("13_look_talk")
+animation_name = &"walk"
+allows_scheduled_activity_interrupt = true
+
+[node name="LookForMonster" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("19_look_monster")
 animation_name = &"walk"
 allows_scheduled_activity_interrupt = true
 

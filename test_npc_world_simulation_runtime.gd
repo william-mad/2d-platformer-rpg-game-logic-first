@@ -14,12 +14,16 @@ class MockLocations:
 
 	var finished: bool = false
 	var updated_records: Dictionary = {}
+	var current_scene_path: String = "res://scenes/testscenes/realtest1.tscn"
 
 	func is_npc_live(_npc_id: String) -> bool:
 		return false
 
 	func get_live_npc(_npc_id: String) -> Node:
 		return null
+
+	func get_current_scene_path() -> String:
+		return current_scene_path
 
 	func update_simulated_record(npc_id: String, record: Dictionary) -> void:
 		updated_records[npc_id] = record.duplicate(true)
@@ -31,6 +35,62 @@ class MockLocations:
 	) -> bool:
 		finished = true
 		return true
+
+
+class MockLiveMachine:
+	extends Node
+
+	var values := {
+		"hunger": 50.0,
+	}
+	var current_state: Node
+	var assigned_invitation_spot: Node2D
+	var assigned_priority: int = -1
+
+	func get_value(value_name: StringName) -> float:
+		return float(values.get(String(value_name), 0.0))
+
+	func assign_invitation_spot(new_target: Node2D, request_priority: int = 75) -> bool:
+		assigned_invitation_spot = new_target
+		assigned_priority = request_priority
+		if current_state == null:
+			current_state = Node.new()
+			add_child(current_state)
+		current_state.name = "InvitePlayer"
+		return true
+
+
+class MockLiveEatSpot:
+	extends Node2D
+
+	var accepts_eat: bool = true
+
+	func can_serve_npc_need(
+		_npc_node: Node2D,
+		_requested_state_name: StringName,
+		_requested_value_name: StringName = &""
+	) -> bool:
+		return accepts_eat
+
+
+class MockMagicLessonSpot:
+	extends Node2D
+
+	var active: bool = false
+	var started_count: int = 0
+
+	func is_lesson_spot_enabled() -> bool:
+		return true
+
+	func can_start_lesson(_inviter: Node2D, _player: Node2D) -> bool:
+		return true
+
+	func is_lesson_active_for(_inviter: Node2D, _player: Node2D) -> bool:
+		return active
+
+	func start_lesson(_inviter: Node2D, _player: Node2D) -> void:
+		started_count += 1
+		active = true
 
 
 func _initialize() -> void:
@@ -67,10 +127,13 @@ func _run_tests() -> void:
 	_test_cleanup_owner_filter(simulator, world_time)
 	_test_sated_meal_owner_is_not_called_again(simulator, world_time)
 	_test_offscreen_eating_consumes_food_one_to_one(simulator, world_time)
+	_test_live_eat_resume_revalidates_spot_and_hunger(simulator)
 	_test_activity_selector_delegate_matches_helper(simulator)
 	_test_sleep_wake_delegate_routes_home(simulator)
 	_test_sleep_window_skip_routes_to_bed(simulator)
 	_test_magic_lesson_can_interrupt_afternoon_work(simulator)
+	_test_magic_lesson_invite_targets_live_player_scene(simulator)
+	_test_accepted_magic_lesson_resume_assigns_invite_state(simulator, world_time, locations)
 	_test_magic_lesson_invite_waits_for_acceptance(simulator)
 	_test_loaded_afternoon_save_tick_is_stable(simulator, world_time, locations)
 	_test_offscreen_starvation_damages_at_hunger_cap(simulator)
@@ -273,6 +336,42 @@ func _test_offscreen_eating_consumes_food_one_to_one(simulator: Node, world_time
 	locations.free()
 
 
+func _test_live_eat_resume_revalidates_spot_and_hunger(simulator: Node) -> void:
+	var definition := _make_live_resume_food_definition()
+	var npc := CharacterBody2D.new()
+	npc.name = "Mom"
+	root.add_child(npc)
+
+	var machine := MockLiveMachine.new()
+	machine.name = "NpcStateMachine"
+	npc.add_child(machine)
+
+	var spot := MockLiveEatSpot.new()
+	spot.name = "FoodSpot"
+	root.add_child(spot)
+
+	spot.accepts_eat = false
+	_expect_false(
+		bool(simulator.call("_live_activity_can_continue", &"mom", npc, machine, definition, spot)),
+		"live Eat resume stops when the spot rejects the eater"
+	)
+
+	spot.accepts_eat = true
+	_expect_true(
+		bool(simulator.call("_live_activity_can_continue", &"mom", npc, machine, definition, spot)),
+		"live Eat resume continues when hunger and spot are valid"
+	)
+
+	machine.values["hunger"] = 0.0
+	_expect_false(
+		bool(simulator.call("_live_activity_can_continue", &"mom", npc, machine, definition, spot)),
+		"live Eat resume stops when the NPC is already sated"
+	)
+
+	spot.free()
+	npc.free()
+
+
 func _test_activity_selector_delegate_matches_helper(simulator: Node) -> void:
 	var original_definitions: Dictionary = simulator.spot_definitions
 	var original_claims: Dictionary = simulator.spot_claim_counts
@@ -332,6 +431,17 @@ func _make_selector_definition(spot_id: StringName) -> NpcSpotDefinition:
 	definition.need_threshold = 20.0
 	definition.priority = 30
 	definition.require_npc_value_threshold = true
+	return definition
+
+
+func _make_live_resume_food_definition() -> NpcSpotDefinition:
+	var definition := NpcSpotDefinition.new()
+	definition.spot_id = &"test_food"
+	definition.scene_path = "res://scenes/testscenes/realtest1.tscn"
+	definition.position = Vector2.ZERO
+	definition.state_name = &"Eat"
+	definition.value_name = &"hunger"
+	definition.finish_when_npc_value_sated = true
 	return definition
 
 
@@ -413,7 +523,7 @@ func _test_sleep_window_skip_routes_to_bed(simulator: Node) -> void:
 func _test_magic_lesson_can_interrupt_afternoon_work(simulator: Node) -> void:
 	simulator.call("_initialize_definition_runtime_states")
 	if simulator.has_method("set_spot_value"):
-		simulator.call("set_spot_value", &"mom_magic_lesson", 100.0, false)
+		simulator.call("set_spot_value", &"mom_magic_lesson", 1.0, false)
 
 	var lesson_definition = simulator.call("get_spot_definition", &"mom_magic_lesson")
 	var work_definition = simulator.call("get_spot_definition", &"mom_work")
@@ -464,10 +574,151 @@ func _test_magic_lesson_can_interrupt_afternoon_work(simulator: Node) -> void:
 		)
 
 
+func _test_magic_lesson_invite_targets_live_player_scene(simulator: Node) -> void:
+	var definition = simulator.call("get_spot_definition", &"mom_magic_lesson")
+	_expect_true(definition != null, "magic lesson definition is available for invite target test")
+	if definition == null:
+		return
+
+	var player := CharacterBody2D.new()
+	player.name = "Player"
+	player.add_to_group("player")
+	player.global_position = Vector2(321.0, 44.0)
+	root.add_child(player)
+
+	var locations := MockLocations.new()
+	locations.current_scene_path = "res://scenes/testscenes/realtest1.tscn"
+	var record := {
+		"scene_path": definition.scene_path,
+		"last_position": definition.position,
+	}
+	var destination: Dictionary = simulator.call(
+		"_get_invitation_activity_start_destination",
+		record,
+		definition,
+		locations
+	)
+
+	_expect_equal(
+		String(destination.get("scene_path", "")),
+		"res://scenes/testscenes/realtest1.tscn",
+		"magic lesson invite targets the live player scene first"
+	)
+	_expect_equal(
+		destination.get("position", Vector2.ZERO),
+		player.global_position,
+		"magic lesson invite starts at the live player position"
+	)
+
+	player.free()
+	locations.free()
+
+
+func _test_accepted_magic_lesson_resume_assigns_invite_state(
+	simulator: Node,
+	world_time: Node,
+	locations: Node
+) -> void:
+	var original_time := float(world_time.call("get_total_hours"))
+	var original_locations: Dictionary = locations.call("get_save_data")
+	var original_runtime_states: Dictionary = simulator.spot_runtime_states.duplicate(true)
+	var original_live_spots: Dictionary = simulator.live_spots.duplicate()
+
+	var definition = simulator.call("get_spot_definition", &"mom_magic_lesson")
+	_expect_true(definition != null, "magic lesson definition is available for accepted resume test")
+	if definition == null:
+		return
+
+	world_time.call("set_total_hours", 15.5)
+	simulator.call("_initialize_definition_runtime_states")
+	simulator.call("set_spot_value", &"mom_magic_lesson", 1.0, false)
+
+	var npc := CharacterBody2D.new()
+	npc.name = "Mom"
+	root.add_child(npc)
+
+	var machine := MockLiveMachine.new()
+	machine.name = "NpcStateMachine"
+	npc.add_child(machine)
+
+	var player := CharacterBody2D.new()
+	player.name = "Player"
+	player.add_to_group("player")
+	root.add_child(player)
+
+	var spot := MockMagicLessonSpot.new()
+	spot.name = "MagicLessonSpot"
+	root.add_child(spot)
+	simulator.live_spots[&"mom_magic_lesson"] = spot
+
+	var activity := {
+		"spot_id": "mom_magic_lesson",
+		"state_name": "InvitePlayer",
+		"value_name": "",
+		"target_scene_path": definition.scene_path,
+		"target_position": definition.position,
+		"lesson_phase": "running",
+		"lesson_scene_path": definition.scene_path,
+		"lesson_position": definition.position,
+		"last_total_hours": 15.25,
+		"return_scene_path": definition.scene_path,
+		"return_position": definition.position,
+	}
+	locations.npc_records["mom"] = {
+		"npc_id": "mom",
+		"node_name": "Mom",
+		"npc_scene_path": "",
+		"home_scene_path": definition.scene_path,
+		"home_position": definition.position,
+		"scene_path": definition.scene_path,
+		"previous_scene_path": "",
+		"last_position": definition.position,
+		"node_state": {
+			"social_stats": {
+				"disabled": 0.0,
+				"hp": 100.0,
+				"tired": 85.0,
+			},
+		},
+		"activity": activity,
+		"pending_travel": {},
+		"last_simulated_total_hours": 15.25,
+		"spawn_random": false,
+		"last_travel_msec": 0,
+	}
+	locations.live_npcs["mom"] = npc
+
+	simulator.call("resume_live_activity", &"mom", npc)
+
+	_expect_equal(
+		spot.started_count,
+		1,
+		"accepted magic lesson resume starts the live class spot"
+	)
+	_expect_equal(
+		machine.assigned_invitation_spot,
+		spot,
+		"accepted magic lesson resume still assigns Mom to InvitePlayer"
+	)
+	_expect_equal(
+		machine.assigned_priority,
+		int(definition.priority),
+		"accepted magic lesson resume uses the spot priority"
+	)
+
+	locations.call("apply_save_data", original_locations)
+	simulator.spot_runtime_states = original_runtime_states
+	simulator.live_spots = original_live_spots
+	world_time.call("set_total_hours", original_time)
+	spot.free()
+	player.free()
+	npc.free()
+
+
 func _test_magic_lesson_invite_waits_for_acceptance(simulator: Node) -> void:
 	var original_runtime_states: Dictionary = simulator.spot_runtime_states.duplicate(true)
 	simulator.call("_initialize_definition_runtime_states")
-	simulator.call("set_spot_value", &"mom_magic_lesson", 100.0, false)
+	simulator.call("set_spot_value", &"mom_magic_lesson", 1.0, false)
 
 	var definition = simulator.call("get_spot_definition", &"mom_magic_lesson")
 	_expect_true(definition != null, "magic lesson definition is available for progress test")
@@ -504,9 +755,9 @@ func _test_magic_lesson_invite_waits_for_acceptance(simulator: Node) -> void:
 	simulator.call("_update_activity", &"mom", record, activity, 15.25, 15.25, locations)
 	_expect_approx(
 		float(simulator.call("get_spot_value", &"mom_magic_lesson", 0.0)),
-		100.0,
+		1.0,
 		0.001,
-		"magic lesson invite phase does not spend class progress"
+		"magic lesson invite phase does not spend today's availability"
 	)
 	_expect_equal(
 		record.get("last_position", Vector2.ZERO),
@@ -519,19 +770,35 @@ func _test_magic_lesson_invite_waits_for_acceptance(simulator: Node) -> void:
 	running_activity["last_total_hours"] = 15.25
 	record["activity"] = running_activity
 	locations.updated_records.clear()
+	simulator.call("_update_activity", &"mom", record, running_activity, 15.75, 15.75, locations)
+	_expect_approx(
+		float(simulator.call("get_spot_value", &"mom_magic_lesson", 0.0)),
+		1.0,
+		0.001,
+		"magic lesson running phase leaves today's availability until class ends"
+	)
+	_expect_equal(
+		record.get("last_position", Vector2.ZERO),
+		definition.position,
+		"magic lesson running phase simulates Mom at the class spot while active"
+	)
+	_expect_false(locations.finished, "magic lesson running phase stays active before schedule end")
+
+	running_activity = record.get("activity", {}).duplicate(true)
+	locations.updated_records.clear()
 	simulator.call("_update_activity", &"mom", record, running_activity, 16.25, 16.25, locations)
 	_expect_approx(
 		float(simulator.call("get_spot_value", &"mom_magic_lesson", 0.0)),
 		0.0,
 		0.001,
-		"magic lesson running phase gets a full hour past the invite window"
+		"magic lesson schedule end consumes today's lesson availability"
 	)
 	_expect_equal(
 		record.get("last_position", Vector2.ZERO),
 		definition.position,
-		"magic lesson running phase simulates Mom at the class spot"
+		"magic lesson schedule end leaves Mom at the last simulated class position"
 	)
-	_expect_true(locations.finished, "magic lesson running phase finishes after the full hour")
+	_expect_true(locations.finished, "magic lesson running phase finishes at schedule end")
 
 	locations.free()
 	simulator.spot_runtime_states = original_runtime_states

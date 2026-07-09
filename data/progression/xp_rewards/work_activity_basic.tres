@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="XPRewardDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/progression/xp_reward_definition.gd" id="1_reward"]
+
+[resource]
+script = ExtResource("1_reward")
+id = &"work_activity.basic"
+display_name = "Basic Work Activity"
+description = "Small batched XP for active player work interactions."
+source_type = &"work_activity"
+tags = Array[StringName]([&"work"])
+global_xp_amount = 0
+skill_xp_amounts = {
+"work": 1
+}
+per_second = true
