@@ -168,6 +168,24 @@ func get_records_snapshot() -> Dictionary:
 	return npc_records.duplicate(true)
 
 
+func get_record_snapshot(npc_id: String) -> Dictionary:
+	if npc_id.is_empty() or not npc_records.has(npc_id):
+		return {}
+
+	return npc_records[npc_id].duplicate(true)
+
+
+func get_record_ids_snapshot() -> PackedStringArray:
+	var npc_ids := PackedStringArray()
+	npc_ids.resize(npc_records.size())
+	var index := 0
+	for npc_id_key in npc_records:
+		npc_ids[index] = String(npc_id_key)
+		index += 1
+
+	return npc_ids
+
+
 func get_all_locations() -> Dictionary:
 	# Compatibility API: new callers should synchronize explicitly, then query a snapshot.
 	synchronize_live_records()

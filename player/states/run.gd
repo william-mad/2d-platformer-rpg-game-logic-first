@@ -43,11 +43,13 @@ func process(_delta: float) -> PlayerState:
 		return idle
 	return next_state
 
-func physics_process(_delta: float) -> PlayerState:
+func physics_update_before_move(_delta: float) -> void:
+	player.velocity.x = player.direction.x * player.move_speed
+
+
+func physics_update_after_move(_delta: float) -> PlayerState:
 	#player going down is falling:
 	if player.velocity.y > 0.5:
 		return fall
-	
-	player.velocity.x = player.direction.x * player.move_speed
-	
+
 	return next_state

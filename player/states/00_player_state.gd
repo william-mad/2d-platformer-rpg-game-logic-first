@@ -54,6 +54,14 @@ func physics_process(_delta: float) -> PlayerState:
 	return next_state
 
 
+func physics_update_before_move(delta: float) -> void:
+	physics_process(delta)
+
+
+func physics_update_after_move(_delta: float) -> PlayerState:
+	return next_state
+
+
 func can_hide() -> bool:
 	return get_current_hidden_spot() != null
 

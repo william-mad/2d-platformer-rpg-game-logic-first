@@ -38,6 +38,9 @@ class_name CharacterStatsOverlay extends CanvasLayer
 var refresh_timer: float = 0.0
 var pause_overlay_visible: bool = false
 var visible_before_pause: bool = false
+var npc_selector: OptionButton
+var npc_record_ids: Array[String] = []
+var selected_npc_id := ""
 
 
 func _ready() -> void:
@@ -57,6 +60,7 @@ func _ready() -> void:
 		return
 
 	_ensure_scroll_layout()
+	_ensure_npc_selector()
 	visible = starts_visible
 	set_process(visible)
 	set_process_unhandled_input(true)
@@ -129,6 +133,65 @@ func _ensure_scroll_layout() -> void:
 	stats_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
+func _ensure_npc_selector() -> void:
+	if npc_selector != null or panel == null:
+		return
+
+	npc_selector = OptionButton.new()
+	npc_selector.name = "NpcSelector"
+	npc_selector.tooltip_text = "NPC record"
+	npc_selector.mouse_filter = Control.MOUSE_FILTER_STOP
+	npc_selector.item_selected.connect(_on_npc_selector_item_selected)
+	panel.get_parent().add_child(npc_selector)
+
+
+func _refresh_npc_selector() -> void:
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations == null or not locations.has_method("get_record_ids_snapshot"):
+		npc_record_ids.clear()
+		selected_npc_id = ""
+		_set_npc_selector_visible(false)
+		return
+
+	var ids: PackedStringArray = locations.call("get_record_ids_snapshot")
+	npc_record_ids.clear()
+	for npc_id in ids:
+		if not npc_id.is_empty():
+			npc_record_ids.append(npc_id)
+	npc_record_ids.sort()
+
+	if not npc_record_ids.has(selected_npc_id):
+		selected_npc_id = npc_record_ids[0] if not npc_record_ids.is_empty() else ""
+
+	if npc_selector == null:
+		return
+
+	npc_selector.clear()
+	for npc_id in npc_record_ids:
+		var status := "LIVE" if locations.has_method("is_npc_live") and bool(locations.call("is_npc_live", npc_id)) else "OFFSCREEN"
+		npc_selector.add_item("%s [%s]" % [npc_id, status])
+
+	if selected_npc_id.is_empty():
+		_set_npc_selector_visible(false)
+		return
+
+	npc_selector.select(npc_record_ids.find(selected_npc_id))
+	_set_npc_selector_visible(true)
+
+
+func _set_npc_selector_visible(next_visible: bool) -> void:
+	if npc_selector != null:
+		npc_selector.visible = next_visible
+
+
+func _on_npc_selector_item_selected(index: int) -> void:
+	if index < 0 or index >= npc_record_ids.size():
+		selected_npc_id = ""
+	else:
+		selected_npc_id = npc_record_ids[index]
+	_update_stats_text()
+
+
 func _update_stats_text() -> void:
 	if stats_label == null:
 		return
@@ -142,7 +205,10 @@ func _update_stats_text() -> void:
 		_append_player_lines(lines)
 
 	if show_npc_stats:
+		_refresh_npc_selector()
 		_append_npc_lines(lines)
+	else:
+		_set_npc_selector_visible(false)
 
 	if show_need_spots:
 		_append_need_spot_lines(lines)
@@ -191,7 +257,7 @@ func _append_npc_lines(lines: Array[String]) -> void:
 		_append_active_state_details(lines, npc)
 		_append_value_lines(lines, _get_character_values(npc))
 
-	_append_offscreen_npc_lines(lines)
+	_append_selected_offscreen_npc_lines(lines)
 
 
 func _append_active_state_details(lines: Array[String], npc: Node) -> void:
@@ -215,44 +281,43 @@ func _append_active_state_details(lines: Array[String], npc: Node) -> void:
 	)
 
 
-func _append_offscreen_npc_lines(lines: Array[String]) -> void:
+func _append_selected_offscreen_npc_lines(lines: Array[String]) -> void:
 	# Location records keep remote NPC activity and stats inspectable without loading their scene.
-	var locations := get_node_or_null("/root/NpcLocations")
-	if locations == null or not locations.has_method("get_records_snapshot"):
+	if selected_npc_id.is_empty():
 		return
 
-	var records: Dictionary = locations.call("get_records_snapshot")
-	var npc_ids := records.keys()
-	npc_ids.sort()
-	for npc_id_key in npc_ids:
-		var npc_id := String(npc_id_key)
-		if locations.has_method("is_npc_live") and bool(locations.call("is_npc_live", npc_id)):
-			continue
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations == null or not locations.has_method("get_record_snapshot"):
+		return
 
-		var record = records[npc_id_key]
-		if not (record is Dictionary):
-			continue
+	if locations.has_method("is_npc_live") and bool(locations.call("is_npc_live", selected_npc_id)):
+		return
 
-		var display_name := String(record.get("node_name", npc_id)).to_upper()
-		lines.append("")
-		lines.append("%s [%s] (OFFSCREEN)" % [display_name, npc_id])
-		lines.append("location: %s" % String(record.get("scene_path", "")).get_file())
+	var record: Dictionary = locations.call("get_record_snapshot", selected_npc_id)
+	if record.is_empty():
+		selected_npc_id = ""
+		return
 
-		var activity = record.get("activity", {})
-		if activity is Dictionary and not activity.is_empty():
-			lines.append("state: %s (simulated)" % String(activity.get("state_name", "--")))
-			lines.append("activity: %s" % String(activity.get("spot_id", "--")))
-			var destination_scene := String(activity.get("target_scene_path", ""))
-			if not destination_scene.is_empty():
-				lines.append("destination: %s" % destination_scene.get_file())
-		else:
-			lines.append("state: simulated idle")
+	var display_name := String(record.get("node_name", selected_npc_id)).to_upper()
+	lines.append("")
+	lines.append("%s [%s] (OFFSCREEN)" % [display_name, selected_npc_id])
+	lines.append("location: %s" % String(record.get("scene_path", "")).get_file())
 
-		var node_state = record.get("node_state", {})
-		if node_state is Dictionary:
-			var social_stats = node_state.get("social_stats", {})
-			if social_stats is Dictionary:
-				_append_value_lines(lines, social_stats)
+	var activity = record.get("activity", {})
+	if activity is Dictionary and not activity.is_empty():
+		lines.append("state: %s (simulated)" % String(activity.get("state_name", "--")))
+		lines.append("activity: %s" % String(activity.get("spot_id", "--")))
+		var destination_scene := String(activity.get("target_scene_path", ""))
+		if not destination_scene.is_empty():
+			lines.append("destination: %s" % destination_scene.get_file())
+	else:
+		lines.append("state: simulated idle")
+
+	var node_state = record.get("node_state", {})
+	if node_state is Dictionary:
+		var social_stats = node_state.get("social_stats", {})
+		if social_stats is Dictionary:
+			_append_value_lines(lines, social_stats)
 
 
 func _append_need_spot_lines(lines: Array[String]) -> void:
@@ -325,16 +390,21 @@ func _get_character_label(character: Node) -> String:
 	if character.has_method("get_display_name"):
 		display_text = String(character.call("get_display_name"))
 
-	var id_text := ""
-	if character.has_method("get_npc_location_id"):
-		id_text = String(character.call("get_npc_location_id"))
-	elif character.has_meta("npc_location_id"):
-		id_text = String(character.get_meta("npc_location_id"))
+	var id_text := _get_npc_location_id(character)
 
 	if id_text.is_empty() or id_text == display_text:
 		return display_text.to_upper()
 
 	return "%s [%s]" % [display_text.to_upper(), id_text]
+
+
+func _get_npc_location_id(character: Node) -> String:
+	if character.has_method("get_npc_location_id"):
+		return String(character.call("get_npc_location_id"))
+	if character.has_meta("npc_location_id"):
+		return String(character.get_meta("npc_location_id"))
+
+	return ""
 
 
 func _get_current_state_name(character: Node) -> String:
@@ -438,6 +508,14 @@ func _resize_panel_to_text() -> void:
 	else:
 		stats_label.position = panel.position + Vector2(8.0, 8.0)
 		stats_label.size = panel_size - Vector2(16.0, 16.0)
+
+	if npc_selector != null and npc_selector.visible:
+		var selector_position := Vector2(panel.position.x, maxf(panel.position.y - 28.0, 4.0))
+		npc_selector.position = selector_position
+		npc_selector.size = Vector2(
+			clampf(panel_size.x, 220.0, viewport_size.x - selector_position.x - 4.0),
+			24.0
+		)
 
 
 func _record_watchdog_marker(source: StringName, detail: String = "") -> void:

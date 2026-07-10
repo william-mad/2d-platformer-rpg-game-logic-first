@@ -273,8 +273,9 @@ func _physics_process(_delta: float) -> void:
 		move_and_slide()
 		return
 
+	current_state.physics_update_before_move(_delta)
 	move_and_slide()
-	change_state(current_state.physics_process(_delta))
+	change_state(current_state.physics_update_after_move(_delta))
 	pass
 
 

@@ -22,29 +22,44 @@ func _ready() -> void:
 
 
 func activate(definition: AttackDefinition, attack_source: Node, facing_x: float) -> void:
+	cancel()
 	if definition == null:
 		return
 
+	activation_serial += 1
+	var current_serial := activation_serial
 	active_definition = definition
 	source_player = attack_source
 	damage = definition.damage
 	knockout_damage = maxf(definition.knockout_damage, 0.0)
 	collision_mask = definition.collision_mask
 	damaged_victims.clear()
-	activation_serial += 1
 	_apply_definition_shape(definition, facing_x)
 	_apply_definition_tags(definition)
 	set_active(true)
 
-	var current_serial := activation_serial
 	await get_tree().create_timer(maxf(definition.active_seconds, 0.0)).timeout
 	if current_serial == activation_serial:
-		set_active(false)
+		_deactivate()
+
+
+func cancel() -> void:
+	activation_serial += 1
+	_deactivate()
 
 
 func set_active(value: bool = true) -> void:
 	monitoring = value
 	visible = value
+
+
+func _deactivate() -> void:
+	set_active(false)
+	damaged_victims.clear()
+	active_definition = null
+	source_player = null
+	damage = 0.0
+	knockout_damage = 0.0
 
 
 func get_damage_source() -> Node:

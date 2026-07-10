@@ -74,9 +74,11 @@ func process(_delta: float) -> PlayerState:
 	set_jump_frame()
 	return next_state
 
-func physics_process(_delta: float) -> PlayerState:
-	
-	
+func physics_update_before_move(_delta: float) -> void:
+	player.velocity.x = player.direction.x * player.move_speed
+
+
+func physics_update_after_move(_delta: float) -> PlayerState:
 	#player on the floor, is idle:
 	if player.is_on_floor() and Input.is_action_pressed("crouch"):
 		return crouch
@@ -85,7 +87,6 @@ func physics_process(_delta: float) -> PlayerState:
 			return ledge_grab
 		else:
 			return idle
-	player.velocity.x = player.direction.x * player.move_speed
 	return next_state
 
 

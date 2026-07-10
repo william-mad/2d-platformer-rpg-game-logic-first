@@ -5,7 +5,6 @@ extends PlayerState
 @export var attack_index: int = 0
 
 var attack_timer: float = 0.0
-var combo_timer: float = 0.0
 var combo_requested: bool = false
 var current_attack: AttackDefinition
 
@@ -13,10 +12,17 @@ var current_attack: AttackDefinition
 func enter() -> void:
 	current_attack = _get_current_attack()
 	attack_timer = current_attack.state_duration if current_attack != null else 0.0
-	combo_timer = 0.0
 	combo_requested = false
 	next_state = null
 	_do_attack()
+
+
+func exit() -> void:
+	if player != null and player.attack_hitbox != null:
+		player.attack_hitbox.cancel()
+	attack_timer = 0.0
+	combo_requested = false
+	current_attack = null
 
 
 func handle_input(event: InputEvent) -> PlayerState:
@@ -24,30 +30,30 @@ func handle_input(event: InputEvent) -> PlayerState:
 		if event.is_action_pressed("jump") and player.is_on_floor():
 			return jump
 
+	if event.is_action_pressed("attack") and current_attack != null:
+		combo_requested = true
+
 	if event.is_action_released("attack"):
 		var special_state := get_special_attack_release_state()
 		if special_state != null:
 			return special_state
-
-		if _has_next_combo_state() and current_attack != null:
-			combo_requested = true
-			combo_timer = maxf(current_attack.combo_window_seconds, 0.0)
 
 	return null
 
 
 func process(delta: float) -> PlayerState:
 	attack_timer -= delta
-	if combo_timer > 0.0:
-		combo_timer -= delta
 
 	if attack_timer > 0.0:
 		return null
 
-	if combo_requested and combo_timer > 0.0:
+	if combo_requested and _is_combo_window_open():
 		var next_combo_state := _get_next_combo_state()
 		if next_combo_state != null:
+			combo_requested = false
 			return next_combo_state
+
+	combo_requested = false
 
 	if current_attack != null and current_attack.return_to_crouch_if_held:
 		if Input.is_action_pressed("crouch") and player.is_on_floor():
@@ -86,8 +92,11 @@ func _get_current_attack() -> AttackDefinition:
 	return combo_definition.get_attack(attack_index)
 
 
-func _has_next_combo_state() -> bool:
-	return _get_next_combo_state() != null
+func _is_combo_window_open() -> bool:
+	if current_attack == null:
+		return false
+
+	return attack_timer <= current_attack.combo_window_seconds
 
 
 func _get_next_combo_state() -> PlayerComboAttackState:

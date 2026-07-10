@@ -363,19 +363,18 @@ func simulate_player_sleep_skip(
 	if (
 		locations == null
 		or not locations.has_method("synchronize_live_records")
-		or not locations.has_method("get_records_snapshot")
+		or not locations.has_method("get_record_ids_snapshot")
+		or not locations.has_method("get_record_snapshot")
 	):
 		return
 
 	locations.call("synchronize_live_records")
-	var records: Dictionary = locations.call("get_records_snapshot")
-	for npc_id_key in records.keys():
-		var record = records[npc_id_key]
-		if not (record is Dictionary):
+	var npc_ids: PackedStringArray = locations.call("get_record_ids_snapshot")
+	for npc_id in npc_ids:
+		var updated_record: Dictionary = locations.call("get_record_snapshot", npc_id)
+		if updated_record.is_empty():
 			continue
 
-		var npc_id := String(npc_id_key)
-		var updated_record: Dictionary = record.duplicate(true)
 		var slept_during_skip := _apply_sleep_skip_body_values(
 			npc_id,
 			updated_record,
