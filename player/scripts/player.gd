@@ -11,9 +11,7 @@ signal player_defeated
 @onready var small_platform_detection: RayCast2D = $"small platform detection"
 @onready var ledgegrabcolider: CollisionShape2D = %ledgegrabcolider
 @onready var animation_player: AnimationPlayer = $AnimationPlayer
-@onready var attack_1: Attack_1 = %Attack_1
-@onready var attack_2: Attack_2 = %Attack_2
-@onready var attack_3: Attack_3 = %Attack_3
+@onready var attack_hitbox: PlayerAttackHitbox = %AttackHitbox
 @onready var ledgedetec: RayCast2D = %ledgedetec
 
 #endregion
@@ -341,9 +339,6 @@ func update_direction()->void:
 func apply_facing_left(is_facing_left: bool) -> void:
 	var direction_x := -1.0 if is_facing_left else 1.0
 
-	attack_1.flip(direction_x)
-	attack_2.flip(direction_x)
-	attack_3.flip(direction_x)
 	sprite_2d.flip_h = is_facing_left
 	ledgedetec.position.x = abs(ledgedetec.position.x) * direction_x
 	ledgedetec.target_position.x = abs(ledgedetec.target_position.x) * direction_x
@@ -677,7 +672,7 @@ func update_mana_charge(delta: float) -> void:
 	if is_downed:
 		return
 
-	if current_state is PlayerAttack1 or current_state is PlayerAttack2 or current_state is PlayerAttack3 or current_state is PlayerSpecialAttack:
+	if current_state is PlayerComboAttackState or current_state is PlayerSpecialAttack:
 		return
 
 	if Input.is_action_pressed("attack"):

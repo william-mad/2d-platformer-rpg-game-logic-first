@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="ComboDefinition" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://player/combat/combo_definition.gd" id="1_combo_definition"]
+[ext_resource type="Resource" path="res://player/combat/attacks/crouch_attack.tres" id="2_crouch_attack"]
+
+[resource]
+script = ExtResource("1_combo_definition")
+combo_id = &"crouch_combo"
+attacks = Array[Resource]([ExtResource("2_crouch_attack")])

@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="AttackDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://player/combat/attack_definition.gd" id="1_attack_definition"]
+
+[resource]
+script = ExtResource("1_attack_definition")
+attack_id = &"crouch_attack"
+damage = 1.0
+knockout_damage = 0.0
+hitbox_size = Vector2(42, 18)
+hitbox_offset = Vector2(28, -12)
+active_seconds = 0.1
+state_duration = 0.32
+combo_window_seconds = 0.0
+animation_name = &"crouch"
+move_speed_multiplier = 0.0
+collision_mask = 128
+tags = Array[StringName]([&"melee", &"crouch", &"low"])
+return_to_crouch_if_held = true

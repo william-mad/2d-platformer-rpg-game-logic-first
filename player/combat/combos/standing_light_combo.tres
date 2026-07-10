@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="ComboDefinition" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://player/combat/combo_definition.gd" id="1_combo_definition"]
+[ext_resource type="Resource" path="res://player/combat/attacks/light_1.tres" id="2_light_1"]
+[ext_resource type="Resource" path="res://player/combat/attacks/light_2.tres" id="3_light_2"]
+[ext_resource type="Resource" path="res://player/combat/attacks/light_3.tres" id="4_light_3"]
+
+[resource]
+script = ExtResource("1_combo_definition")
+combo_id = &"standing_light_combo"
+attacks = Array[Resource]([ExtResource("2_light_1"), ExtResource("3_light_2"), ExtResource("4_light_3")])

@@ -25,7 +25,7 @@ func exit() -> void:
 
 func handle_input(_event : InputEvent) -> PlayerState:
 	if _event.is_action_released("attack"):
-		return get_attack_release_state()
+		return get_crouch_attack_release_state()
 	
 	if _event.is_action_released("crouch"):
 		if player.is_on_floor():

@@ -125,7 +125,6 @@ func do_special_attack() -> void:
 		3:
 			player.animation_player.play("attack_3")
 		_:
-			player.attack_1.activate(hitbox_duration)
 			player.animation_player.play("attack_1")
 
 

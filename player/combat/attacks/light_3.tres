@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="AttackDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://player/combat/attack_definition.gd" id="1_attack_definition"]
+
+[resource]
+script = ExtResource("1_attack_definition")
+attack_id = &"light_3"
+damage = 3.0
+knockout_damage = 50.0
+hitbox_size = Vector2(53.984375, 15.953125)
+hitbox_offset = Vector2(40, -33)
+active_seconds = 0.1
+state_duration = 0.4
+combo_window_seconds = 0.0
+animation_name = &"attack_3"
+move_speed_multiplier = 0.5
+collision_mask = 128
+tags = Array[StringName]([&"melee", &"standing", &"light", &"combo_3"])

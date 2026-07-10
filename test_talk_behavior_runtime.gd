@@ -97,6 +97,7 @@ func _run_tests() -> void:
 	_test_look_for_monster_after_kill_finds_next_monster()
 	_test_unrelated_fight_does_not_scan_monsters_by_default()
 	_test_npc_prompt_calls_accept_once()
+	_test_remote_magic_lesson_config_is_cached()
 	_test_magic_lesson_accept_and_decline_paths()
 	_test_title_scene_instantiates_without_crashing()
 
@@ -419,6 +420,44 @@ func _test_npc_prompt_calls_accept_once() -> void:
 	_expect_equal(callback.accepted_count, 1, "prompt accept callback fires once")
 	_expect_equal(callback.declined_count, 0, "prompt accept does not decline")
 	_expect_equal(String(callback.last_prompt_id), "test_prompt", "prompt id is forwarded")
+	_free_setup(setup)
+
+
+func _test_remote_magic_lesson_config_is_cached() -> void:
+	var setup := _create_prompt_setup()
+	var player: CharacterBody2D = setup["player"]
+	var mom: CharacterBody2D = setup["npc"]
+
+	var definition := NpcSpotDefinition.new()
+	definition.spot_id = &"test_remote_magic_lesson"
+	definition.scene_path = "res://scenes/testscenes/realhometest.tscn"
+	definition.position = Vector2(-860.0, 368.0)
+	definition.state_name = &"InvitePlayer"
+	definition.spot_value_name = &"lesson_available"
+	definition.spot_value_initial = 1.0
+	definition.spot_value_done_threshold = 0.0
+
+	var remote := MagicLessonRemoteInvitation.new()
+	remote.name = "RemoteMagicLessonInvitation"
+	root.add_child(remote)
+	remote.configure(definition, {
+		"target_position": Vector2(12.0, 0.0),
+	})
+	setup["spot"] = remote
+
+	var load_count_after_config := int(remote.get("_scene_spot_config_load_count"))
+	_expect_equal(load_count_after_config, 1, "remote magic lesson reads scene spot config once on configure")
+	for index in range(5):
+		_expect_true(
+			remote.can_start_lesson(mom, player),
+			"remote magic lesson can start after cached config %d" % index
+		)
+	_expect_equal(
+		int(remote.get("_scene_spot_config_load_count")),
+		load_count_after_config,
+		"remote magic lesson does not reload the class scene during repeated can_start checks"
+	)
+
 	_free_setup(setup)
 
 

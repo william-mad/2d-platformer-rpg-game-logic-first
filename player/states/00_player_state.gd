@@ -13,9 +13,10 @@ var next_state : PlayerState
 @onready var fall: PlayerStateFall = %Fall
 @onready var crouch: PlayerStateCrouch = %Crouch
 @onready var hidden: PlayerStateHidden = %Hidden
-@onready var attack_3: PlayerAttack3 = %Attack3
-@onready var attack_2: PlayerAttack2 = %Attack2
-@onready var attack_1: PlayerAttack1 = %Attack1
+@onready var attack_3: PlayerComboAttackState = %Attack3
+@onready var attack_2: PlayerComboAttackState = %Attack2
+@onready var attack_1: PlayerComboAttackState = %Attack1
+@onready var crouch_attack: PlayerComboAttackState = %CrouchAttack
 @onready var dash_state = %Dash
 @onready var special_attack_3: PlayerState = %SpecialAttack3
 @onready var special_attack_2: PlayerState = %SpecialAttack2
@@ -68,6 +69,15 @@ func get_attack_release_state() -> PlayerState:
 		return special_state
 
 	return attack_1
+
+
+func get_crouch_attack_release_state() -> PlayerState:
+	var special_state := get_special_attack_release_state()
+
+	if special_state != null:
+		return special_state
+
+	return crouch_attack
 
 
 func get_special_attack_release_state() -> PlayerState:

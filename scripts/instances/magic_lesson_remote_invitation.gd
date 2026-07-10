@@ -25,6 +25,10 @@ var active_mom: Node2D
 var active_player: Node2D
 var completed_day: int = -1
 var skipped_day: int = -1
+var _scene_spot_config_loaded: bool = false
+var _scene_spot_config_key: String = ""
+var _cached_scene_spot_enabled: bool = true
+var _scene_spot_config_load_count: int = 0
 
 
 func configure(definition: NpcSpotDefinition, activity: Dictionary = {}) -> void:
@@ -42,6 +46,11 @@ func configure(definition: NpcSpotDefinition, activity: Dictionary = {}) -> void
 	var activity_position = activity.get("lesson_position", lesson_position)
 	if activity_position is Vector2:
 		lesson_position = activity_position
+	var next_config_key := _get_scene_spot_config_key()
+	if next_config_key != _scene_spot_config_key:
+		_scene_spot_config_key = next_config_key
+		_scene_spot_config_loaded = false
+		_cached_scene_spot_enabled = true
 	_apply_scene_spot_config()
 
 
@@ -336,25 +345,8 @@ func _magic_lesson_disabled() -> bool:
 
 
 func _scene_spot_enabled() -> bool:
-	if world_definition == null or world_definition.scene_path.is_empty():
-		return true
-
-	var packed_scene := load(world_definition.scene_path) as PackedScene
-	if packed_scene == null:
-		return true
-
-	var root := packed_scene.instantiate()
-	if root == null:
-		return true
-
-	var spot := _find_scene_lesson_spot(root)
-	var enabled := true
-	if spot != null:
-		var value = _get_property_if_present(spot, &"lesson_enabled")
-		if value != null:
-			enabled = bool(value)
-	root.free()
-	return enabled
+	_ensure_scene_spot_config_loaded()
+	return _cached_scene_spot_enabled
 
 
 func _node_matches_lesson_spot(node: Node) -> bool:
@@ -368,10 +360,21 @@ func _node_matches_lesson_spot(node: Node) -> bool:
 
 
 func _apply_scene_spot_config() -> void:
-	if world_definition == null or world_definition.scene_path.is_empty():
+	_ensure_scene_spot_config_loaded()
+
+
+func _ensure_scene_spot_config_loaded() -> void:
+	if _scene_spot_config_loaded:
 		return
 
-	var packed_scene := load(world_definition.scene_path) as PackedScene
+	_scene_spot_config_loaded = true
+	_cached_scene_spot_enabled = true
+	var scene_path := _get_scene_spot_config_scene_path()
+	if scene_path.is_empty():
+		return
+
+	_scene_spot_config_load_count += 1
+	var packed_scene := load(scene_path) as PackedScene
 	if packed_scene == null:
 		return
 
@@ -381,6 +384,9 @@ func _apply_scene_spot_config() -> void:
 
 	var spot := _find_scene_lesson_spot(root)
 	if spot != null:
+		var enabled = _get_property_if_present(spot, &"lesson_enabled")
+		if enabled != null:
+			_cached_scene_spot_enabled = bool(enabled)
 		var title = _get_property_if_present(spot, &"prompt_title")
 		if title != null:
 			prompt_title = String(title)
@@ -394,6 +400,19 @@ func _apply_scene_spot_config() -> void:
 		if consume != null:
 			mark_spot_unavailable_after_attempt = bool(consume)
 	root.free()
+
+
+func _get_scene_spot_config_scene_path() -> String:
+	if not lesson_scene_path.is_empty():
+		return lesson_scene_path
+	if world_definition != null:
+		return world_definition.scene_path
+
+	return ""
+
+
+func _get_scene_spot_config_key() -> String:
+	return "%s|%s" % [_get_scene_spot_config_scene_path(), String(spot_id)]
 
 
 func _find_scene_lesson_spot(node: Node) -> Node:
