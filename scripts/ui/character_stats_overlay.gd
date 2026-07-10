@@ -218,10 +218,10 @@ func _append_active_state_details(lines: Array[String], npc: Node) -> void:
 func _append_offscreen_npc_lines(lines: Array[String]) -> void:
 	# Location records keep remote NPC activity and stats inspectable without loading their scene.
 	var locations := get_node_or_null("/root/NpcLocations")
-	if locations == null or not locations.has_method("get_all_locations"):
+	if locations == null or not locations.has_method("get_records_snapshot"):
 		return
 
-	var records: Dictionary = locations.call("get_all_locations")
+	var records: Dictionary = locations.call("get_records_snapshot")
 	var npc_ids := records.keys()
 	npc_ids.sort()
 	for npc_id_key in npc_ids:

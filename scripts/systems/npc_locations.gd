@@ -160,9 +160,18 @@ func get_npc_location(npc_id: String) -> Dictionary:
 	return npc_records[npc_id].duplicate(true)
 
 
-func get_all_locations() -> Dictionary:
+func synchronize_live_records() -> void:
 	_refresh_live_records_for_save()
+
+
+func get_records_snapshot() -> Dictionary:
 	return npc_records.duplicate(true)
+
+
+func get_all_locations() -> Dictionary:
+	# Compatibility API: new callers should synchronize explicitly, then query a snapshot.
+	synchronize_live_records()
+	return get_records_snapshot()
 
 
 func is_npc_live(npc_id: String) -> bool:
@@ -564,7 +573,7 @@ func finish_scheduled_activity(
 
 
 func get_save_data() -> Dictionary:
-	_refresh_live_records_for_save()
+	synchronize_live_records()
 	return {
 		"active_scene_path": active_scene_path,
 		"return_timer": return_timer,

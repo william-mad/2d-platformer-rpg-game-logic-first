@@ -282,14 +282,19 @@ func simulate_now() -> void:
 	var world_time := get_node_or_null("/root/WorldTime")
 	if locations == null or world_time == null:
 		return
-	if not locations.has_method("get_all_locations") or not world_time.has_method("get_snapshot"):
+	if (
+		not locations.has_method("synchronize_live_records")
+		or not locations.has_method("get_records_snapshot")
+		or not world_time.has_method("get_snapshot")
+	):
 		return
 
 	var snapshot: Dictionary = world_time.call("get_snapshot")
 	var total_hours := float(snapshot.get("total_hours", 0.0))
 	var hour := float(snapshot.get("time_of_day_hours", snapshot.get("hour", 0.0)))
 	_process_meal_cycle_schedule_until_snapshot(snapshot)
-	var records: Dictionary = locations.call("get_all_locations")
+	locations.call("synchronize_live_records")
+	var records: Dictionary = locations.call("get_records_snapshot")
 	_breadcrumb("npc_world:simulate_start", "hour=%.3f records=%d" % [hour, records.size()])
 	_rebuild_spot_claims(records)
 
@@ -355,10 +360,15 @@ func simulate_player_sleep_skip(
 		return
 
 	var locations := get_node_or_null("/root/NpcLocations")
-	if locations == null or not locations.has_method("get_all_locations"):
+	if (
+		locations == null
+		or not locations.has_method("synchronize_live_records")
+		or not locations.has_method("get_records_snapshot")
+	):
 		return
 
-	var records: Dictionary = locations.call("get_all_locations")
+	locations.call("synchronize_live_records")
+	var records: Dictionary = locations.call("get_records_snapshot")
 	for npc_id_key in records.keys():
 		var record = records[npc_id_key]
 		if not (record is Dictionary):
