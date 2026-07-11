@@ -69,9 +69,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	open_inventory()
 
 
-func bind_player_inventory(inventory: InventoryModel) -> void:
+func bind_player_inventory(inventory: InventoryModel, player_owner: Node2D = null) -> void:
 	bound_player_inventory = inventory
-	inventory_screen.bind_inventory(inventory)
+	inventory_screen.bind_inventory(inventory, player_owner)
 
 
 func unbind_player_inventory(inventory: InventoryModel) -> void:
@@ -105,6 +105,7 @@ func open_trade_screen(merchant: MerchantComponent) -> bool:
 		return false
 	inventory_previous_pause_state = get_tree().paused
 	if not trade_screen.open_screen(bound_player_inventory, merchant):
+		merchant.clear_trade_player()
 		return false
 	_set_inventory_pause(true)
 	return true

@@ -13,6 +13,10 @@ extends Resource
 @export_range(0, 999999, 1) var base_value: int = 0
 @export_range(0.0, 10000.0, 0.01) var unit_weight: float = 0.0
 @export var icon: Texture2D
+@export var tradable: bool = true
+@export var trade_group: StringName = &"general"
+@export_range(0.0, 100.0, 1.0) var minimum_favor_to_buy: float = 0.0
+@export_range(0.0, 100.0, 1.0) var minimum_favor_to_sell: float = 0.0
 
 @export_group("Food")
 @export var edible: bool = false

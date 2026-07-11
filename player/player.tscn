@@ -1,4 +1,4 @@
-[gd_scene format=3 uid="uid://by1aphre1t601"]
+[gd_scene load_steps=23 format=3 uid="uid://by1aphre1t601"]
 
 [ext_resource type="Script" uid="uid://bda5vp1binny7" path="res://player/scripts/player.gd" id="1_yw30f"]
 [ext_resource type="PackedScene" uid="uid://bg32w4t03pt45" path="res://scenes/things/rope.tscn" id="2_kb6p2"]
@@ -19,6 +19,7 @@
 [ext_resource type="Resource" path="res://player/combat/combos/standing_light_combo.tres" id="19_standing_combo"]
 [ext_resource type="Resource" path="res://player/combat/combos/crouch_combo.tres" id="20_crouch_combo"]
 [ext_resource type="Script" path="res://player/scripts/player_inventory_component.gd" id="21_inventory"]
+[ext_resource type="Script" path="res://scripts/economy/inventory_pickup_receiver.gd" id="22_pickup_receiver"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_wodsf"]
 radius = 35.0
@@ -188,6 +189,9 @@ script = ExtResource("1_yw30f")
 
 [node name="PlayerInventory" type="Node" parent="."]
 script = ExtResource("21_inventory")
+
+[node name="InventoryPickupReceiver" type="Node" parent="."]
+script = ExtResource("22_pickup_receiver")
 
 [node name="rope" parent="." unique_id=163704369 instance=ExtResource("2_kb6p2")]
 

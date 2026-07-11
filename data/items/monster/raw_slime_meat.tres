@@ -1,6 +1,7 @@
-[gd_resource type="Resource" script_class="ItemDefinition" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="ItemDefinition" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/resources/economy/item_definition.gd" id="1_item"]
+[ext_resource type="Texture2D" path="res://images/sprites/assets/gpticons/slime_meat.png" id="2_icon"]
 
 [resource]
 script = ExtResource("1_item")
@@ -12,4 +13,7 @@ tags = Array[StringName]([&"monster_drop", &"food", &"raw_food", &"slime", &"coo
 maximum_stack = 50
 base_value = 2
 unit_weight = 0.25
+icon = ExtResource("2_icon")
+trade_group = &"raw_food"
+minimum_favor_to_buy = 10.0
 requires_processing = true

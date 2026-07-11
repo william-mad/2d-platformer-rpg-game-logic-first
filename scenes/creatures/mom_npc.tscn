@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Script" path="res://scripts/creatures/social_npc.gd" id="1_social_npc"]
 [ext_resource type="Script" path="res://player/scripts/damage_area.gd" id="2_damage_area"]
@@ -9,6 +9,7 @@
 [ext_resource type="Script" path="res://scripts/creatures/npc_inventory_drop_component.gd" id="7_inventory_drop"]
 [ext_resource type="Script" path="res://scripts/economy/merchant_component.gd" id="8_merchant"]
 [ext_resource type="Resource" path="res://data/inventory_profiles/merchant_basic_inventory.tres" id="9_profile"]
+[ext_resource type="Script" path="res://scripts/economy/inventory_pickup_receiver.gd" id="10_pickup_receiver"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_body"]
 size = Vector2(48, 64)
@@ -47,6 +48,9 @@ script = ExtResource("6_inventory")
 
 [node name="NpcInventoryDrop" type="Node" parent="."]
 script = ExtResource("7_inventory_drop")
+
+[node name="InventoryPickupReceiver" type="Node" parent="."]
+script = ExtResource("10_pickup_receiver")
 
 [node name="Merchant" type="Node" parent="."]
 script = ExtResource("8_merchant")

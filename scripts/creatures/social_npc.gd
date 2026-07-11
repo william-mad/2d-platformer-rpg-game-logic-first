@@ -551,12 +551,20 @@ func initialize_merchant_starting_inventory() -> InventoryResult:
 
 
 func try_open_trade(_player: Node) -> bool:
-	if merchant_component == null:
+	if not can_trade_with_player(_player):
 		return false
 	var hud := get_node_or_null("/root/PlayerHud")
 	if hud == null or not hud.has_method("open_trade_screen"):
 		return false
+	merchant_component.bind_trade_player(_player)
 	return bool(hud.call("open_trade_screen", merchant_component))
+
+
+func can_trade_with_player(_player: Node = null) -> bool:
+	if merchant_component == null or float(social_stats.get("disabled", 0.0)) >= 1.0 or get_inventory() == null:
+		return false
+	var locations := get_node_or_null("/root/NpcLocations")
+	return locations != null and locations.call("get_live_npc", String(get_npc_location_id())) == self
 
 
 func get_npc_location_save_data() -> Dictionary:

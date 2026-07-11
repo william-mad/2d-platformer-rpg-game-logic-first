@@ -115,7 +115,7 @@ func _ready() -> void:
 	initialize_states()
 	_apply_pending_runtime_state()
 	if PlayerHud.has_method("bind_player_inventory"):
-		PlayerHud.call("bind_player_inventory", get_inventory())
+		PlayerHud.call("bind_player_inventory", get_inventory(), self)
 	pass
 
 

@@ -27,10 +27,8 @@ const MENU_NPC_PROMPT := &"npc_prompt"
 ]
 @export var interaction_option_texts: PackedStringArray = [
 	"Talk",
-	"Give",
-	"Help",
-	"Ask",
-	"Leave"
+	"Trade",
+	"Cancel"
 ]
 @export var talk_option_texts: PackedStringArray = [
 	"Friendly check-in",
@@ -107,6 +105,7 @@ var prompt_callback_target: Node
 var prompt_accept_method: StringName = &""
 var prompt_decline_method: StringName = &""
 var prompt_completed: bool = false
+var menu_target_can_trade: bool = false
 
 
 func _ready() -> void:
@@ -170,10 +169,6 @@ func _try_open_interaction_menu() -> void:
 	if not block_reason.is_empty():
 		interaction_blocked.emit(player, target_npc, interaction_id, block_reason)
 		return
-	if target_npc.has_method("try_open_trade") and bool(target_npc.call("try_open_trade", player)):
-		cooldown = cooldown_seconds
-		return
-
 	menu_target_npc = target_npc
 	active_menu = MENU_INTERACTION
 	_begin_target_menu_hold(target_npc)
@@ -239,7 +234,13 @@ func show_magic_lesson_invite(mom: Node2D, lesson_spot: Node) -> bool:
 
 func _show_interaction_menu(feedback: String = "") -> void:
 	var npc_label := _get_npc_label(menu_target_npc)
-	_show_menu("Interact: %s" % npc_label, interaction_option_texts, feedback)
+	menu_target_can_trade = (
+		menu_target_npc != null
+		and menu_target_npc.has_method("can_trade_with_player")
+		and bool(menu_target_npc.call("can_trade_with_player", player))
+	)
+	var options := PackedStringArray(["Talk", "Trade", "Cancel"]) if menu_target_can_trade else PackedStringArray(["Talk", "Cancel"])
+	_show_menu("Interact: %s" % npc_label, options, feedback)
 
 
 func _show_talk_menu(feedback: String = "") -> void:
@@ -361,7 +362,18 @@ func _handle_interaction_option(selected_index: int) -> void:
 		_show_talk_menu("")
 		return
 
-	if selected_index == 4:
+	if selected_index == 1 and menu_target_can_trade:
+		var target := menu_target_npc
+		_close_menu()
+		if target != null and target.has_method("try_open_trade") and bool(target.call("try_open_trade", player)):
+			interaction_started.emit(player, target, &"trade")
+			interaction_applied.emit(player, target, &"trade")
+		else:
+			interaction_blocked.emit(player, target, &"trade", "trade_unavailable")
+		cooldown = cooldown_seconds
+		return
+
+	if selected_index == (2 if menu_target_can_trade else 1):
 		_close_menu()
 		return
 

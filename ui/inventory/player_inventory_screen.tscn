@@ -2,8 +2,8 @@
 
 [ext_resource type="Script" path="res://ui/inventory/player_inventory_screen.gd" id="1_screen"]
 
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
-bg_color = Color(0.055, 0.065, 0.085, 0.97)
+[sub_resource type="StyleBoxFlat" id="Panel"]
+bg_color = Color(0.055, 0.065, 0.085, 0.98)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
@@ -24,10 +24,9 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 0
 script = ExtResource("1_screen")
 
-[node name="DimBackground" type="ColorRect" parent="."]
+[node name="Dim" type="ColorRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -35,9 +34,9 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-color = Color(0, 0, 0, 0.52)
+color = Color(0, 0, 0, 0.55)
 
-[node name="CenterContainer" type="CenterContainer" parent="."]
+[node name="Center" type="CenterContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -45,47 +44,89 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="PanelContainer" type="PanelContainer" parent="CenterContainer"]
-custom_minimum_size = Vector2(680, 470)
+[node name="Panel" type="PanelContainer" parent="Center"]
+custom_minimum_size = Vector2(820, 520)
 layout_mode = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+theme_override_styles/panel = SubResource("Panel")
 
-[node name="MarginContainer" type="MarginContainer" parent="CenterContainer/PanelContainer"]
+[node name="Margin" type="MarginContainer" parent="Center/Panel"]
 layout_mode = 2
-theme_override_constants/margin_left = 28
-theme_override_constants/margin_top = 24
-theme_override_constants/margin_right = 28
-theme_override_constants/margin_bottom = 20
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 18
 
-[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer/PanelContainer/MarginContainer"]
+[node name="Root" type="VBoxContainer" parent="Center/Panel/Margin"]
 layout_mode = 2
-theme_override_constants/separation = 14
+theme_override_constants/separation = 12
 
-[node name="Header" type="Label" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]
+[node name="Header" type="Label" parent="Center/Panel/Margin/Root"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.92, 0.82, 0.55, 1)
-theme_override_font_sizes/font_size = 28
+theme_override_font_sizes/font_size = 26
 text = "INVENTORY"
 horizontal_alignment = 1
 
-[node name="Separator" type="HSeparator" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]
-layout_mode = 2
-
-[node name="ScrollContainer" type="ScrollContainer" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]
+[node name="Content" type="HBoxContainer" parent="Center/Panel/Margin/Root"]
 layout_mode = 2
 size_flags_vertical = 3
-horizontal_scroll_mode = 0
+theme_override_constants/separation = 20
 
-[node name="ItemsContainer" type="VBoxContainer" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/ScrollContainer"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(600, 0)
+[node name="Scroll" type="ScrollContainer" parent="Center/Panel/Margin/Root/Content"]
+custom_minimum_size = Vector2(500, 380)
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_constants/separation = 8
 
-[node name="CloseHint" type="Label" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]
+[node name="GridStack" type="VBoxContainer" parent="Center/Panel/Margin/Root/Content/Scroll"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.64, 0.69, 0.76, 1)
-theme_override_font_sizes/font_size = 14
-text = "Press I to close"
+size_flags_horizontal = 3
+
+[node name="EmptyLabel" type="Label" parent="Center/Panel/Margin/Root/Content/Scroll/GridStack"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Inventory is empty."
+horizontal_alignment = 1
+
+[node name="ItemsGrid" type="GridContainer" parent="Center/Panel/Margin/Root/Content/Scroll/GridStack"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+columns = 5
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 8
+
+[node name="Details" type="VBoxContainer" parent="Center/Panel/Margin/Root/Content"]
+custom_minimum_size = Vector2(250, 0)
+layout_mode = 2
+
+[node name="DetailsLabel" type="Label" parent="Center/Panel/Margin/Root/Content/Details"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(250, 210)
+layout_mode = 2
+text = "Select an item to view details."
+autowrap_mode = 2
+
+[node name="DumpTitle" type="Label" parent="Center/Panel/Margin/Root/Content/Details"]
+layout_mode = 2
+text = "Dump into world"
+
+[node name="DumpQuantity" type="SpinBox" parent="Center/Panel/Margin/Root/Content/Details"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 1.0
+max_value = 1.0
+value = 1.0
+
+[node name="DumpButton" type="Button" parent="Center/Panel/Margin/Root/Content/Details"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Dump selected quantity"
+
+[node name="FeedbackLabel" type="Label" parent="Center/Panel/Margin/Root/Content/Details"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 2
+
+[node name="CloseHint" type="Label" parent="Center/Panel/Margin/Root"]
+layout_mode = 2
+text = "Arrow keys/controller: navigate • I: close"
 horizontal_alignment = 1

@@ -1,6 +1,7 @@
-[gd_resource type="Resource" script_class="ItemDefinition" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="ItemDefinition" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/resources/economy/item_definition.gd" id="1_item"]
+[ext_resource type="Texture2D" path="res://images/sprites/assets/gpticons/coin.png" id="2_icon"]
 
 [resource]
 script = ExtResource("1_item")
@@ -12,3 +13,6 @@ tags = Array[StringName]([&"currency"])
 maximum_stack = 9999
 base_value = 1
 unit_weight = 0.0
+icon = ExtResource("2_icon")
+tradable = false
+trade_group = &"currency"

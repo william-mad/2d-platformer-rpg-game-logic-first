@@ -2,6 +2,26 @@
 
 This foundation separates immutable item descriptions from mutable inventory state. `ItemDefinition` resources contain catalog metadata such as names, tags, values, stack hints, weight, and food properties. `InventoryModel` stores only runtime quantities and reservations; it does not modify definition resources.
 
+## Implemented inventory, loot, and trade update
+
+World loot now uses its existing `Area2D` as a 160-pixel attraction zone. Body enter/exit events track only nearby `InventoryPickupReceiver` components; there is no per-frame scene-tree or group scan. The shared player and persistent `SocialNpc` scenes each expose that thin receiver contract over their existing authoritative inventory. A player must be live in the tree. An NPC must additionally be alive, not queued for removal, and be the canonical live instance accepted by `NpcLocations`; rejected duplicates, wrong-scene instances, off-screen records, dead NPCs, and the dead loot source are ineligible.
+
+The nearest eligible receiver is selected by squared distance with receiver ID as the deterministic tie-break. The current target is retained until a candidate is at least 12 pixels closer, avoiding rapid switching. Loot starts at 90 px/s, accelerates at 900 px/s², caps at 420 px/s, and collects within 18 pixels. Collection transfers each complete stack through `InventoryTransactionService`. Successful quantities leave the container; failures remain world-owned; the container is freed only when empty. NPC pickups enter the live NPC inventory and therefore follow the normal later record capture, trade, and definitive-death-drop lifecycle.
+
+Every accepted ordinary `SocialNpc` has the shared `MerchantComponent` and exposes `Talk`, `Trade`, and `Cancel` through the existing interaction menu. Its actual persistent inventory is its stock and wallet. A new persistent record initializes authored profile items, then adds 20 `gold_coin` only when no authored gold exists. This happens only in the new-record branch; restoration always wins and never refills gold or stock. Mom's authored profile remains the override with 100 gold and five cooked slime meat.
+
+Pricing uses directed `NPC → Player` favor from `Relationships`, falling back to the NPC's configured default and clamping to 0–100. The charge multiplier is piecewise linear through `(0, 2.0)`, `(50, 1.25)`, `(100, 0.9)`; the payment multiplier is piecewise linear through `(0, 0.25)`, `(50, 0.5)`, `(100, 0.75)`. Final price is `max(1, roundi(base_value * multiplier))`; Godot rounds positive halfway values away from zero. Gold, non-tradable definitions, zero-value definitions, unavailable stock, and reserved items/gold are excluded. Policy validation precedes the existing atomic two-inventory exchange.
+
+Item definitions now carry `tradable`, `trade_group`, `minimum_favor_to_buy`, and `minimum_favor_to_sell`. Empty NPC group filters accept ordinary tradable groups. `slime_gel` is unrestricted material; `raw_slime_meat` requires 10 favor to buy and 0 to sell; `cooked_slime_meat` requires 35 to buy and 15 to sell; `gold_coin` is currency and never appears as a product. Favor-locked Buy stock remains visible with its icon, quantity, lock overlay, required favor, and current favor. Items the NPC refuses to buy are consistently hidden from Sell.
+
+Player inventory and both trade sides use `inventory_item_slot.tscn` inside scrollable `GridContainer`s. Slots display assigned icons, quantities, reservation markers, prices, locks, and a clear focus/hover border. Built-in Control focus provides keyboard/controller arrow navigation; mouse hover and focus both update the shared details area. Grids rebuild only on open, bound inventory signals, trade-partner/favor changes, completed trades, or dumps. Selection is restored by item ID when still valid, and each empty section has an explicit message.
+
+The four catalog definitions are assigned once to existing `gpticons` textures: `slime_gel.png`, `slime_meat.png` for both raw and cooked slime meat, and `coin.png` for gold. No runtime filename search, artwork generation, rename, or overwrite occurs. All item definitions have a match; the remaining icon assets are currently unused catalog candidates. Unknown runtime IDs or future definitions without an icon use the existing `book.png` as a stable fallback.
+
+The inventory details area can dump one, a chosen quantity, or the full available unreserved stack. Gold follows the same general rule and may be dumped. The screen validates the world parent and quantity, creates and initializes one ordinary `WorldLootContainer`, then removes the exact quantity through the public inventory API; initialization or removal failure frees the staged node and leaves player ownership unchanged. Successful loot spawns 76 pixels beside and 24 pixels above the player. A 0.75-second receiver-ID exclusion prevents only the dumping player from immediately reclaiming it, while eligible nearby NPCs remain able to collect it. The receiver stays tracked during the cooldown and becomes eligible automatically when it expires.
+
+World loot, including dumped stacks, remains scene-local and does not survive save/load or scene changes. Crafting, recipes, eating behavior, equipment, travel, dynamic markets, debt, taxes, bargaining, theft/ownership rights, manual slot rearrangement, and persistent world drops remain deferred.
+
 ## Stable item IDs
 
 Inventory entries use stable item IDs instead of `Resource` references. String IDs remain predictable across JSON serialization, do not depend on a resource being loaded, and let a later transaction layer validate catalog membership without coupling the inventory model to the catalog. IDs are trimmed before storage, and empty or whitespace-only IDs are rejected.
@@ -68,7 +88,7 @@ The future cooking system will be responsible for catalog validation and grantin
 
 Gold is the ordinary catalog item `gold_coin`, stored as an integer quantity in the same authoritative `InventoryModel` as every other item. There is no wallet or parallel currency state. The configured Mom NPC uses her existing persistent NPC inventory for both stock and gold; the player uses the existing persistent player inventory.
 
-Positive `ItemDefinition.base_value` values mark ordinarily tradable items. `MerchantComponent` is the single pricing source: the price to the player is the base value multiplied by `price_to_player_multiplier`, while the price from the player is the base value multiplied by `price_from_player_multiplier`. Godot's positive `roundi` rule is applied once after multiplication and a positive tradable price is clamped to at least one gold. Zero-value items and gold itself are excluded from ordinary item trading.
+Positive `ItemDefinition.base_value` plus the explicit trade metadata mark ordinarily tradable items. `MerchantComponent` is the single pricing and item-access source; the exact directed-favor curve and rounding rule are documented above. Zero-value items and gold itself are excluded from ordinary item trading.
 
 `TradeService` stages the complete item and gold exchange in inventory snapshots before applying either authoritative result. Buying moves merchant item to player and player gold to merchant; selling reverses both legs. Invalid quantity or price, overflow, insufficient stock or gold, destination overflow, and any failed staged leg leave both live inventories untouched. If an authoritative apply unexpectedly fails, both exact pre-trade snapshots are restored. Only available quantities may move, so reservations protect stock and gold from trading.
 
@@ -76,7 +96,7 @@ Mom's starting profile supplies 100 gold and 5 cooked slime meat only when `NpcL
 
 The signal-driven trade screen opens through the existing NPC interaction action, uses the HUD's established modal pause ownership, and refreshes on inventory and reservation signals without polling. The player development component offers a separate disabled-by-default `development_add_trade_gold` option that adds 50 gold once in a debug build.
 
-Dynamic pricing, timed restocking, bargaining, reputation discounts, taxes, credit, debt, multiple currencies, protected merchant items, crafting, recipes, equipment, and item use remain deferred.
+Dynamic market simulation, timed restocking, bargaining dialogue, taxes, credit, debt, multiple currencies, protected merchant items, crafting, recipes, equipment, and item use remain deferred. Directed-favor pricing is implemented as documented above.
 
 ## Persistent NPC ownership
 
@@ -88,7 +108,7 @@ After a scene-authored NPC passes wrong-scene and duplicate-instance registratio
 
 Old records with no `inventory` field are normalized to a fresh valid empty block and restore as empty. If a present block fails `InventoryModel` validation, no partial data is applied: a warning identifies the NPC and failure, the valid live inventory is preserved, and the record's malformed block is replaced by a fresh live snapshot. Reservations persist through capture, scene changes, off-screen storage, and save/load.
 
-NPC inventory gameplay remains deferred. This persistence layer does not add stock generation, wallets, merchants, loot, recipes, eating, equipment, travel behavior, or NPC inventory UI.
+The persistence layer remains the authority handoff used by universal trading, automatic loot pickup, and definitive death drops. It does not add arbitrary stock generation, wallets, recipes, eating, equipment, travel behavior, or a separate NPC inventory UI.
 
 ## Persistent player inventory and screen
 
@@ -96,11 +116,11 @@ The canonical player scene has one `PlayerInventoryComponent`, which owns the li
 
 The autoloaded `PlayerHud` binds the current player's model to the read-only `PlayerInventoryScreen`. The existing `inventory` input action (`I`) toggles the screen. Opening pauses through `PauseSystem` without displaying the ordinary pause-stats overlay, and closing restores the prior pause state. Game-over and pre-existing pause ownership prevent the inventory from opening over another modal screen.
 
-The list refreshes when opened or when inventory signals arrive while visible. Changes received while closed only mark it dirty, so it rebuilds once on the next open rather than polling. Rows use catalog display names and icons, show total quantity, and show available and reserved quantities when stock is reserved. Empty inventories have an explicit message; unresolved IDs remain visible through an ID fallback and produce one consolidated warning per refresh.
+The icon grid refreshes when opened or when inventory signals arrive while visible. Changes received while closed only mark it dirty, so it rebuilds once on the next open rather than polling. Slots and the details panel expose catalog names/icons plus total, available, and reserved quantities. Empty inventories have an explicit message and unresolved IDs remain stable through an ID fallback.
 
 For immediate debug verification, `PlayerInventoryComponent.development_add_sample_items` is an exported, disabled-by-default option. Debug builds can also call `add_development_sample_items()` once per component. It validates the current catalog and uses public inventory APIs to add the three sample slime items; it is not release or normal starting inventory.
 
-The screen deliberately provides no item use, dropping, equipment, loot pickup, merchant, money, eating, recipe, crafting, sorting, drag-and-drop, or NPC inventory controls.
+The screen deliberately provides no item use, equipment, eating, recipes, crafting, drag-and-drop rearrangement, or direct NPC inventory controls beyond the shared trade screen.
 
 ## Definitive NPC death loot
 
@@ -108,7 +128,7 @@ The screen deliberately provides no item use, dropping, equipment, loot pickup, 
 
 The component confirms that its owner is the accepted canonical live NPC. It initializes one `WorldLootContainer` from a reservation-free copy of the complete total quantities. Only after the container successfully owns that snapshot does it release every dead-owner reservation, clear the live NPC inventory through public APIs, and trigger the existing persistent-record capture. A local completion guard makes repeated death calls idempotent. Initialization or spawn failure leaves the NPC inventory unchanged and retryable.
 
-The world container owns one `InventoryModel` and uses the existing `up` interaction action while a player is inside its `Area2D`. Collection transfers each complete item quantity through `InventoryTransactionService`; failed transfers are rolled back and remain in the container, while successful transfers enter the authoritative player inventory. The container removes itself only after all loot is collected. Unknown item IDs remain authoritative and transferable without requiring catalog metadata.
+The world container owns one `InventoryModel` and automatically attracts the nearest eligible receiver as documented above. Collection transfers each complete item quantity through `InventoryTransactionService`; failed transfers are rolled back and remain in the container, while successful transfers enter the receiver's authoritative inventory. The container removes itself only after all loot is collected. Unknown item IDs remain authoritative and transferable without requiring catalog metadata.
 
 Dropped world containers are scene-local in this implementation. They do not survive a scene change or save/load because the project has no small persistent-world-object lifecycle to extend. Advanced loot-table features, merchants, money, item use, eating, recipes, equipment, travel behavior, and a full loot-selection UI remain deferred.
 
