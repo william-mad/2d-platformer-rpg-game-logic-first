@@ -6,8 +6,6 @@ signal activity_finished(npc_id: StringName, spot_id: StringName)
 const SPOT_DATA_DIRECTORY := "res://data/npc_spots"
 const PLAYER_SOCIAL_TARGET_ID := "__player__"
 const DEFAULT_SLEEP_SKIP_WAKE_HUNGER_MAX := 60.0
-const DEFAULT_PASSIVE_HEALING_PER_GAME_DAY := 10.0
-const DEFAULT_STARVATION_DAMAGE_PER_GAME_DAY := 5.0
 const MEAL_STAGE_PREP_WORK := "prep_work"
 const MEAL_STAGE_FOOD := "food"
 const MEAL_STAGE_CLEANUP_WORK := "cleanup_work"
@@ -32,7 +30,8 @@ var spot_runtime_states: Dictionary = {}
 var simulation_timer: float = 0.0
 var simulation_queued: bool = false
 var social_rng := RandomNumberGenerator.new()
-var social_favor_cache: Dictionary = {}
+var _social_planner := NpcSocialPlanner.new()
+var _needs_simulator := NpcNeedsSimulator.new()
 var simulation_tick_skip_logged: bool = false
 var _performance_profile_call_count: int = 0
 var _performance_profile_total_usec: int = 0
@@ -299,7 +298,7 @@ func _process(delta: float) -> void:
 
 func simulate_now() -> void:
 	# Only saved records are simulated; unloaded NPC scenes never need a running state machine.
-	social_favor_cache.clear()
+	_social_planner.begin_simulation_pass()
 	if _world_simulation_debug_disabled():
 		_log_world_simulation_disabled("simulate_now")
 		return
@@ -437,7 +436,7 @@ func simulate_now() -> void:
 			profile_live_records,
 			profile_disabled_records
 		)
-	social_favor_cache.clear()
+	_social_planner.end_simulation_pass()
 
 
 func _apply_simulated_record_update(locations: Node, npc_id: String, record: Dictionary) -> void:
@@ -844,88 +843,14 @@ func _simulate_offscreen_passive_values(
 	var last_total_hours := float(record.get("last_simulated_total_hours", total_hours))
 	var elapsed_game_hours := maxf(total_hours - last_total_hours, 0.0)
 	record["last_simulated_total_hours"] = total_hours
-	if elapsed_game_hours <= 0.0:
+	if not _needs_simulator.advance_needs(record, elapsed_game_hours, paused_state_name):
 		return
 
 	var node_state = record.get("node_state", {})
-	if not (node_state is Dictionary):
-		return
-	var social_stats = node_state.get("social_stats", {})
-	if not (social_stats is Dictionary):
-		return
-
 	var profile = node_state.get("world_simulation_profile", {})
 	if not (profile is Dictionary):
 		profile = {}
-	var tired_settings = profile.get("tired", {})
-	if not (tired_settings is Dictionary):
-		tired_settings = {}
-	var tired_value_name := String(tired_settings.get("value_name", "tired"))
-	if not tired_value_name.is_empty() and not social_stats.has(tired_value_name):
-		social_stats[tired_value_name] = 0.0
-		node_state["social_stats"] = social_stats
-		record["node_state"] = node_state
-	if not bool(profile.get("passive_needs_enabled", true)):
-		return
-
-	var rates = profile.get("rates_per_game_hour", {})
-	if not (rates is Dictionary) or rates.is_empty():
-		rates = {
-			"sleep_need": 5.1,
-			"hunger": 7.0,
-			"boredom": 8.0,
-			"talk_need": 24.0,
-		}
-	var talk_need_before_growth := float(social_stats.get("talk_need", 0.0))
-	var talk_need_rate := float(rates.get("talk_need", 0.0))
-	var hunger_before_growth := float(social_stats.get("hunger", 0.0))
-	var hunger_rate := float(rates.get("hunger", 0.0))
-	var hunger_paused := _passive_value_is_paused("hunger", paused_state_name)
-
-	for value_key in rates.keys():
-		var value_name := String(value_key)
-		if not social_stats.has(value_name):
-			continue
-		if _passive_value_is_paused(value_name, paused_state_name):
-			continue
-		var current_value := float(social_stats.get(value_name, 0.0))
-		var growth := float(rates[value_key]) * elapsed_game_hours
-		if value_name == "talk_need":
-			_apply_offscreen_talk_need_growth(social_stats, current_value, growth)
-			continue
-		var next_value := current_value + growth
-		social_stats[value_name] = clampf(next_value, 0.0, 100.0)
-
-	var starvation_applied := _apply_offscreen_starvation_damage(
-		social_stats,
-		profile,
-		elapsed_game_hours,
-		hunger_before_growth,
-		hunger_rate,
-		hunger_paused
-	)
-	if not starvation_applied:
-		_apply_offscreen_passive_healing(social_stats, profile, elapsed_game_hours)
-	_apply_offscreen_tired_change(
-		social_stats,
-		profile,
-		paused_state_name,
-		elapsed_game_hours
-	)
-
-	_apply_offscreen_loneliness_recovery(
-		social_stats,
-		profile,
-		talk_need_before_growth,
-		talk_need_rate,
-		elapsed_game_hours,
-		_passive_value_is_paused("talk_need", paused_state_name)
-	)
-	_apply_offscreen_emotion_decay(social_stats, profile, elapsed_game_hours)
 	_decay_offscreen_relationships(record, profile, elapsed_game_hours)
-
-	node_state["social_stats"] = social_stats
-	record["node_state"] = node_state
 
 
 func _apply_full_sleep_health_restore(
@@ -944,93 +869,6 @@ func _apply_full_sleep_health_restore(
 	social_stats[health_value_name] = full_health
 
 
-func _apply_offscreen_starvation_damage(
-	social_stats: Dictionary,
-	profile: Dictionary,
-	elapsed_game_hours: float,
-	hunger_before_growth: float,
-	hunger_rate: float,
-	hunger_paused: bool
-) -> bool:
-	if elapsed_game_hours <= 0.0 or hunger_paused:
-		return false
-	if not social_stats.has("hp") or not social_stats.has("hunger"):
-		return false
-	if float(social_stats.get("disabled", 0.0)) >= 1.0:
-		return false
-
-	var current_hp := float(social_stats.get("hp", 0.0))
-	if current_hp <= 0.0:
-		return false
-
-	var damage_per_day := clampf(
-		float(profile.get("starvation_damage_per_game_day", DEFAULT_STARVATION_DAMAGE_PER_GAME_DAY)),
-		0.0,
-		100.0
-	)
-	if damage_per_day <= 0.0:
-		return false
-
-	var starvation_hours := _get_offscreen_starvation_game_hours(
-		elapsed_game_hours,
-		hunger_before_growth,
-		hunger_rate
-	)
-	if starvation_hours <= 0.0:
-		return false
-
-	var damage := (damage_per_day / 24.0) * starvation_hours
-	social_stats["hp"] = maxf(current_hp - damage, 0.0)
-	return true
-
-
-func _get_offscreen_starvation_game_hours(
-	elapsed_game_hours: float,
-	hunger_before_growth: float,
-	hunger_rate: float
-) -> float:
-	if hunger_before_growth >= 100.0:
-		return elapsed_game_hours
-	if hunger_rate <= 0.0:
-		return 0.0
-
-	var remaining_hunger := maxf(100.0 - hunger_before_growth, 0.0)
-	var hours_to_starvation := remaining_hunger / hunger_rate
-	return maxf(elapsed_game_hours - hours_to_starvation, 0.0)
-
-
-func _apply_offscreen_passive_healing(
-	social_stats: Dictionary,
-	profile: Dictionary,
-	elapsed_game_hours: float
-) -> void:
-	if elapsed_game_hours <= 0.0:
-		return
-	if not social_stats.has("hp"):
-		return
-	if float(social_stats.get("hunger", 0.0)) >= 100.0:
-		return
-	if float(social_stats.get("disabled", 0.0)) >= 1.0:
-		return
-
-	var current_hp := float(social_stats.get("hp", 0.0))
-	if current_hp <= 0.0 or current_hp >= 100.0:
-		return
-
-	var healing_per_day := clampf(
-		float(profile.get("passive_healing_per_game_day", DEFAULT_PASSIVE_HEALING_PER_GAME_DAY)),
-		0.0,
-		100.0
-	)
-	if healing_per_day <= 0.0:
-		return
-
-	social_stats["hp"] = minf(
-		100.0,
-		current_hp + (healing_per_day / 24.0) * elapsed_game_hours
-	)
-
-
 func _consume_sleep_skip_wake_pause(
 	npc_id: StringName,
 	record: Dictionary,
@@ -1045,167 +883,6 @@ func _consume_sleep_skip_wake_pause(
 	elif locations != null and locations.has_method("update_simulated_record"):
 		_apply_simulated_record_update(locations, String(npc_id), record)
 	return true
-
-
-func _apply_offscreen_tired_change(
-	social_stats: Dictionary,
-	profile: Dictionary,
-	state_name: StringName,
-	game_hours: float
-) -> void:
-	# Scheduled actions build fatigue; idle off-screen NPCs can casually recover without an activity.
-	var settings = profile.get("tired", {})
-	if not (settings is Dictionary):
-		settings = {}
-	if not bool(settings.get("enabled", true)) or game_hours <= 0.0:
-		return
-
-	var value_name := String(settings.get("value_name", "tired"))
-	if value_name.is_empty():
-		return
-	var state_text := String(state_name)
-	var rate := 0.0
-	if state_text.is_empty():
-		var current_tired := float(social_stats.get(value_name, 0.0))
-		var rest_threshold := float(settings.get("rest_threshold", 50.0))
-		if current_tired < rest_threshold:
-			return
-		var rest_floor := float(settings.get("rest_floor", 40.0))
-		social_stats[value_name] = maxf(
-			current_tired
-				- absf(float(settings.get("rest_recovery_per_game_hour", 100.0)))
-				* game_hours,
-			rest_floor
-		)
-		return
-	elif state_text == "Rest":
-		rate = -absf(float(settings.get("rest_recovery_per_game_hour", 100.0)))
-	elif state_text == "Fight":
-		rate = absf(float(settings.get("fight_growth_per_game_hour", 60.0)))
-	else:
-		var inactive_states = settings.get(
-			"inactive_states",
-			[&"Idle", &"Sleep", &"Collapse", &"DisabledDead"]
-		)
-		if _variant_array_has_string(inactive_states, state_text):
-			return
-		rate = absf(float(settings.get("action_growth_per_game_hour", 25.0)))
-
-	var minimum_value := float(settings.get("rest_floor", 40.0)) if state_text == "Rest" else 0.0
-	social_stats[value_name] = clampf(
-		float(social_stats.get(value_name, 0.0)) + rate * game_hours,
-		minimum_value,
-		100.0
-	)
-
-
-func _apply_offscreen_talk_need_growth(
-	social_stats: Dictionary,
-	current_value: float,
-	growth: float
-) -> void:
-	# Preserve every 100 -> 60 lonely cycle even when several game hours pass off-screen.
-	var talk_need := clampf(current_value, 0.0, 100.0)
-	var lonely_increases := 0
-	if talk_need >= 100.0:
-		talk_need = 60.0
-		lonely_increases += 1
-
-	var total := talk_need + maxf(growth, 0.0)
-	if total >= 100.0:
-		var overflow := total - 100.0
-		lonely_increases += 1 + int(floor(overflow / 40.0))
-		total = 60.0 + fposmod(overflow, 40.0)
-
-	social_stats["talk_need"] = clampf(total, 0.0, 100.0)
-	if lonely_increases <= 0 or not social_stats.has("lonely"):
-		return
-
-	social_stats["lonely"] = clampf(
-		float(social_stats.get("lonely", 0.0)) + float(lonely_increases),
-		0.0,
-		100.0
-	)
-
-
-func _apply_offscreen_loneliness_recovery(
-	social_stats: Dictionary,
-	profile: Dictionary,
-	initial_talk_need: float,
-	talk_need_rate: float,
-	elapsed_game_hours: float,
-	talk_need_paused: bool
-) -> void:
-	# Recover only for the part of an unloaded interval spent below the threshold.
-	var settings = profile.get("loneliness_recovery", {})
-	if not (settings is Dictionary):
-		settings = {}
-	if not bool(settings.get("enabled", true)):
-		return
-
-	var lonely_name := String(settings.get("value_name", "lonely"))
-	if lonely_name.is_empty() or not social_stats.has(lonely_name):
-		return
-	var threshold := float(settings.get("talk_need_below", 50.0))
-	if initial_talk_need >= threshold:
-		return
-
-	var recovery_hours := elapsed_game_hours
-	if not talk_need_paused and talk_need_rate > 0.0:
-		recovery_hours = minf(
-			recovery_hours,
-			maxf((threshold - initial_talk_need) / talk_need_rate, 0.0)
-		)
-	if recovery_hours <= 0.0:
-		return
-
-	var full_recovery_hours := maxf(
-		float(settings.get("full_recovery_game_hours", 5.0)),
-		0.001
-	)
-	var current_loneliness := float(social_stats.get(lonely_name, 0.0))
-	social_stats[lonely_name] = maxf(
-		current_loneliness - (100.0 / full_recovery_hours) * recovery_hours,
-		0.0
-	)
-
-
-func _apply_offscreen_emotion_decay(
-	social_stats: Dictionary,
-	profile: Dictionary,
-	game_hours: float
-) -> void:
-	var anger_decay = profile.get("anger_decay", {})
-	if anger_decay is Dictionary and bool(anger_decay.get("enabled", false)):
-		var anger_name := String(anger_decay.get("value_name", "anger"))
-		if social_stats.has(anger_name):
-			var anger := float(social_stats[anger_name])
-			var full_hours := maxf(float(anger_decay.get("full_decay_game_hours", 4.0)), 0.001)
-			social_stats[anger_name] = maxf(anger - (100.0 / full_hours) * game_hours, 0.0)
-
-	var fear_decay = profile.get("fear_decay", {})
-	if not (fear_decay is Dictionary) or not bool(fear_decay.get("enabled", false)):
-		return
-
-	var fear_name := String(fear_decay.get("value_name", "fear"))
-	if not social_stats.has(fear_name):
-		return
-
-	var fear := float(social_stats[fear_name])
-	var panic_floor := float(fear_decay.get("panic_floor", 90.0))
-	var stop_value := maxf(float(fear_decay.get("stop_value", 69.9)), 0.0)
-	if fear <= stop_value:
-		return
-	if fear > panic_floor:
-		var panic_hours := float(fear_decay.get("panic_cooldown_game_hours", 1.0 / 6.0))
-		if panic_hours <= 0.0:
-			fear = panic_floor
-		else:
-			fear = maxf(fear - ((100.0 - panic_floor) / panic_hours) * game_hours, panic_floor)
-	else:
-		var slow_rate := float(fear_decay.get("slow_decay_per_game_hour", 5.0))
-		fear = maxf(fear - slow_rate * game_hours, stop_value)
-	social_stats[fear_name] = fear
 
 
 func _decay_offscreen_relationships(
@@ -1244,20 +921,6 @@ func _decay_offscreen_relationships(
 				float(fear_decay.get("slow_decay_per_game_hour", 5.0)),
 				float(fear_decay.get("stop_value", 69.9))
 			)
-
-
-func _passive_value_is_paused(value_name: String, state_name: StringName) -> bool:
-	var state_key := String(state_name).to_snake_case()
-	if value_name == "sleep_need":
-		return state_key == "sleep" or state_key == "collapse"
-	if value_name == "hunger":
-		return state_key == "eat"
-	if value_name == "boredom":
-		return state_key == "work" or state_key == "recreation" or state_key == "routine_task"
-	if value_name == "talk_need":
-		return state_key == "talk"
-
-	return false
 
 
 func register_live_spot(spot_id: StringName, spot: Node2D) -> void:
@@ -2014,7 +1677,22 @@ func _try_start_social_seek(
 	if _get_saved_stat(record, "talk_need") < float(settings.get("talk_need_threshold", 70.0)):
 		return false
 
-	var candidate := _choose_social_candidate(npc_id, record, records, locations, settings)
+	var relationships := get_node_or_null("/root/Relationships")
+	var player := get_tree().get_first_node_in_group("player") as Node2D
+	var candidate_evaluated := Callable()
+	if performance_profiling_enabled:
+		candidate_evaluated = Callable(self, "_record_social_candidate_evaluation")
+	var candidate := _social_planner.choose_candidate(
+		npc_id,
+		record,
+		records,
+		locations,
+		settings,
+		relationships,
+		player,
+		social_rng,
+		candidate_evaluated
+	)
 	if candidate.is_empty():
 		return false
 
@@ -2122,124 +1800,8 @@ func _get_social_seek_settings(record: Dictionary) -> Dictionary:
 	}
 
 
-func _choose_social_candidate(
-	npc_id: StringName,
-	record: Dictionary,
-	records: Dictionary,
-	locations: Node,
-	settings: Dictionary
-) -> Dictionary:
-	var seeker_scene_path := String(record.get("scene_path", ""))
-	var local_candidates: Array[Dictionary] = []
-	var remote_candidates: Array[Dictionary] = []
-	var player := get_tree().get_first_node_in_group("player") as Node2D
-	if player != null and is_instance_valid(player):
-		var player_scene_path := String(locations.call("get_current_scene_path"))
-		_add_social_candidate({
-			"target_id": PLAYER_SOCIAL_TARGET_ID,
-			"scene_path": player_scene_path,
-			"position": player.global_position,
-			"is_player": true,
-		}, seeker_scene_path, local_candidates, remote_candidates)
-
-	var relationships := get_node_or_null("/root/Relationships")
-	var owner_id := _get_record_relationship_id(npc_id, record)
-	var minimum_favor := float(settings.get("minimum_npc_favor", 10.0))
-	for target_id_key in records.keys():
-		var target_id := String(target_id_key)
-		if target_id == String(npc_id):
-			continue
-		var target_record = records[target_id_key]
-		if not (target_record is Dictionary) or _record_is_disabled(target_record):
-			continue
-		if performance_profiling_enabled:
-			_performance_profile_candidate_evaluations_in_pass += 1
-		var target_relationship_id := _get_record_relationship_id(
-			StringName(target_id),
-			target_record
-		)
-		if relationships != null and relationships.has_method("get_favor_by_id"):
-			var seeker_favor := _get_cached_social_favor(
-				relationships,
-				owner_id,
-				target_relationship_id,
-				50.0
-			)
-			var target_favor := _get_cached_social_favor(
-				relationships,
-				target_relationship_id,
-				owner_id,
-				50.0
-			)
-			if seeker_favor <= minimum_favor or target_favor <= minimum_favor:
-				continue
-		var target_position = target_record.get("last_position", Vector2.ZERO)
-		if locations.has_method("get_live_npc"):
-			var target_live := locations.call("get_live_npc", target_id) as Node2D
-			if target_live != null:
-				target_position = target_live.global_position
-		_add_social_candidate({
-			"target_id": target_id,
-			"scene_path": String(target_record.get("scene_path", "")),
-			"position": target_position,
-			"is_player": false,
-		}, seeker_scene_path, local_candidates, remote_candidates)
-
-	var candidates := local_candidates if not local_candidates.is_empty() else remote_candidates
-	if candidates.is_empty():
-		return {}
-	var preferred_target_id := String(record.get("social_visit_target_id", ""))
-	for candidate in candidates:
-		if not preferred_target_id.is_empty() and String(candidate.get("target_id", "")) == preferred_target_id:
-			return candidate
-
-	var player_chance := clampf(float(settings.get("player_target_chance", 0.35)), 0.0, 1.0)
-	if social_rng.randf() < player_chance:
-		for candidate in candidates:
-			if bool(candidate.get("is_player", false)):
-				return candidate
-	return candidates[social_rng.randi_range(0, candidates.size() - 1)]
-
-
-func _get_cached_social_favor(
-	relationships: Node,
-	owner_id: String,
-	other_id: String,
-	fallback: float
-) -> float:
-	var favors_for_owner = social_favor_cache.get(owner_id, null)
-	if favors_for_owner is Dictionary and favors_for_owner.has(other_id):
-		return float(favors_for_owner[other_id])
-
-	var favor := float(relationships.call("get_favor_by_id", owner_id, other_id, fallback))
-	if not (favors_for_owner is Dictionary):
-		favors_for_owner = {}
-		social_favor_cache[owner_id] = favors_for_owner
-	favors_for_owner[other_id] = favor
-	return favor
-
-
-func _add_social_candidate(
-	candidate: Dictionary,
-	seeker_scene_path: String,
-	local_candidates: Array[Dictionary],
-	remote_candidates: Array[Dictionary]
-) -> void:
-	if String(candidate.get("scene_path", "")).is_empty():
-		return
-	if String(candidate.get("scene_path", "")) == seeker_scene_path:
-		local_candidates.append(candidate)
-	else:
-		remote_candidates.append(candidate)
-
-
-func _get_record_relationship_id(npc_id: StringName, record: Dictionary) -> String:
-	var node_state = record.get("node_state", {})
-	if node_state is Dictionary:
-		var relationship_id := String(node_state.get("relationship_id", ""))
-		if not relationship_id.is_empty():
-			return relationship_id
-	return String(npc_id)
+func _record_social_candidate_evaluation() -> void:
+	_performance_profile_candidate_evaluations_in_pass += 1
 
 
 func _get_live_social_target(candidate: Dictionary, locations: Node) -> Node2D:

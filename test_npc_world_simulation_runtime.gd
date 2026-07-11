@@ -137,6 +137,7 @@ func _run_tests() -> void:
 	_test_magic_lesson_invite_waits_for_acceptance(simulator)
 	_test_loaded_afternoon_save_tick_is_stable(simulator, world_time, locations)
 	_test_offscreen_starvation_damages_at_hunger_cap(simulator)
+	_test_needs_simulator_determinism_and_clamping()
 
 
 func _reset_meal_cycle(simulator: Node, world_time: Node, total_hours: float) -> Dictionary:
@@ -893,6 +894,37 @@ func _test_offscreen_starvation_damages_at_hunger_cap(simulator: Node) -> void:
 	var social_stats: Dictionary = record["node_state"]["social_stats"]
 	_expect_approx(float(social_stats["hp"]), 99.0, 0.001, "offscreen hunger 100 drains HP")
 	_expect_equal(float(social_stats["hunger"]), 100.0, "offscreen hunger stays capped")
+
+
+func _test_needs_simulator_determinism_and_clamping() -> void:
+	var simulator := NpcNeedsSimulator.new()
+	var original := {
+		"node_state": {
+			"social_stats": {
+				"hp": 90.0,
+				"hunger": 98.0,
+				"sleep_need": 20.0,
+			},
+			"world_simulation_profile": {
+				"rates_per_game_hour": {
+					"hunger": 7.0,
+					"sleep_need": 5.1,
+				},
+			},
+		},
+	}
+	var unchanged := original.duplicate(true)
+	simulator.advance_needs(unchanged, 0.0, &"Idle")
+	_expect_equal(unchanged, original, "zero elapsed needs simulation changes nothing")
+
+	var first := original.duplicate(true)
+	var second := original.duplicate(true)
+	simulator.advance_needs(first, 1.0, &"Idle")
+	simulator.advance_needs(second, 1.0, &"Idle")
+	_expect_equal(first, second, "identical needs inputs produce identical outputs")
+	var stats: Dictionary = first["node_state"]["social_stats"]
+	_expect_equal(float(stats["hunger"]), 100.0, "passive hunger remains clamped")
+	_expect_approx(float(stats["sleep_need"]), 25.1, 0.001, "passive need rate is preserved")
 
 
 func _make_loaded_afternoon_spot_states(last_schedule_total_hours: float) -> Dictionary:
