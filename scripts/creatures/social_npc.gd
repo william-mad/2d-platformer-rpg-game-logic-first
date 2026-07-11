@@ -237,6 +237,10 @@ func apply_social_event(
 		return false
 
 	var normalized_delta := _normalize_stat_delta(stat_delta)
+	if _state_machine_active():
+		# The state machine owns active NPC values and emits the canonical result back to this NPC.
+		return npc_state_machine.apply_value_delta(normalized_delta, actor)
+
 	var favor_delta := float(normalized_delta.get("favor", 0.0))
 	var changed_stats: Dictionary = {}
 
@@ -259,13 +263,7 @@ func apply_social_event(
 	_update_favor_bar()
 	_update_visual_mood()
 
-	if _state_machine_active():
-		# Keep SocialNpc as the stat owner, then sync those values into the state machine.
-		syncing_state_machine_values = true
-		npc_state_machine.replace_values(social_stats, actor, changed_stats)
-		syncing_state_machine_values = false
-	else:
-		_react_to_event(actor, favor_delta)
+	_react_to_event(actor, favor_delta)
 
 	social_stats_changed.emit(social_stats.duplicate())
 	return true
@@ -1058,9 +1056,13 @@ func _setup_state_machine() -> void:
 	# The same SocialNpc scene still works without this child; this path opts into state behavior.
 	npc_state_machine.bind_npc(self)
 
-	var callback := Callable(self, "_on_npc_state_machine_values_changed")
-	if not npc_state_machine.values_changed.is_connected(callback):
-		npc_state_machine.values_changed.connect(callback)
+	var values_changed_callback := Callable(self, "_on_npc_state_machine_values_changed")
+	if not npc_state_machine.values_changed.is_connected(values_changed_callback):
+		npc_state_machine.values_changed.connect(values_changed_callback)
+
+	var values_replaced_callback := Callable(self, "_on_npc_state_machine_values_replaced")
+	if not npc_state_machine.values_replaced.is_connected(values_replaced_callback):
+		npc_state_machine.values_replaced.connect(values_replaced_callback)
 
 	syncing_state_machine_values = true
 	npc_state_machine.replace_values(social_stats)
@@ -1442,20 +1444,84 @@ func _state_machine_active() -> bool:
 
 
 func _on_npc_state_machine_values_changed(
-	values: Dictionary,
-	_changed_values: Dictionary,
+	changed_values: Dictionary,
 	_actor: Node2D
 ) -> void:
 	if syncing_state_machine_values:
 		return
 
-	# States can also change values, so mirror them back into the social NPC display.
-	social_stats = values.duplicate(true)
-	update_hp_bar()
-	if social_stats.has("knockout"):
-		knockout_bar_active = knockout_bar_active or get_knockout() > 0.0
+	var synchronized_keys: Dictionary = {}
+	if not _synchronize_social_stat_changes_in_place(changed_values, synchronized_keys):
+		return
+
+	_update_synchronized_social_stat_presentation(synchronized_keys)
+
+
+func _on_npc_state_machine_values_replaced(
+	values_snapshot: Dictionary,
+	_actor: Node2D
+) -> void:
+	if syncing_state_machine_values:
+		return
+
+	var synchronized_keys: Dictionary = {}
+	if not _synchronize_social_stats_in_place(values_snapshot, synchronized_keys):
+		return
+
+	_update_synchronized_social_stat_presentation(synchronized_keys)
+
+
+func _update_synchronized_social_stat_presentation(synchronized_keys: Dictionary) -> void:
+	if synchronized_keys.has("hp"):
+		update_hp_bar()
+	if synchronized_keys.has("knockout"):
+		if social_stats.has("knockout"):
+			knockout_bar_active = knockout_bar_active or get_knockout() > 0.0
 		_update_knockout_state()
-	update_knockout_bar()
-	_update_favor_bar()
-	_update_visual_mood()
+		update_knockout_bar()
+	if synchronized_keys.has("favor"):
+		_update_favor_bar()
+		_update_visual_mood()
+
 	social_stats_changed.emit(social_stats.duplicate())
+
+
+func _synchronize_social_stat_changes_in_place(
+	changed_values: Dictionary,
+	synchronized_keys: Dictionary
+) -> bool:
+	var stats_changed := false
+
+	for stat_key in changed_values.keys():
+		var value = changed_values[stat_key]
+		if not social_stats.has(stat_key) or social_stats[stat_key] != value:
+			social_stats[stat_key] = value
+			synchronized_keys[stat_key] = true
+			stats_changed = true
+
+	return stats_changed
+
+
+func _synchronize_social_stats_in_place(
+	values_snapshot: Dictionary,
+	synchronized_keys: Dictionary
+) -> bool:
+	var stats_changed := false
+
+	if social_stats == values_snapshot:
+		return false
+
+	for stat_key in social_stats.keys():
+		if not values_snapshot.has(stat_key):
+			social_stats.erase(stat_key)
+			synchronized_keys[stat_key] = true
+			stats_changed = true
+
+	for stat_key in values_snapshot.keys():
+		var value = values_snapshot[stat_key]
+		if not social_stats.has(stat_key) or social_stats[stat_key] != value:
+			social_stats[stat_key] = value
+			synchronized_keys[stat_key] = true
+			stats_changed = true
+
+	return stats_changed

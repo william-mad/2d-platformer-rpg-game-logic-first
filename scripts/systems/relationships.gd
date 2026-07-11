@@ -189,19 +189,34 @@ func set_favor_by_id(
 
 
 func get_favor(relationship_owner: Node, other: Node, fallback: float = -1.0) -> float:
-	var relationship := get_relationship(relationship_owner, other)
-	if relationship.is_empty():
+	if relationship_owner == null or other == null:
 		return default_favor if fallback < 0.0 else fallback
 
-	return float(relationship.get("favor", default_favor))
+	return get_favor_by_id(
+		get_relationship_id(relationship_owner),
+		get_relationship_id(other),
+		fallback
+	)
 
 
 func get_favor_by_id(owner_id: String, other_id: String, fallback: float = -1.0) -> float:
-	var relationship := get_relationship_by_id(owner_id, other_id)
-	if relationship.is_empty():
-		return default_favor if fallback < 0.0 else fallback
+	var clean_owner_id := owner_id.strip_edges()
+	var clean_other_id := other_id.strip_edges()
+	var missing_fallback := default_favor if fallback < 0.0 else fallback
+	if clean_owner_id.is_empty() or clean_other_id.is_empty():
+		return missing_fallback
+	if not relationships.has(clean_owner_id):
+		return missing_fallback
 
-	return float(relationship.get("favor", default_favor))
+	var relationships_for_owner: Dictionary = relationships[clean_owner_id]
+	if not relationships_for_owner.has(clean_other_id):
+		return missing_fallback
+
+	var relationship: Dictionary = relationships_for_owner[clean_other_id]
+	if not relationship.has("favor"):
+		return default_favor
+
+	return float(relationship["favor"])
 
 
 func change_anger(

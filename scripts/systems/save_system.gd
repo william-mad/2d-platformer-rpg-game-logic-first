@@ -13,6 +13,15 @@ const NPC_WORLD_SIMULATION_PATH: String = "/root/NpcWorldSimulation"
 const RELATIONSHIPS_PATH: String = "/root/Relationships"
 const PROGRESSION_PATH: String = "/root/ProgressionSystem"
 
+enum SaveFileReadStatus {
+	VALID,
+	MISSING,
+	OPEN_FAILED,
+	READ_FAILED,
+	INVALID_JSON,
+	NOT_DICTIONARY,
+}
+
 @export_range(1, 9, 1) var save_slot_count: int = 3
 
 var global_values: Dictionary = {}
@@ -86,11 +95,11 @@ func save_exists(slot: String = "") -> bool:
 
 func delete_save(slot: String = "") -> bool:
 	var save_path := get_save_path(slot)
-	if not FileAccess.file_exists(save_path):
-		return true
-
-	var error := DirAccess.remove_absolute(save_path)
-	return error == OK
+	var success := true
+	success = _remove_save_file_if_exists(save_path) and success
+	success = _remove_save_file_if_exists(_get_temporary_save_path(save_path)) and success
+	success = _remove_save_file_if_exists(_get_backup_save_path(save_path)) and success
+	return success
 
 
 func get_save_path(slot: String = "") -> String:
@@ -406,33 +415,279 @@ func _write_save_file(save_path: String, save_data: Dictionary) -> bool:
 	if not DirAccess.dir_exists_absolute(SAVE_DIR):
 		var dir_error := DirAccess.make_dir_recursive_absolute(SAVE_DIR)
 		if dir_error != OK:
-			push_warning("Could not create save directory: %s" % SAVE_DIR)
+			push_warning("Could not create save directory: %s (error %d)" % [SAVE_DIR, dir_error])
 			return false
 
-	var file := FileAccess.open(save_path, FileAccess.WRITE)
-	if file == null:
-		push_warning("Could not write save file: %s" % save_path)
+	var temporary_path := _get_temporary_save_path(save_path)
+	var backup_path := _get_backup_save_path(save_path)
+	var serialized_save := JSON.stringify(save_data, "\t")
+
+	if not _remove_save_file_if_exists(temporary_path):
 		return false
 
-	file.store_string(JSON.stringify(save_data, "\t"))
+	var file := FileAccess.open(temporary_path, FileAccess.WRITE)
+	if file == null:
+		push_warning(
+			"Could not open temporary save file for writing: %s (error %d)"
+			% [temporary_path, FileAccess.get_open_error()]
+		)
+		_remove_save_file_if_exists(temporary_path)
+		return false
+
+	file.store_string(serialized_save)
+	file.flush()
+	var write_error := file.get_error()
+	file = null
+	if write_error != OK:
+		push_warning("Could not write temporary save file: %s (error %d)" % [temporary_path, write_error])
+		_remove_save_file_if_exists(temporary_path)
+		return false
+
+	if not _temporary_save_file_is_valid(temporary_path):
+		_remove_save_file_if_exists(temporary_path)
+		return false
+
+	if not _remove_save_file_if_exists(backup_path):
+		_remove_save_file_if_exists(temporary_path)
+		return false
+
+	var had_primary := FileAccess.file_exists(save_path)
+	if had_primary and not _rename_save_file(save_path, backup_path, "back up previous save"):
+		_remove_save_file_if_exists(temporary_path)
+		return false
+
+	if _rename_save_file(temporary_path, save_path, "promote temporary save"):
+		return true
+
+	if had_primary:
+		_rename_save_file(backup_path, save_path, "restore previous save")
+
+	_remove_save_file_if_exists(temporary_path)
+	return false
+
+
+func _get_temporary_save_path(save_path: String) -> String:
+	return "%s.tmp" % save_path
+
+
+func _get_backup_save_path(save_path: String) -> String:
+	return "%s.bak" % save_path
+
+
+func _temporary_save_file_is_valid(save_path: String) -> bool:
+	var result := _read_save_file_result(save_path)
+	if _save_file_read_result_is_valid(result):
+		return true
+
+	push_warning(
+		"Temporary save file failed validation: %s (%s, error %d)"
+		% [
+			save_path,
+			_save_file_read_status_text(int(result.get("status", SaveFileReadStatus.MISSING))),
+			int(result.get("error", FAILED)),
+		]
+	)
+	return false
+
+
+func _remove_save_file_if_exists(path: String) -> bool:
+	if not FileAccess.file_exists(path):
+		return true
+
+	var error := DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	if error != OK:
+		push_warning("Could not remove save file: %s (error %d)" % [path, error])
+		return false
+
+	return true
+
+
+func _rename_save_file(from_path: String, to_path: String, action: String) -> bool:
+	var error := DirAccess.rename_absolute(
+		ProjectSettings.globalize_path(from_path),
+		ProjectSettings.globalize_path(to_path)
+	)
+	if error != OK:
+		push_warning(
+			"Could not %s from %s to %s (error %d)"
+			% [action, from_path, to_path, error]
+		)
+		return false
+
 	return true
 
 
 func _read_save_file(save_path: String) -> Dictionary:
-	if not FileAccess.file_exists(save_path):
+	var primary_result := _read_save_file_result(save_path)
+	if _save_file_read_result_is_valid(primary_result):
+		var primary_data = primary_result.get("data", {})
+		if primary_data is Dictionary:
+			return primary_data
+
+	var backup_path := _get_backup_save_path(save_path)
+	push_warning(
+		"Primary save failed, attempting backup: %s (%s, error %d); backup: %s"
+		% [
+			save_path,
+			_save_file_read_status_text(int(primary_result.get("status", SaveFileReadStatus.MISSING))),
+			int(primary_result.get("error", FAILED)),
+			backup_path,
+		]
+	)
+
+	var backup_result := _read_save_file_result(backup_path)
+	if not _save_file_read_result_is_valid(backup_result):
+		push_warning(
+			"Backup save is not available for failed primary: %s (%s, error %d); backup: %s (%s, error %d)"
+			% [
+				save_path,
+				_save_file_read_status_text(int(primary_result.get("status", SaveFileReadStatus.MISSING))),
+				int(primary_result.get("error", FAILED)),
+				backup_path,
+				_save_file_read_status_text(int(backup_result.get("status", SaveFileReadStatus.MISSING))),
+				int(backup_result.get("error", FAILED)),
+			]
+		)
 		return {}
+
+	var restored := _restore_backup_to_primary(save_path, backup_path)
+	if restored:
+		push_warning("Recovered save from backup and restored primary: %s from %s" % [save_path, backup_path])
+	else:
+		push_warning("Recovered save from backup but could not restore primary: %s from %s" % [save_path, backup_path])
+
+	var backup_data = backup_result.get("data", {})
+	if backup_data is Dictionary:
+		return backup_data
+
+	return {}
+
+
+func _read_save_file_result(save_path: String) -> Dictionary:
+	if not FileAccess.file_exists(save_path):
+		return {
+			"status": SaveFileReadStatus.MISSING,
+			"data": {},
+			"text": "",
+			"error": ERR_FILE_NOT_FOUND,
+		}
 
 	var file := FileAccess.open(save_path, FileAccess.READ)
 	if file == null:
-		push_warning("Could not read save file: %s" % save_path)
-		return {}
+		return {
+			"status": SaveFileReadStatus.OPEN_FAILED,
+			"data": {},
+			"text": "",
+			"error": FileAccess.get_open_error(),
+		}
 
-	var parsed = JSON.parse_string(file.get_as_text())
-	if not (parsed is Dictionary):
-		push_warning("Save file is not valid JSON data: %s" % save_path)
-		return {}
+	var save_text := file.get_as_text()
+	var read_error := file.get_error()
+	file = null
+	if read_error != OK:
+		return {
+			"status": SaveFileReadStatus.READ_FAILED,
+			"data": {},
+			"text": "",
+			"error": read_error,
+		}
 
-	return parsed
+	var json := JSON.new()
+	var parse_error := json.parse(save_text)
+	if parse_error != OK:
+		return {
+			"status": SaveFileReadStatus.INVALID_JSON,
+			"data": {},
+			"text": save_text,
+			"error": parse_error,
+		}
+
+	if not (json.data is Dictionary):
+		return {
+			"status": SaveFileReadStatus.NOT_DICTIONARY,
+			"data": {},
+			"text": save_text,
+			"error": ERR_INVALID_DATA,
+		}
+
+	return {
+		"status": SaveFileReadStatus.VALID,
+		"data": json.data,
+		"text": save_text,
+		"error": OK,
+	}
+
+
+func _save_file_read_result_is_valid(result: Dictionary) -> bool:
+	return int(result.get("status", SaveFileReadStatus.MISSING)) == SaveFileReadStatus.VALID
+
+
+func _save_file_read_status_text(status: int) -> String:
+	match status:
+		SaveFileReadStatus.VALID:
+			return "valid"
+		SaveFileReadStatus.MISSING:
+			return "missing"
+		SaveFileReadStatus.OPEN_FAILED:
+			return "open failed"
+		SaveFileReadStatus.READ_FAILED:
+			return "read failed"
+		SaveFileReadStatus.INVALID_JSON:
+			return "invalid JSON"
+		SaveFileReadStatus.NOT_DICTIONARY:
+			return "not a Dictionary"
+
+	return "unknown"
+
+
+func _restore_backup_to_primary(primary_path: String, backup_path: String) -> bool:
+	var backup_result := _read_save_file_result(backup_path)
+	if not _save_file_read_result_is_valid(backup_result):
+		push_warning(
+			"Could not restore primary save because backup is not valid: %s (%s, error %d)"
+			% [
+				backup_path,
+				_save_file_read_status_text(int(backup_result.get("status", SaveFileReadStatus.MISSING))),
+				int(backup_result.get("error", FAILED)),
+			]
+		)
+		return false
+
+	var temporary_path := _get_temporary_save_path(primary_path)
+	if not _remove_save_file_if_exists(temporary_path):
+		return false
+
+	var file := FileAccess.open(temporary_path, FileAccess.WRITE)
+	if file == null:
+		push_warning(
+			"Could not open temporary save file for backup recovery: %s (error %d)"
+			% [temporary_path, FileAccess.get_open_error()]
+		)
+		_remove_save_file_if_exists(temporary_path)
+		return false
+
+	file.store_string(String(backup_result.get("text", "")))
+	file.flush()
+	var write_error := file.get_error()
+	file = null
+	if write_error != OK:
+		push_warning("Could not write temporary backup recovery file: %s (error %d)" % [temporary_path, write_error])
+		_remove_save_file_if_exists(temporary_path)
+		return false
+
+	if not _temporary_save_file_is_valid(temporary_path):
+		_remove_save_file_if_exists(temporary_path)
+		return false
+
+	if FileAccess.file_exists(primary_path) and not _remove_save_file_if_exists(primary_path):
+		_remove_save_file_if_exists(temporary_path)
+		return false
+
+	if _rename_save_file(temporary_path, primary_path, "restore backup save"):
+		return true
+
+	_remove_save_file_if_exists(temporary_path)
+	return false
 
 
 func _normalize_slot(slot: String = "") -> String:

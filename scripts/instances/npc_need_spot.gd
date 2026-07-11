@@ -91,6 +91,8 @@ func _exit_tree() -> void:
 	var callback := Callable(self, "_on_machine_values_changed")
 	if connected_machine.values_changed.is_connected(callback):
 		connected_machine.values_changed.disconnect(callback)
+	if connected_machine.values_replaced.is_connected(callback):
+		connected_machine.values_replaced.disconnect(callback)
 
 
 func _process(delta: float) -> void:
@@ -401,7 +403,6 @@ func _maybe_request_state() -> void:
 
 
 func _on_machine_values_changed(
-	_values: Dictionary,
 	_changed_values: Dictionary,
 	_actor: Node2D
 ) -> void:
@@ -766,6 +767,8 @@ func _connect_machine_signals() -> void:
 		var old_callback := Callable(self, "_on_machine_values_changed")
 		if connected_machine.values_changed.is_connected(old_callback):
 			connected_machine.values_changed.disconnect(old_callback)
+		if connected_machine.values_replaced.is_connected(old_callback):
+			connected_machine.values_replaced.disconnect(old_callback)
 
 	connected_machine = machine
 	if connected_machine == null:
@@ -774,6 +777,8 @@ func _connect_machine_signals() -> void:
 	var callback := Callable(self, "_on_machine_values_changed")
 	if not connected_machine.values_changed.is_connected(callback):
 		connected_machine.values_changed.connect(callback)
+	if not connected_machine.values_replaced.is_connected(callback):
+		connected_machine.values_replaced.connect(callback)
 
 
 func is_work_spot() -> bool:

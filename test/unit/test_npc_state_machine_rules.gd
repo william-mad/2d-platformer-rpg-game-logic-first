@@ -119,6 +119,17 @@ func test_non_alias_key_passes_through() -> void:
 	assert_eq(machine._canonical_value_key("favor"), "favor", "favor is canonical and unchanged")
 
 
+func test_replace_values_reuses_dictionary_and_preserves_canonical_alias_value() -> void:
+	var values_reference: Dictionary = machine.values
+	machine.replace_values({"sleepiness": 10.0, "sleep_need": 40.0, "favor": 80.0}, null, {}, false)
+
+	values_reference["reference_observer"] = true
+	assert_true(machine.values.has("reference_observer"), "replace_values keeps the values dictionary instance")
+	assert_eq(machine.values.get("sleep_need"), 40.0, "canonical key wins over its alias")
+	assert_false(machine.values.has("sleepiness"), "alias key is removed during normalization")
+	assert_false(machine.values.has("hunger"), "replacement removes keys omitted from the new values")
+
+
 # --- _variant_to_float ----------------------------------------------------------
 
 func test_variant_to_float_handles_int_float_string() -> void:

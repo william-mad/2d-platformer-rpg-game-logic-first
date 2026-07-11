@@ -92,6 +92,7 @@ func _run_tests() -> void:
 	_test_tired_speed_scaling()
 	_test_seen_monster_starts_fight()
 	_test_seen_monster_can_flee_for_coward_npc()
+	_test_value_signals_use_delta_and_full_sync_paths()
 	_test_monster_damage_does_not_change_social_anger()
 	_test_monster_fight_respects_low_health_stop()
 	_test_look_for_monster_after_kill_finds_next_monster()
@@ -312,6 +313,45 @@ func _test_seen_monster_can_flee_for_coward_npc() -> void:
 
 	_expect_state(machine, "Flee", "coward monster reaction starts Flee")
 	_expect_true(machine.target == monster, "coward NPC flees from the seen monster")
+	_free_setup(setup)
+
+
+func _test_value_signals_use_delta_and_full_sync_paths() -> void:
+	var setup := _create_combat_npc("ValueSignalDefender", Vector2.ZERO)
+	var npc: SocialNpc = setup["npc"]
+	var machine: NpcStateMachine = setup["machine"]
+	var changed_events: Array[Dictionary] = []
+	var replaced_events: Array[Dictionary] = []
+	var changed_callback := func(changed_values: Dictionary, _actor: Node2D) -> void:
+		changed_events.append(changed_values)
+	var replaced_callback := func(values_snapshot: Dictionary, _actor: Node2D) -> void:
+		replaced_events.append(values_snapshot)
+
+	machine.values_changed.connect(changed_callback)
+	machine.values_replaced.connect(replaced_callback)
+	_expect_true(npc.apply_social_event({"favor": 10.0}, null, false), "favor event is applied")
+	_expect_equal(changed_events.size(), 1, "one-key event emits one changed-values signal")
+	_expect_equal(replaced_events.size(), 0, "one-key event does not emit a replacement signal")
+	if not changed_events.is_empty():
+		var changed_snapshot: Dictionary = changed_events[0]
+		_expect_equal(changed_snapshot.size(), 1, "changed-values payload contains only changed keys")
+		_expect_equal(changed_snapshot.get("favor"), 60.0, "changed-values payload uses final canonical value")
+		changed_snapshot["favor"] = 0.0
+		_expect_equal(machine.values.get("favor"), 60.0, "changed-values payload is detached from machine values")
+	_expect_equal(npc.social_stats.get("favor"), 60.0, "SocialNpc receives the final changed value")
+
+	machine.replace_values({"favor": 80.0}, null, {}, false)
+	_expect_equal(changed_events.size(), 1, "replacement does not emit changed-values")
+	_expect_equal(replaced_events.size(), 1, "replacement emits one full snapshot")
+	_expect_false(npc.social_stats.has("hunger"), "full sync removes obsolete SocialNpc keys")
+	if not replaced_events.is_empty():
+		var replacement_snapshot: Dictionary = replaced_events[0]
+		replacement_snapshot["favor"] = 0.0
+		_expect_equal(machine.values.get("favor"), 80.0, "replacement snapshot is detached from machine values")
+
+	_expect_false(machine.apply_value_delta({"favor": 0.0}, null, false), "zero delta is ignored")
+	_expect_equal(changed_events.size(), 1, "zero delta emits no changed-values signal")
+	_expect_equal(replaced_events.size(), 1, "zero delta emits no replacement signal")
 	_free_setup(setup)
 
 

@@ -459,9 +459,13 @@ func _connect_machine(machine: NpcStateMachine) -> void:
 	if not machine.state_changed.is_connected(state_callback):
 		machine.state_changed.connect(state_callback)
 
-	var values_callback := Callable(self, "_on_npc_values_changed").bind(machine)
-	if not machine.values_changed.is_connected(values_callback):
-		machine.values_changed.connect(values_callback)
+	var values_changed_callback := Callable(self, "_on_npc_values_changed").bind(machine)
+	if not machine.values_changed.is_connected(values_changed_callback):
+		machine.values_changed.connect(values_changed_callback)
+
+	var values_replaced_callback := Callable(self, "_on_npc_values_replaced").bind(machine)
+	if not machine.values_replaced.is_connected(values_replaced_callback):
+		machine.values_replaced.connect(values_replaced_callback)
 
 	connected_machines[machine_id] = true
 	_record_marker("watch:npc_machine_connected", _get_node_label(machine))
@@ -519,7 +523,6 @@ func _on_npc_state_changed(
 
 
 func _on_npc_values_changed(
-	_values: Dictionary,
 	changed_values: Dictionary,
 	_actor: Node2D,
 	machine: NpcStateMachine
@@ -532,6 +535,14 @@ func _on_npc_values_changed(
 		"npc:values",
 		"%s %s" % [_get_machine_owner_label(machine), _format_keys(changed_values.keys(), 4)]
 	)
+
+
+func _on_npc_values_replaced(
+	_values_snapshot: Dictionary,
+	_actor: Node2D,
+	machine: NpcStateMachine
+) -> void:
+	_record_marker("npc:values_replaced", _get_machine_owner_label(machine))
 
 
 func _record_marker(source: String, detail: String = "") -> void:

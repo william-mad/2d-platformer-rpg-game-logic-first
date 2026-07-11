@@ -22,7 +22,9 @@ const MagicLessonRemoteInvitationScene := preload("res://scripts/instances/magic
 @export var simulated_talk_need_drop: float = 40.0
 @export var simulated_partner_talk_need_drop: float = 25.0
 @export var simulated_talk_boredom_drop: float = 10.0
+@export var performance_profiling_enabled: bool = false
 
+const PERFORMANCE_PROFILE_REPORT_WINDOW_CALLS := 30
 var spot_definitions: Dictionary = {}
 var live_spots: Dictionary = {}
 var spot_claim_counts: Dictionary = {}
@@ -30,7 +32,30 @@ var spot_runtime_states: Dictionary = {}
 var simulation_timer: float = 0.0
 var simulation_queued: bool = false
 var social_rng := RandomNumberGenerator.new()
+var social_favor_cache: Dictionary = {}
 var simulation_tick_skip_logged: bool = false
+var _performance_profile_call_count: int = 0
+var _performance_profile_total_usec: int = 0
+var _performance_profile_max_total_usec: int = 0
+var _performance_profile_synchronize_usec: int = 0
+var _performance_profile_snapshot_usec: int = 0
+var _performance_profile_preparation_usec: int = 0
+var _performance_profile_needs_usec: int = 0
+var _performance_profile_activity_usec: int = 0
+var _performance_profile_schedule_usec: int = 0
+var _performance_profile_travel_usec: int = 0
+var _performance_profile_social_usec: int = 0
+var _performance_profile_apply_usec: int = 0
+var _performance_profile_records_total: int = 0
+var _performance_profile_records_simulated: int = 0
+var _performance_profile_live_records: int = 0
+var _performance_profile_disabled_records: int = 0
+var _performance_profile_candidate_evaluations: int = 0
+var _performance_profile_records_applied: int = 0
+var _performance_profile_social_usec_in_pass: int = 0
+var _performance_profile_candidate_evaluations_in_pass: int = 0
+var _performance_profile_apply_usec_in_pass: int = 0
+var _performance_profile_records_applied_in_pass: int = 0
 
 
 func _ready() -> void:
@@ -274,6 +299,7 @@ func _process(delta: float) -> void:
 
 func simulate_now() -> void:
 	# Only saved records are simulated; unloaded NPC scenes never need a running state machine.
+	social_favor_cache.clear()
 	if _world_simulation_debug_disabled():
 		_log_world_simulation_disabled("simulate_now")
 		return
@@ -289,20 +315,51 @@ func simulate_now() -> void:
 	):
 		return
 
+	var profiling_enabled := performance_profiling_enabled
+	var profile_total_start_usec := Time.get_ticks_usec() if profiling_enabled else 0
+	var profile_synchronize_usec := 0
+	var profile_snapshot_usec := 0
+	var profile_preparation_usec := 0
+	var profile_needs_usec := 0
+	var profile_activity_usec := 0
+	var profile_schedule_usec := 0
+	var profile_travel_usec := 0
+	var profile_records_simulated := 0
+	var profile_live_records := 0
+	var profile_disabled_records := 0
+	if profiling_enabled:
+		_performance_profile_social_usec_in_pass = 0
+		_performance_profile_candidate_evaluations_in_pass = 0
+		_performance_profile_apply_usec_in_pass = 0
+		_performance_profile_records_applied_in_pass = 0
+
 	var snapshot: Dictionary = world_time.call("get_snapshot")
 	var total_hours := float(snapshot.get("total_hours", 0.0))
 	var hour := float(snapshot.get("time_of_day_hours", snapshot.get("hour", 0.0)))
 	_process_meal_cycle_schedule_until_snapshot(snapshot)
+	var profile_stage_start_usec := Time.get_ticks_usec() if profiling_enabled else 0
 	locations.call("synchronize_live_records")
+	if profiling_enabled:
+		profile_synchronize_usec = Time.get_ticks_usec() - profile_stage_start_usec
+		profile_stage_start_usec = Time.get_ticks_usec()
 	var records: Dictionary = locations.call("get_records_snapshot")
+	if profiling_enabled:
+		profile_snapshot_usec = Time.get_ticks_usec() - profile_stage_start_usec
+		profile_stage_start_usec = Time.get_ticks_usec()
 	_breadcrumb("npc_world:simulate_start", "hour=%.3f records=%d" % [hour, records.size()])
 	_rebuild_spot_claims(records)
+	if profiling_enabled:
+		profile_preparation_usec = Time.get_ticks_usec() - profile_stage_start_usec
 
 	for npc_id_key in records.keys():
 		var npc_id := StringName(String(npc_id_key))
 		var record = records[npc_id_key]
 		if not (record is Dictionary):
 			continue
+		if profiling_enabled:
+			profile_records_simulated += 1
+			if _record_is_disabled(record):
+				profile_disabled_records += 1
 		var record_dictionary: Dictionary = record
 		var activity_label := ""
 		var activity_value = record_dictionary.get("activity", {})
@@ -325,28 +382,185 @@ func simulate_now() -> void:
 			locations.has_method("is_npc_live")
 			and bool(locations.call("is_npc_live", String(npc_id)))
 		)
+		if profiling_enabled and npc_is_live:
+			profile_live_records += 1
 		var current_activity = record.get("activity", {})
 		if not npc_is_live:
 			var paused_state_name := &""
 			if current_activity is Dictionary and not current_activity.is_empty():
 				paused_state_name = StringName(String(current_activity.get("state_name", "")))
+			if profiling_enabled:
+				profile_stage_start_usec = Time.get_ticks_usec()
 			_simulate_offscreen_passive_values(record, total_hours, paused_state_name)
+			if profiling_enabled:
+				profile_needs_usec += Time.get_ticks_usec() - profile_stage_start_usec
 			if locations.has_method("update_simulated_record"):
-				locations.call("update_simulated_record", String(npc_id), record)
+				_apply_simulated_record_update(locations, String(npc_id), record)
 
 		var pending_travel = record.get("pending_travel", {})
 		if pending_travel is Dictionary and not pending_travel.is_empty():
+			if profiling_enabled:
+				profile_stage_start_usec = Time.get_ticks_usec()
 			_update_pending_travel(npc_id, record, pending_travel, hour, locations)
+			if profiling_enabled:
+				profile_travel_usec += Time.get_ticks_usec() - profile_stage_start_usec
 			continue
 
 		var activity = record.get("activity", {})
 		if activity is Dictionary and not activity.is_empty():
+			if profiling_enabled:
+				profile_stage_start_usec = Time.get_ticks_usec()
 			_update_activity(npc_id, record, activity, total_hours, hour, locations)
+			if profiling_enabled:
+				profile_activity_usec += Time.get_ticks_usec() - profile_stage_start_usec
 		else:
 			if _consume_sleep_skip_wake_pause(npc_id, record, locations):
 				continue
+			if profiling_enabled:
+				profile_stage_start_usec = Time.get_ticks_usec()
 			_try_start_activity(npc_id, record, total_hours, hour, locations, records)
+			if profiling_enabled:
+				profile_schedule_usec += Time.get_ticks_usec() - profile_stage_start_usec
 	_breadcrumb("npc_world:simulate_end", "hour=%.3f" % hour)
+	if profiling_enabled:
+		_record_performance_profile(
+			Time.get_ticks_usec() - profile_total_start_usec,
+			profile_synchronize_usec,
+			profile_snapshot_usec,
+			profile_preparation_usec,
+			profile_needs_usec,
+			profile_activity_usec,
+			profile_schedule_usec,
+			profile_travel_usec,
+			records.size(),
+			profile_records_simulated,
+			profile_live_records,
+			profile_disabled_records
+		)
+	social_favor_cache.clear()
+
+
+func _apply_simulated_record_update(locations: Node, npc_id: String, record: Dictionary) -> void:
+	var profile_start_usec := Time.get_ticks_usec() if performance_profiling_enabled else 0
+	locations.call("update_simulated_record", npc_id, record)
+	if performance_profiling_enabled:
+		_performance_profile_apply_usec_in_pass += Time.get_ticks_usec() - profile_start_usec
+		_performance_profile_records_applied_in_pass += 1
+
+
+func _record_performance_profile(
+	total_usec: int,
+	synchronize_usec: int,
+	snapshot_usec: int,
+	preparation_usec: int,
+	needs_usec: int,
+	activity_usec: int,
+	schedule_usec: int,
+	travel_usec: int,
+	records_total: int,
+	records_simulated: int,
+	live_records: int,
+	disabled_records: int
+) -> void:
+	_performance_profile_call_count += 1
+	_performance_profile_total_usec += total_usec
+	_performance_profile_max_total_usec = max(_performance_profile_max_total_usec, total_usec)
+	_performance_profile_synchronize_usec += synchronize_usec
+	_performance_profile_snapshot_usec += snapshot_usec
+	_performance_profile_preparation_usec += preparation_usec
+	_performance_profile_needs_usec += needs_usec
+	_performance_profile_activity_usec += activity_usec
+	_performance_profile_schedule_usec += schedule_usec
+	_performance_profile_travel_usec += travel_usec
+	_performance_profile_social_usec += _performance_profile_social_usec_in_pass
+	_performance_profile_apply_usec += _performance_profile_apply_usec_in_pass
+	_performance_profile_records_total += records_total
+	_performance_profile_records_simulated += records_simulated
+	_performance_profile_live_records += live_records
+	_performance_profile_disabled_records += disabled_records
+	_performance_profile_candidate_evaluations += _performance_profile_candidate_evaluations_in_pass
+	_performance_profile_records_applied += _performance_profile_records_applied_in_pass
+
+	if _performance_profile_call_count < PERFORMANCE_PROFILE_REPORT_WINDOW_CALLS:
+		return
+
+	var slowest_stage_name := "synchronize"
+	var slowest_stage_usec := _performance_profile_synchronize_usec
+	if _performance_profile_snapshot_usec > slowest_stage_usec:
+		slowest_stage_name = "snapshot"
+		slowest_stage_usec = _performance_profile_snapshot_usec
+	if _performance_profile_preparation_usec > slowest_stage_usec:
+		slowest_stage_name = "prepare"
+		slowest_stage_usec = _performance_profile_preparation_usec
+	if _performance_profile_needs_usec > slowest_stage_usec:
+		slowest_stage_name = "needs"
+		slowest_stage_usec = _performance_profile_needs_usec
+	if _performance_profile_activity_usec > slowest_stage_usec:
+		slowest_stage_name = "activity"
+		slowest_stage_usec = _performance_profile_activity_usec
+	if _performance_profile_schedule_usec > slowest_stage_usec:
+		slowest_stage_name = "schedule"
+		slowest_stage_usec = _performance_profile_schedule_usec
+	if _performance_profile_travel_usec > slowest_stage_usec:
+		slowest_stage_name = "travel"
+		slowest_stage_usec = _performance_profile_travel_usec
+	if _performance_profile_social_usec > slowest_stage_usec:
+		slowest_stage_name = "social"
+		slowest_stage_usec = _performance_profile_social_usec
+	if _performance_profile_apply_usec > slowest_stage_usec:
+		slowest_stage_name = "apply"
+		slowest_stage_usec = _performance_profile_apply_usec
+
+	var calls := float(_performance_profile_call_count)
+	print_debug((
+		"NPC world simulation profile (%d calls): total avg=%.3fms max=%.3fms "
+		+ "sync=%.3f snapshot=%.3f prepare=%.3f needs=%.3f activity=%.3f "
+		+ "schedule=%.3f travel=%.3f social=%.3f apply=%.3f "
+		+ "records=%.1f simulated=%.1f live=%.1f disabled=%.1f candidates=%.1f applied=%.1f slowest=%s"
+	) % [
+			_performance_profile_call_count,
+			_performance_profile_total_usec / calls / 1000.0,
+			_performance_profile_max_total_usec / 1000.0,
+			_performance_profile_synchronize_usec / calls / 1000.0,
+			_performance_profile_snapshot_usec / calls / 1000.0,
+			_performance_profile_preparation_usec / calls / 1000.0,
+			_performance_profile_needs_usec / calls / 1000.0,
+			_performance_profile_activity_usec / calls / 1000.0,
+			_performance_profile_schedule_usec / calls / 1000.0,
+			_performance_profile_travel_usec / calls / 1000.0,
+			_performance_profile_social_usec / calls / 1000.0,
+			_performance_profile_apply_usec / calls / 1000.0,
+			_performance_profile_records_total / calls,
+			_performance_profile_records_simulated / calls,
+			_performance_profile_live_records / calls,
+			_performance_profile_disabled_records / calls,
+			_performance_profile_candidate_evaluations / calls,
+			_performance_profile_records_applied / calls,
+			slowest_stage_name,
+		]
+	)
+	_reset_performance_profile()
+
+
+func _reset_performance_profile() -> void:
+	_performance_profile_call_count = 0
+	_performance_profile_total_usec = 0
+	_performance_profile_max_total_usec = 0
+	_performance_profile_synchronize_usec = 0
+	_performance_profile_snapshot_usec = 0
+	_performance_profile_preparation_usec = 0
+	_performance_profile_needs_usec = 0
+	_performance_profile_activity_usec = 0
+	_performance_profile_schedule_usec = 0
+	_performance_profile_travel_usec = 0
+	_performance_profile_social_usec = 0
+	_performance_profile_apply_usec = 0
+	_performance_profile_records_total = 0
+	_performance_profile_records_simulated = 0
+	_performance_profile_live_records = 0
+	_performance_profile_disabled_records = 0
+	_performance_profile_candidate_evaluations = 0
+	_performance_profile_records_applied = 0
 
 
 func simulate_player_sleep_skip(
@@ -829,7 +1043,7 @@ func _consume_sleep_skip_wake_pause(
 	if locations != null and locations.has_method("apply_simulated_record"):
 		locations.call("apply_simulated_record", String(npc_id), record, false)
 	elif locations != null and locations.has_method("update_simulated_record"):
-		locations.call("update_simulated_record", String(npc_id), record)
+		_apply_simulated_record_update(locations, String(npc_id), record)
 	return true
 
 
@@ -1938,23 +2152,25 @@ func _choose_social_candidate(
 		var target_record = records[target_id_key]
 		if not (target_record is Dictionary) or _record_is_disabled(target_record):
 			continue
+		if performance_profiling_enabled:
+			_performance_profile_candidate_evaluations_in_pass += 1
 		var target_relationship_id := _get_record_relationship_id(
 			StringName(target_id),
 			target_record
 		)
 		if relationships != null and relationships.has_method("get_favor_by_id"):
-			var seeker_favor := float(relationships.call(
-				"get_favor_by_id",
+			var seeker_favor := _get_cached_social_favor(
+				relationships,
 				owner_id,
 				target_relationship_id,
 				50.0
-			))
-			var target_favor := float(relationships.call(
-				"get_favor_by_id",
+			)
+			var target_favor := _get_cached_social_favor(
+				relationships,
 				target_relationship_id,
 				owner_id,
 				50.0
-			))
+			)
 			if seeker_favor <= minimum_favor or target_favor <= minimum_favor:
 				continue
 		var target_position = target_record.get("last_position", Vector2.ZERO)
@@ -1983,6 +2199,24 @@ func _choose_social_candidate(
 			if bool(candidate.get("is_player", false)):
 				return candidate
 	return candidates[social_rng.randi_range(0, candidates.size() - 1)]
+
+
+func _get_cached_social_favor(
+	relationships: Node,
+	owner_id: String,
+	other_id: String,
+	fallback: float
+) -> float:
+	var favors_for_owner = social_favor_cache.get(owner_id, null)
+	if favors_for_owner is Dictionary and favors_for_owner.has(other_id):
+		return float(favors_for_owner[other_id])
+
+	var favor := float(relationships.call("get_favor_by_id", owner_id, other_id, fallback))
+	if not (favors_for_owner is Dictionary):
+		favors_for_owner = {}
+		social_favor_cache[owner_id] = favors_for_owner
+	favors_for_owner[other_id] = favor
+	return favor
 
 
 func _add_social_candidate(
@@ -2074,8 +2308,8 @@ func _complete_simulated_conversation(
 	records[String(npc_id)] = record
 	records[target_id] = target_record
 	if locations.has_method("update_simulated_record"):
-		locations.call("update_simulated_record", String(npc_id), record)
-		locations.call("update_simulated_record", target_id, target_record)
+		_apply_simulated_record_update(locations, String(npc_id), record)
+		_apply_simulated_record_update(locations, target_id, target_record)
 	return true
 
 
@@ -2105,7 +2339,11 @@ func _try_start_activity(
 		"%s -> %s" % [String(npc_id), String(definition.spot_id) if definition != null else "none"]
 	)
 	var blocking_priority := definition.priority if definition != null else -1
-	if _try_start_social_seek(npc_id, record, records, locations, blocking_priority):
+	var social_planning_start_usec := Time.get_ticks_usec() if performance_profiling_enabled else 0
+	var social_started := _try_start_social_seek(npc_id, record, records, locations, blocking_priority)
+	if performance_profiling_enabled:
+		_performance_profile_social_usec_in_pass += Time.get_ticks_usec() - social_planning_start_usec
+	if social_started:
 		return
 	if definition == null:
 		return
@@ -2411,7 +2649,7 @@ func _update_activity(
 	record["activity"] = activity
 	record["last_position"] = _get_activity_simulated_position(activity, definition)
 	if locations.has_method("update_simulated_record"):
-		locations.call("update_simulated_record", String(npc_id), record)
+		_apply_simulated_record_update(locations, String(npc_id), record)
 
 	var npc_value_sated := (
 		definition.finish_when_npc_value_sated
@@ -2536,7 +2774,7 @@ func _finish_activity(
 	if String(activity.get("state_name", "")) == "Sleep":
 		_set_saved_stat(record, "tired", 0.0)
 		if locations.has_method("update_simulated_record"):
-			locations.call("update_simulated_record", String(npc_id), record)
+			_apply_simulated_record_update(locations, String(npc_id), record)
 	var definition := spot_definitions.get(spot_id, null) as NpcSpotDefinition
 	_consume_invitation_activity_availability(definition)
 

@@ -79,3 +79,34 @@ func test_empty_other_id_is_skipped() -> void:
 func test_get_relationship_for_unknown_ids_is_empty() -> void:
 	var restored := relationships.get_relationship_by_id("nobody", "noone")
 	assert_true(restored.is_empty(), "unknown id pair returns empty dict")
+
+
+func test_get_favor_by_id_reads_stored_value_with_normalized_ids() -> void:
+	relationships.relationships = {"npc_a": {"npc_b": {"favor": 73.0}}}
+	assert_eq(
+		relationships.get_favor_by_id(" npc_a ", " npc_b "),
+		73.0,
+		"favor lookup reads the stored scalar with normalized ids"
+	)
+
+
+func test_get_favor_by_id_preserves_missing_fallback() -> void:
+	assert_eq(
+		relationships.get_favor_by_id("npc_a", "npc_b", 12.0),
+		12.0,
+		"missing relationship returns the supplied fallback"
+	)
+	assert_eq(
+		relationships.get_favor_by_id("npc_a", "npc_b"),
+		50.0,
+		"negative fallback uses the configured default favor"
+	)
+
+
+func test_get_favor_by_id_defaults_malformed_entry_without_favor() -> void:
+	relationships.relationships = {"npc_a": {"npc_b": {"met": true}}}
+	assert_eq(
+		relationships.get_favor_by_id("npc_a", "npc_b", 12.0),
+		50.0,
+		"stored entries without favor use default favor instead of the missing fallback"
+	)

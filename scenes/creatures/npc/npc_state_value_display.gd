@@ -50,6 +50,10 @@ func _setup() -> void:
 	if not machine.values_changed.is_connected(values_callback):
 		machine.values_changed.connect(values_callback)
 
+	var values_replaced_callback := Callable(self, "_on_values_replaced")
+	if not machine.values_replaced.is_connected(values_replaced_callback):
+		machine.values_replaced.connect(values_replaced_callback)
+
 	var state_callback := Callable(self, "_on_state_changed")
 	if not machine.state_changed.is_connected(state_callback):
 		machine.state_changed.connect(state_callback)
@@ -59,11 +63,18 @@ func _setup() -> void:
 
 
 func _on_values_changed(
-	_values: Dictionary,
 	changed_values: Dictionary,
 	_actor: Node2D
 ) -> void:
 	last_changed_values = changed_values.duplicate(true)
+	_update_display()
+
+
+func _on_values_replaced(
+	_values_snapshot: Dictionary,
+	_actor: Node2D
+) -> void:
+	last_changed_values.clear()
 	_update_display()
 
 

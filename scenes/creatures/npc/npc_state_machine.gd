@@ -3,7 +3,8 @@ class_name NpcStateMachine extends Node
 signal state_changed(state_name: StringName, previous_state_name: StringName)
 signal state_request_failed(state_name: StringName, reason: String)
 signal target_changed(target: Node2D)
-signal values_changed(values: Dictionary, changed_values: Dictionary, actor: Node2D)
+signal values_changed(changed_values: Dictionary, actor: Node2D)
+signal values_replaced(values_snapshot: Dictionary, actor: Node2D)
 
 const VALUE_ALIASES := {
 	"sleepiness": "sleep_need",
@@ -341,7 +342,7 @@ var _debug_label: Label
 
 
 func _ready() -> void:
-	values = _normalize_value_dictionary(values)
+	_normalize_values_in_place(values)
 	_stagger_passive_need_tick()
 
 	if npc == null:
@@ -1380,11 +1381,16 @@ func replace_values(
 	evaluate_reactions: bool = true
 ) -> void:
 	var previous_values := values.duplicate(true)
-	values = _normalize_value_dictionary(new_values)
+	var normalized_values := _normalize_value_dictionary(new_values)
+	for value_key in values.keys():
+		if not normalized_values.has(value_key):
+			values.erase(value_key)
+	for value_key in normalized_values.keys():
+		values[value_key] = normalized_values[value_key]
 	last_actor = actor
 	last_changed_values = _normalize_value_delta(changed_values)
 	_record_value_threshold_crossings(previous_values, values, last_changed_values)
-	values_changed.emit(values.duplicate(true), last_changed_values.duplicate(true), actor)
+	values_replaced.emit(values.duplicate(true), actor)
 
 	_notify_current_state_values_changed(actor)
 
@@ -1398,7 +1404,7 @@ func apply_value_delta(
 	evaluate_reactions: bool = true
 ) -> bool:
 	# Use deltas for events: {"fear": 20.0} raises fear and may trigger a rule.
-	values = _normalize_value_dictionary(values)
+	_normalize_values_in_place(values)
 	var previous_values := values.duplicate(true)
 	var normalized_delta := _normalize_value_delta(value_delta)
 	var changed_values: Dictionary = {}
@@ -1425,7 +1431,7 @@ func apply_value_delta(
 	last_actor = actor
 	last_changed_values = changed_values.duplicate(true)
 	_record_value_threshold_crossings(previous_values, values, changed_values)
-	values_changed.emit(values.duplicate(true), changed_values.duplicate(true), actor)
+	values_changed.emit(_get_changed_values_snapshot(changed_values), actor)
 	_notify_current_state_values_changed(actor)
 
 	if evaluate_reactions and _value_reactions_enabled():
@@ -1440,7 +1446,7 @@ func set_value(
 	actor: Node2D = null,
 	evaluate_reactions: bool = true
 ) -> void:
-	values = _normalize_value_dictionary(values)
+	_normalize_values_in_place(values)
 	var previous_values := values.duplicate(true)
 	var key := _canonical_value_key(value_name)
 	var previous_value := _variant_to_float(values.get(key, 0.0))
@@ -1463,7 +1469,7 @@ func set_value(
 	last_actor = actor
 	last_changed_values = changed_values.duplicate(true)
 	_record_value_threshold_crossings(previous_values, values, changed_values)
-	values_changed.emit(values.duplicate(true), changed_values.duplicate(true), actor)
+	values_changed.emit(_get_changed_values_snapshot(changed_values), actor)
 	_notify_current_state_values_changed(actor)
 
 	if evaluate_reactions and _value_reactions_enabled():
@@ -1471,8 +1477,17 @@ func set_value(
 
 
 func get_value(value_name: StringName, default_value: float = 0.0) -> float:
-	values = _normalize_value_dictionary(values)
+	_normalize_values_in_place(values)
 	return _variant_to_float(values.get(_canonical_value_key(value_name), default_value))
+
+
+func _get_changed_values_snapshot(changed_values: Dictionary) -> Dictionary:
+	var snapshot: Dictionary = {}
+	for value_key in changed_values.keys():
+		if values.has(value_key):
+			snapshot[value_key] = values[value_key]
+
+	return snapshot
 
 
 func get_fatigue_speed_multiplier() -> float:
@@ -2527,16 +2542,19 @@ func _variant_is_truthy(value) -> bool:
 
 func _normalize_value_dictionary(source_values: Dictionary) -> Dictionary:
 	var normalized := source_values.duplicate(true)
+	_normalize_values_in_place(normalized)
+	return normalized
+
+
+func _normalize_values_in_place(target_values: Dictionary) -> void:
 	for old_key in VALUE_ALIASES.keys():
-		if not normalized.has(old_key):
+		if not target_values.has(old_key):
 			continue
 
 		var new_key := String(VALUE_ALIASES[old_key])
-		if not normalized.has(new_key):
-			normalized[new_key] = normalized[old_key]
-		normalized.erase(old_key)
-
-	return normalized
+		if not target_values.has(new_key):
+			target_values[new_key] = target_values[old_key]
+		target_values.erase(old_key)
 
 
 func _normalize_value_delta(value_delta: Dictionary) -> Dictionary:
