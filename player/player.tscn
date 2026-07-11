@@ -18,6 +18,7 @@
 [ext_resource type="Script" path="res://player/states/downed.gd" id="18_downed"]
 [ext_resource type="Resource" path="res://player/combat/combos/standing_light_combo.tres" id="19_standing_combo"]
 [ext_resource type="Resource" path="res://player/combat/combos/crouch_combo.tres" id="20_crouch_combo"]
+[ext_resource type="Script" path="res://player/scripts/player_inventory_component.gd" id="21_inventory"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_wodsf"]
 radius = 35.0
@@ -184,6 +185,9 @@ b = Vector2(26, -112)
 collision_layer = 2
 collision_mask = 89
 script = ExtResource("1_yw30f")
+
+[node name="PlayerInventory" type="Node" parent="."]
+script = ExtResource("21_inventory")
 
 [node name="rope" parent="." unique_id=163704369 instance=ExtResource("2_kb6p2")]
 

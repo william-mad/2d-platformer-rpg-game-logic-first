@@ -42,39 +42,50 @@ func register_npc(npc: Node) -> bool:
 	_breadcrumb("npc_locations:register_start", npc_id)
 	var current_scene_path := get_current_scene_path()
 	var npc_scene_path := _get_npc_scene_path(npc)
-	var created_record := false
-
-	if not npc_records.has(npc_id):
-		npc_records[npc_id] = _build_initial_record(npc_id, npc, current_scene_path, npc_scene_path)
-		created_record = true
-	else:
-		_refresh_record_from_node(npc_records[npc_id], npc, npc_scene_path)
-
-	var record: Dictionary = npc_records[npc_id]
-	var expected_scene_path := String(record.get("scene_path", current_scene_path))
-	if not expected_scene_path.is_empty() and expected_scene_path != current_scene_path:
+	var created_record := not npc_records.has(npc_id)
+	var existing_record: Dictionary = npc_records.get(npc_id, {})
+	var expected_scene_path := String(existing_record.get("scene_path", current_scene_path))
+	if not created_record and not expected_scene_path.is_empty() and expected_scene_path != current_scene_path:
 		_breadcrumb(
 			"npc_locations:register_scene_mismatch",
 			"%s expected=%s current=%s" % [npc_id, expected_scene_path.get_file(), current_scene_path.get_file()]
 		)
 		return false
 
-	if not created_record:
+	var existing_npc = live_npcs.get(npc_id, null) as Node
+	if existing_npc != null and is_instance_valid(existing_npc) and not existing_npc.is_queued_for_deletion() and existing_npc != npc:
+		_breadcrumb("npc_locations:register_duplicate", npc_id)
+		return false
+	if not _has_live_inventory_api(npc):
+		if npc is SocialNpc:
+			push_error("Persistent SocialNpc '%s' is missing its required inventory component API." % npc_id)
+			return false
+
+	var record: Dictionary
+	if created_record:
+		record = _build_initial_record(npc_id, npc, current_scene_path, npc_scene_path)
+		if npc.has_method("initialize_merchant_starting_inventory"):
+			var initialization = npc.call("initialize_merchant_starting_inventory")
+			if initialization is InventoryResult and not (initialization as InventoryResult).success:
+				push_error("Merchant '%s' starting inventory failed: %s" % [npc_id, (initialization as InventoryResult).message])
+				return false
+	else:
+		# Registration works on a copy so even component/wiring failures cannot
+		# partially mutate the canonical record before the instance is committed.
+		record = existing_record.duplicate(true)
+		_refresh_record_from_node(record, npc, npc_scene_path)
+		if not _restore_record_inventory_to_live_npc(npc_id, npc, record):
+			return false
 		var should_randomize_position := bool(record.get("spawn_random", false)) and active_scene_path == current_scene_path
 		_apply_record_to_npc(npc, record, should_randomize_position)
 		if should_randomize_position:
 			record["spawn_random"] = false
 
-	var existing_npc = live_npcs.get(npc_id, null) as Node
-	if existing_npc != null and is_instance_valid(existing_npc) and not existing_npc.is_queued_for_deletion() and existing_npc != npc:
-		_breadcrumb("npc_locations:register_duplicate", npc_id)
-		return false
-
 	live_npcs[npc_id] = npc
 	record["scene_path"] = current_scene_path
-	record["last_position"] = _get_node_position(npc)
-	record["node_state"] = _get_npc_state(npc)
-	record["last_simulated_total_hours"] = _get_world_total_hours()
+	if not _capture_live_npc_into_record(npc_id, npc, record):
+		live_npcs.erase(npc_id)
+		return false
 	npc_records[npc_id] = record
 
 	npc_registered.emit(npc_id, npc, current_scene_path)
@@ -97,8 +108,7 @@ func unregister_npc(npc: Node) -> void:
 		_breadcrumb("npc_locations:unregister", npc_id)
 		if npc_records.has(npc_id):
 			var record: Dictionary = npc_records[npc_id]
-			record["node_state"] = _get_npc_state(npc)
-			record["last_position"] = _get_node_position(npc)
+			_capture_live_npc_into_record(npc_id, npc, record)
 			var activity = record.get("activity", {})
 			if activity is Dictionary and not activity.is_empty():
 				var activity_scene := String(activity.get("target_scene_path", ""))
@@ -110,7 +120,6 @@ func unregister_npc(npc: Node) -> void:
 				if activity_scene == String(record.get("scene_path", "")) and activity_position is Vector2:
 					# Once this scene unloads, finish the unseen walk instead of restarting it on re-entry.
 					record["last_position"] = activity_position
-			record["last_simulated_total_hours"] = _get_world_total_hours()
 			npc_records[npc_id] = record
 
 		live_npcs.erase(npc_id)
@@ -134,8 +143,7 @@ func request_travel(npc: Node, target_scene_path: String) -> bool:
 		return false
 
 	var record: Dictionary = npc_records[npc_id]
-	record["node_state"] = _get_npc_state(npc)
-	record["last_position"] = _get_node_position(npc)
+	_capture_live_npc_into_record(npc_id, npc, record)
 	_move_record_to_scene(npc_id, record, target_scene_path, true)
 	_record_watchdog_marker(&"npc_locations:travel", "%s -> %s" % [npc_id, target_scene_path.get_file()])
 
@@ -386,7 +394,7 @@ func _complete_social_travel(
 	if not npc_records.has(npc_id):
 		return false
 	var record: Dictionary = npc_records[npc_id]
-	record["node_state"] = _get_npc_state(npc)
+	_capture_live_npc_into_record(npc_id, npc, record)
 	record["pending_travel"] = {}
 	record["activity"] = {}
 	record["social_visit_target_id"] = social_target_id
@@ -501,6 +509,9 @@ func apply_simulated_record(
 	var previous_scene_path := ""
 	if npc_records.has(npc_id) and npc_records[npc_id] is Dictionary:
 		previous_scene_path = String(npc_records[npc_id].get("scene_path", ""))
+	var accepted_live_npc := get_live_npc(npc_id)
+	if accepted_live_npc != null:
+		_capture_live_inventory_into_record(npc_id, accepted_live_npc, record)
 
 	npc_records[npc_id] = record.duplicate(true)
 	if not apply_to_live_npc:
@@ -681,6 +692,7 @@ func _build_initial_record(
 		"node_state": _get_npc_state(npc),
 		"activity": {},
 		"pending_travel": {},
+		"inventory": _fresh_empty_inventory_save_data(),
 		"last_simulated_total_hours": _get_world_total_hours(),
 		"spawn_random": false,
 		"last_travel_msec": 0,
@@ -726,9 +738,7 @@ func _refresh_live_records_for_save() -> void:
 
 		_refresh_record_from_node(record, live_npc, npc_scene_path)
 		record["scene_path"] = current_scene_path
-		record["last_position"] = _get_node_position(live_npc)
-		record["node_state"] = _get_npc_state(live_npc)
-		record["last_simulated_total_hours"] = _get_world_total_hours()
+		_capture_live_npc_into_record(npc_id, live_npc, record)
 		npc_records[npc_id] = record
 
 
@@ -753,11 +763,79 @@ func _refresh_live_record(npc_id: String) -> void:
 		return
 
 	var record: Dictionary = npc_records[npc_id]
-	_refresh_record_from_node(record, live_npc, _get_npc_scene_path(live_npc))
-	record["last_position"] = _get_node_position(live_npc)
-	record["node_state"] = _get_npc_state(live_npc)
-	record["last_simulated_total_hours"] = _get_world_total_hours()
+	_capture_live_npc_into_record(npc_id, live_npc, record)
 	npc_records[npc_id] = record
+
+
+func _capture_live_npc_into_record(npc_id: String, npc: Node, record: Dictionary) -> bool:
+	_refresh_record_from_node(record, npc, _get_npc_scene_path(npc))
+	record["last_position"] = _get_node_position(npc)
+	record["node_state"] = _get_npc_state(npc)
+	record["last_simulated_total_hours"] = _get_world_total_hours()
+	return _capture_live_inventory_into_record(npc_id, npc, record)
+
+
+func _capture_live_inventory_into_record(npc_id: String, npc: Node, record: Dictionary) -> bool:
+	if not _has_live_inventory_api(npc):
+		if npc is SocialNpc:
+			push_error("Persistent SocialNpc '%s' cannot be captured without its inventory component API." % npc_id)
+			return false
+		if not record.has("inventory"):
+			record["inventory"] = _fresh_empty_inventory_save_data()
+		return true
+	var inventory_data = npc.call("get_inventory_save_data")
+	if not (inventory_data is Dictionary) or inventory_data.is_empty():
+		push_error("Persistent NPC '%s' returned invalid empty inventory save data." % npc_id)
+		return false
+	record["inventory"] = inventory_data.duplicate(true)
+	return true
+
+
+func _restore_record_inventory_to_live_npc(npc_id: String, npc: Node, record: Dictionary) -> bool:
+	if not _has_live_inventory_api(npc):
+		if npc is SocialNpc:
+			push_error("Persistent SocialNpc '%s' cannot restore inventory: component API is missing." % npc_id)
+			return false
+		return true
+	if not record.has("inventory"):
+		npc.call("reset_inventory")
+		return _capture_live_inventory_into_record(npc_id, npc, record)
+
+	var saved_inventory = record["inventory"]
+	var result: InventoryResult
+	if saved_inventory is Dictionary:
+		result = npc.call("apply_inventory_save_data", saved_inventory)
+	else:
+		result = InventoryResult.failed(
+			InventoryResult.Code.INVALID_SAVE_DATA,
+			"NPC record inventory must be a dictionary."
+		)
+	if result != null and result.success:
+		return true
+
+	var code_text := "unknown"
+	var message_text := "Inventory restoration returned no result."
+	if result != null:
+		code_text = str(result.code)
+		message_text = result.message
+	push_warning(
+		"NPC inventory restore failed for '%s' (code %s): %s Preserving live inventory."
+		% [npc_id, code_text, message_text]
+	)
+	return _capture_live_inventory_into_record(npc_id, npc, record)
+
+
+func _has_live_inventory_api(npc: Node) -> bool:
+	return (
+		npc != null
+		and npc.has_method("get_inventory_save_data")
+		and npc.has_method("apply_inventory_save_data")
+		and npc.has_method("reset_inventory")
+	)
+
+
+func _fresh_empty_inventory_save_data() -> Dictionary:
+	return InventoryModel.get_empty_save_data()
 
 
 func _normalize_loaded_record(npc_id: String, saved_record: Dictionary) -> Dictionary:
@@ -800,6 +878,10 @@ func _normalize_loaded_record(npc_id: String, saved_record: Dictionary) -> Dicti
 		record["activity"] = {}
 	if not (record.get("pending_travel", null) is Dictionary):
 		record["pending_travel"] = {}
+	if not record.has("inventory"):
+		# Missing inventory is the supported old-save case; malformed present data is
+		# deferred until an accepted live component can validate it atomically.
+		record["inventory"] = _fresh_empty_inventory_save_data()
 	if not record.has("last_simulated_total_hours"):
 		record["last_simulated_total_hours"] = _get_world_total_hours()
 
@@ -901,8 +983,7 @@ func _return_npc_to_previous_scene(npc_id: String, record: Dictionary) -> void:
 
 	var live_npc = live_npcs.get(npc_id, null) as Node
 	if live_npc != null and is_instance_valid(live_npc):
-		record["node_state"] = _get_npc_state(live_npc)
-		record["last_position"] = _get_node_position(live_npc)
+		_capture_live_npc_into_record(npc_id, live_npc, record)
 		live_npc.queue_free()
 		live_npcs.erase(npc_id)
 
@@ -929,8 +1010,7 @@ func _spawn_missing_npcs_for_active_scene() -> void:
 		if live_npc != null and is_instance_valid(live_npc) and not live_npc.is_queued_for_deletion():
 			var should_randomize_position := bool(record.get("spawn_random", false))
 			_apply_record_to_npc(live_npc, record, should_randomize_position)
-			record["node_state"] = _get_npc_state(live_npc)
-			record["last_position"] = _get_node_position(live_npc)
+			_capture_live_npc_into_record(String(npc_id), live_npc, record)
 			record["spawn_random"] = false
 			npc_records[npc_id] = record
 			_resume_scheduled_activity_deferred(String(npc_id), live_npc)

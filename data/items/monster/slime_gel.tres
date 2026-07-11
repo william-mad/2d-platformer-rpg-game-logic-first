@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ItemDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/economy/item_definition.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+id = &"slime_gel"
+display_name = "Slime Gel"
+description = "A useful alchemical material left behind by slimes."
+category = &"material"
+tags = Array[StringName]([&"monster_drop", &"material", &"slime", &"alchemy_ingredient"])
+maximum_stack = 99
+base_value = 1
+unit_weight = 0.1

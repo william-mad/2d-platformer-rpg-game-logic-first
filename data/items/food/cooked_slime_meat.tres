@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ItemDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/economy/item_definition.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+id = &"cooked_slime_meat"
+display_name = "Cooked Slime Meat"
+description = "Prepared slime meat suitable for travel."
+category = &"processed_food"
+tags = Array[StringName]([&"food", &"processed_food", &"slime", &"travel_food"])
+maximum_stack = 20
+base_value = 4
+unit_weight = 0.25
+edible = true
+hunger_reduction = 25.0
+health_change = 2.0

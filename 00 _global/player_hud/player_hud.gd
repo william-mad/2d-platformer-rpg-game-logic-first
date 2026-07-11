@@ -5,6 +5,10 @@ extends CanvasLayer
 @onready var mana_bar: TextureProgressBar = $"Control/mana margin cont/mana_2/mana"
 @onready var mana_2_bar: TextureProgressBar = $"Control/mana margin cont/mana_2"
 @onready var control_root: Control = $Control
+@onready var inventory_screen: PlayerInventoryScreen = $PlayerInventoryScreen
+@onready var trade_screen: TradeScreen = $TradeScreen
+
+const INVENTORY_ACTION: StringName = &"inventory"
 
 const LEVEL_LABEL_SIZE := Vector2(48.0, 18.0)
 const LEVEL_LABEL_GAP := 6.0
@@ -30,13 +34,104 @@ var level_label: Label
 var level_xp_back: ColorRect
 var level_xp_fill: ColorRect
 var current_mana_attack_tier := -1
+var inventory_previous_pause_state: bool = false
+var bound_player_inventory: InventoryModel
 
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	set_process_unhandled_input(true)
 	_ensure_progression_widgets()
 	_connect_progression_system()
 	_refresh_progression_widgets()
 	_update_mana_attack_color(mana_bar.value)
+	trade_screen.close_requested.connect(close_trade_screen)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not event.is_action_pressed(INVENTORY_ACTION):
+		return
+	var key_event := event as InputEventKey
+	if key_event != null and key_event.echo:
+		return
+	if _is_game_over_active():
+		return
+	if inventory_screen.is_open():
+		get_viewport().set_input_as_handled()
+		close_inventory()
+		return
+	if trade_screen.is_open():
+		return
+	# A pre-existing pause belongs to another modal owner.
+	if get_tree().paused or not inventory_screen.has_bound_inventory():
+		return
+	get_viewport().set_input_as_handled()
+	open_inventory()
+
+
+func bind_player_inventory(inventory: InventoryModel) -> void:
+	bound_player_inventory = inventory
+	inventory_screen.bind_inventory(inventory)
+
+
+func unbind_player_inventory(inventory: InventoryModel) -> void:
+	if not inventory_screen.is_bound_to(inventory):
+		return
+	if inventory_screen.is_open():
+		close_inventory()
+	if trade_screen.is_open():
+		close_trade_screen()
+	inventory_screen.unbind_inventory(inventory)
+	bound_player_inventory = null
+
+
+func open_inventory() -> void:
+	if get_tree().paused or inventory_screen.is_open() or not inventory_screen.has_bound_inventory():
+		return
+	inventory_previous_pause_state = get_tree().paused
+	inventory_screen.open_screen()
+	_set_inventory_pause(true)
+
+
+func close_inventory() -> void:
+	if not inventory_screen.is_open():
+		return
+	inventory_screen.close_screen()
+	_set_inventory_pause(inventory_previous_pause_state)
+
+
+func open_trade_screen(merchant: MerchantComponent) -> bool:
+	if get_tree().paused or trade_screen.is_open() or inventory_screen.is_open() or bound_player_inventory == null:
+		return false
+	inventory_previous_pause_state = get_tree().paused
+	if not trade_screen.open_screen(bound_player_inventory, merchant):
+		return false
+	_set_inventory_pause(true)
+	return true
+
+
+func close_trade_screen() -> void:
+	if not trade_screen.is_open():
+		return
+	trade_screen.close_screen()
+	_set_inventory_pause(inventory_previous_pause_state)
+
+
+func _set_inventory_pause(should_pause: bool) -> void:
+	var pause_system := get_node_or_null("/root/PauseSystem")
+	if pause_system != null and pause_system.has_method("set_paused"):
+		pause_system.call("set_paused", should_pause, false)
+	else:
+		get_tree().paused = should_pause
+
+
+func _is_game_over_active() -> bool:
+	var game_over_screen := get_node_or_null("/root/GameOverScreen")
+	return (
+		game_over_screen != null
+		and game_over_screen.has_method("is_game_over_active")
+		and bool(game_over_screen.call("is_game_over_active"))
+	)
 
 
 func setup_hp(max_hp: float, current_hp: float) -> void:

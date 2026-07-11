@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="InventoryProfileDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/economy/inventory_profile_definition.gd" id="1_profile"]
+
+[resource]
+script = ExtResource("1_profile")
+items = {
+&"cooked_slime_meat": 5,
+&"gold_coin": 100
+}

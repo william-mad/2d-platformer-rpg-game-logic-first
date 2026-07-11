@@ -5,6 +5,7 @@ const SPECIAL_MANA_MIN_THRESHOLD_MARGIN := 0.01
 
 var player : Player
 var next_state : PlayerState
+var _legacy_physics_transition: PlayerState = null
 
 #state references
 @onready var idle: PlayerStateIdle = %Idle
@@ -55,10 +56,14 @@ func physics_process(_delta: float) -> PlayerState:
 
 
 func physics_update_before_move(delta: float) -> void:
-	physics_process(delta)
+	_legacy_physics_transition = physics_process(delta)
 
 
 func physics_update_after_move(_delta: float) -> PlayerState:
+	var transition := _legacy_physics_transition
+	_legacy_physics_transition = null
+	if transition != null:
+		return transition
 	return next_state
 
 

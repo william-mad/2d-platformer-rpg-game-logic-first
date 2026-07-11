@@ -1,8 +1,10 @@
-[gd_scene format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://scripts/creatures/social_npc.gd" id="1_social_npc"]
 [ext_resource type="Script" path="res://player/scripts/damage_area.gd" id="2_damage_area"]
 [ext_resource type="Script" path="res://scripts/instances/creature_hp_bar.gd" id="3_hp_bar"]
+[ext_resource type="Script" path="res://scripts/creatures/npc_inventory_component.gd" id="4_inventory"]
+[ext_resource type="Script" path="res://scripts/creatures/npc_inventory_drop_component.gd" id="5_inventory_drop"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_body"]
 size = Vector2(48, 64)
@@ -11,6 +13,12 @@ size = Vector2(48, 64)
 collision_layer = 4
 collision_mask = 161
 script = ExtResource("1_social_npc")
+
+[node name="NpcInventory" type="Node" parent="."]
+script = ExtResource("4_inventory")
+
+[node name="NpcInventoryDrop" type="Node" parent="."]
+script = ExtResource("5_inventory_drop")
 
 [node name="BodyVisual" type="Polygon2D" parent="."]
 unique_name_in_owner = true

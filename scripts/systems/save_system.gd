@@ -90,7 +90,12 @@ func continue_game(slot: String = "") -> bool:
 
 
 func save_exists(slot: String = "") -> bool:
-	return FileAccess.file_exists(get_save_path(slot))
+	var save_path := get_save_path(slot)
+	if FileAccess.file_exists(save_path):
+		return true
+
+	var backup_result := _read_save_file_result(_get_backup_save_path(save_path))
+	return _save_file_read_result_is_valid(backup_result)
 
 
 func delete_save(slot: String = "") -> bool:
@@ -145,11 +150,12 @@ func get_save_summaries() -> Array[Dictionary]:
 func get_save_summary(slot: String = "") -> Dictionary:
 	var normalized_slot := _normalize_slot(slot)
 	var save_path := get_save_path(normalized_slot)
+	var primary_exists := FileAccess.file_exists(save_path)
 	var summary := {
 		"slot": normalized_slot,
 		"display_name": get_save_slot_display_name(normalized_slot),
 		"save_path": save_path,
-		"exists": FileAccess.file_exists(save_path),
+		"exists": save_exists(normalized_slot),
 		"valid": false,
 		"version": 0,
 		"scene_path": "",
@@ -164,7 +170,14 @@ func get_save_summary(slot: String = "") -> Dictionary:
 	if not bool(summary["exists"]):
 		return summary
 
-	var save_data := _read_save_file(save_path)
+	var save_data: Dictionary
+	if primary_exists:
+		save_data = _read_save_file(save_path)
+	else:
+		var backup_result := _read_save_file_result(_get_backup_save_path(save_path))
+		var backup_data = backup_result.get("data", {})
+		if _save_file_read_result_is_valid(backup_result) and backup_data is Dictionary:
+			save_data = backup_data
 	if save_data.is_empty():
 		return summary
 

@@ -1,10 +1,14 @@
-[gd_scene format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://scripts/creatures/social_npc.gd" id="1_social_npc"]
 [ext_resource type="Script" path="res://player/scripts/damage_area.gd" id="2_damage_area"]
 [ext_resource type="Script" path="res://scripts/instances/creature_hp_bar.gd" id="3_hp_bar"]
 [ext_resource type="PackedScene" path="res://scenes/creatures/npc/npc_state_machine.tscn" id="4_state_machine"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/mom_fight.gd" id="5_mom_fight"]
+[ext_resource type="Script" path="res://scripts/creatures/npc_inventory_component.gd" id="6_inventory"]
+[ext_resource type="Script" path="res://scripts/creatures/npc_inventory_drop_component.gd" id="7_inventory_drop"]
+[ext_resource type="Script" path="res://scripts/economy/merchant_component.gd" id="8_merchant"]
+[ext_resource type="Resource" path="res://data/inventory_profiles/merchant_basic_inventory.tres" id="9_profile"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_body"]
 size = Vector2(48, 64)
@@ -37,6 +41,16 @@ social_stats = {
 "talk_need": 25.0,
 "trust": 85.0
 }
+
+[node name="NpcInventory" type="Node" parent="."]
+script = ExtResource("6_inventory")
+
+[node name="NpcInventoryDrop" type="Node" parent="."]
+script = ExtResource("7_inventory_drop")
+
+[node name="Merchant" type="Node" parent="."]
+script = ExtResource("8_merchant")
+starting_inventory_profile = ExtResource("9_profile")
 
 [node name="BodyVisual" type="Polygon2D" parent="."]
 unique_name_in_owner = true

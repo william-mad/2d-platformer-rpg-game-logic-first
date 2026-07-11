@@ -1,7 +1,9 @@
-[gd_scene format=3 uid="uid://dicudb0t1rd0j"]
+[gd_scene load_steps=4 format=3 uid="uid://dicudb0t1rd0j"]
 
 [ext_resource type="Texture2D" uid="uid://8ehnoal3e8eh" path="res://images/sprites/assets/hp bar.png" id="1_kyp3m"]
 [ext_resource type="Script" uid="uid://ct62uktvpeu7x" path="res://00 _global/player_hud/player_hud.gd" id="2_hud"]
+[ext_resource type="PackedScene" path="res://ui/inventory/player_inventory_screen.tscn" id="3_inventory_screen"]
+[ext_resource type="PackedScene" path="res://ui/trade/trade_screen.tscn" id="4_trade_screen"]
 
 [sub_resource type="Gradient" id="Gradient_3vx8i"]
 offsets = PackedFloat32Array(0.2470238, 0.98511904)
@@ -41,6 +43,10 @@ fill_to = Vector2(1, 0.3995984)
 [node name="PlayerHud" type="CanvasLayer" unique_id=1998049805]
 layer = 2
 script = ExtResource("2_hud")
+
+[node name="PlayerInventoryScreen" parent="." instance=ExtResource("3_inventory_screen")]
+
+[node name="TradeScreen" parent="." instance=ExtResource("4_trade_screen")]
 
 [node name="Control" type="Control" parent="." unique_id=1427456495]
 process_mode = 3

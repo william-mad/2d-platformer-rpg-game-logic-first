@@ -27,6 +27,9 @@ signal death_drop_requested(monster)
 @onready var damage_area: Area2D = get_node_or_null("Damage_Area") as Area2D
 @onready var touch_damage_area: Area2D = get_node_or_null("TouchDamageArea") as Area2D
 @onready var hp_bar: CreatureHpBar = get_node_or_null("HPBar") as CreatureHpBar
+@onready var inventory_component: NpcInventoryComponent = get_node_or_null("NpcInventory") as NpcInventoryComponent
+@onready var inventory_drop_component: NpcInventoryDropComponent = get_node_or_null("NpcInventoryDrop") as NpcInventoryDropComponent
+@onready var monster_loot_component: MonsterLootComponent = get_node_or_null("MonsterLoot") as MonsterLootComponent
 
 var hp: float = 0.0
 var dead: bool = false
@@ -46,6 +49,8 @@ func _ready() -> void:
 
 	add_to_group(&"attack_target")
 	_setup_hp_bar()
+	if monster_loot_component != null:
+		monster_loot_component.initialize_loot_once()
 
 
 func take_damage(
@@ -81,6 +86,8 @@ func die() -> void:
 	knockback_timer = 0.0
 	_disable_hitboxes()
 	_update_hp_bar()
+	if inventory_drop_component != null and not inventory_drop_component.drop_inventory_on_death():
+		push_warning("Monster '%s' died but its inventory drop could not be completed." % name)
 	_on_died()
 	died.emit(self)
 	_award_progression_on_death()
@@ -99,6 +106,16 @@ func heal(amount: float) -> void:
 
 func get_current_health() -> float:
 	return hp
+
+
+func get_inventory() -> InventoryModel:
+	if inventory_component == null:
+		return null
+	return inventory_component.get_inventory()
+
+
+func get_loot_source_id() -> StringName:
+	return StringName("monster:%s" % get_instance_id())
 
 
 func set_last_damage_tags(tags: Array[StringName]) -> void:

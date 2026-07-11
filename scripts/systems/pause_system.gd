@@ -28,7 +28,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	set_paused(not get_tree().paused)
 
 
-func set_paused(should_pause: bool) -> void:
+func set_paused(should_pause: bool, show_stats_overlay: bool = true) -> void:
 	_set_world_time_paused(should_pause)
 	get_tree().paused = should_pause
 	_ensure_stats_overlay()
@@ -36,7 +36,7 @@ func set_paused(should_pause: bool) -> void:
 	if stats_overlay == null:
 		return
 
-	if should_pause:
+	if should_pause and show_stats_overlay:
 		stats_overlay.show_pause_overlay()
 	else:
 		stats_overlay.hide_pause_overlay()

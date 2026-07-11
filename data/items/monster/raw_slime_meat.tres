@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="ItemDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/economy/item_definition.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+id = &"raw_slime_meat"
+display_name = "Raw Slime Meat"
+description = "Unprocessed meat collected from a slime."
+category = &"raw_food"
+tags = Array[StringName]([&"monster_drop", &"food", &"raw_food", &"slime", &"cooking_ingredient"])
+maximum_stack = 50
+base_value = 2
+unit_weight = 0.25
+requires_processing = true

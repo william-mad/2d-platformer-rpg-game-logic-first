@@ -13,6 +13,7 @@ signal player_defeated
 @onready var animation_player: AnimationPlayer = $AnimationPlayer
 @onready var attack_hitbox: PlayerAttackHitbox = %AttackHitbox
 @onready var ledgedetec: RayCast2D = %ledgedetec
+@onready var player_inventory: PlayerInventoryComponent = get_node_or_null("PlayerInventory") as PlayerInventoryComponent
 
 #endregion
 
@@ -113,7 +114,14 @@ func _ready() -> void:
 	#initialize states
 	initialize_states()
 	_apply_pending_runtime_state()
+	if PlayerHud.has_method("bind_player_inventory"):
+		PlayerHud.call("bind_player_inventory", get_inventory())
 	pass
+
+
+func _exit_tree() -> void:
+	if PlayerHud.has_method("unbind_player_inventory"):
+		PlayerHud.call("unbind_player_inventory", get_inventory())
 
 
 func get_save_id() -> String:
@@ -123,7 +131,7 @@ func get_save_id() -> String:
 func get_save_data() -> Dictionary:
 	# SaveSystem calls this when SaveSystem.save_game() runs.
 	# Add stable keys here for important player data that needs special restore behavior.
-	return {
+	var data := {
 		"global_position": global_position,
 		"hp": hp,
 		"max_hp": max_hp,
@@ -139,6 +147,8 @@ func get_save_data() -> Dictionary:
 		"facing_left": sprite_2d.flip_h,
 		"extra_values": _collect_extra_save_values(),
 	}
+	data["inventory"] = get_inventory_save_data()
+	return data
 
 
 func apply_save_data(data: Dictionary) -> void:
@@ -164,6 +174,25 @@ func apply_save_data(data: Dictionary) -> void:
 	if data.has("facing_left"):
 		apply_facing_left(bool(data["facing_left"]))
 
+	if data.has("inventory"):
+		var inventory_data = data["inventory"]
+		var inventory_result: InventoryResult
+		if inventory_data is Dictionary:
+			inventory_result = apply_inventory_save_data(inventory_data)
+		else:
+			inventory_result = InventoryResult.failed(
+				InventoryResult.Code.INVALID_SAVE_DATA,
+				"Player inventory save data must be a dictionary."
+			)
+		if not inventory_result.success:
+			push_warning(
+				"Player inventory restore failed (code %s): %s Existing live inventory was preserved."
+				% [str(inventory_result.code), inventory_result.message]
+			)
+	else:
+		# Inventory was optional in older player save blocks.
+		reset_inventory()
+
 	var extra_values = data.get("extra_values", {})
 	if extra_values is Dictionary:
 		_apply_extra_save_values(extra_values)
@@ -179,6 +208,36 @@ func apply_save_data(data: Dictionary) -> void:
 	set_process(true)
 	set_process_unhandled_input(true)
 	sync_stats_to_hud()
+
+
+func get_inventory() -> InventoryModel:
+	if player_inventory == null:
+		push_error("Player is missing its required PlayerInventory component.")
+		return null
+	return player_inventory.get_inventory()
+
+
+func get_inventory_save_data() -> Dictionary:
+	if player_inventory == null:
+		push_error("Player cannot serialize inventory: PlayerInventory component is missing.")
+		return InventoryModel.get_empty_save_data()
+	return player_inventory.get_save_data()
+
+
+func apply_inventory_save_data(data: Dictionary) -> InventoryResult:
+	if player_inventory == null:
+		return InventoryResult.failed(
+			InventoryResult.Code.INVALID_SAVE_DATA,
+			"Player is missing its required PlayerInventory component."
+		)
+	return player_inventory.apply_save_data(data)
+
+
+func reset_inventory() -> void:
+	if player_inventory == null:
+		push_error("Player cannot reset inventory: PlayerInventory component is missing.")
+		return
+	player_inventory.reset_inventory()
 
 
 func _apply_pending_runtime_state() -> void:

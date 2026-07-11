@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="LootTableDefinition" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/economy/loot_table_definition.gd" id="1_table"]
+[ext_resource type="Script" path="res://scripts/resources/economy/loot_table_entry.gd" id="2_entry"]
+
+[sub_resource type="Resource" id="LootTableEntry_gel"]
+script = ExtResource("2_entry")
+item_id = &"slime_gel"
+drop_chance = 1.0
+minimum_quantity = 1
+maximum_quantity = 3
+
+[sub_resource type="Resource" id="LootTableEntry_meat"]
+script = ExtResource("2_entry")
+item_id = &"raw_slime_meat"
+drop_chance = 0.45
+minimum_quantity = 1
+maximum_quantity = 2
+
+[resource]
+script = ExtResource("1_table")
+entries = Array[LootTableEntry]([SubResource("LootTableEntry_gel"), SubResource("LootTableEntry_meat")])

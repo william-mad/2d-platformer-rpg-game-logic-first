@@ -170,6 +170,9 @@ func _try_open_interaction_menu() -> void:
 	if not block_reason.is_empty():
 		interaction_blocked.emit(player, target_npc, interaction_id, block_reason)
 		return
+	if target_npc.has_method("try_open_trade") and bool(target_npc.call("try_open_trade", player)):
+		cooldown = cooldown_seconds
+		return
 
 	menu_target_npc = target_npc
 	active_menu = MENU_INTERACTION

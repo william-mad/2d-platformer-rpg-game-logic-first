@@ -1,8 +1,12 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Script" path="res://scripts/monsters/slime.gd" id="1_slime"]
 [ext_resource type="Script" path="res://player/scripts/damage_area.gd" id="2_damage_area"]
 [ext_resource type="Script" path="res://scripts/instances/creature_hp_bar.gd" id="3_hp_bar"]
+[ext_resource type="Script" path="res://scripts/creatures/npc_inventory_component.gd" id="4_inventory"]
+[ext_resource type="Script" path="res://scripts/creatures/npc_inventory_drop_component.gd" id="5_inventory_drop"]
+[ext_resource type="Script" path="res://scripts/creatures/monster_loot_component.gd" id="6_monster_loot"]
+[ext_resource type="Resource" path="res://data/loot_tables/slime_loot_table.tres" id="7_slime_loot"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_body"]
 radius = 22.0
@@ -26,6 +30,16 @@ script = ExtResource("1_slime")
 target_groups = Array[StringName]([&"player", &"npc", &"training_dummy", &"attack_target"])
 touch_damage = 1.0
 touch_knockout_damage = 14.0
+
+[node name="NpcInventory" type="Node" parent="."]
+script = ExtResource("4_inventory")
+
+[node name="NpcInventoryDrop" type="Node" parent="."]
+script = ExtResource("5_inventory_drop")
+
+[node name="MonsterLoot" type="Node" parent="."]
+script = ExtResource("6_monster_loot")
+loot_table = ExtResource("7_slime_loot")
 
 [node name="BodyVisual" type="Node2D" parent="."]
 position = Vector2(0, -22)

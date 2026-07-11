@@ -119,6 +119,9 @@ const STAT_KEY_ALIASES := {
 @onready var hp_bar: CreatureHpBar = get_node_or_null("HPBar") as CreatureHpBar
 @onready var knockout_bar: ProgressBar = get_node_or_null("KnockoutBar") as ProgressBar
 @onready var name_label: Label = get_node_or_null("NameLabel") as Label
+@onready var npc_inventory: NpcInventoryComponent = get_node_or_null("NpcInventory") as NpcInventoryComponent
+@onready var npc_inventory_drop: NpcInventoryDropComponent = get_node_or_null("NpcInventoryDrop") as NpcInventoryDropComponent
+@onready var merchant_component: MerchantComponent = get_node_or_null("Merchant") as MerchantComponent
 # Optional child component. If present, social values can drive the reusable NPC states.
 @onready var npc_state_machine: NpcStateMachine = get_node_or_null("NpcStateMachine") as NpcStateMachine
 
@@ -439,6 +442,11 @@ func die() -> void:
 	if float(social_stats.get("disabled", 0.0)) >= 1.0:
 		return
 
+	if npc_inventory_drop == null:
+		push_error("Definitively dead NPC '%s' is missing its NpcInventoryDrop component." % String(get_npc_location_id()))
+	elif not npc_inventory_drop.drop_inventory_on_death():
+		push_warning("Definitive death inventory drop failed for NPC '%s'; live inventory was preserved." % String(get_npc_location_id()))
+
 	social_stats["disabled"] = 1.0
 	knockout_bar_active = false
 	is_downed = false
@@ -457,6 +465,13 @@ func die() -> void:
 	else:
 		velocity = Vector2.ZERO
 		set_physics_process(false)
+
+
+func drop_inventory_on_definitive_death() -> bool:
+	if npc_inventory_drop == null:
+		push_error("NPC '%s' is missing its NpcInventoryDrop component." % String(get_npc_location_id()))
+		return false
+	return npc_inventory_drop.drop_inventory_on_death()
 
 
 func get_favor() -> float:
@@ -497,6 +512,51 @@ func get_npc_scene_path() -> String:
 		return scene_file_path
 
 	return ""
+
+
+func get_inventory() -> InventoryModel:
+	if npc_inventory == null:
+		push_error("Persistent SocialNpc '%s' is missing its NpcInventory component." % name)
+		return null
+	return npc_inventory.get_inventory()
+
+
+func get_inventory_save_data() -> Dictionary:
+	if npc_inventory == null:
+		push_error("Persistent SocialNpc '%s' cannot serialize inventory: component is missing." % name)
+		return {}
+	return npc_inventory.get_save_data()
+
+
+func apply_inventory_save_data(data: Dictionary) -> InventoryResult:
+	if npc_inventory == null:
+		return InventoryResult.failed(
+			InventoryResult.Code.INVALID_SAVE_DATA,
+			"Persistent SocialNpc '%s' is missing its NpcInventory component." % name
+		)
+	return npc_inventory.apply_save_data(data)
+
+
+func reset_inventory() -> void:
+	if npc_inventory == null:
+		push_error("Persistent SocialNpc '%s' cannot reset inventory: component is missing." % name)
+		return
+	npc_inventory.reset_inventory()
+
+
+func initialize_merchant_starting_inventory() -> InventoryResult:
+	if merchant_component == null:
+		return InventoryResult.succeeded("NPC is not configured as a merchant.")
+	return merchant_component.initialize_starting_inventory()
+
+
+func try_open_trade(_player: Node) -> bool:
+	if merchant_component == null:
+		return false
+	var hud := get_node_or_null("/root/PlayerHud")
+	if hud == null or not hud.has_method("open_trade_screen"):
+		return false
+	return bool(hud.call("open_trade_screen", merchant_component))
 
 
 func get_npc_location_save_data() -> Dictionary:
