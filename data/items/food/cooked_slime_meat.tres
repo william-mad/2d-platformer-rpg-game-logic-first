@@ -18,5 +18,5 @@ trade_group = &"processed_food"
 minimum_favor_to_buy = 35.0
 minimum_favor_to_sell = 15.0
 edible = true
-hunger_reduction = 25.0
+hunger_reduction = 30.0
 health_change = 2.0

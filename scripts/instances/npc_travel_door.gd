@@ -195,7 +195,7 @@ func _capture_player_runtime_state() -> void:
 	if player == null:
 		return
 
-	runtime.call("capture_player", player, target_spawn_id)
+	runtime.call("capture_player", player, target_spawn_id, target_scene_path)
 
 
 func _get_active_player() -> Node2D:

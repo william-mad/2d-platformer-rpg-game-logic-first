@@ -2,6 +2,7 @@ class_name Player extends CharacterBody2D
 
 # Emitted when hp hits 0. GameOverScreen (autoload) listens and shows the game-over flow.
 signal player_defeated
+signal hunger_changed(current_hunger: float, changed_by: float)
 
 #region //onready variables:
 @onready var sprite_2d: Sprite2D = $Sprite2D
@@ -630,9 +631,12 @@ func update_passive_healing(delta: float) -> void:
 func apply_hunger_delta(delta: float) -> float:
 	var previous_value := hunger
 	hunger = clampf(hunger + delta, 0.0, 100.0)
+	var changed_by := hunger - previous_value
 	if PlayerHud.has_method("set_hunger"):
 		PlayerHud.call("set_hunger", hunger)
-	return hunger - previous_value
+	if not is_zero_approx(changed_by):
+		hunger_changed.emit(hunger, changed_by)
+	return changed_by
 
 
 func apply_sleep_need_delta(delta: float) -> float:

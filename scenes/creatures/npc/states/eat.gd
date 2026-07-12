@@ -10,6 +10,11 @@ var total_eat_seconds: float = 0.0
 var active_eat_target: Node2D
 var resume_from_talk_overlay: bool = false
 var meal_sated_marked: bool = false
+var inventory_food_item_id: StringName = &""
+var inventory_food_reservation_id: StringName = &""
+var using_inventory_food: bool = false
+var inventory_food_retry_until_msec: int = 0
+var food_service := FoodConsumptionService.new()
 
 
 func enter() -> void:
@@ -53,7 +58,14 @@ func enter() -> void:
 	if active_eat_target == null:
 		_breadcrumb("npc_eat:missing_target", _npc_label())
 		eat_timer = 0.0
+		inventory_food_retry_until_msec = Time.get_ticks_msec() + 10000
 		machine.call_deferred("request_state", &"Idle", null, "missing_eat_spot", 20)
+		return
+	if not _prepare_inventory_food_if_needed():
+		_breadcrumb("npc_eat:no_inventory_food", _npc_label())
+		eat_timer = 0.0
+		inventory_food_retry_until_msec = Time.get_ticks_msec() + 10000
+		machine.call_deferred("request_state", &"Idle", null, "no_available_food", 20)
 		return
 	if active_eat_target != null and not is_close_to(active_eat_target.global_position, machine.stop_distance):
 		_breadcrumb("npc_eat:walk_to_target", "%s -> %s" % [_npc_label(), active_eat_target.name])
@@ -86,6 +98,7 @@ func exit() -> void:
 		"%s hunger=%.2f timer=%.2f" % [_npc_label(), machine.get_value(eat_value_name), eat_timer]
 	)
 	super.exit()
+	call_deferred("_release_inventory_food_if_cancelled")
 
 
 func physics_process(delta: float) -> NpcState:
@@ -113,6 +126,11 @@ func physics_process(delta: float) -> NpcState:
 		return get_state(&"Idle")
 
 	eat_timer -= delta
+	if using_inventory_food:
+		if eat_timer <= 0.0:
+			_complete_inventory_food()
+			return get_state(&"Idle")
+		return next_state
 	var made_progress := _apply_eat_progress(delta)
 	if not made_progress and not _hunger_is_sated():
 		_breadcrumb("npc_eat:no_progress", _npc_label())
@@ -136,6 +154,7 @@ func can_continue_during_talk() -> bool:
 		and is_close_to(eat_target.global_position, machine.stop_distance)
 		and eat_timer > 0.0
 		and not _hunger_is_sated()
+		and (not using_inventory_food or _inventory_food_reservation_is_valid())
 	)
 
 
@@ -157,6 +176,11 @@ func process_talk_overlay(delta: float) -> StringName:
 		return &"Idle"
 
 	eat_timer -= delta
+	if using_inventory_food:
+		if eat_timer <= 0.0:
+			_complete_inventory_food()
+			return &"Idle"
+		return &"Eat"
 	var made_progress := _apply_eat_progress(delta)
 	if not made_progress and not _hunger_is_sated():
 		return &"Idle"
@@ -192,6 +216,8 @@ func _resolve_eat_target() -> Node2D:
 		machine.eat_target = closest_spot
 		_breadcrumb("npc_eat:target_closest", "%s -> %s" % [_npc_label(), closest_spot.name])
 		return closest_spot
+	if Time.get_ticks_msec() >= inventory_food_retry_until_msec and _has_available_inventory_food():
+		return npc
 
 	return null
 
@@ -207,6 +233,120 @@ func _target_can_be_eaten_at(eat_target: Node2D) -> bool:
 		return accepted
 
 	return true
+
+
+func _target_uses_spot_food(eat_target: Node2D) -> bool:
+	return (
+		eat_target != null
+		and (
+			eat_target.has_method("consume_eat_amount")
+			or eat_target.has_method("consume_eat_progress")
+		)
+	)
+
+
+func _prepare_inventory_food_if_needed() -> bool:
+	using_inventory_food = not _target_uses_spot_food(active_eat_target)
+	if not using_inventory_food:
+		_release_inventory_food_reservation()
+		return true
+	if _inventory_food_reservation_is_valid():
+		return true
+	if Time.get_ticks_msec() < inventory_food_retry_until_msec:
+		return false
+	_release_inventory_food_reservation()
+	using_inventory_food = true
+	var inventory := _get_npc_inventory()
+	if inventory == null:
+		return false
+	inventory_food_item_id = food_service.select_best_available_food(inventory)
+	if inventory_food_item_id == &"":
+		return false
+	inventory_food_reservation_id = StringName("eat:%s" % _get_npc_id())
+	var reservation := inventory.reserve_items(
+		inventory_food_reservation_id,
+		{inventory_food_item_id: 1}
+	)
+	if not reservation.success:
+		inventory_food_item_id = &""
+		inventory_food_reservation_id = &""
+		using_inventory_food = false
+		return false
+	return true
+
+
+func _complete_inventory_food() -> bool:
+	if not using_inventory_food or not _inventory_food_reservation_is_valid():
+		_release_inventory_food_reservation()
+		return false
+	var consumed_item_id := inventory_food_item_id
+	var result := food_service.consume_for_npc(
+		_get_npc_inventory(),
+		npc,
+		inventory_food_item_id,
+		inventory_food_reservation_id
+	)
+	if not result.success:
+		_breadcrumb("npc_eat:inventory_consume_failed", "%s %s" % [_npc_label(), result.message])
+		_release_inventory_food_reservation()
+		return false
+	_breadcrumb("npc_eat:inventory_consumed", "%s item=%s" % [_npc_label(), String(consumed_item_id)])
+	inventory_food_item_id = &""
+	inventory_food_reservation_id = &""
+	using_inventory_food = false
+	return true
+
+
+func _release_inventory_food_if_cancelled() -> void:
+	if _should_preserve_inventory_food_reservation():
+		return
+	_release_inventory_food_reservation()
+
+
+func _should_preserve_inventory_food_reservation() -> bool:
+	if not using_inventory_food or machine == null or machine.current_state == null:
+		return false
+	var current_name := StringName(machine.current_state.name)
+	if current_name == &"MoveToTarget":
+		return machine.state_after_move == &"Eat"
+	if current_name == &"Talk":
+		return machine.current_state.get("continued_task_state") == self
+	return current_name == &"Eat"
+
+
+func _release_inventory_food_reservation() -> void:
+	var inventory := _get_npc_inventory()
+	if inventory != null and inventory_food_reservation_id != &"" and inventory.has_reservation(inventory_food_reservation_id):
+		inventory.release_reservation(inventory_food_reservation_id)
+	inventory_food_item_id = &""
+	inventory_food_reservation_id = &""
+	using_inventory_food = false
+
+
+func _inventory_food_reservation_is_valid() -> bool:
+	var inventory := _get_npc_inventory()
+	if inventory == null or inventory_food_reservation_id == &"" or inventory_food_item_id == &"":
+		return false
+	var reservation := inventory.get_reservation(inventory_food_reservation_id)
+	return reservation.size() == 1 and int(reservation.get(String(inventory_food_item_id), 0)) == 1
+
+
+func _has_available_inventory_food() -> bool:
+	if npc != null and npc.has_method("has_available_inventory_food"):
+		return bool(npc.call("has_available_inventory_food"))
+	return food_service.select_best_available_food(_get_npc_inventory()) != &""
+
+
+func _get_npc_inventory() -> InventoryModel:
+	if npc == null or not is_instance_valid(npc) or not npc.has_method("get_inventory"):
+		return null
+	return npc.call("get_inventory") as InventoryModel
+
+
+func _get_npc_id() -> String:
+	if npc != null and npc.has_method("get_npc_location_id"):
+		return String(npc.call("get_npc_location_id"))
+	return "instance:%s" % (npc.get_instance_id() if npc != null else get_instance_id())
 
 
 func _apply_eat_progress(delta: float) -> bool:

@@ -1,0 +1,20 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/instances/travel_return_point.gd" id="1_return"]
+
+[sub_resource type="RectangleShape2D" id="1_shape"]
+size = Vector2(100, 130)
+
+[node name="TravelReturnPoint" type="Area2D"]
+collision_layer = 0
+collision_mask = 2
+script = ExtResource("1_return")
+
+[node name="Visual" type="Polygon2D" parent="."]
+position = Vector2(0, -58)
+color = Color(0.15, 0.55, 0.75, 0.85)
+polygon = PackedVector2Array(-34, 48, 34, 48, 34, -48, -34, -48)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(0, -58)
+shape = SubResource("1_shape")

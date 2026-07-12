@@ -25,6 +25,7 @@
 [ext_resource type="PackedScene" path="res://scenes/instances/practice_dummy.tscn" id="28_practice_dummy"]
 [ext_resource type="Script" uid="uid://bwvh30h8x6rcw" path="res://scripts/monsters/slime_hourly_spawner.gd" id="29_slime_hourly"]
 [ext_resource type="PackedScene" path="res://scenes/things/slime_spawner.tscn" id="30_slime_spawner"]
+[ext_resource type="PackedScene" path="res://scenes/things/npc_travel_door.tscn" id="31_route_door"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_q8s1k"]
 texture = ExtResource("9_fddca")
@@ -264,6 +265,20 @@ owner_ids = Array[StringName]([&"mom", &"player"])
 position = Vector2(-220, 368)
 script = ExtResource("27_player_spawn")
 spawn_id = &"from_realhometest"
+
+[node name="PlayerSpawnFromCompanionRoute" type="Marker2D" parent="."]
+position = Vector2(180, 368)
+script = ExtResource("27_player_spawn")
+spawn_id = &"from_companion_route"
+
+[node name="CompanionSpawn" type="Marker2D" parent="." groups=["companion_spawn"]]
+position = Vector2(100, 368)
+
+[node name="CompanionRouteDoor" parent="." instance=ExtResource("31_route_door")]
+position = Vector2(760, 420)
+target_scene_path = "res://scenes/levels/level_1.tscn"
+target_spawn_id = &"travel_route_entry"
+allow_unscheduled_npc_travel = false
 
 [node name="PracticeDummy" parent="." unique_id=1318855900 instance=ExtResource("28_practice_dummy")]
 position = Vector2(-520, 368)

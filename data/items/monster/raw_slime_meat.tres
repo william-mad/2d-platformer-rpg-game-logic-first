@@ -16,4 +16,6 @@ unit_weight = 0.25
 icon = ExtResource("2_icon")
 trade_group = &"raw_food"
 minimum_favor_to_buy = 10.0
-requires_processing = true
+requires_processing = false
+edible = true
+hunger_reduction = 10.0

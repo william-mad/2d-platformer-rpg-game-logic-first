@@ -18,7 +18,7 @@ func _initialize() -> void:
 	await process_frame
 	_test_table_roll_rules()
 	_test_component_exactly_once_and_precedence()
-	_test_slime_death_drop_and_collection()
+	await _test_slime_death_drop_and_collection()
 	_finish()
 
 
@@ -84,6 +84,7 @@ func _test_slime_death_drop_and_collection() -> void:
 	_expect_equal(inventory.get_save_data(), before_damage, "nonlethal hit does not reroll or drop loot")
 	var expected_quantities := inventory.get_all_quantities()
 	slime.die()
+	await process_frame
 	var loot := slime.inventory_drop_component.get_spawned_loot_container()
 	_expect_not_null(loot, "generated slime inventory reaches existing death-drop container")
 	if loot == null:

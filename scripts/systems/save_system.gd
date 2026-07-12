@@ -12,6 +12,7 @@ const NPC_LOCATIONS_PATH: String = "/root/NpcLocations"
 const NPC_WORLD_SIMULATION_PATH: String = "/root/NpcWorldSimulation"
 const RELATIONSHIPS_PATH: String = "/root/Relationships"
 const PROGRESSION_PATH: String = "/root/ProgressionSystem"
+const PLAYER_RUNTIME_PATH: String = "/root/PlayerRuntime"
 
 enum SaveFileReadStatus {
 	VALID,
@@ -65,6 +66,7 @@ func load_game(slot: String = "") -> bool:
 	_apply_system_save_data(PROGRESSION_PATH, save_data.get("progression", {}))
 	_apply_system_save_data(NPC_WORLD_SIMULATION_PATH, save_data.get("npc_world_simulation", {}))
 	_apply_system_save_data(NPC_LOCATIONS_PATH, save_data.get("npc_locations", {}))
+	_apply_system_save_data(PLAYER_RUNTIME_PATH, save_data.get("player_runtime", {}))
 
 	var scene_path := String(save_data.get("scene_path", ""))
 	if scene_path.is_empty():
@@ -251,6 +253,7 @@ func clear_runtime_values() -> void:
 	_apply_system_save_data(PROGRESSION_PATH, {})
 	_apply_system_save_data(NPC_WORLD_SIMULATION_PATH, {})
 	_apply_system_save_data(NPC_LOCATIONS_PATH, {})
+	_apply_system_save_data(PLAYER_RUNTIME_PATH, {})
 
 
 func _build_save_data() -> Dictionary:
@@ -269,6 +272,7 @@ func _build_save_data() -> Dictionary:
 		"npc_world_simulation": _encode_value(_get_system_save_data(NPC_WORLD_SIMULATION_PATH)),
 		"relationships": _encode_value(_get_system_save_data(RELATIONSHIPS_PATH)),
 		"progression": _encode_value(_get_system_save_data(PROGRESSION_PATH)),
+		"player_runtime": _encode_value(_get_system_save_data(PLAYER_RUNTIME_PATH)),
 		"nodes": {},
 	}
 

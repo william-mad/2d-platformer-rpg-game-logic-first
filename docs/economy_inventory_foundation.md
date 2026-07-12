@@ -2,6 +2,20 @@
 
 This foundation separates immutable item descriptions from mutable inventory state. `ItemDefinition` resources contain catalog metadata such as names, tags, values, stack hints, weight, and food properties. `InventoryModel` stores only runtime quantities and reservations; it does not modify definition resources.
 
+## Food consumption and basic processing
+
+Hunger is a need value where `0` is fully satisfied and `100` is maximum hunger. Player and NPC hunger naturally grows upward, so food applies a negative hunger delta. Existing `ItemDefinition.edible` and `hunger_reduction` fields are the authoritative food metadata: raw slime meat is edible and reduces hunger by 10; cooked slime meat reduces hunger by 30; slime gel and gold remain non-edible. `ItemCatalog.is_food()` and `get_food_value()` treat unknown definitions as non-food and keep UI and services free of item-ID effect checks.
+
+`FoodConsumptionService` coordinates one inventory item with one public hunger mutation. It rejects missing owners/inventories, unknown or non-edible items, non-positive food values, satisfied or definitively dead characters, noncanonical NPC instances, reserved player food, and missing NPC eating reservations. It applies the clamped hunger reduction first, removes or consumes the one-item reservation through `InventoryModel`, and restores the exact previous hunger through the same public need API if inventory mutation fails. The player inventory details panel exposes a focusable Consume button only for edible items, shows the food value and current hunger, preserves item selection through signal-driven refreshes, and remains operable under the existing inventory pause modal.
+
+Live NPCs use the existing `Eat` state. A stocked meal/work spot remains the sole source for that action and retains its existing gradual food-point depletion; NPC inventory is not touched, preventing double consumption. For an Eat action without a stocked spot, the state selects the highest `hunger_reduction` among available unreserved NPC-owned food, then display name and item ID as deterministic tie-breakers. It reserves one item as `eat:<npc_id>` across movement and talk overlays, consumes it through `FoodConsumptionService` only when the existing eat timer completes, and releases it after cancellation or interruption. Missing food starts a 10-second retry delay and does not fabricate stock or reduce hunger. Live inventory capture later persists successful consumption. Existing off-screen meal-spot simulation is unchanged; general off-screen mutation of NPC inventory remains deferred.
+
+`ProcessingRecipeDefinition` stores a stable recipe ID, display name, positive input quantities, and positive output quantities. `InventoryProcessingService.process(inventory, recipe, batches)` validates every catalog ID and available unreserved input, stages the full operation in a snapshot-backed `InventoryModel`, removes all inputs, adds all outputs, and commits once. Any input/output failure leaves the authoritative inventory and its unrelated reservations unchanged. `cook_slime_meat.tres` defines one raw slime meat into one cooked slime meat with no gold cost.
+
+The home scene contains one stove using the existing Up interaction and `PauseSystem` modal convention. Its event-driven panel shows recipe icons, the 1→1 flow, maximum processable batches, a keyboard/controller-focusable quantity selector and Process button, and concise feedback. It revalidates on Process and refreshes only on open, inventory/reservation signals, quantity changes, and completed processing. Player inventory persistence stores consumed inputs and cooked outputs through the existing save block; player hunger already uses the same player save path; NPC lifecycle capture persists live consumption. No save version change is required because food and recipe metadata live in resources.
+
+Recipe discovery, crafting trees, cooking skill, buffs, poisoning, spoilage, equipment, farming, cooking animations, advanced meal planning, travel rations, merchant restocking, and automatic NPC food purchasing are not implemented.
+
 ## Implemented inventory, loot, and trade update
 
 World loot now uses its existing `Area2D` as a 160-pixel attraction zone. Body enter/exit events track only nearby `InventoryPickupReceiver` components; there is no per-frame scene-tree or group scan. The shared player and persistent `SocialNpc` scenes each expose that thin receiver contract over their existing authoritative inventory. A player must be live in the tree. An NPC must additionally be alive, not queued for removal, and be the canonical live instance accepted by `NpcLocations`; rejected duplicates, wrong-scene instances, off-screen records, dead NPCs, and the dead loot source are ineligible.
@@ -20,7 +34,7 @@ The four catalog definitions are assigned once to existing `gpticons` textures: 
 
 The inventory details area can dump one, a chosen quantity, or the full available unreserved stack. Gold follows the same general rule and may be dumped. The screen validates the world parent and quantity, creates and initializes one ordinary `WorldLootContainer`, then removes the exact quantity through the public inventory API; initialization or removal failure frees the staged node and leaves player ownership unchanged. Successful loot spawns 76 pixels beside and 24 pixels above the player. A 0.75-second receiver-ID exclusion prevents only the dumping player from immediately reclaiming it, while eligible nearby NPCs remain able to collect it. The receiver stays tracked during the cooldown and becomes eligible automatically when it expires.
 
-World loot, including dumped stacks, remains scene-local and does not survive save/load or scene changes. Crafting, recipes, eating behavior, equipment, travel, dynamic markets, debt, taxes, bargaining, theft/ownership rights, manual slot rearrangement, and persistent world drops remain deferred.
+World loot, including dumped stacks, remains scene-local and does not survive save/load or scene changes. Crafting trees, advanced recipes, equipment, travel, dynamic markets, debt, taxes, bargaining, theft/ownership rights, manual slot rearrangement, and persistent world drops remain deferred.
 
 ## Stable item IDs
 
@@ -66,7 +80,7 @@ Inventory saves currently use schema version 1:
 
 Loading validates the complete document before replacing existing state. It rejects unsupported versions, missing or malformed fields, non-positive quantities, invalid IDs, empty reservations, and individual or combined reservations exceeding total stock. An empty dictionary is rejected because it is not a versioned save; a versioned save with empty `quantities` and `reservations` is a valid empty inventory.
 
-## Future cooking example
+## Reservation example for future timed processing
 
 ```gdscript
 var inventory := InventoryModel.new()
@@ -82,7 +96,7 @@ if result.success:
 	# If it is cancelled instead, call release_reservation().
 ```
 
-The future cooking system will be responsible for catalog validation and granting outputs. The inventory itself intentionally knows nothing about recipes.
+The implemented stove processing is immediate and therefore does not need a long-lived reservation. A future timed processing activity could use this reservation lifecycle; the inventory itself intentionally remains unaware of recipes.
 
 ## Gold and merchant trading
 
@@ -96,7 +110,7 @@ Mom's starting profile supplies 100 gold and 5 cooked slime meat only when `NpcL
 
 The signal-driven trade screen opens through the existing NPC interaction action, uses the HUD's established modal pause ownership, and refreshes on inventory and reservation signals without polling. The player development component offers a separate disabled-by-default `development_add_trade_gold` option that adds 50 gold once in a debug build.
 
-Dynamic market simulation, timed restocking, bargaining dialogue, taxes, credit, debt, multiple currencies, protected merchant items, crafting, recipes, equipment, and item use remain deferred. Directed-favor pricing is implemented as documented above.
+Dynamic market simulation, timed restocking, bargaining dialogue, taxes, credit, debt, multiple currencies, protected merchant items, crafting trees, advanced recipes, equipment, and non-food item use remain deferred. Directed-favor pricing is implemented as documented above.
 
 ## Persistent NPC ownership
 
@@ -108,7 +122,7 @@ After a scene-authored NPC passes wrong-scene and duplicate-instance registratio
 
 Old records with no `inventory` field are normalized to a fresh valid empty block and restore as empty. If a present block fails `InventoryModel` validation, no partial data is applied: a warning identifies the NPC and failure, the valid live inventory is preserved, and the record's malformed block is replaced by a fresh live snapshot. Reservations persist through capture, scene changes, off-screen storage, and save/load.
 
-The persistence layer remains the authority handoff used by universal trading, automatic loot pickup, and definitive death drops. It does not add arbitrary stock generation, wallets, recipes, eating, equipment, travel behavior, or a separate NPC inventory UI.
+The persistence layer remains the authority handoff used by universal trading, automatic loot pickup, inventory-based eating, and definitive death drops. It does not add arbitrary stock generation, wallets, advanced recipes, equipment, travel behavior, or a separate NPC inventory UI.
 
 ## Persistent player inventory and screen
 
@@ -120,7 +134,7 @@ The icon grid refreshes when opened or when inventory signals arrive while visib
 
 For immediate debug verification, `PlayerInventoryComponent.development_add_sample_items` is an exported, disabled-by-default option. Debug builds can also call `add_development_sample_items()` once per component. It validates the current catalog and uses public inventory APIs to add the three sample slime items; it is not release or normal starting inventory.
 
-The screen deliberately provides no item use, equipment, eating, recipes, crafting, drag-and-drop rearrangement, or direct NPC inventory controls beyond the shared trade screen.
+The screen deliberately provides no non-food item use, equipment, crafting tree, drag-and-drop rearrangement, or direct NPC inventory controls beyond the shared trade screen.
 
 ## Definitive NPC death loot
 

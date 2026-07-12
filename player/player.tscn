@@ -20,6 +20,7 @@
 [ext_resource type="Resource" path="res://player/combat/combos/crouch_combo.tres" id="20_crouch_combo"]
 [ext_resource type="Script" path="res://player/scripts/player_inventory_component.gd" id="21_inventory"]
 [ext_resource type="Script" path="res://scripts/economy/inventory_pickup_receiver.gd" id="22_pickup_receiver"]
+[ext_resource type="Script" path="res://player/scripts/player_breadcrumb_recorder.gd" id="23_breadcrumbs"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_wodsf"]
 radius = 35.0
@@ -189,6 +190,9 @@ script = ExtResource("1_yw30f")
 
 [node name="PlayerInventory" type="Node" parent="."]
 script = ExtResource("21_inventory")
+
+[node name="BreadcrumbRecorder" type="Node" parent="."]
+script = ExtResource("23_breadcrumbs")
 
 [node name="InventoryPickupReceiver" type="Node" parent="."]
 script = ExtResource("22_pickup_receiver")

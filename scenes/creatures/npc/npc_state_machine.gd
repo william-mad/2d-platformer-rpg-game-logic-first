@@ -439,6 +439,15 @@ func change_state(
 	# Switches the active child state and gives the old state a clean exit.
 	if new_state == null:
 		return false
+	if _is_active_travel_companion():
+		var requested_name := String(new_state.name)
+		if requested_name == "Idle":
+			var follow_state := get_state(&"TravelFollow")
+			if follow_state != null:
+				new_state = follow_state
+		elif requested_name in ["Work", "Recreation", "RoutineTask", "LookForTalkTarget", "InvitePlayer", "Sleep", "Rest"]:
+			state_request_failed.emit(StringName(requested_name), "Travel companion social/schedule activity disabled")
+			return false
 
 	if current_state == new_state:
 		return false
@@ -1715,23 +1724,24 @@ func _apply_passive_need_growth(real_seconds: float) -> void:
 		return
 
 	var value_delta := {}
+	var travel_multipliers := _get_travel_need_multipliers()
 	if (
 		sleep_need_growth_per_game_hour > 0.0
 		and not _current_state_matches_any(sleep_need_paused_states)
 	):
-		value_delta["sleep_need"] = sleep_need_growth_per_game_hour * game_hours
+		value_delta["sleep_need"] = sleep_need_growth_per_game_hour * game_hours * float(travel_multipliers.get("sleep_need", 1.0))
 
 	if (
 		hunger_growth_per_game_hour > 0.0
 		and not _current_state_matches_any(hunger_paused_states)
 	):
-		value_delta["hunger"] = hunger_growth_per_game_hour * game_hours
+		value_delta["hunger"] = hunger_growth_per_game_hour * game_hours * float(travel_multipliers.get("hunger", 1.0))
 
 	if (
 		boredom_growth_per_game_hour > 0.0
 		and not _current_state_matches_any(boredom_paused_states)
 	):
-		value_delta["boredom"] = boredom_growth_per_game_hour * game_hours
+		value_delta["boredom"] = boredom_growth_per_game_hour * game_hours * float(travel_multipliers.get("boredom", 1.0))
 
 	if (
 		talk_need_growth_per_interval > 0.0
@@ -1742,6 +1752,7 @@ func _apply_passive_need_growth(real_seconds: float) -> void:
 		value_delta["talk_need"] = (
 			talk_need_growth_per_interval
 			* (game_minutes / talk_need_growth_interval_game_minutes)
+			* float(travel_multipliers.get("talk_need", 1.0))
 		)
 
 	var starvation_delta := _get_starvation_damage_delta(game_hours)
@@ -1757,6 +1768,8 @@ func _apply_passive_need_growth(real_seconds: float) -> void:
 		value_delta[String(tired_value_name)] = tired_delta
 
 	if (
+		not _is_active_travel_companion()
+		and
 		loneliness_recovery_enabled
 		and loneliness_value_name != &""
 		and get_value(&"talk_need") < loneliness_recovery_talk_need_below
@@ -1784,9 +1797,9 @@ func _apply_passive_need_growth(real_seconds: float) -> void:
 		)
 
 	var fear_delta := _get_fear_decay_delta(game_hours)
-	if not is_equal_approx(fear_delta, 0.0):
+	if not _is_active_travel_companion() and not is_equal_approx(fear_delta, 0.0):
 		value_delta[String(fear_decay_value_name)] = fear_delta
-	if fear_decay_enabled and npc != null and npc.has_method("decay_relationship_fear"):
+	if not _is_active_travel_companion() and fear_decay_enabled and npc != null and npc.has_method("decay_relationship_fear"):
 		var flee_threshold := _get_flee_fear_threshold()
 		var fear_stop_value := maxf(
 			flee_threshold - fear_decay_stop_below_flee_threshold_by,
@@ -1802,15 +1815,30 @@ func _apply_passive_need_growth(real_seconds: float) -> void:
 		)
 
 	var anger_delta := _get_anger_decay_delta(game_hours)
-	if not is_equal_approx(anger_delta, 0.0):
+	if not _is_active_travel_companion() and not is_equal_approx(anger_delta, 0.0):
 		value_delta[String(anger_decay_value_name)] = anger_delta
-	if anger_decay_enabled and npc != null and npc.has_method("decay_relationship_anger"):
+	if not _is_active_travel_companion() and anger_decay_enabled and npc != null and npc.has_method("decay_relationship_anger"):
 		npc.call("decay_relationship_anger", game_hours, anger_full_decay_game_hours)
 
 	if value_delta.is_empty():
 		return
 
 	apply_value_delta(value_delta, null, true)
+
+
+func _is_active_travel_companion() -> bool:
+	if npc == null:
+		return false
+	var runtime := get_node_or_null("/root/PlayerRuntime")
+	return runtime != null and runtime.has_method("is_active_companion") and bool(runtime.call("is_active_companion", npc))
+
+
+func _get_travel_need_multipliers() -> Dictionary:
+	if not _is_active_travel_companion():
+		return {}
+	var runtime := get_node_or_null("/root/PlayerRuntime")
+	var policy := runtime.call("get_active_travel_policy") as TravelPolicy
+	return policy.get_need_multipliers() if policy != null else {}
 
 
 func _get_passive_healing_delta(game_hours: float) -> float:
@@ -2159,7 +2187,7 @@ func _find_best_matching_rule(changed_values: Dictionary, actor: Node2D = null) 
 			continue
 		if (
 			bool(rule_dictionary.get("requires_need_spot", false))
-			and not _has_available_need_spot(state_name, StringName(value_key))
+			and not _has_available_need_source(state_name, StringName(value_key))
 		):
 			continue
 
@@ -2191,6 +2219,17 @@ func _has_available_need_spot(state_name: StringName, value_name: StringName = &
 			return true
 
 	return false
+
+
+func _has_available_need_source(state_name: StringName, value_name: StringName = &"") -> bool:
+	if _has_available_need_spot(state_name, value_name):
+		return true
+	return (
+		state_name == &"Eat"
+		and npc != null
+		and npc.has_method("has_available_inventory_food")
+		and bool(npc.call("has_available_inventory_food"))
+	)
 
 
 func _has_available_casual_spot(state_name: StringName) -> bool:

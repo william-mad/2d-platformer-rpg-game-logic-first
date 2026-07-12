@@ -19,6 +19,7 @@
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/routine_task.gd" id="17_routine_task"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/invite_player.gd" id="18_invite_player"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/look_for_monster.gd" id="19_look_monster"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/travel_follow.gd" id="20_travel_follow"]
 
 [node name="NpcStateMachine" type="Node"]
 script = ExtResource("1_machine")
@@ -107,6 +108,11 @@ unique_name_in_owner = true
 script = ExtResource("15_fight")
 animation_name = &"run"
 projectile_knockout_damage = 40.0
+
+[node name="TravelFollow" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("20_travel_follow")
+animation_name = &"run"
 
 [node name="Sleep" type="Node" parent="."]
 unique_name_in_owner = true

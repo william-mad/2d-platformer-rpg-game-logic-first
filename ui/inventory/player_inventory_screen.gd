@@ -10,6 +10,7 @@ const LOOT_SCENE: PackedScene = preload("res://scenes/items/world_loot_container
 @onready var items_grid: GridContainer = %ItemsGrid
 @onready var empty_label: Label = %EmptyLabel
 @onready var details_label: Label = %DetailsLabel
+@onready var consume_button: Button = %ConsumeButton
 @onready var dump_quantity: SpinBox = %DumpQuantity
 @onready var dump_button: Button = %DumpButton
 @onready var feedback_label: Label = %FeedbackLabel
@@ -20,22 +21,26 @@ var _catalog := ItemCatalog.new()
 var _display_dirty: bool = true
 var _selected_item_id: StringName = &""
 var _slots: Array[InventoryItemSlot] = []
+var _food_service := FoodConsumptionService.new()
 
 
 func _ready() -> void:
 	visible = false
 	dump_button.pressed.connect(_on_dump_pressed)
+	consume_button.pressed.connect(_on_consume_pressed)
 	dump_quantity.value_changed.connect(func(_value: float) -> void: _refresh_dump_controls())
 	if not _catalog.load_definitions():
 		push_warning("Player inventory catalog errors: %s" % str(_catalog.get_validation_errors()))
 
 
 func bind_inventory(inventory: InventoryModel, player_owner: Node2D = null) -> void:
+	_disconnect_player_signals()
 	if _inventory != inventory:
 		_disconnect_inventory_signals()
 		_inventory = inventory
 		_connect_inventory_signals()
 	_player_owner = player_owner
+	_connect_player_signals()
 	_display_dirty = true
 	if visible:
 		_refresh_items()
@@ -45,6 +50,7 @@ func unbind_inventory(inventory: InventoryModel = null) -> void:
 	if inventory != null and _inventory != inventory:
 		return
 	_disconnect_inventory_signals()
+	_disconnect_player_signals()
 	_inventory = null
 	_player_owner = null
 	_display_dirty = true
@@ -116,6 +122,8 @@ func _on_slot_inspected(slot: InventoryItemSlot) -> void:
 func _refresh_details(slot: InventoryItemSlot) -> void:
 	if slot == null:
 		details_label.text = "Select an item to view details."
+		consume_button.visible = false
+		consume_button.disabled = true
 		dump_quantity.max_value = 1
 		dump_quantity.value = 1
 		dump_button.disabled = true
@@ -125,10 +133,28 @@ func _refresh_details(slot: InventoryItemSlot) -> void:
 	var description := definition.description if definition != null else "No item definition found."
 	var category := String(definition.category) if definition != null else "unknown"
 	var base_value := definition.base_value if definition != null else 0
-	details_label.text = "%s\n%s\nTotal: %d | Available: %d | Reserved: %d\nType: %s | Base value: %d gold" % [name_text, description, slot.total_quantity, slot.available_quantity, slot.reserved_quantity, category, base_value]
+	var food_text := ""
+	var is_food := definition != null and definition.edible and definition.hunger_reduction > 0.0
+	if is_food:
+		var current_hunger := float(_player_owner.get("hunger")) if _player_owner != null else 0.0
+		food_text = "\nFood benefit: -%.0f hunger | Current hunger: %.0f" % [definition.hunger_reduction, current_hunger]
+	details_label.text = "%s\n%s\nTotal: %d | Available: %d | Reserved: %d\nType: %s | Base value: %d gold%s" % [name_text, description, slot.total_quantity, slot.available_quantity, slot.reserved_quantity, category, base_value, food_text]
+	consume_button.visible = is_food
+	consume_button.disabled = not is_food or slot.available_quantity <= 0 or _player_owner == null or float(_player_owner.get("hunger")) <= 0.0
 	dump_quantity.max_value = maxi(1, slot.available_quantity)
 	dump_quantity.value = clampi(int(dump_quantity.value), 1, maxi(1, slot.available_quantity))
 	_refresh_dump_controls()
+
+
+func _on_consume_pressed() -> void:
+	var slot := _get_selected_slot()
+	if slot == null or _inventory == null or _player_owner == null:
+		feedback_label.text = "Select an available food item."
+		return
+	var result := _food_service.consume_for_player(_inventory, _player_owner, slot.item_id)
+	feedback_label.text = "You are not hungry." if result.code == InventoryResult.Code.NEED_ALREADY_SATISFIED else result.message
+	if visible and not _display_dirty:
+		_refresh_details(_get_selected_slot())
 
 
 func _refresh_dump_controls() -> void:
@@ -214,6 +240,25 @@ func _on_reservation_changed(_id: StringName, _reason: StringName) -> void:
 
 func _on_inventory_reset() -> void:
 	_mark_display_dirty()
+
+
+func _connect_player_signals() -> void:
+	if _player_owner == null or not _player_owner.has_signal(&"hunger_changed"):
+		return
+	if not _player_owner.is_connected(&"hunger_changed", _on_player_hunger_changed):
+		_player_owner.connect(&"hunger_changed", _on_player_hunger_changed)
+
+
+func _disconnect_player_signals() -> void:
+	if _player_owner == null or not is_instance_valid(_player_owner) or not _player_owner.has_signal(&"hunger_changed"):
+		return
+	if _player_owner.is_connected(&"hunger_changed", _on_player_hunger_changed):
+		_player_owner.disconnect(&"hunger_changed", _on_player_hunger_changed)
+
+
+func _on_player_hunger_changed(_current_hunger: float, _changed_by: float) -> void:
+	if visible:
+		_refresh_details(_get_selected_slot())
 
 
 func _clear_slots() -> void:

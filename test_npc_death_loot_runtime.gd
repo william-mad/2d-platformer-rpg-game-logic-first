@@ -15,7 +15,7 @@ func _initialize() -> void:
 		_finish()
 		return
 	_locations.call("apply_save_data", {"records": {}})
-	_test_death_drop_and_collection()
+	await _test_death_drop_and_collection()
 	_test_knockout_does_not_drop()
 	_test_failed_spawn_preserves_inventory()
 	_test_failed_transfer_preserves_loot()
@@ -31,6 +31,7 @@ func _test_death_drop_and_collection() -> void:
 	inventory.reserve_items(&"dead.activity", {&"raw_slime_meat": 2})
 	var drop_component := npc.npc_inventory_drop
 	_expect_true(drop_component.drop_inventory_on_death(), "definitive death API drops inventory")
+	await process_frame
 	var loot := drop_component.get_spawned_loot_container()
 	_expect_not_null(loot, "one world loot container is spawned")
 	if loot == null:
@@ -58,6 +59,7 @@ func _test_death_drop_and_collection() -> void:
 	var auto_dead := _make_npc(&"loot.runtime.auto_dead")
 	auto_dead.get_inventory().add(&"cooked_slime_meat", 2)
 	auto_dead.take_damage(999.0)
+	await process_frame
 	_expect_true(auto_dead.npc_inventory_drop.has_completed_drop(), "HP-zero canonical die path invokes the drop")
 	_expect_equal(_count_loot_for_source(&"loot.runtime.auto_dead"), 1, "canonical death spawns one container")
 

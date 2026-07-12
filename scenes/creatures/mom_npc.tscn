@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="Script" path="res://scripts/creatures/social_npc.gd" id="1_social_npc"]
 [ext_resource type="Script" path="res://player/scripts/damage_area.gd" id="2_damage_area"]
@@ -10,9 +10,14 @@
 [ext_resource type="Script" path="res://scripts/economy/merchant_component.gd" id="8_merchant"]
 [ext_resource type="Resource" path="res://data/inventory_profiles/merchant_basic_inventory.tres" id="9_profile"]
 [ext_resource type="Script" path="res://scripts/economy/inventory_pickup_receiver.gd" id="10_pickup_receiver"]
+[ext_resource type="Script" path="res://scripts/creatures/travel_companion_component.gd" id="11_travel_component"]
+[ext_resource type="Resource" path="res://data/travel_policies/default_companion.tres" id="12_travel_policy"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_body"]
 size = Vector2(48, 64)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_ledge_assist"]
+size = Vector2(82, 12)
 
 [node name="MomNpc" type="CharacterBody2D" groups=["npc", "social_npc"]]
 collision_layer = 4
@@ -56,6 +61,10 @@ script = ExtResource("10_pickup_receiver")
 script = ExtResource("8_merchant")
 starting_inventory_profile = ExtResource("9_profile")
 
+[node name="TravelCompanion" type="Node" parent="."]
+script = ExtResource("11_travel_component")
+travel_policy = ExtResource("12_travel_policy")
+
 [node name="BodyVisual" type="Polygon2D" parent="."]
 unique_name_in_owner = true
 position = Vector2(0, -32)
@@ -65,6 +74,15 @@ polygon = PackedVector2Array(-24, -32, 24, -32, 24, 32, -24, 32)
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
 position = Vector2(0, -32)
 shape = SubResource("RectangleShape2D_body")
+
+[node name="AirLedgeAssistCast" type="ShapeCast2D" parent="."]
+position = Vector2(0, -58)
+enabled = false
+shape = SubResource("RectangleShape2D_ledge_assist")
+target_position = Vector2(0, 0)
+collision_mask = 1
+max_results = 4
+debug_shape_custom_color = Color(0.1, 1, 0.9, 0.55)
 
 [node name="Damage_Area" type="Area2D" parent="."]
 position = Vector2(0, -32)

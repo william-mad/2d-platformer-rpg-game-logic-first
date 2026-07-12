@@ -1,4 +1,4 @@
-[gd_scene load_steps=17 format=3]
+[gd_scene load_steps=18 format=3]
 
 [ext_resource type="PackedScene" path="res://player/player.tscn" id="1_player"]
 [ext_resource type="Script" path="res://scripts/systems/npc_location_scene.gd" id="2_location_scene"]
@@ -13,6 +13,7 @@
 [ext_resource type="PackedScene" path="res://scenes/things/npc_shower_spot.tscn" id="11_shower_spot"]
 [ext_resource type="Script" path="res://scripts/instances/magic_lesson_spot.gd" id="12_magic_lesson"]
 [ext_resource type="Resource" path="res://data/npc_spots/mom_magic_lesson.tres" id="13_mom_magic_lesson"]
+[ext_resource type="PackedScene" path="res://scenes/things/player_cooking_station.tscn" id="14_cooking_station"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_floor"]
 size = Vector2(2304, 64)
@@ -150,6 +151,9 @@ owner_npc_ids = Array[StringName]([&"mom"])
 npc_preference_weights = {
 "mom": 4.0
 }
+
+[node name="KitchenStove" parent="." instance=ExtResource("14_cooking_station")]
+position = Vector2(760, 368)
 
 [node name="MomMagicLessonSpot" type="Node2D" parent="."]
 position = Vector2(-860, 368)

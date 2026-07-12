@@ -63,6 +63,16 @@ func get_definitions_with_tag(tag: StringName) -> Array[ItemDefinition]:
 	return result
 
 
+func is_food(item_id: StringName) -> bool:
+	var definition := get_definition(item_id)
+	return definition != null and definition.edible and definition.hunger_reduction > 0.0
+
+
+func get_food_value(item_id: StringName) -> float:
+	var definition := get_definition(item_id)
+	return definition.hunger_reduction if definition != null and definition.edible else 0.0
+
+
 func get_validation_errors() -> PackedStringArray:
 	return _validation_errors.duplicate()
 

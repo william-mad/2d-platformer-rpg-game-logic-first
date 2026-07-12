@@ -521,6 +521,14 @@ func get_inventory() -> InventoryModel:
 	return npc_inventory.get_inventory()
 
 
+func has_available_inventory_food() -> bool:
+	return npc_inventory != null and npc_inventory.has_available_food()
+
+
+func get_best_available_inventory_food() -> StringName:
+	return npc_inventory.get_best_available_food() if npc_inventory != null else &""
+
+
 func get_inventory_save_data() -> Dictionary:
 	if npc_inventory == null:
 		push_error("Persistent SocialNpc '%s' cannot serialize inventory: component is missing." % name)
@@ -565,6 +573,39 @@ func can_trade_with_player(_player: Node = null) -> bool:
 		return false
 	var locations := get_node_or_null("/root/NpcLocations")
 	return locations != null and locations.call("get_live_npc", String(get_npc_location_id())) == self
+
+
+func can_travel_with_player(player: Node = null) -> bool:
+	return get_travel_unavailable_reason(player).is_empty()
+
+
+func get_travel_unavailable_reason(player: Node = null) -> String:
+	var component := get_node_or_null("TravelCompanion") as TravelCompanionComponent
+	if component == null:
+		return "This NPC is not configured for travel."
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations != null and locations.has_method("get_live_npc"):
+		if locations.call("get_live_npc", String(get_npc_location_id())) != self:
+			return "This is not the active NPC instance."
+	var runtime := get_node_or_null("/root/PlayerRuntime")
+	if runtime == null:
+		return "Travel runtime unavailable."
+	if runtime.call("is_travel_active") and not runtime.call("is_active_companion", self):
+		return "Another companion is already traveling."
+	return component.get_unavailable_reason(self, player)
+
+
+func try_toggle_travel_with_player(player: Node) -> Dictionary:
+	var runtime := get_node_or_null("/root/PlayerRuntime")
+	if runtime == null:
+		return {"success": false, "reason": "Travel runtime unavailable."}
+	if runtime.call("is_active_companion", self):
+		return runtime.call("request_stop_travel", self)
+	var reason := get_travel_unavailable_reason(player)
+	if not reason.is_empty():
+		return {"success": false, "reason": reason}
+	var component := get_node_or_null("TravelCompanion") as TravelCompanionComponent
+	return runtime.call("start_travel", self, player, component.travel_policy)
 
 
 func get_npc_location_save_data() -> Dictionary:

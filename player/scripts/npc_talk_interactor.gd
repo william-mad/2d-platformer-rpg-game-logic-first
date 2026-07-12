@@ -106,6 +106,7 @@ var prompt_accept_method: StringName = &""
 var prompt_decline_method: StringName = &""
 var prompt_completed: bool = false
 var menu_target_can_trade: bool = false
+var interaction_menu_actions: Array[StringName] = []
 
 
 func _ready() -> void:
@@ -239,7 +240,20 @@ func _show_interaction_menu(feedback: String = "") -> void:
 		and menu_target_npc.has_method("can_trade_with_player")
 		and bool(menu_target_npc.call("can_trade_with_player", player))
 	)
-	var options := PackedStringArray(["Talk", "Trade", "Cancel"]) if menu_target_can_trade else PackedStringArray(["Talk", "Cancel"])
+	var options := PackedStringArray(["Talk"])
+	interaction_menu_actions = [&"talk"]
+	if menu_target_can_trade:
+		options.append("Trade")
+		interaction_menu_actions.append(&"trade")
+	if menu_target_npc != null and menu_target_npc.has_method("get_travel_unavailable_reason"):
+		var runtime := get_node_or_null("/root/PlayerRuntime")
+		var already_traveling := runtime != null and bool(runtime.call("is_active_companion", menu_target_npc))
+		var travel_reason := String(menu_target_npc.call("get_travel_unavailable_reason", player))
+		if already_traveling or travel_reason.is_empty():
+			options.append("Stop Traveling Together" if already_traveling else "Travel Together")
+			interaction_menu_actions.append(&"travel")
+	options.append("Cancel")
+	interaction_menu_actions.append(&"cancel")
 	_show_menu("Interact: %s" % npc_label, options, feedback)
 
 
@@ -357,12 +371,15 @@ func _handle_menu_option_input() -> void:
 
 
 func _handle_interaction_option(selected_index: int) -> void:
-	if selected_index == 0:
+	if selected_index < 0 or selected_index >= interaction_menu_actions.size():
+		return
+	var selected_action := interaction_menu_actions[selected_index]
+	if selected_action == &"talk":
 		active_menu = MENU_TALK
 		_show_talk_menu("")
 		return
 
-	if selected_index == 1 and menu_target_can_trade:
+	if selected_action == &"trade":
 		var target := menu_target_npc
 		_close_menu()
 		if target != null and target.has_method("try_open_trade") and bool(target.call("try_open_trade", player)):
@@ -373,7 +390,18 @@ func _handle_interaction_option(selected_index: int) -> void:
 		cooldown = cooldown_seconds
 		return
 
-	if selected_index == (2 if menu_target_can_trade else 1):
+	if selected_action == &"travel":
+		var target := menu_target_npc
+		var result: Dictionary = target.call("try_toggle_travel_with_player", player)
+		if bool(result.get("success", false)):
+			interaction_applied.emit(player, target, &"travel")
+			_finish_menu_attempt("", true)
+		else:
+			_show_interaction_menu(String(result.get("reason", "Travel unavailable.")))
+		cooldown = cooldown_seconds
+		return
+
+	if selected_action == &"cancel":
 		_close_menu()
 		return
 

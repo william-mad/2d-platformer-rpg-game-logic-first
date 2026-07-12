@@ -145,10 +145,10 @@ func _apply_definition_tags(definition: AttackDefinition) -> void:
 
 func _ensure_collision_shape() -> CollisionShape2D:
 	for child in get_children():
-		var collision_shape := child as CollisionShape2D
-		if collision_shape != null:
-			return collision_shape
+		var existing_collision_shape := child as CollisionShape2D
+		if existing_collision_shape != null:
+			return existing_collision_shape
 
-	var collision_shape := CollisionShape2D.new()
-	add_child(collision_shape)
-	return collision_shape
+	var new_collision_shape := CollisionShape2D.new()
+	add_child(new_collision_shape)
+	return new_collision_shape

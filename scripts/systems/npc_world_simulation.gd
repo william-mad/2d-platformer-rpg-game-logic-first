@@ -31,6 +31,7 @@ var simulation_timer: float = 0.0
 var simulation_queued: bool = false
 var social_rng := RandomNumberGenerator.new()
 var _social_planner := NpcSocialPlanner.new()
+var _social_planning_suppressed: bool = false
 var _needs_simulator := NpcNeedsSimulator.new()
 var simulation_tick_skip_logged: bool = false
 var _performance_profile_call_count: int = 0
@@ -352,6 +353,9 @@ func simulate_now() -> void:
 
 	for npc_id_key in records.keys():
 		var npc_id := StringName(String(npc_id_key))
+		var player_runtime := get_node_or_null("/root/PlayerRuntime")
+		if player_runtime != null and player_runtime.has_method("is_active_companion") and bool(player_runtime.call("is_active_companion", String(npc_id))):
+			continue
 		var record = records[npc_id_key]
 		if not (record is Dictionary):
 			continue
@@ -607,6 +611,61 @@ func simulate_player_sleep_skip(
 			_wake_live_npc_after_sleep_skip(live_npc, slept_during_skip)
 
 	_queue_simulation()
+
+
+func simulate_companion_return_skip(
+	start_total_hours: float,
+	end_total_hours: float,
+	companion_npc_id: String,
+	travel_policy: TravelPolicy
+) -> void:
+	var elapsed_game_hours := maxf(end_total_hours - start_total_hours, 0.0)
+	if elapsed_game_hours <= 0.0:
+		return
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations == null:
+		return
+	locations.call("synchronize_live_records")
+	var records: Dictionary = locations.call("get_records_snapshot")
+	_social_planning_suppressed = true
+	_social_planner.begin_simulation_pass()
+	var end_hour := fposmod(end_total_hours, 24.0)
+	for npc_key in records.keys():
+		var npc_id := String(npc_key)
+		var record: Dictionary = records[npc_key]
+		if npc_id == companion_npc_id:
+			var multipliers := travel_policy.get_need_multipliers() if travel_policy != null else {}
+			_needs_simulator.advance_needs(record, elapsed_game_hours, &"", multipliers)
+			record["last_simulated_total_hours"] = end_total_hours
+			locations.call("apply_simulated_record", npc_id, record, true)
+			_simulate_live_companion_food(locations.call("get_live_npc", npc_id), travel_policy)
+			continue
+		_needs_simulator.advance_needs(record, elapsed_game_hours, &"")
+		record["last_simulated_total_hours"] = end_total_hours
+		var activity = record.get("activity", {})
+		if activity is Dictionary and not activity.is_empty():
+			_update_activity(StringName(npc_id), record, activity, end_total_hours, end_hour, locations)
+		else:
+			_try_start_activity(StringName(npc_id), record, end_total_hours, end_hour, locations, records)
+		locations.call("apply_simulated_record", npc_id, record, true)
+	_social_planner.end_simulation_pass()
+	_social_planning_suppressed = false
+
+
+func _simulate_live_companion_food(live_npc: Node, travel_policy: TravelPolicy) -> void:
+	if live_npc == null or travel_policy == null or not travel_policy.inventory_eating_enabled:
+		return
+	var machine := live_npc.get_node_or_null("NpcStateMachine") as NpcStateMachine
+	if machine == null or String(machine.current_state.name if machine.current_state != null else "") == "Fight":
+		return
+	var inventory: InventoryModel = live_npc.call("get_inventory")
+	var food_service := FoodConsumptionService.new()
+	var safety := 0
+	while machine.get_value(&"hunger") >= 70.0 and safety < 8:
+		var food_id := food_service.select_best_available_food(inventory)
+		if food_id == &"" or not food_service.consume_for_npc(inventory, live_npc, food_id).success:
+			break
+		safety += 1
 
 
 func _apply_sleep_skip_body_values(
@@ -1662,6 +1721,8 @@ func _try_start_social_seek(
 	locations: Node,
 	blocking_priority: int
 ) -> bool:
+	if _social_planning_suppressed:
+		return false
 	if _record_has_non_social_pending_travel(record):
 		return false
 	if DebugToolsConfig.TROUBLESHOOTING_MODE and DebugToolsConfig.DEBUG_DISABLE_TALK_SEARCH:

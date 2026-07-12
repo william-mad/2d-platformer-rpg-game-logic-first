@@ -9,7 +9,8 @@ const DEFAULT_STARVATION_DAMAGE_PER_GAME_DAY := 5.0
 func advance_needs(
 	record: Dictionary,
 	elapsed_game_hours: float,
-	paused_state_name: StringName
+	paused_state_name: StringName,
+	need_multipliers: Dictionary = {}
 ) -> bool:
 	if elapsed_game_hours <= 0.0:
 		return false
@@ -56,13 +57,15 @@ func advance_needs(
 		if _passive_value_is_paused(value_name, paused_state_name):
 			continue
 		var current_value := float(social_stats.get(value_name, 0.0))
-		var growth := float(rates[value_key]) * elapsed_game_hours
+		var multiplier := float(need_multipliers.get(value_name, 1.0))
+		var growth := float(rates[value_key]) * elapsed_game_hours * multiplier
 		if value_name == "talk_need":
 			_apply_talk_need_growth(social_stats, current_value, growth)
 			continue
 		var next_value := current_value + growth
 		social_stats[value_name] = clampf(next_value, 0.0, 100.0)
 
+	hunger_rate *= float(need_multipliers.get("hunger", 1.0))
 	var starvation_applied := _apply_starvation_damage(
 		social_stats,
 		profile,
@@ -74,15 +77,17 @@ func advance_needs(
 	if not starvation_applied:
 		_apply_passive_healing(social_stats, profile, elapsed_game_hours)
 	_apply_tired_change(social_stats, profile, paused_state_name, elapsed_game_hours)
-	_apply_loneliness_recovery(
+	if float(need_multipliers.get("talk_need", 1.0)) > 0.0:
+		_apply_loneliness_recovery(
 		social_stats,
 		profile,
 		talk_need_before_growth,
-		talk_need_rate,
+		talk_need_rate * float(need_multipliers.get("talk_need", 1.0)),
 		elapsed_game_hours,
 		_passive_value_is_paused("talk_need", paused_state_name)
-	)
-	_apply_emotion_decay(social_stats, profile, elapsed_game_hours)
+		)
+	if float(need_multipliers.get("talk_need", 1.0)) > 0.0:
+		_apply_emotion_decay(social_stats, profile, elapsed_game_hours)
 
 	node_state["social_stats"] = social_stats
 	record["node_state"] = node_state

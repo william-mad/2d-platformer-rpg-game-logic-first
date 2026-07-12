@@ -26,10 +26,6 @@ func exit() -> void:
 
 
 func handle_input(event: InputEvent) -> PlayerState:
-	if current_attack != null and current_attack.allow_ground_jump_cancel:
-		if event.is_action_pressed("jump") and player.is_on_floor():
-			return jump
-
 	if event.is_action_pressed("attack") and current_attack != null:
 		combo_requested = true
 
@@ -55,11 +51,11 @@ func process(delta: float) -> PlayerState:
 
 	combo_requested = false
 
-	if current_attack != null and current_attack.return_to_crouch_if_held:
-		if Input.is_action_pressed("crouch") and player.is_on_floor():
-			return crouch
-
 	if player.is_on_floor():
+		if Input.is_action_pressed("crouch"):
+			return crouch
+		if Input.is_action_pressed("jump"):
+			return jump
 		return idle
 
 	return fall

@@ -55,12 +55,48 @@ func drop_inventory_on_death() -> bool:
 		loot.queue_free()
 		_drop_in_progress = false
 		return false
-	world_parent.add_child(loot)
+	# Death can be triggered by an Area2D callback while PhysicsServer2D is
+	# flushing overlap queries. Adding the loot Area2D in that callback attempts
+	# to register its shape immediately and is rejected by the physics server.
+	# Keep both inventories unchanged until the deferred world insertion succeeds.
 	loot.global_position = owner_entity.global_position
 	_spawned_loot = loot
+	call_deferred(
+		"_commit_deferred_drop",
+		world_parent,
+		loot,
+		owner_entity.global_position,
+		inventory,
+		npc_id
+	)
+	return true
 
-	# World loot owns the full totals now; the dead owner can release its obsolete
-	# reservations and relinquish the authoritative live inventory.
+
+func _commit_deferred_drop(
+		world_parent: Node,
+		loot: WorldLootContainer,
+		spawn_position: Vector2,
+		inventory: InventoryModel,
+		npc_id: StringName
+) -> void:
+	if world_parent == null or not is_instance_valid(world_parent) or not world_parent.is_inside_tree():
+		push_error("NPC '%s' deferred inventory death drop failed: world parent is no longer available." % String(npc_id))
+		if loot != null and is_instance_valid(loot):
+			loot.free()
+		_spawned_loot = null
+		_drop_in_progress = false
+		return
+	if loot == null or not is_instance_valid(loot) or inventory == null:
+		push_error("NPC '%s' deferred inventory death drop lost its staged container or inventory." % String(npc_id))
+		_spawned_loot = null
+		_drop_in_progress = false
+		return
+
+	world_parent.add_child(loot)
+	loot.global_position = spawn_position
+
+	# World insertion succeeded. The loot model now owns the complete totals, so
+	# the dead live inventory can release reservations and relinquish ownership.
 	var release_result := inventory.release_all_reservations()
 	if not release_result.success:
 		push_error("NPC '%s' could not release death reservations: %s" % [String(npc_id), release_result.message])
@@ -68,7 +104,6 @@ func drop_inventory_on_death() -> bool:
 	_capture_empty_record(npc_id)
 	_drop_completed = true
 	_drop_in_progress = false
-	return true
 
 
 func has_completed_drop() -> bool:

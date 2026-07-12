@@ -105,6 +105,12 @@ layout_mode = 2
 text = "Select an item to view details."
 autowrap_mode = 2
 
+[node name="ConsumeButton" type="Button" parent="Center/Panel/Margin/Root/Content/Details"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+text = "Consume"
+
 [node name="DumpTitle" type="Label" parent="Center/Panel/Margin/Root/Content/Details"]
 layout_mode = 2
 text = "Dump into world"

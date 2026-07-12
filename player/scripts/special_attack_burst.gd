@@ -1,7 +1,5 @@
 class_name PlayerSpecialAttackBurst extends Area2D
 
-const CombatLayers := preload("res://scripts/systems/combat_layers.gd")
-
 @export var damage: float = 15.0
 @export var knockout_damage: float = 0.0
 @export var radius: float = 360.0

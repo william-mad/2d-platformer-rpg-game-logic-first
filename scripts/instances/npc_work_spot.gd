@@ -981,7 +981,7 @@ func _player_owner_is_allowed_for_eat(player: Node2D) -> bool:
 	return false
 
 
-func mark_npc_meal_sated(npc_node: Node2D, value_name: StringName = &"hunger") -> bool:
+func mark_npc_meal_sated(npc_node: Node2D, need_value_name: StringName = &"hunger") -> bool:
 	if _debug_realtest1_meal_spot_disabled():
 		_log_debug_disabled_once()
 		return false
@@ -998,12 +998,12 @@ func mark_npc_meal_sated(npc_node: Node2D, value_name: StringName = &"hunger") -
 		"mark_meal_owner_sated",
 		spot_id,
 		_get_npc_id(npc_node),
-		value_name
+		need_value_name
 	))
 	if marked:
 		_breadcrumb(
 			"work_spot:meal_sated",
-			"%s npc=%s value=%s" % [name, String(_get_npc_id(npc_node)), String(value_name)]
+			"%s npc=%s value=%s" % [name, String(_get_npc_id(npc_node)), String(need_value_name)]
 		)
 		_sync_meal_cycle_state_from_world()
 	return marked
@@ -1036,11 +1036,11 @@ func _get_meal_cycle_current_work_owner_type() -> String:
 
 
 func _meal_cycle_owner_allows(owner_type: String, owner_id: StringName) -> bool:
-	var owner_ids := _get_meal_cycle_owner_ids(owner_type)
-	if owner_ids.is_empty():
+	var cycle_owner_ids := _get_meal_cycle_owner_ids(owner_type)
+	if cycle_owner_ids.is_empty():
 		return true
 
-	for configured_id in owner_ids:
+	for configured_id in cycle_owner_ids:
 		if String(configured_id) == String(owner_id):
 			return true
 
