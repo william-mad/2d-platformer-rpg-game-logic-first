@@ -1,33 +1,542 @@
-[gd_scene load_steps=13 format=3]
+[gd_scene format=3 uid="uid://c3yowegig4fvu"]
 
-[ext_resource type="Script" path="res://scripts/creatures/social_npc.gd" id="1_social_npc"]
-[ext_resource type="Script" path="res://player/scripts/damage_area.gd" id="2_damage_area"]
-[ext_resource type="Script" path="res://scripts/instances/creature_hp_bar.gd" id="3_hp_bar"]
+[ext_resource type="Script" uid="uid://xhvt0loqax0n" path="res://scripts/creatures/social_npc.gd" id="1_social_npc"]
+[ext_resource type="Script" uid="uid://dxg732h3lcbxt" path="res://player/scripts/damage_area.gd" id="2_damage_area"]
+[ext_resource type="Script" uid="uid://bxwi0yr6miws4" path="res://scripts/instances/creature_hp_bar.gd" id="3_hp_bar"]
 [ext_resource type="PackedScene" path="res://scenes/creatures/npc/npc_state_machine.tscn" id="4_state_machine"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/mom_fight.gd" id="5_mom_fight"]
-[ext_resource type="Script" path="res://scripts/creatures/npc_inventory_component.gd" id="6_inventory"]
-[ext_resource type="Script" path="res://scripts/creatures/npc_inventory_drop_component.gd" id="7_inventory_drop"]
-[ext_resource type="Script" path="res://scripts/economy/merchant_component.gd" id="8_merchant"]
+[ext_resource type="Script" uid="uid://cjj4ytk01kgt" path="res://scripts/creatures/npc_inventory_component.gd" id="6_inventory"]
+[ext_resource type="Script" uid="uid://5khrttukx4i1" path="res://scripts/creatures/npc_inventory_drop_component.gd" id="7_inventory_drop"]
+[ext_resource type="Script" uid="uid://d21t67s8rwi2l" path="res://scripts/economy/merchant_component.gd" id="8_merchant"]
 [ext_resource type="Resource" path="res://data/inventory_profiles/merchant_basic_inventory.tres" id="9_profile"]
-[ext_resource type="Script" path="res://scripts/economy/inventory_pickup_receiver.gd" id="10_pickup_receiver"]
-[ext_resource type="Script" path="res://scripts/creatures/travel_companion_component.gd" id="11_travel_component"]
+[ext_resource type="Script" uid="uid://16om2bb8sgal" path="res://scripts/economy/inventory_pickup_receiver.gd" id="10_pickup_receiver"]
+[ext_resource type="Script" uid="uid://codcu60axkbr8" path="res://scripts/creatures/travel_companion_component.gd" id="11_travel_component"]
 [ext_resource type="Resource" path="res://data/travel_policies/default_companion.tres" id="12_travel_policy"]
+[ext_resource type="Texture2D" uid="uid://4gp1piwttkar" path="res://images/sprites/characters/mom/mom_actions_1.png" id="12_wgv2s"]
+[ext_resource type="Texture2D" uid="uid://eixnph1trhyh" path="res://images/sprites/characters/mom/walk_1_mom.png" id="13_svwi8"]
 
-[sub_resource type="RectangleShape2D" id="RectangleShape2D_body"]
-size = Vector2(48, 64)
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_agoec"]
+radius = 15.0
+height = 114.0
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_ledge_assist"]
 size = Vector2(82, 12)
 
-[node name="MomNpc" type="CharacterBody2D" groups=["npc", "social_npc"]]
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_x2mlj"]
+
+[sub_resource type="Animation" id="Animation_v2734"]
+length = 0.001
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("Sprite2D:texture")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [ExtResource("12_wgv2s")]
+}
+tracks/1/type = "value"
+tracks/1/imported = false
+tracks/1/enabled = true
+tracks/1/path = NodePath("Sprite2D:hframes")
+tracks/1/interp = 1
+tracks/1/loop_wrap = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [8]
+}
+tracks/2/type = "value"
+tracks/2/imported = false
+tracks/2/enabled = true
+tracks/2/path = NodePath("Sprite2D:vframes")
+tracks/2/interp = 1
+tracks/2/loop_wrap = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [8]
+}
+tracks/3/type = "value"
+tracks/3/imported = false
+tracks/3/enabled = true
+tracks/3/path = NodePath("Sprite2D:position")
+tracks/3/interp = 1
+tracks/3/loop_wrap = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [Vector2(0, -64)]
+}
+tracks/4/type = "value"
+tracks/4/imported = false
+tracks/4/enabled = true
+tracks/4/path = NodePath("Sprite2D:frame")
+tracks/4/interp = 1
+tracks/4/loop_wrap = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [0]
+}
+tracks/5/type = "value"
+tracks/5/imported = false
+tracks/5/enabled = true
+tracks/5/path = NodePath("Sprite2D:flip_h")
+tracks/5/interp = 1
+tracks/5/loop_wrap = true
+tracks/5/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+[sub_resource type="Animation" id="Animation_ccr8n"]
+resource_name = "class_1"
+length = 1.5333333
+loop_mode = 1
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("Sprite2D:texture")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [ExtResource("12_wgv2s")]
+}
+tracks/1/type = "value"
+tracks/1/imported = false
+tracks/1/enabled = true
+tracks/1/path = NodePath("Sprite2D:hframes")
+tracks/1/interp = 1
+tracks/1/loop_wrap = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [8]
+}
+tracks/2/type = "value"
+tracks/2/imported = false
+tracks/2/enabled = true
+tracks/2/path = NodePath("Sprite2D:vframes")
+tracks/2/interp = 1
+tracks/2/loop_wrap = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [8]
+}
+tracks/3/type = "value"
+tracks/3/imported = false
+tracks/3/enabled = true
+tracks/3/path = NodePath("Sprite2D:position")
+tracks/3/interp = 1
+tracks/3/loop_wrap = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [Vector2(0, -64)]
+}
+tracks/4/type = "value"
+tracks/4/imported = false
+tracks/4/enabled = true
+tracks/4/path = NodePath("Sprite2D:frame")
+tracks/4/interp = 1
+tracks/4/loop_wrap = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0, 0.3, 0.6333333, 0.93333334, 1.2333333),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 1,
+"values": [2, 3, 2, 4, 5]
+}
+
+[sub_resource type="Animation" id="Animation_3jl8l"]
+resource_name = "idle"
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("Sprite2D:texture")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [ExtResource("12_wgv2s")]
+}
+tracks/1/type = "value"
+tracks/1/imported = false
+tracks/1/enabled = true
+tracks/1/path = NodePath("Sprite2D:hframes")
+tracks/1/interp = 1
+tracks/1/loop_wrap = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [8]
+}
+tracks/2/type = "value"
+tracks/2/imported = false
+tracks/2/enabled = true
+tracks/2/path = NodePath("Sprite2D:vframes")
+tracks/2/interp = 1
+tracks/2/loop_wrap = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [8]
+}
+tracks/3/type = "value"
+tracks/3/imported = false
+tracks/3/enabled = true
+tracks/3/path = NodePath("Sprite2D:position")
+tracks/3/interp = 1
+tracks/3/loop_wrap = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [Vector2(0, -64)]
+}
+tracks/4/type = "value"
+tracks/4/imported = false
+tracks/4/enabled = true
+tracks/4/path = NodePath("Sprite2D:frame")
+tracks/4/interp = 1
+tracks/4/loop_wrap = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [0]
+}
+
+[sub_resource type="Animation" id="Animation_p2j31"]
+resource_name = "meal_prep_1"
+loop_mode = 1
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("Sprite2D:texture")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [ExtResource("12_wgv2s")]
+}
+tracks/1/type = "value"
+tracks/1/imported = false
+tracks/1/enabled = true
+tracks/1/path = NodePath("Sprite2D:hframes")
+tracks/1/interp = 1
+tracks/1/loop_wrap = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [8]
+}
+tracks/2/type = "value"
+tracks/2/imported = false
+tracks/2/enabled = true
+tracks/2/path = NodePath("Sprite2D:vframes")
+tracks/2/interp = 1
+tracks/2/loop_wrap = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [8]
+}
+tracks/3/type = "value"
+tracks/3/imported = false
+tracks/3/enabled = true
+tracks/3/path = NodePath("Sprite2D:position")
+tracks/3/interp = 1
+tracks/3/loop_wrap = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [Vector2(0, -64)]
+}
+tracks/4/type = "value"
+tracks/4/imported = false
+tracks/4/enabled = true
+tracks/4/path = NodePath("Sprite2D:frame")
+tracks/4/interp = 1
+tracks/4/loop_wrap = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0, 0.23333333, 0.46666667, 0.73333335),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 1,
+"values": [10, 11, 12, 13]
+}
+tracks/5/type = "value"
+tracks/5/imported = false
+tracks/5/enabled = true
+tracks/5/path = NodePath("Sprite2D:flip_h")
+tracks/5/interp = 1
+tracks/5/loop_wrap = true
+tracks/5/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+[sub_resource type="Animation" id="Animation_dhf66"]
+resource_name = "see_player"
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("Sprite2D:texture")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [ExtResource("12_wgv2s")]
+}
+tracks/1/type = "value"
+tracks/1/imported = false
+tracks/1/enabled = true
+tracks/1/path = NodePath("Sprite2D:hframes")
+tracks/1/interp = 1
+tracks/1/loop_wrap = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [8]
+}
+tracks/2/type = "value"
+tracks/2/imported = false
+tracks/2/enabled = true
+tracks/2/path = NodePath("Sprite2D:vframes")
+tracks/2/interp = 1
+tracks/2/loop_wrap = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [8]
+}
+tracks/3/type = "value"
+tracks/3/imported = false
+tracks/3/enabled = true
+tracks/3/path = NodePath("Sprite2D:position")
+tracks/3/interp = 1
+tracks/3/loop_wrap = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [Vector2(0, -64)]
+}
+tracks/4/type = "value"
+tracks/4/imported = false
+tracks/4/enabled = true
+tracks/4/path = NodePath("Sprite2D:frame")
+tracks/4/interp = 1
+tracks/4/loop_wrap = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [1]
+}
+
+[sub_resource type="Animation" id="Animation_hdd0t"]
+resource_name = "walk_1"
+length = 0.8333333
+loop_mode = 1
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("Sprite2D:texture")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [ExtResource("13_svwi8")]
+}
+tracks/1/type = "value"
+tracks/1/imported = false
+tracks/1/enabled = true
+tracks/1/path = NodePath("Sprite2D:hframes")
+tracks/1/interp = 1
+tracks/1/loop_wrap = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [6]
+}
+tracks/2/type = "value"
+tracks/2/imported = false
+tracks/2/enabled = true
+tracks/2/path = NodePath("Sprite2D:vframes")
+tracks/2/interp = 1
+tracks/2/loop_wrap = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [1]
+}
+tracks/3/type = "value"
+tracks/3/imported = false
+tracks/3/enabled = true
+tracks/3/path = NodePath("Sprite2D:position")
+tracks/3/interp = 1
+tracks/3/loop_wrap = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [Vector2(1, -101)]
+}
+tracks/4/type = "value"
+tracks/4/imported = false
+tracks/4/enabled = true
+tracks/4/path = NodePath("Sprite2D:frame")
+tracks/4/interp = 1
+tracks/4/loop_wrap = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0, 0.13333334, 0.26666668, 0.4, 0.56666666, 0.7),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1, 1),
+"update": 1,
+"values": [0, 1, 2, 3, 4, 5]
+}
+
+[sub_resource type="Animation" id="Animation_w4vow"]
+resource_name = "work_1"
+loop_mode = 1
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("Sprite2D:texture")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [ExtResource("12_wgv2s")]
+}
+tracks/1/type = "value"
+tracks/1/imported = false
+tracks/1/enabled = true
+tracks/1/path = NodePath("Sprite2D:hframes")
+tracks/1/interp = 1
+tracks/1/loop_wrap = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [8]
+}
+tracks/2/type = "value"
+tracks/2/imported = false
+tracks/2/enabled = true
+tracks/2/path = NodePath("Sprite2D:vframes")
+tracks/2/interp = 1
+tracks/2/loop_wrap = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [8]
+}
+tracks/3/type = "value"
+tracks/3/imported = false
+tracks/3/enabled = true
+tracks/3/path = NodePath("Sprite2D:position")
+tracks/3/interp = 1
+tracks/3/loop_wrap = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [Vector2(0, -64)]
+}
+tracks/4/type = "value"
+tracks/4/imported = false
+tracks/4/enabled = true
+tracks/4/path = NodePath("Sprite2D:frame")
+tracks/4/interp = 1
+tracks/4/loop_wrap = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0, 0.23333333, 0.5, 0.8),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 1,
+"values": [6, 7, 8, 9]
+}
+tracks/5/type = "value"
+tracks/5/imported = false
+tracks/5/enabled = true
+tracks/5/path = NodePath("Sprite2D:flip_h")
+tracks/5/interp = 1
+tracks/5/loop_wrap = true
+tracks/5/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_vhose"]
+_data = {
+&"RESET": SubResource("Animation_v2734"),
+&"class_1": SubResource("Animation_ccr8n"),
+&"collapse": SubResource("Animation_3jl8l"),
+&"dead": SubResource("Animation_3jl8l"),
+&"disabled": SubResource("Animation_3jl8l"),
+&"downed": SubResource("Animation_3jl8l"),
+&"eat": SubResource("Animation_3jl8l"),
+&"idle": SubResource("Animation_3jl8l"),
+&"meal_prep_1": SubResource("Animation_p2j31"),
+&"recreation": SubResource("Animation_3jl8l"),
+&"rest": SubResource("Animation_3jl8l"),
+&"routine_task": SubResource("Animation_3jl8l"),
+&"run": SubResource("Animation_hdd0t"),
+&"see_player": SubResource("Animation_dhf66"),
+&"shower": SubResource("Animation_3jl8l"),
+&"sleep": SubResource("Animation_3jl8l"),
+&"talk": SubResource("Animation_dhf66"),
+&"walk": SubResource("Animation_hdd0t"),
+&"walk_1": SubResource("Animation_hdd0t"),
+&"work": SubResource("Animation_w4vow"),
+&"work_1": SubResource("Animation_w4vow")
+}
+
+[node name="MomNpc" type="CharacterBody2D" unique_id=1550637659 groups=["npc", "social_npc"]]
 collision_layer = 4
 collision_mask = 161
 script = ExtResource("1_social_npc")
 patrol_range = 0.0
-display_name = "Mom"
-npc_tags = [&"mom", &"family"]
-location_id = &"mom"
-npc_scene_path = "res://scenes/creatures/mom_npc.tscn"
 social_stats = {
 "anger": 0.0,
 "boredom": 85.0,
@@ -42,115 +551,117 @@ social_stats = {
 "love": 80.0,
 "sadness": 0.0,
 "sleep_need": 10.0,
-"tired": 0.0,
 "suspicion": 0.0,
 "talk_need": 25.0,
+"tired": 0.0,
 "trust": 85.0
 }
+display_name = "Mom"
+npc_tags = Array[StringName]([&"mom", &"family"])
+location_id = &"mom"
+npc_scene_path = "res://scenes/creatures/mom_npc.tscn"
 
-[node name="NpcInventory" type="Node" parent="."]
+[node name="NpcInventory" type="Node" parent="." unique_id=721636258]
 script = ExtResource("6_inventory")
 
-[node name="NpcInventoryDrop" type="Node" parent="."]
+[node name="NpcInventoryDrop" type="Node" parent="." unique_id=856237340]
 script = ExtResource("7_inventory_drop")
 
-[node name="InventoryPickupReceiver" type="Node" parent="."]
+[node name="InventoryPickupReceiver" type="Node" parent="." unique_id=234636385]
 script = ExtResource("10_pickup_receiver")
 
-[node name="Merchant" type="Node" parent="."]
+[node name="Merchant" type="Node" parent="." unique_id=1585666433]
 script = ExtResource("8_merchant")
 starting_inventory_profile = ExtResource("9_profile")
 
-[node name="TravelCompanion" type="Node" parent="."]
+[node name="TravelCompanion" type="Node" parent="." unique_id=1011656644]
 script = ExtResource("11_travel_component")
 travel_policy = ExtResource("12_travel_policy")
 
-[node name="BodyVisual" type="Polygon2D" parent="."]
+[node name="BodyVisual" type="Polygon2D" parent="." unique_id=2146533437]
 unique_name_in_owner = true
+visible = false
 position = Vector2(0, -32)
-color = Color(0.9, 0.78, 0.25, 1)
 polygon = PackedVector2Array(-24, -32, 24, -32, 24, 32, -24, 32)
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
-position = Vector2(0, -32)
-shape = SubResource("RectangleShape2D_body")
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=1529639536]
+position = Vector2(0, -57)
+shape = SubResource("CapsuleShape2D_agoec")
 
-[node name="AirLedgeAssistCast" type="ShapeCast2D" parent="."]
-position = Vector2(0, -58)
+[node name="AirLedgeAssistCast" type="ShapeCast2D" parent="." unique_id=2005964799]
+position = Vector2(0, -106)
 enabled = false
 shape = SubResource("RectangleShape2D_ledge_assist")
 target_position = Vector2(0, 0)
-collision_mask = 1
 max_results = 4
-debug_shape_custom_color = Color(0.1, 1, 0.9, 0.55)
 
-[node name="Damage_Area" type="Area2D" parent="."]
+[node name="Damage_Area" type="Area2D" parent="." unique_id=820828056]
 position = Vector2(0, -32)
 collision_layer = 129
 collision_mask = 0
 script = ExtResource("2_damage_area")
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="Damage_Area"]
-shape = SubResource("RectangleShape2D_body")
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Damage_Area" unique_id=307687612]
+shape = SubResource("CapsuleShape2D_x2mlj")
 
-[node name="SightPivot" type="Node2D" parent="."]
+[node name="SightPivot" type="Node2D" parent="." unique_id=209593265]
 unique_name_in_owner = true
 position = Vector2(0, -44)
 
-[node name="SightConeVisual" type="Polygon2D" parent="SightPivot"]
+[node name="SightConeVisual" type="Polygon2D" parent="SightPivot" unique_id=1694473824]
 color = Color(0.25, 0.55, 1, 0.16)
-polygon = PackedVector2Array(0, 0, 330, -130, 330, 130)
+polygon = PackedVector2Array(-1, -50, 439, -186, 438, 43, 112, 37)
 
-[node name="SightArea" type="Area2D" parent="SightPivot"]
+[node name="SightArea" type="Area2D" parent="SightPivot" unique_id=892234652]
 unique_name_in_owner = true
 collision_layer = 0
 collision_mask = 6
 monitorable = false
 
-[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="SightPivot/SightArea"]
-polygon = PackedVector2Array(0, 0, 330, -130, 330, 130)
-debug_color = Color(0.25, 0.55, 1, 0.22)
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="SightPivot/SightArea" unique_id=1739549008]
+position = Vector2(3, -48)
+polygon = PackedVector2Array(-10, -2, 435, -138, 435, 92, 109, 84)
 
-[node name="FavorBar" type="ProgressBar" parent="."]
+[node name="FavorBar" type="ProgressBar" parent="." unique_id=2135157134]
 unique_name_in_owner = true
-offset_left = -36.0
-offset_top = -94.0
-offset_right = 36.0
-offset_bottom = -86.0
+offset_left = -35.0
+offset_top = -127.0
+offset_right = 37.0
+offset_bottom = -119.0
 value = 50.0
 show_percentage = false
 
-[node name="NameLabel" type="Label" parent="."]
-offset_left = -80.0
-offset_top = -148.0
-offset_right = 80.0
-offset_bottom = -126.0
-text = "Mom"
-horizontal_alignment = 1
-vertical_alignment = 1
+[node name="NameLabel" type="Label" parent="." unique_id=1085751001]
+offset_left = -79.0
+offset_top = -184.0
+offset_right = 81.0
+offset_bottom = -161.0
 theme_override_colors/font_color = Color(1, 1, 1, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
 theme_override_constants/shadow_offset_x = 1
 theme_override_constants/shadow_offset_y = 1
+text = "Mom"
+horizontal_alignment = 1
+vertical_alignment = 1
 
-[node name="HPBar" type="ProgressBar" parent="."]
+[node name="HPBar" type="ProgressBar" parent="." unique_id=1138566931]
 unique_name_in_owner = true
-offset_left = -36.0
-offset_top = -101.0
-offset_right = 36.0
-offset_bottom = -95.0
+offset_left = -35.0
+offset_top = -138.0
+offset_right = 37.0
+offset_bottom = -132.0
 value = 100.0
 show_percentage = false
 script = ExtResource("3_hp_bar")
 
-[node name="NpcStateMachine" parent="." instance=ExtResource("4_state_machine")]
-debug_label_path = NodePath("StateLabel")
+[node name="NpcStateMachine" parent="." unique_id=733584758 instance=ExtResource("4_state_machine")]
 walk_speed = 77.0
 run_speed = 161.0
 default_reaction_time = 0.8
 default_work_time = 2.5
 default_talk_time = 2.0
 default_flee_time = 4.0
+debug_label_path = NodePath("StateLabel")
 
 [node name="Fight" parent="NpcStateMachine"]
 script = ExtResource("5_mom_fight")
@@ -189,15 +700,25 @@ straight_hit_melee_walk_seconds = 1.0
 straight_hit_melee_speed_multiplier = 0.2
 straight_hit_melee_cooldown_seconds = 0.75
 
-[node name="StateLabel" type="Label" parent="."]
-offset_left = -46.0
-offset_top = -125.0
-offset_right = 46.0
-offset_bottom = -102.0
-text = "Idle"
-horizontal_alignment = 1
-vertical_alignment = 1
+[node name="StateLabel" type="Label" parent="." unique_id=1487196904]
+offset_left = -45.0
+offset_top = -162.0
+offset_right = 47.0
+offset_bottom = -139.0
 theme_override_colors/font_color = Color(1, 1, 1, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
 theme_override_constants/shadow_offset_x = 1
 theme_override_constants/shadow_offset_y = 1
+text = "Idle"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Sprite2D" type="Sprite2D" parent="." unique_id=1856565527]
+position = Vector2(0, -64)
+texture = ExtResource("12_wgv2s")
+hframes = 8
+vframes = 8
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="." unique_id=1102354660]
+libraries/ = SubResource("AnimationLibrary_vhose")
+autoplay = &"idle"

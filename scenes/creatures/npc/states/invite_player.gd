@@ -5,6 +5,7 @@ class_name NpcStateInvitePlayer extends NpcState
 @export_range(0.5, 60.0, 0.1, "suffix:s") var prompt_timeout_seconds: float = 20.0
 @export var player_group: StringName = &"player"
 @export var end_state_name: StringName = &"Idle"
+@export var hold_animation_name: StringName = &""
 
 @export_group("Interrupts")
 @export_range(0, 1000, 1) var minimum_emergency_interrupt_priority: int = 90
@@ -126,8 +127,22 @@ func _process_approach(delta: float) -> NpcState:
 
 func _hold_inviter() -> void:
 	stop_horizontal()
+	var active_hold_animation := _get_hold_animation_name()
+	if active_hold_animation != &"":
+		play_animation(active_hold_animation)
 	if player != null and is_instance_valid(player):
 		face_x_direction(player.global_position.x - npc.global_position.x)
+
+
+func _get_hold_animation_name() -> StringName:
+	if hold_animation_name != &"":
+		return hold_animation_name
+	if lesson_spot == null or not is_instance_valid(lesson_spot):
+		return &""
+	if not lesson_spot.has_method("get_invitation_animation_name"):
+		return &""
+
+	return StringName(String(lesson_spot.call("get_invitation_animation_name")))
 
 
 func _lesson_can_start() -> bool:

@@ -85,6 +85,12 @@ func _exit_tree() -> void:
 	_unregister_live_spot()
 
 
+func get_invitation_animation_name() -> StringName:
+	if world_definition == null:
+		return &""
+	return world_definition.routine_animation_name
+
+
 func _process(delta: float) -> void:
 	if _magic_lesson_disabled():
 		cancel_lesson(&"debug_disabled")

@@ -21,6 +21,8 @@ func enter() -> void:
 		stop_horizontal()
 		return
 
+	_play_work_animation(active_work_target)
+
 	if not is_close_to(active_work_target.global_position, machine.stop_distance):
 		_walk_to_work_target(active_work_target)
 		return
@@ -31,6 +33,19 @@ func enter() -> void:
 		return
 
 	stop_horizontal()
+
+
+func _play_work_animation(work_target: Node2D) -> void:
+	var target_animation := animation_name
+	if work_target != null and work_target.has_method("get_routine_task_animation_name"):
+		var configured_animation := StringName(String(
+			work_target.call("get_routine_task_animation_name")
+		))
+		if configured_animation != &"":
+			target_animation = configured_animation
+
+	if target_animation != &"":
+		play_animation(target_animation)
 
 
 func physics_process(delta: float) -> NpcState:
