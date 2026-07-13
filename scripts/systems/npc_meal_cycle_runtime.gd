@@ -66,6 +66,9 @@ static func _initialize_meal_cycle_runtime_states(runtime) -> void:
 			controller.meal_cycle_cleanup_owner_ids,
 			[]
 		)
+		state["cleanup_work_multiplier"] = controller.get_meal_cycle_work_multiplier_for_stage(
+			MEAL_STAGE_CLEANUP_WORK
+		)
 
 		var owner_meal_data = state.get("owner_meal_data", {})
 		if not (owner_meal_data is Dictionary):
@@ -238,6 +241,9 @@ static func _start_meal_cycle_prep(
 	state["food_available"] = false
 	state["food_ready_total_hours"] = -1.0
 	state["stage_started_total_hours"] = event_total_hours
+	state["cleanup_work_multiplier"] = controller.get_meal_cycle_work_multiplier_for_stage(
+		MEAL_STAGE_CLEANUP_WORK
+	)
 	state.erase("pending_work_completion_total_hours")
 	_set_meal_cycle_controller_state(runtime, controller, state)
 
@@ -350,7 +356,12 @@ static func _apply_meal_cycle_work_progress(
 		return
 
 	var previous_value := float(state.get("value", definition.spot_value_initial))
-	var requested_delta := definition.spot_value_delta_per_game_hour * game_hours
+	var stage := String(state.get("stage", MEAL_STAGE_PREP_WORK))
+	var requested_delta := (
+		definition.spot_value_delta_per_game_hour
+		* game_hours
+		* definition.get_meal_cycle_work_multiplier_for_stage(stage)
+	)
 	var done_threshold := float(state.get("done_threshold", definition.spot_value_done_threshold))
 	if (
 		total_hours >= 0.0
@@ -470,6 +481,9 @@ static func _deplete_meal_cycle_food(runtime, food_spot_id: StringName) -> void:
 	state["food_available"] = false
 	state["food_ready_total_hours"] = -1.0
 	state["stage_started_total_hours"] = runtime._get_current_total_hours()
+	state["cleanup_work_multiplier"] = controller.get_meal_cycle_work_multiplier_for_stage(
+		MEAL_STAGE_CLEANUP_WORK
+	)
 	state.erase("pending_work_completion_total_hours")
 	_set_meal_cycle_controller_state(runtime, controller, state)
 

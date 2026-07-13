@@ -44,6 +44,7 @@ class_name NpcSpotDefinition extends Resource
 @export var meal_cycle_prep_owner_ids: Array[StringName] = []
 @export var meal_cycle_food_owner_ids: Array[StringName] = []
 @export var meal_cycle_cleanup_owner_ids: Array[StringName] = []
+@export_range(0.0, 20.0, 0.01) var meal_cycle_cleanup_work_multiplier: float = 1.0
 
 @export_group("Sleep Skip Wake")
 @export var wake_at_home_position: bool = true
@@ -134,6 +135,13 @@ func get_assignment_method() -> StringName:
 		return &""
 
 	return StringName("assign_%s_target" % String(state_name).to_snake_case())
+
+
+func get_meal_cycle_work_multiplier_for_stage(stage: String) -> float:
+	if stage == "cleanup_work":
+		return maxf(meal_cycle_cleanup_work_multiplier, 0.0)
+
+	return 1.0
 
 
 func _window_contains_hour(window: Dictionary, hour: float) -> bool:

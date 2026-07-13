@@ -7,6 +7,7 @@ func init() -> void:
 
 
 func enter() -> void:
+	run.begin_idle_to_walk_countdown()
 	player.ledgegrabcolider.disabled = true
 	player.animation_player.play( "idle" )
 	pass
@@ -14,10 +15,13 @@ func enter() -> void:
 
 
 func exit() -> void:
-	pass
+	run.update_idle_to_walk_countdown()
+	run.cancel_idle_to_walk_countdown()
 
 
 func handle_input( _event : InputEvent) -> PlayerState:
+	run.update_idle_to_walk_countdown()
+
 	var requested_dash := get_dash_state_from_input(_event)
 
 	if requested_dash != null:
@@ -37,6 +41,7 @@ func handle_input( _event : InputEvent) -> PlayerState:
 
 
 func process(_delta: float) -> PlayerState:
+	run.update_idle_to_walk_countdown()
 	if player.direction.x != 0:
 		return run
 	return next_state

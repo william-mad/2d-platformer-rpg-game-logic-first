@@ -1,5 +1,13 @@
 class_name PlayerStateRun extends PlayerState
 
+@export var walk_speed: float = 350.0
+@export var walk_animation: StringName = &"run"
+@export var run_animation: StringName = &"run"
+@export_range(0.0, 2.0, 0.05, "suffix:s") var idle_to_walk_delay: float = 1.0
+
+var is_running: bool = false
+var idle_to_walk_at_msec: int = 0
+
 
 func init() -> void:
 	pass
@@ -7,7 +15,9 @@ func init() -> void:
 
 
 func enter() -> void:
-	player.animation_player.play("run")
+	if player.previous_state == dash_state:
+		enable_running()
+	player.animation_player.play(run_animation if is_running else walk_animation)
 	player.ledgegrabcolider.disabled = true
 	pass
 
@@ -44,7 +54,8 @@ func process(_delta: float) -> PlayerState:
 	return next_state
 
 func physics_update_before_move(_delta: float) -> void:
-	player.velocity.x = player.direction.x * player.move_speed
+	var movement_speed := player.move_speed if is_running else walk_speed
+	player.velocity.x = player.direction.x * movement_speed
 
 
 func physics_update_after_move(_delta: float) -> PlayerState:
@@ -53,3 +64,28 @@ func physics_update_after_move(_delta: float) -> PlayerState:
 		return fall
 
 	return next_state
+
+
+func enable_running() -> void:
+	is_running = true
+	idle_to_walk_at_msec = 0
+
+
+func begin_idle_to_walk_countdown() -> void:
+	if not is_running:
+		return
+	idle_to_walk_at_msec = Time.get_ticks_msec() + int(idle_to_walk_delay * 1000.0)
+
+
+func update_idle_to_walk_countdown() -> void:
+	if is_running and idle_to_walk_at_msec > 0 and Time.get_ticks_msec() >= idle_to_walk_at_msec:
+		clear_running()
+
+
+func cancel_idle_to_walk_countdown() -> void:
+	idle_to_walk_at_msec = 0
+
+
+func clear_running() -> void:
+	is_running = false
+	idle_to_walk_at_msec = 0

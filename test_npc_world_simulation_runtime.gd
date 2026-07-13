@@ -125,6 +125,7 @@ func _run_tests() -> void:
 	_test_late_food_does_not_call_eaters(simulator, world_time)
 	_test_skipped_time_forces_cleanup(simulator, world_time)
 	_test_cleanup_owner_filter(simulator, world_time)
+	_test_cleanup_work_is_faster_than_prep(simulator, world_time)
 	_test_sated_meal_owner_is_not_called_again(simulator, world_time)
 	_test_offscreen_eating_consumes_food_one_to_one(simulator, world_time)
 	_test_live_eat_resume_revalidates_spot_and_hunger(simulator)
@@ -225,6 +226,33 @@ func _test_cleanup_owner_filter(simulator: Node, world_time: Node) -> void:
 		bool(simulator.call("_meal_cycle_definition_can_start", prep_definition, &"player", 8.0)),
 		"player is a cleanup owner"
 	)
+
+
+func _test_cleanup_work_is_faster_than_prep(simulator: Node, world_time: Node) -> void:
+	var prep_definition = simulator.call("get_spot_definition", PREP_SPOT_ID)
+	_expect_true(prep_definition != null, "meal prep definition loads for cleanup speed test")
+	if prep_definition == null:
+		return
+
+	_reset_meal_cycle(simulator, world_time, 6.0)
+	simulator.call("_apply_meal_cycle_work_progress", prep_definition, 0.125, 6.125)
+	var state: Dictionary = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_approx(float(state.get("value", 0.0)), 75.0, 0.001, "prep keeps the base work rate")
+
+	world_time.call("set_total_hours", 8.0)
+	simulator.call("_process_meal_cycle_schedule_until_snapshot", world_time.call("get_snapshot"))
+	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_equal(state.get("stage", ""), STAGE_CLEANUP, "cleanup speed test enters cleanup")
+	_expect_approx(
+		float(state.get("cleanup_work_multiplier", 1.0)),
+		2.0,
+		0.001,
+		"cleanup exposes the configured work multiplier"
+	)
+
+	simulator.call("_apply_meal_cycle_work_progress", prep_definition, 0.125, 8.125)
+	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_approx(float(state.get("value", 0.0)), 50.0, 0.001, "cleanup work clears twice as fast")
 
 
 func _test_sated_meal_owner_is_not_called_again(simulator: Node, world_time: Node) -> void:

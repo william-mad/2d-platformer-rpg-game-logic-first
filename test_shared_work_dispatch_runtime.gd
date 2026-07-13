@@ -44,6 +44,7 @@ func _run_tests() -> void:
 	_test_player_and_npc_progress_is_additive()
 	_test_player_work_respects_meal_stage()
 	_test_player_work_respects_cleanup_owner()
+	_test_cleanup_work_uses_stage_multiplier()
 	_test_player_eat_progress_is_visible()
 	_test_live_eat_consumes_food_one_to_one()
 	_test_practice_dummy_player_hit_updates_counters()
@@ -131,6 +132,33 @@ func _test_player_work_respects_cleanup_owner() -> void:
 		0.001,
 		"cleanup owner gate blocks player progress"
 	)
+	_free_setup(setup)
+
+
+func _test_cleanup_work_uses_stage_multiplier() -> void:
+	var setup := _create_work_setup()
+	var spot: NpcWorkSpot = setup["spot"]
+	var player: Node2D = setup["player"]
+
+	spot.world_definition.meal_cycle_cleanup_work_multiplier = 2.0
+	spot.meal_cycle_enabled = true
+	spot.meal_cycle_stage = "cleanup_work"
+	spot.meal_cycle_work_call_active = true
+	spot.meal_cycle_cleanup_owner_ids = [&"player"]
+
+	_expect_approx(
+		spot.get_full_work_game_hours(),
+		0.5,
+		0.001,
+		"cleanup live work duration uses the cleanup multiplier"
+	)
+	_expect_approx(
+		spot.apply_worker_work_progress(player, 1.0, 1.0),
+		-20.0,
+		0.001,
+		"cleanup live work progress is doubled"
+	)
+	_expect_approx(spot.get_work_needed(), 80.0, 0.001, "cleanup live work updates shared work")
 	_free_setup(setup)
 
 

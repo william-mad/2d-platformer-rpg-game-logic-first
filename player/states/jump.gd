@@ -63,7 +63,7 @@ func physics_update_after_move(_delta: float) -> PlayerState:
 		if player.ongrounddetection.is_colliding():
 			return ledge_grab
 		else:
-			return idle
+			return run if player.direction.x != 0.0 else idle
 	#player going down is falling:
 	if player.velocity.y >= 0:
 		return fall

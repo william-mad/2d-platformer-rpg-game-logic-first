@@ -174,7 +174,7 @@ func get_full_work_game_hours() -> float:
 	# A spot's own work rate controls its live duration as well as off-screen simulation.
 	if world_definition == null:
 		return -1.0
-	var work_rate := absf(world_definition.spot_value_delta_per_game_hour)
+	var work_rate := absf(world_definition.spot_value_delta_per_game_hour) * _get_meal_cycle_work_multiplier()
 	if is_zero_approx(work_rate):
 		return -1.0
 	return get_work_needed_capacity() / work_rate
@@ -1033,6 +1033,13 @@ func _get_meal_cycle_current_work_owner_type() -> String:
 	if meal_cycle_stage == MEAL_STAGE_CLEANUP_WORK:
 		return MEAL_OWNER_CLEANUP
 	return MEAL_OWNER_PREP
+
+
+func _get_meal_cycle_work_multiplier() -> float:
+	if not meal_cycle_enabled or world_definition == null:
+		return 1.0
+
+	return world_definition.get_meal_cycle_work_multiplier_for_stage(meal_cycle_stage)
 
 
 func _meal_cycle_owner_allows(owner_type: String, owner_id: StringName) -> bool:

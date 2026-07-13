@@ -38,6 +38,7 @@ func init() -> void:
 
 
 func enter() -> void:
+	run.enable_running()
 	dash_timer = dash_duration
 	dash_elapsed = 0.0
 	afterimage_timer = 0.0

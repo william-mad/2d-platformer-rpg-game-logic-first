@@ -43,5 +43,6 @@ meal_cycle_schedule = Array[Dictionary]([{
 meal_cycle_prep_owner_ids = Array[StringName]([&"mom", &"player"])
 meal_cycle_food_owner_ids = Array[StringName]([&"mom", &"player"])
 meal_cycle_cleanup_owner_ids = Array[StringName]([&"player"])
+meal_cycle_cleanup_work_multiplier = 2.0
 owner_ids = Array[StringName]([&"mom", &"player"])
 capacity = 0
