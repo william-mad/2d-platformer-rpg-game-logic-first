@@ -1,5 +1,7 @@
 extends Node
 
+const NpcActionSessionModel = preload("res://scripts/systems/npc_action_session.gd")
+
 signal npc_registered(npc_id: String, npc: Node, scene_path: String)
 signal npc_travelled(npc_id: String, from_scene_path: String, to_scene_path: String)
 signal npc_spawned(npc_id: String, npc: Node, scene_path: String)
@@ -313,13 +315,18 @@ func prepare_scheduled_travel(
 		if machine == null or not machine.has_method("assign_move_target"):
 			_breadcrumb("npc_locations:prepare_travel_no_machine", npc_id)
 			return false
-		accepted = bool(machine.call("assign_move_target", departure_door, &"Idle"))
+		accepted = _request_pending_travel_movement(
+			machine, npc_id, pending_travel, departure_door, record
+		)
 
 	if not accepted:
 		_breadcrumb("npc_locations:prepare_travel_assignment_reject", npc_id)
 		return false
 
 	record["pending_travel"] = pending_travel.duplicate(true)
+	var accepted_machine := npc.get_node_or_null("NpcStateMachine")
+	if accepted_machine != null and accepted_machine.has_method("get_active_action_descriptor"):
+		record["action"] = accepted_machine.call("get_active_action_descriptor")
 	npc_records[npc_id] = record
 	if already_at_door:
 		var travelled := bool(departure_door.call("try_travel_npc", npc))
@@ -347,9 +354,72 @@ func resume_pending_scheduled_travel(npc_id: String, departure_door: Node2D) -> 
 		_breadcrumb("npc_locations:resume_pending_no_machine", npc_id)
 		return false
 
-	var accepted := bool(machine.call("assign_move_target", departure_door, &"Idle"))
+	var record: Dictionary = npc_records.get(npc_id, {})
+	var pending = record.get("pending_travel", {})
+	var accepted := _request_pending_travel_movement(
+		machine,
+		npc_id,
+		pending if pending is Dictionary else {},
+		departure_door,
+		record
+	)
 	_breadcrumb("npc_locations:resume_pending_move", "%s %s" % [npc_id, "accept" if accepted else "reject"])
 	return accepted
+
+
+func _request_pending_travel_movement(
+	machine: Node,
+	npc_id: String,
+	pending_travel: Dictionary,
+	departure_door: Node2D,
+	record: Dictionary
+) -> bool:
+	if machine.has_method("request_action_movement_from_descriptor"):
+		var descriptor: Dictionary = {}
+		var destination_kind := StringName(String(pending_travel.get(
+			"requested_state_name", "Idle"
+		)))
+		var nested_activity = pending_travel.get("activity", {})
+		if nested_activity is Dictionary and not nested_activity.is_empty():
+			descriptor = nested_activity.duplicate(true)
+			descriptor["action_kind"] = String(nested_activity.get(
+				"state_name", destination_kind
+			))
+			descriptor["source"] = String(nested_activity.get("source", "schedule"))
+			descriptor["target_persistent_id"] = String(nested_activity.get("spot_id", ""))
+		elif String(pending_travel.get("mode", "")) == "social":
+			descriptor = {
+				"session_id": String(pending_travel.get("social_session_id", "")),
+				"action_kind": "LookForTalkTarget",
+				"source": "social_ai",
+				"target_persistent_id": String(pending_travel.get("social_target_id", "")),
+				"scene_path": String(pending_travel.get("target_scene_path", "")),
+				"priority": int(pending_travel.get("requested_priority", 60)),
+				"status": "proposed",
+				"start_world_time": _get_world_total_hours(),
+			}
+			destination_kind = &"LookForTalkTarget"
+		else:
+			var existing_action = record.get("action", {})
+			if existing_action is Dictionary:
+				descriptor = existing_action.duplicate(true)
+			if descriptor.is_empty():
+				descriptor = {
+					"action_kind": String(
+						destination_kind if destination_kind not in [&"", &"Idle"] else &"MoveToTarget"
+					),
+					"source": "manual",
+					"priority": int(pending_travel.get("requested_priority", 20)),
+					"status": "proposed",
+					"start_world_time": _get_world_total_hours(),
+				}
+		return bool(machine.call(
+			"request_action_movement_from_descriptor",
+			descriptor,
+			departure_door,
+			destination_kind
+		))
+	return bool(machine.call("assign_move_target", departure_door, &"Idle"))
 
 
 func complete_pending_scheduled_travel(npc: Node, door_target_scene_path: String) -> bool:
@@ -374,14 +444,20 @@ func complete_pending_scheduled_travel(npc: Node, door_target_scene_path: String
 		target_position = Vector2.ZERO
 
 	if mode == "finish":
-		return finish_scheduled_activity(npc_id, door_target_scene_path, target_position)
+		return finish_scheduled_activity(
+			npc_id,
+			door_target_scene_path,
+			target_position,
+			String(pending.get("action_session_id", ""))
+		)
 	if mode == "social":
 		return _complete_social_travel(
 			npc_id,
 			npc,
 			door_target_scene_path,
 			target_position,
-			String(pending.get("social_target_id", ""))
+			String(pending.get("social_target_id", "")),
+			String(pending.get("social_session_id", ""))
 		)
 
 	var activity = pending.get("activity", {})
@@ -406,7 +482,9 @@ func cancel_pending_scheduled_travel(npc_id: String) -> void:
 		if pending_activity is Dictionary and not pending_activity.is_empty():
 			_notify_activity_claim_release(
 				StringName(String(pending_activity.get("spot_id", ""))),
-				"pending_travel_cancelled"
+				"pending_travel_cancelled",
+				NpcActionSessionModel._descriptor_session_id(pending_activity),
+				StringName(npc_id)
 			)
 	record["pending_travel"] = {}
 	npc_records[npc_id] = record
@@ -426,7 +504,21 @@ func rollback_scheduled_activity(
 		expected_activity
 	):
 		return false
+	var expected_session_id := NpcActionSessionModel._descriptor_session_id(expected_activity)
+	var current_action = record.get("action", {})
+	if not expected_session_id.is_empty() and current_action is Dictionary:
+		var current_action_id := NpcActionSessionModel._descriptor_session_id(current_action)
+		if not current_action_id.is_empty() and current_action_id != expected_session_id:
+			_breadcrumb(
+				"npc_locations:activity_rollback_stale",
+				"%s callback=%s active=%s" % [npc_id, expected_session_id, current_action_id]
+			)
+			return false
 	record["activity"] = {}
+	if current_action is Dictionary:
+		var current_action_id := NpcActionSessionModel._descriptor_session_id(current_action)
+		if expected_session_id.is_empty() or current_action_id == expected_session_id:
+			record["action"] = {}
 	var pending = record.get("pending_travel", {})
 	if pending is Dictionary:
 		var pending_activity = pending.get("activity", {})
@@ -436,6 +528,13 @@ func rollback_scheduled_activity(
 		):
 			record["pending_travel"] = {}
 	npc_records[npc_id] = record
+	var live_npc := get_live_npc(npc_id)
+	if live_npc != null and not expected_session_id.is_empty():
+		var machine := live_npc.get_node_or_null("NpcStateMachine")
+		if machine != null and machine.has_method("cancel_active_action"):
+			if bool(machine.call("cancel_active_action", expected_session_id, reason)):
+				if machine.has_method("clear_terminal_action"):
+					machine.call("clear_terminal_action", expected_session_id)
 	_breadcrumb("npc_locations:activity_rollback", "%s %s" % [npc_id, reason])
 	return true
 
@@ -466,7 +565,7 @@ func _activity_records_match(left: Dictionary, right: Dictionary) -> bool:
 	var right_state := String(right.get("state_name", ""))
 	if not left_state.is_empty() and not right_state.is_empty() and left_state != right_state:
 		return false
-	for id_key in ["activity_id", "request_id"]:
+	for id_key in ["session_id", "action_session_id", "activity_id", "request_id"]:
 		var left_id := String(left.get(id_key, ""))
 		var right_id := String(right.get(id_key, ""))
 		if not left_id.is_empty() and not right_id.is_empty() and left_id != right_id:
@@ -478,7 +577,8 @@ func move_simulated_npc_for_social_visit(
 	npc_id: String,
 	target_scene_path: String,
 	target_position: Vector2,
-	social_target_id: String
+	social_target_id: String,
+	session_id: String = ""
 ) -> bool:
 	# Unloaded NPC travel is represented in records; live NPCs must walk through a door.
 	if not npc_records.has(npc_id) or target_scene_path.is_empty() or is_npc_live(npc_id):
@@ -487,6 +587,16 @@ func move_simulated_npc_for_social_visit(
 	var from_scene_path := String(record.get("scene_path", ""))
 	record["pending_travel"] = {}
 	record["activity"] = {}
+	var social_action := NpcActionSessionModel.create(npc_id, &"LookForTalkTarget", &"social_ai", null, {
+		"session_id": session_id,
+		"action_kind": "LookForTalkTarget",
+		"source": "social_ai",
+		"target_persistent_id": social_target_id,
+		"scene_path": target_scene_path,
+		"status": "active",
+		"start_world_time": _get_world_total_hours(),
+	})
+	record["action"] = social_action.to_descriptor()
 	record["social_visit_target_id"] = social_target_id
 	record["last_position"] = target_position
 	record["spawn_random"] = false
@@ -505,7 +615,8 @@ func _complete_social_travel(
 	npc: Node,
 	target_scene_path: String,
 	target_position: Vector2,
-	social_target_id: String
+	social_target_id: String,
+	requested_session_id: String = ""
 ) -> bool:
 	if not npc_records.has(npc_id):
 		return false
@@ -513,6 +624,21 @@ func _complete_social_travel(
 	_capture_live_npc_into_record(npc_id, npc, record)
 	record["pending_travel"] = {}
 	record["activity"] = {}
+	var social_session_id := requested_session_id
+	if social_session_id.is_empty():
+		social_session_id = String(record.get("social_session_id", ""))
+	if social_session_id.is_empty():
+		social_session_id = String(record.get("action", {}).get("session_id", ""))
+	var social_action := NpcActionSessionModel.create(npc_id, &"LookForTalkTarget", &"social_ai", null, {
+		"session_id": social_session_id,
+		"action_kind": "LookForTalkTarget",
+		"source": "social_ai",
+		"target_persistent_id": social_target_id,
+		"scene_path": target_scene_path,
+		"status": "active",
+		"start_world_time": _get_world_total_hours(),
+	})
+	record["action"] = social_action.to_descriptor()
 	record["social_visit_target_id"] = social_target_id
 	record["last_position"] = target_position
 	record["spawn_random"] = false
@@ -534,6 +660,25 @@ func begin_scheduled_activity(
 	if not npc_records.has(npc_id) or target_scene_path.is_empty() or activity.is_empty():
 		_breadcrumb("npc_locations:begin_activity_reject", npc_id)
 		return false
+	# Canonicalize identity before validation or live assignment. Compatibility callers
+	# may still omit IDs, but every participant in this transaction receives the same one.
+	activity = activity.duplicate(true)
+	var proposed_session := NpcActionSessionModel.create(
+		npc_id,
+		StringName(String(activity.get("state_name", activity.get("action_kind", "")))),
+		StringName(String(activity.get("source", "schedule"))),
+		null,
+		activity
+	)
+	if proposed_session == null or proposed_session.action_kind == &"":
+		_breadcrumb("npc_locations:begin_activity_session_reject", npc_id)
+		return false
+	var proposed_session_id := proposed_session.session_id
+	activity["session_id"] = proposed_session_id
+	activity["action_session_id"] = proposed_session_id
+	activity["activity_id"] = String(activity.get("activity_id", proposed_session_id))
+	activity["source"] = String(activity.get("source", "schedule"))
+	activity["status"] = "proposed"
 
 	_breadcrumb(
 		"npc_locations:begin_activity_start",
@@ -589,7 +734,21 @@ func begin_scheduled_activity(
 		)
 		return false
 
-	record["activity"] = activity.duplicate(true)
+	var committed_activity := activity.duplicate(true)
+	var action_session := NpcActionSessionModel.from_legacy_activity(npc_id, committed_activity)
+	if action_session == null:
+		_breadcrumb("npc_locations:begin_activity_session_reject", npc_id)
+		return false
+	action_session.status = NpcActionSession.Status.ACTIVE
+	var action_descriptor := action_session.to_descriptor()
+	var session_id := action_session.session_id
+	committed_activity["session_id"] = session_id
+	committed_activity["action_session_id"] = session_id
+	committed_activity["activity_id"] = String(committed_activity.get("activity_id", session_id))
+	committed_activity["source"] = String(committed_activity.get("source", "schedule"))
+	committed_activity["status"] = "active"
+	record["activity"] = committed_activity
+	record["action"] = action_descriptor
 	record["pending_travel"] = {}
 	record["previous_scene_path"] = ""
 	record["scene_path"] = target_scene_path
@@ -601,7 +760,7 @@ func begin_scheduled_activity(
 		simulator.call(
 			"confirm_scheduled_activity_proposal",
 			StringName(npc_id),
-			activity
+			committed_activity
 		)
 
 	if live_npc != null and target_scene_path != get_current_scene_path():
@@ -630,6 +789,27 @@ func update_simulated_record(npc_id: String, record: Dictionary) -> void:
 		return
 
 	npc_records[npc_id] = record.duplicate(true)
+
+
+func sync_live_action_descriptor(npc_id: String, npc: Node, descriptor: Dictionary) -> bool:
+	if npc_id.is_empty() or not npc_records.has(npc_id):
+		return false
+	var registered_npc = live_npcs.get(npc_id, null)
+	if registered_npc != null and registered_npc != npc:
+		return false
+	var record: Dictionary = npc_records[npc_id]
+	var activity = record.get("activity", {})
+	if activity is Dictionary and not activity.is_empty():
+		var activity_session_id := NpcActionSessionModel._descriptor_session_id(activity)
+		var action_session_id := NpcActionSessionModel._descriptor_session_id(descriptor)
+		if (
+			not activity_session_id.is_empty()
+			and action_session_id != activity_session_id
+		):
+			record["activity"] = {}
+	record["action"] = descriptor.duplicate(true)
+	npc_records[npc_id] = record
+	return true
 
 
 func update_simulated_social_pair(
@@ -676,6 +856,214 @@ func set_scheduled_activity_field(
 	record["activity"] = updated_activity
 	npc_records[npc_id] = record
 	return true
+
+
+func transition_scheduled_activity(
+	npc_id: StringName,
+	expected_session_id: StringName,
+	updates: Dictionary
+) -> Dictionary:
+	var npc_key := String(npc_id).strip_edges()
+	var expected_session := String(expected_session_id).strip_edges()
+	if npc_key.is_empty() or expected_session.is_empty():
+		return {"accepted": false, "reason": "invalid_identity"}
+	if updates.is_empty():
+		return {"accepted": false, "reason": "updates_empty"}
+	for protected_field in [
+		"session_id", "action_session_id", "activity_id", "spot_id",
+		"reservation_ids", "source", "priority",
+	]:
+		if updates.has(protected_field):
+			return {"accepted": false, "reason": "identity_update_forbidden"}
+	if not npc_records.has(npc_key):
+		return {"accepted": false, "reason": "npc_record_missing"}
+
+	var current_record: Dictionary = npc_records[npc_key]
+	var activity_value = current_record.get("activity", {})
+	if not (activity_value is Dictionary) or activity_value.is_empty():
+		return {"accepted": false, "reason": "scheduled_activity_missing"}
+	var activity: Dictionary = activity_value
+	var activity_session := NpcActionSessionModel._descriptor_session_id(activity)
+	if activity_session != expected_session:
+		_log_lesson_transition(
+			npc_key, expected_session, activity, updates, false, "stale_activity_session"
+		)
+		return {"accepted": false, "reason": "stale_activity_session"}
+
+	var action_value = current_record.get("action", {})
+	var action: Dictionary = action_value if action_value is Dictionary else {}
+	if not action.is_empty():
+		var action_session := NpcActionSessionModel._descriptor_session_id(action)
+		if action_session != expected_session:
+			_log_lesson_transition(
+				npc_key, expected_session, activity, updates, false, "activity_action_session_mismatch"
+			)
+			return {"accepted": false, "reason": "activity_action_session_mismatch"}
+
+	var old_phase := String(activity.get("lesson_phase", "inviting"))
+	var expected_phases = updates.get("expected_lesson_phases", [])
+	if expected_phases is Array or expected_phases is PackedStringArray:
+		if not expected_phases.is_empty():
+			var phase_allowed := false
+			for expected_phase in expected_phases:
+				if String(expected_phase) == old_phase:
+					phase_allowed = true
+					break
+			if not phase_allowed:
+				_log_lesson_transition(
+					npc_key, expected_session, activity, updates, false, "unexpected_lesson_phase"
+				)
+				return {"accepted": false, "reason": "unexpected_lesson_phase"}
+
+	var spot_id := StringName(String(activity.get("spot_id", "")))
+	var purpose := StringName(String(activity.get("reservation_purpose", "activity")))
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if simulator == null or not simulator.has_method("session_owns_spot"):
+		return {"accepted": false, "reason": "reservation_service_missing"}
+	if not bool(simulator.call(
+		"session_owns_spot", npc_id, expected_session, spot_id, purpose
+	)):
+		_log_lesson_transition(
+			npc_key, expected_session, activity, updates, false, "lesson_reservation_missing"
+		)
+		return {"accepted": false, "reason": "lesson_reservation_missing"}
+
+	var reservation_id := ""
+	if simulator.has_method("make_spot_reservation_id"):
+		reservation_id = String(simulator.call(
+			"make_spot_reservation_id", expected_session, spot_id, purpose
+		))
+	var activity_reservation_ids = activity.get("reservation_ids", [])
+	if (
+		not reservation_id.is_empty()
+		and (activity_reservation_ids is Array or activity_reservation_ids is PackedStringArray)
+		and not activity_reservation_ids.has(reservation_id)
+	):
+		_log_lesson_transition(
+			npc_key, expected_session, activity, updates, false, "activity_reservation_reference_missing"
+		)
+		return {"accepted": false, "reason": "activity_reservation_reference_missing"}
+	if not action.is_empty() and not reservation_id.is_empty():
+		var action_reservation_ids = action.get("reservation_ids", [])
+		if (
+			not (action_reservation_ids is Array or action_reservation_ids is PackedStringArray)
+			or not action_reservation_ids.has(reservation_id)
+		):
+			_log_lesson_transition(
+				npc_key, expected_session, activity, updates, false, "action_reservation_reference_missing"
+			)
+			return {"accepted": false, "reason": "action_reservation_reference_missing"}
+
+	var updated_record := current_record.duplicate(true)
+	var updated_activity: Dictionary = activity.duplicate(true)
+	var allowed_activity_fields := [
+		"lesson_phase", "target_scene_path", "target_position", "lesson_scene_path",
+		"lesson_position", "last_total_hours", "lesson_score",
+	]
+	for field_name in allowed_activity_fields:
+		if updates.has(field_name):
+			updated_activity[field_name] = updates[field_name]
+	updated_record["activity"] = updated_activity
+
+	var updated_action := action.duplicate(true)
+	if updated_action.is_empty():
+		var restored_action := NpcActionSessionModel.from_legacy_activity(npc_key, updated_activity)
+		if restored_action == null:
+			return {"accepted": false, "reason": "action_restore_failed"}
+		restored_action.status = NpcActionSession.Status.ACTIVE
+		updated_action = restored_action.to_descriptor()
+	var metadata = updated_action.get("metadata", {})
+	if not (metadata is Dictionary):
+		metadata = {}
+	else:
+		metadata = metadata.duplicate(true)
+	for lesson_field in ["lesson_phase", "lesson_scene_path", "lesson_position", "lesson_score"]:
+		if updates.has(lesson_field):
+			metadata[lesson_field] = updates[lesson_field]
+	var metadata_updates = updates.get("action_metadata", {})
+	if metadata_updates is Dictionary:
+		for key in metadata_updates.keys():
+			metadata[String(key)] = metadata_updates[key]
+	updated_action["metadata"] = metadata
+	if updates.has("target_scene_path"):
+		updated_action["scene_path"] = String(updates["target_scene_path"])
+	updated_record["action"] = updated_action
+
+	var relocate_npc := bool(updates.get("relocate_npc", false))
+	var from_scene_path := String(current_record.get("scene_path", ""))
+	var target_scene_path := String(updated_activity.get("target_scene_path", from_scene_path))
+	var target_position = updated_activity.get("target_position", current_record.get(
+		"last_position", Vector2.ZERO
+	))
+	if relocate_npc:
+		if target_scene_path.is_empty() or not (target_position is Vector2):
+			return {"accepted": false, "reason": "invalid_relocation_destination"}
+		var live_npc := get_live_npc(npc_key)
+		if live_npc != null and not _capture_live_npc_into_record(npc_key, live_npc, updated_record):
+			return {"accepted": false, "reason": "live_npc_capture_failed"}
+		# Capture refreshes the action descriptor; restore the validated transition copy.
+		updated_record["activity"] = updated_activity
+		updated_record["action"] = updated_action
+		updated_record["previous_scene_path"] = ""
+		updated_record["scene_path"] = target_scene_path
+		updated_record["last_position"] = target_position
+		updated_record["spawn_random"] = false
+		updated_record["pending_travel"] = {}
+		updated_record["last_travel_msec"] = Time.get_ticks_msec()
+
+	var live_npc := get_live_npc(npc_key)
+	if live_npc != null:
+		var machine := live_npc.get_node_or_null("NpcStateMachine")
+		if machine != null and machine.has_method("update_active_action_metadata"):
+			if not bool(machine.call(
+				"update_active_action_metadata",
+				expected_session,
+				metadata,
+				String(updated_action.get("scene_path", "")),
+				false
+			)):
+				return {"accepted": false, "reason": "live_action_session_mismatch"}
+
+	npc_records[npc_key] = updated_record
+	if relocate_npc and live_npc != null:
+		live_npcs.erase(npc_key)
+		live_npc.queue_free()
+	if relocate_npc and from_scene_path != target_scene_path:
+		npc_travelled.emit(npc_key, from_scene_path, target_scene_path)
+		_emit_location_event(npc_key, from_scene_path, target_scene_path)
+	if relocate_npc and target_scene_path == active_scene_path:
+		call_deferred("_spawn_missing_npcs_for_active_scene")
+	_update_return_processing()
+	_log_lesson_transition(npc_key, expected_session, activity, updates, true, "accepted")
+	return {
+		"accepted": true,
+		"reason": "accepted",
+		"session_id": expected_session,
+		"reservation_id": reservation_id,
+		"old_lesson_phase": old_phase,
+		"lesson_phase": String(updated_activity.get("lesson_phase", old_phase)),
+		"scene_path": String(updated_record.get("scene_path", "")),
+	}
+
+
+func _log_lesson_transition(
+	npc_id: String,
+	session_id: String,
+	activity: Dictionary,
+	updates: Dictionary,
+	accepted: bool,
+	reason: String
+) -> void:
+	if not OS.is_debug_build():
+		return
+	var old_phase := String(activity.get("lesson_phase", "inviting"))
+	var new_phase := String(updates.get("lesson_phase", old_phase))
+	var reservation_ids = activity.get("reservation_ids", [])
+	print("Magic lesson transition: npc=%s session=%s phase=%s->%s scene=%s reservation=%s accepted=%s reason=%s" % [
+		npc_id, session_id, old_phase, new_phase,
+		String(updates.get("target_scene_path", activity.get("target_scene_path", ""))),
+		str(reservation_ids), str(accepted), reason,
+	])
 
 
 func apply_simulated_record(
@@ -729,7 +1117,8 @@ func apply_simulated_record(
 func finish_scheduled_activity(
 	npc_id: String,
 	return_scene_path: String,
-	return_position: Vector2
+	return_position: Vector2,
+	expected_session_id: String = ""
 ) -> bool:
 	if not npc_records.has(npc_id):
 		_breadcrumb("npc_locations:finish_activity_reject", npc_id)
@@ -739,6 +1128,33 @@ func finish_scheduled_activity(
 	_refresh_live_record(npc_id)
 	var record: Dictionary = npc_records[npc_id]
 	var committed_activity = record.get("activity", {})
+	var committed_session_id := (
+		NpcActionSessionModel._descriptor_session_id(committed_activity)
+		if committed_activity is Dictionary
+		else ""
+	)
+	var record_action = record.get("action", {})
+	var record_action_session_id := (
+		NpcActionSessionModel._descriptor_session_id(record_action)
+		if record_action is Dictionary
+		else ""
+	)
+	if not expected_session_id.is_empty() and committed_session_id != expected_session_id:
+		_breadcrumb(
+			"npc_locations:finish_activity_stale",
+			"%s callback=%s active=%s" % [npc_id, expected_session_id, committed_session_id]
+		)
+		return false
+	if (
+		not expected_session_id.is_empty()
+		and not record_action_session_id.is_empty()
+		and record_action_session_id != expected_session_id
+	):
+		_breadcrumb(
+			"npc_locations:finish_activity_stale_action",
+			"%s callback=%s active=%s" % [npc_id, expected_session_id, record_action_session_id]
+		)
+		return false
 	var committed_spot_id := &""
 	if committed_activity is Dictionary:
 		committed_spot_id = StringName(String(committed_activity.get("spot_id", "")))
@@ -759,6 +1175,7 @@ func finish_scheduled_activity(
 	):
 		spawn_position = _get_node_position(live_npc)
 	record["activity"] = {}
+	record["action"] = {}
 	record["pending_travel"] = {}
 	record["previous_scene_path"] = ""
 	record["scene_path"] = destination_scene_path
@@ -766,7 +1183,9 @@ func finish_scheduled_activity(
 	record["spawn_random"] = false
 	record["last_travel_msec"] = Time.get_ticks_msec()
 	npc_records[npc_id] = record
-	_notify_activity_claim_release(committed_spot_id, "activity_finished")
+	_notify_activity_claim_release(
+		committed_spot_id, "activity_finished", committed_session_id, StringName(npc_id)
+	)
 
 	if live_npc != null and String(record["scene_path"]) != get_current_scene_path():
 		live_npcs.erase(npc_id)
@@ -877,6 +1296,7 @@ func _build_initial_record(
 		"last_position": _get_node_position(npc),
 		"node_state": _get_npc_state(npc),
 		"activity": {},
+		"action": {},
 		"pending_travel": {},
 		"social_visit_target_id": "",
 		"social_session_id": "",
@@ -962,6 +1382,9 @@ func _capture_live_npc_into_record(npc_id: String, npc: Node, record: Dictionary
 	record["last_position"] = _get_node_position(npc)
 	record["node_state"] = _get_npc_state(npc)
 	record["last_simulated_total_hours"] = _get_world_total_hours()
+	var machine := npc.get_node_or_null("NpcStateMachine")
+	if machine != null and machine.has_method("get_active_action_descriptor"):
+		record["action"] = machine.call("get_active_action_descriptor")
 	return _capture_live_inventory_into_record(npc_id, npc, record)
 
 
@@ -1071,8 +1494,34 @@ func _normalize_loaded_record(npc_id: String, saved_record: Dictionary) -> Dicti
 		record["node_state"] = {}
 	if not (record.get("activity", null) is Dictionary):
 		record["activity"] = {}
+	if not (record.get("action", null) is Dictionary):
+		record["action"] = {}
+	var loaded_action: Dictionary = record["action"]
+	var loaded_activity: Dictionary = record["activity"]
+	if loaded_action.is_empty() and not loaded_activity.is_empty():
+		var translated_action := NpcActionSessionModel.from_legacy_activity(npc_id, loaded_activity)
+		if translated_action != null:
+			record["action"] = translated_action.to_descriptor()
+			loaded_activity["session_id"] = translated_action.session_id
+			loaded_activity["action_session_id"] = translated_action.session_id
+			loaded_activity["activity_id"] = String(loaded_activity.get(
+				"activity_id", translated_action.session_id
+			))
+			record["activity"] = loaded_activity
+	elif not loaded_action.is_empty():
+		var normalized_action := NpcActionSessionModel.create(
+			npc_id,
+			StringName(String(loaded_action.get("action_kind", loaded_action.get("state_name", "")))),
+			StringName(String(loaded_action.get("source", "manual"))),
+			null,
+			loaded_action
+		)
+		if normalized_action != null and normalized_action.action_kind != &"":
+			record["action"] = normalized_action.to_descriptor()
 	if not (record.get("pending_travel", null) is Dictionary):
 		record["pending_travel"] = {}
+	_normalize_record_spot_reservations(npc_id, record)
+	_normalize_lesson_action_metadata(record)
 	if not record.has("inventory"):
 		# Missing inventory is the supported old-save case; malformed present data is
 		# deferred until an accepted live component can validate it atomically.
@@ -1112,8 +1561,73 @@ func _repair_mismatched_activity_record(record: Dictionary) -> bool:
 		record["last_position"] = return_position
 
 	record["activity"] = {}
+	record["action"] = {}
 	record["pending_travel"] = {}
 	return true
+
+
+func _normalize_record_spot_reservations(npc_id: String, record: Dictionary) -> void:
+	var descriptors: Array[Dictionary] = []
+	for key in [&"action", &"activity"]:
+		var descriptor = record.get(key, {})
+		if descriptor is Dictionary and not descriptor.is_empty():
+			descriptors.append(descriptor)
+	var pending = record.get("pending_travel", {})
+	if pending is Dictionary and not pending.is_empty():
+		var pending_activity = pending.get("activity", {})
+		if pending_activity is Dictionary and not pending_activity.is_empty():
+			descriptors.append(pending_activity)
+	var repairs := 0
+	for descriptor in descriptors:
+		var session_id := NpcActionSessionModel._descriptor_session_id(descriptor)
+		var spot_id := String(descriptor.get("spot_id", "")).strip_edges()
+		if session_id.is_empty() or spot_id.is_empty():
+			continue
+		var purpose := String(descriptor.get("reservation_purpose", "activity"))
+		var exact_id := "%s|%s|%s" % [session_id, spot_id, purpose]
+		var status := String(descriptor.get("status", "active"))
+		var terminal := status in ["completed", "failed", "cancelled", "cancelling"]
+		var normalized_ids: Array[String] = []
+		var values = descriptor.get("reservation_ids", [])
+		if values is Array or values is PackedStringArray:
+			for value in values:
+				var reservation_id := String(value).strip_edges()
+				if reservation_id.is_empty():
+					continue
+				if reservation_id.begins_with("spot:") or reservation_id.begins_with("%s|" % session_id):
+					repairs += 1
+					continue
+				if reservation_id not in normalized_ids:
+					normalized_ids.append(reservation_id)
+		if not terminal:
+			normalized_ids.append(exact_id)
+		descriptor["reservation_ids"] = normalized_ids
+	if OS.is_debug_build() and repairs > 0:
+		print("NPC reservation migration: npc=%s repaired_ids=%d" % [npc_id, repairs])
+
+
+func _normalize_lesson_action_metadata(record: Dictionary) -> void:
+	var activity = record.get("activity", {})
+	var action = record.get("action", {})
+	if not (activity is Dictionary) or activity.is_empty():
+		return
+	if not (action is Dictionary) or action.is_empty():
+		return
+	if not activity.has("lesson_phase"):
+		return
+	if (
+		NpcActionSessionModel._descriptor_session_id(activity)
+		!= NpcActionSessionModel._descriptor_session_id(action)
+	):
+		return
+	var metadata = action.get("metadata", {})
+	if not (metadata is Dictionary):
+		metadata = {}
+	else:
+		metadata = metadata.duplicate(true)
+	metadata["lesson_phase"] = String(activity.get("lesson_phase", "inviting"))
+	action["metadata"] = metadata
+	record["action"] = action
 
 
 func _move_record_to_scene(
@@ -1281,6 +1795,15 @@ func _spawn_record_in_active_scene(npc_id: String, record: Dictionary) -> bool:
 func _apply_record_to_npc(npc: Node, record: Dictionary, use_random_position: bool) -> void:
 	if npc.has_method("apply_npc_location_save_data"):
 		npc.call("apply_npc_location_save_data", record.get("node_state", {}))
+	var machine := npc.get_node_or_null("NpcStateMachine")
+	var action_descriptor = record.get("action", {})
+	if (
+		machine != null
+		and action_descriptor is Dictionary
+		and not action_descriptor.is_empty()
+		and machine.has_method("restore_action_descriptor")
+	):
+		machine.call("restore_action_descriptor", action_descriptor)
 
 	if use_random_position:
 		_place_npc(npc, _get_spawn_position(active_scene_context, get_npc_id(npc), record))
@@ -1429,12 +1952,17 @@ func _has_property(object: Object, property_name: StringName) -> bool:
 	return false
 
 
-func _notify_activity_claim_release(spot_id: StringName, reason: String) -> void:
+func _notify_activity_claim_release(
+	spot_id: StringName,
+	reason: String,
+	session_id: String = "",
+	npc_id: StringName = &""
+) -> void:
 	if spot_id == &"":
 		return
 	var simulator := get_node_or_null("/root/NpcWorldSimulation")
 	if simulator != null and simulator.has_method("release_scheduled_activity_claim"):
-		simulator.call("release_scheduled_activity_claim", spot_id, reason)
+		simulator.call("release_scheduled_activity_claim", spot_id, reason, session_id, npc_id)
 
 
 func _resume_scheduled_activity_deferred(npc_id: String, npc: Node) -> void:

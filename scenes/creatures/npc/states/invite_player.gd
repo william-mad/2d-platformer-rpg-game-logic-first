@@ -24,6 +24,11 @@ var prompt_timer: float = 0.0
 var invitation_started: bool = false
 
 
+func on_action_session_refreshed() -> void:
+	lesson_spot = machine.get_invitation_spot()
+	player = _find_player()
+
+
 func enter() -> void:
 	super.enter()
 	if _magic_lesson_disabled():
@@ -42,6 +47,11 @@ func enter() -> void:
 
 func exit() -> void:
 	stop_horizontal()
+	var newer_session_owns_spot := (
+		machine != null
+		and machine.get_active_action_session_id() != action_session_id
+		and machine.get_invitation_spot() == lesson_spot
+	)
 	var prompt_pending := (
 		_lesson_spot_has("is_invitation_pending_for")
 		and bool(lesson_spot.call("is_invitation_pending_for", npc, player))
@@ -50,13 +60,19 @@ func exit() -> void:
 		_lesson_spot_has("is_lesson_active_for")
 		and bool(lesson_spot.call("is_lesson_active_for", npc, player))
 	)
-	if prompt_pending or lesson_active:
+	var lesson_handoff := (
+		_lesson_spot_has("is_lesson_handoff_for")
+		and bool(lesson_spot.call("is_lesson_handoff_for", npc, player))
+	)
+	if not newer_session_owns_spot and not lesson_handoff and (prompt_pending or lesson_active):
 		lesson_spot.call("cancel_lesson", &"state_exit")
-	if machine != null and machine.get("invitation_spot") == lesson_spot:
-		machine.set("invitation_spot", null)
+	if not lesson_handoff and machine != null and machine.get_invitation_spot() == lesson_spot:
+		machine.set_action_target(&"InvitePlayer", null, action_session_id)
 
 
 func physics_process(delta: float) -> NpcState:
+	if not action_session_is_current():
+		return reconcile_invalid_action_session()
 	if _magic_lesson_disabled():
 		_cancel_if_possible(&"debug_disabled")
 		return get_state(end_state_name)
@@ -66,6 +82,10 @@ func physics_process(delta: float) -> NpcState:
 		return get_state(end_state_name)
 
 	if _lesson_spot_has("lesson_is_done_for") and bool(lesson_spot.call("lesson_is_done_for", npc, player)):
+		return get_state(end_state_name)
+	if _lesson_spot_has("is_lesson_handoff_for") and bool(
+		lesson_spot.call("is_lesson_handoff_for", npc, player)
+	):
 		return get_state(end_state_name)
 
 	if _lesson_spot_has("is_lesson_active_for") and bool(lesson_spot.call("is_lesson_active_for", npc, player)):
@@ -170,7 +190,7 @@ func _resolve_lesson_spot() -> Node2D:
 	if machine == null:
 		return null
 
-	var configured_spot = machine.get("invitation_spot")
+	var configured_spot = machine.get_invitation_spot()
 	if configured_spot is Node2D and is_instance_valid(configured_spot):
 		return configured_spot
 

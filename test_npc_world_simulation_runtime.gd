@@ -46,6 +46,8 @@ class MockLiveMachine:
 	var current_state: Node
 	var assigned_invitation_spot: Node2D
 	var assigned_priority: int = -1
+	var assigned_descriptor: Dictionary = {}
+	var assignment_request_count: int = 0
 
 	func get_value(value_name: StringName) -> float:
 		return float(values.get(String(value_name), 0.0))
@@ -53,6 +55,17 @@ class MockLiveMachine:
 	func assign_invitation_spot(new_target: Node2D, request_priority: int = 75) -> bool:
 		assigned_invitation_spot = new_target
 		assigned_priority = request_priority
+		if current_state == null:
+			current_state = Node.new()
+			add_child(current_state)
+		current_state.name = "InvitePlayer"
+		return true
+
+	func request_action_from_descriptor(descriptor: Dictionary, live_target: Node2D) -> bool:
+		assignment_request_count += 1
+		assigned_descriptor = descriptor.duplicate(true)
+		assigned_invitation_spot = live_target
+		assigned_priority = int(descriptor.get("priority", -1))
 		if current_state == null:
 			current_state = Node.new()
 			add_child(current_state)
@@ -78,6 +91,7 @@ class MockMagicLessonSpot:
 
 	var active: bool = false
 	var started_count: int = 0
+	var active_session_id: String = ""
 
 	func is_lesson_spot_enabled() -> bool:
 		return true
@@ -88,9 +102,18 @@ class MockMagicLessonSpot:
 	func is_lesson_active_for(_inviter: Node2D, _player: Node2D) -> bool:
 		return active
 
-	func start_lesson(_inviter: Node2D, _player: Node2D) -> void:
+	func get_active_lesson_session_id() -> String:
+		return active_session_id
+
+	func start_lesson(
+		_inviter: Node2D,
+		_player: Node2D,
+		expected_session_id: String = ""
+	) -> Dictionary:
 		started_count += 1
 		active = true
+		active_session_id = expected_session_id
+		return {"accepted": true, "reason": "started"}
 
 
 func _initialize() -> void:
@@ -652,6 +675,7 @@ func _test_accepted_magic_lesson_resume_assigns_invite_state(
 	var original_locations: Dictionary = locations.call("get_save_data")
 	var original_runtime_states: Dictionary = simulator.spot_runtime_states.duplicate(true)
 	var original_live_spots: Dictionary = simulator.live_spots.duplicate()
+	var original_reservations: Dictionary = simulator.spot_reservations.duplicate(true)
 
 	var definition = simulator.call("get_spot_definition", &"mom_magic_lesson")
 	_expect_true(definition != null, "magic lesson definition is available for accepted resume test")
@@ -681,12 +705,15 @@ func _test_accepted_magic_lesson_resume_assigns_invite_state(
 	simulator.live_spots[&"mom_magic_lesson"] = spot
 
 	var activity := {
+		"session_id": "accepted-lesson-session",
+		"action_session_id": "accepted-lesson-session",
+		"activity_id": "accepted-lesson-session",
 		"spot_id": "mom_magic_lesson",
 		"state_name": "InvitePlayer",
 		"value_name": "",
 		"target_scene_path": definition.scene_path,
 		"target_position": definition.position,
-		"lesson_phase": "running",
+		"lesson_phase": "handoff",
 		"lesson_scene_path": definition.scene_path,
 		"lesson_position": definition.position,
 		"last_total_hours": 15.25,
@@ -725,19 +752,35 @@ func _test_accepted_magic_lesson_resume_assigns_invite_state(
 		"accepted magic lesson resume starts the live class spot"
 	)
 	_expect_equal(
+		machine.assignment_request_count,
+		1,
+		"accepted lesson startup still requests the live activity assignment"
+	)
+	_expect_equal(
 		machine.assigned_invitation_spot,
 		spot,
-		"accepted magic lesson resume still assigns Mom to InvitePlayer"
+		"accepted lesson assignment targets the local lesson spot"
+	)
+	_expect_equal(
+		String(machine.assigned_descriptor.get("session_id", "")),
+		"accepted-lesson-session",
+		"accepted lesson assignment preserves the existing session ID"
 	)
 	_expect_equal(
 		machine.assigned_priority,
-		int(definition.priority),
-		"accepted magic lesson resume uses the spot priority"
+		definition.priority,
+		"accepted lesson assignment keeps the lesson priority"
+	)
+	_expect_true(
+		machine.current_state != null and String(machine.current_state.name) == "InvitePlayer",
+		"accepted lesson resume does not leave Mom idle while the lesson runs"
 	)
 
 	locations.call("apply_save_data", original_locations)
 	simulator.spot_runtime_states = original_runtime_states
 	simulator.live_spots = original_live_spots
+	simulator.spot_reservations = original_reservations
+	simulator.call("_sync_spot_claim_count_cache")
 	world_time.call("set_total_hours", original_time)
 	spot.free()
 	player.free()

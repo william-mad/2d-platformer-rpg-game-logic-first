@@ -34,6 +34,8 @@ func enter() -> void:
 
 
 func physics_process(delta: float) -> NpcState:
+	if not action_session_is_current():
+		return reconcile_invalid_action_session()
 	# Moves toward the chosen person; once close enough, hands off to Talk.
 	if _talk_search_disabled():
 		_breadcrumb("npc_talk_search:disabled_tick", _npc_label())
@@ -70,14 +72,15 @@ func is_searching_for_talk_target(candidate: Node2D) -> bool:
 
 
 func _find_talk_target() -> Node2D:
-	# Prefer known active targets, then scan allowed groups for the closest person.
-	if machine != null and _is_allowed_talk_target(machine.target):
-		_breadcrumb("npc_talk_search:target_current", "%s -> %s" % [_npc_label(), _target_label(machine.target)])
-		return machine.target
-
-	if machine != null and _is_allowed_talk_target(machine.last_actor):
-		_breadcrumb("npc_talk_search:target_last_actor", "%s -> %s" % [_npc_label(), _target_label(machine.last_actor)])
-		return machine.last_actor
+	# Prefer the explicitly requested partner, then select from perception.
+	if machine != null:
+		var action_target := machine.get_active_action_target()
+		if _is_allowed_talk_target(action_target):
+			_breadcrumb("npc_talk_search:target_action", "%s -> %s" % [_npc_label(), _target_label(action_target)])
+			return action_target
+		for perceived_target in machine.get_perceived_targets():
+			if _is_allowed_talk_target(perceived_target):
+				return perceived_target
 
 	if npc == null or not npc.is_inside_tree():
 		return null

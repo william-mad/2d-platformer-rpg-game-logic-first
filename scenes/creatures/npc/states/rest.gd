@@ -10,6 +10,11 @@ var resting_in_place: bool = false
 var choice_rng := RandomNumberGenerator.new()
 
 
+func on_action_session_refreshed() -> void:
+	active_rest_target = machine.get_rest_target()
+	resting_in_place = active_rest_target == null
+
+
 func init() -> void:
 	choice_rng.randomize()
 
@@ -33,14 +38,8 @@ func enter() -> void:
 	resting_in_place = active_rest_target == null
 	if active_rest_target != null and not is_close_to(active_rest_target.global_position, machine.stop_distance):
 		_breadcrumb("npc_rest:walk_to_target", "%s -> %s" % [_npc_label(), active_rest_target.name])
-		machine.move_target = active_rest_target
-		machine.state_after_move = &"Rest"
 		machine.call_deferred(
-			"request_state",
-			&"MoveToTarget",
-			active_rest_target,
-			"walk_to_rest",
-			20
+			"request_active_action_approach", action_session_id, "walk_to_rest", 20
 		)
 		return
 
@@ -60,22 +59,23 @@ func exit() -> void:
 
 
 func physics_process(_delta: float) -> NpcState:
+	if not action_session_is_current():
+		return reconcile_invalid_action_session()
 	# The state machine's 10-second fatigue tick lowers tired while this state remains active.
 	stop_horizontal()
 
 	if active_rest_target != null and not _target_can_be_rested_at(active_rest_target):
 		_breadcrumb("npc_rest:target_rejected", "%s %s" % [_npc_label(), active_rest_target.name])
-		machine.rest_target = null
+		machine.set_action_target(&"Rest", null, action_session_id)
 		active_rest_target = _resolve_rest_target()
 		resting_in_place = active_rest_target == null
 
 	if active_rest_target != null and not is_close_to(active_rest_target.global_position, machine.stop_distance):
-		machine.move_target = active_rest_target
-		machine.state_after_move = &"Rest"
+		machine.begin_active_action_approach(action_session_id)
 		return get_state(&"MoveToTarget")
 
 	if rest_value_name == &"" or machine.get_value(rest_value_name) <= tired_floor:
-		machine.rest_target = null
+		machine.set_action_target(&"Rest", null, action_session_id)
 		return get_state(&"Idle")
 
 	return next_state
@@ -96,16 +96,15 @@ func can_continue_during_talk() -> bool:
 func process_talk_overlay(_delta: float) -> StringName:
 	stop_horizontal()
 	if rest_value_name == &"" or machine.get_value(rest_value_name) <= tired_floor:
-		machine.rest_target = null
+		machine.set_action_target(&"Rest", null, action_session_id)
 		return &"Idle"
 	if active_rest_target == null:
 		return &"Rest" if resting_in_place else &"Idle"
 	if not is_instance_valid(active_rest_target) or not _target_can_be_rested_at(active_rest_target):
-		machine.rest_target = null
+		machine.set_action_target(&"Rest", null, action_session_id)
 		return &"Idle"
 	if not is_close_to(active_rest_target.global_position, machine.stop_distance):
-		machine.move_target = active_rest_target
-		machine.state_after_move = &"Rest"
+		machine.begin_active_action_approach(action_session_id)
 		return &"MoveToTarget"
 	return &"Rest"
 
@@ -123,24 +122,26 @@ func _resolve_rest_target() -> Node2D:
 	if machine == null:
 		return null
 
+	var assigned_target := machine.get_rest_target()
+	if _target_can_be_rested_at(assigned_target):
+		_breadcrumb("npc_rest:target_assigned", "%s -> %s" % [_npc_label(), assigned_target.name])
+		return assigned_target
+
 	if String(rest_target_path) != "" and machine.npc != null:
 		var configured_target := machine.npc.get_node_or_null(rest_target_path) as Node2D
 		if _target_can_be_rested_at(configured_target):
+			machine.set_action_target(&"Rest", configured_target, action_session_id)
 			_breadcrumb("npc_rest:target_configured", "%s -> %s" % [_npc_label(), configured_target.name])
 			return configured_target
 
-	if _target_can_be_rested_at(machine.rest_target):
-		_breadcrumb("npc_rest:target_assigned", "%s -> %s" % [_npc_label(), machine.rest_target.name])
-		return machine.rest_target
-
-	machine.rest_target = null
+	machine.set_action_target(&"Rest", null, action_session_id)
 	if choice_rng.randf() < clampf(rest_in_place_chance, 0.0, 1.0):
 		_breadcrumb("npc_rest:target_in_place", _npc_label())
 		return null
 
 	var preferred_spot := find_weighted_casual_spot(&"Rest", choice_rng)
 	if preferred_spot != null:
-		machine.rest_target = preferred_spot
+		machine.set_action_target(&"Rest", preferred_spot, action_session_id)
 		_breadcrumb("npc_rest:target_weighted", "%s -> %s" % [_npc_label(), preferred_spot.name])
 		return preferred_spot
 

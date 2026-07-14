@@ -37,6 +37,8 @@ func enter() -> void:
 
 
 func physics_process(delta: float) -> NpcState:
+	if not action_session_is_current():
+		return reconcile_invalid_action_session()
 	monster_target = _find_monster_target()
 	if monster_target != null:
 		if machine != null and machine.request_monster_reaction(
@@ -69,17 +71,12 @@ func is_searching_for_monster_target(candidate: Node2D) -> bool:
 
 func _find_monster_target() -> Node2D:
 	if machine != null:
-		var active_target := _get_live_node_2d(machine.target)
+		var active_target := _get_live_node_2d(machine.get_active_action_target())
 		if _is_allowed_monster_target(active_target):
 			return active_target
-		if machine.target != null and not is_instance_valid(machine.target):
-			machine.target = null
-
-		var last_actor := _get_live_node_2d(machine.last_actor)
-		if _is_allowed_monster_target(last_actor):
-			return last_actor
-		if machine.last_actor != null and not is_instance_valid(machine.last_actor):
-			machine.last_actor = null
+		var selected_target := _get_live_node_2d(machine.get_selected_threat())
+		if _is_allowed_monster_target(selected_target):
+			return selected_target
 
 	if npc == null or not npc.is_inside_tree():
 		return null
@@ -182,10 +179,12 @@ func _process_search_wander(delta: float) -> void:
 
 func _get_search_origin_x() -> float:
 	if machine != null:
-		if machine.target != null and is_instance_valid(machine.target):
-			return machine.target.global_position.x
-		if machine.last_actor != null and is_instance_valid(machine.last_actor):
-			return machine.last_actor.global_position.x
+		var action_target := machine.get_active_action_target()
+		if action_target != null:
+			return action_target.global_position.x
+		var selected_target := machine.get_selected_threat()
+		if selected_target != null:
+			return selected_target.global_position.x
 
 	return npc.global_position.x if npc != null else 0.0
 

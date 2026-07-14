@@ -31,6 +31,31 @@ class LessonMom:
 		return "mom"
 
 
+class LessonActionMachine:
+	extends Node
+
+	var descriptor: Dictionary = {}
+
+	func get_active_action_session_id() -> String:
+		return NpcActionSession._descriptor_session_id(descriptor)
+
+	func get_active_action_descriptor() -> Dictionary:
+		return descriptor.duplicate(true)
+
+	func update_active_action_metadata(
+		expected_session_id: String,
+		metadata_updates: Dictionary,
+		scene_path: String = "",
+		_publish_change: bool = true
+	) -> bool:
+		if get_active_action_session_id() != expected_session_id:
+			return false
+		descriptor["metadata"] = metadata_updates.duplicate(true)
+		if not scene_path.is_empty():
+			descriptor["scene_path"] = scene_path
+		return true
+
+
 class EmptyFoodSpot:
 	extends Node2D
 
@@ -989,6 +1014,16 @@ func _create_magic_lesson_setup(test_lesson_id: StringName) -> Dictionary:
 	mom.add_to_group("npc")
 	mom.global_position = Vector2(12.0, 0.0)
 	root.add_child(mom)
+	var machine := LessonActionMachine.new()
+	machine.name = "NpcStateMachine"
+	mom.add_child(machine)
+	var locations := root.get_node_or_null("NpcLocations")
+	var simulator := root.get_node_or_null("NpcWorldSimulation")
+	if locations != null and simulator != null:
+		setup["lesson_original_records"] = locations.npc_records.duplicate(true)
+		setup["lesson_original_live_npcs"] = locations.live_npcs.duplicate()
+		setup["lesson_original_reservations"] = simulator.spot_reservations.duplicate(true)
+		setup["lesson_original_live_spots"] = simulator.live_spots.duplicate()
 
 	var spot := MagicLessonSpot.new()
 	spot.name = "MagicLessonSpot"
@@ -999,6 +1034,46 @@ func _create_magic_lesson_setup(test_lesson_id: StringName) -> Dictionary:
 	spot.mark_spot_unavailable_after_attempt = false
 	spot.global_position = Vector2(100.0, 64.0)
 	root.add_child(spot)
+
+	if locations != null and simulator != null:
+		var lesson_session_id := "test-lesson:%s" % String(test_lesson_id)
+		var claim: Dictionary = simulator.call(
+			"try_claim_spot", &"mom", lesson_session_id, test_lesson_id, &"activity"
+		)
+		var activity := {
+			"session_id": lesson_session_id,
+			"action_session_id": lesson_session_id,
+			"activity_id": lesson_session_id,
+			"state_name": "InvitePlayer",
+			"source": "schedule",
+			"status": "active",
+			"spot_id": String(test_lesson_id),
+			"lesson_phase": "inviting",
+			"target_scene_path": "res://test_magic_lesson.tscn",
+			"target_position": spot.global_position,
+			"return_scene_path": "res://test_magic_lesson.tscn",
+			"return_position": mom.global_position,
+			"reservation_ids": [String(claim.get("reservation_id", ""))],
+		}
+		var session := NpcActionSession.create(
+			"mom", &"InvitePlayer", &"schedule", spot, activity
+		)
+		session.status = NpcActionSession.Status.ACTIVE
+		session.phase = &"executing"
+		machine.descriptor = session.to_descriptor()
+		locations.npc_records["mom"] = {
+			"npc_id": "mom",
+			"scene_path": "res://test_magic_lesson.tscn",
+			"home_scene_path": "res://test_magic_lesson.tscn",
+			"home_position": mom.global_position,
+			"last_position": mom.global_position,
+			"activity": activity,
+			"action": session.to_descriptor(),
+			"pending_travel": {},
+			"node_state": {},
+			"inventory": {},
+		}
+		locations.live_npcs["mom"] = mom
 
 	var mom_marker := Marker2D.new()
 	mom_marker.name = "MomLessonPosition"
@@ -1066,6 +1141,16 @@ func _free_setup(setup: Dictionary) -> void:
 			continue
 		freed.append(node)
 		node.free()
+	if setup.has("lesson_original_records"):
+		var locations := root.get_node_or_null("NpcLocations")
+		var simulator := root.get_node_or_null("NpcWorldSimulation")
+		if locations != null:
+			locations.npc_records = setup["lesson_original_records"]
+			locations.live_npcs = setup["lesson_original_live_npcs"]
+		if simulator != null:
+			simulator.spot_reservations = setup["lesson_original_reservations"]
+			simulator.live_spots = setup["lesson_original_live_spots"]
+			simulator.call("_sync_spot_claim_count_cache")
 
 
 func _free_nodes(nodes: Array) -> void:

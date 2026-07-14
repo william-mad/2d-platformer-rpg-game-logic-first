@@ -257,7 +257,13 @@ func sync_stats_to_hud() -> void:
 	PlayerHud.setup_hp(max_hp, hp)
 	PlayerHud.setup_mana(max_mana, mana_amount, mana_2_amount)
 	if PlayerHud.has_method("setup_knockout"):
-		PlayerHud.call("setup_knockout", max_knockout, knockout_amount, knockout_active)
+		PlayerHud.call(
+			"setup_knockout",
+			max_knockout,
+			knockout_amount,
+			knockout_active,
+			is_downed
+		)
 	if PlayerHud.has_method("setup_needs"):
 		PlayerHud.call("setup_needs", 100.0, hunger, sleep_need)
 
@@ -587,6 +593,7 @@ func enter_downed_state() -> void:
 	var downed_state := $States.get_node_or_null("Downed") as PlayerState
 	if downed_state != null:
 		change_state(downed_state)
+	sync_knockout_bar()
 
 
 func exit_downed_state() -> void:
@@ -600,7 +607,7 @@ func exit_downed_state() -> void:
 
 func sync_knockout_bar() -> void:
 	if PlayerHud.has_method("set_knockout"):
-		PlayerHud.call("set_knockout", knockout_amount, knockout_active)
+		PlayerHud.call("set_knockout", knockout_amount, knockout_active, is_downed)
 
 
 func update_player_needs(delta: float) -> void:

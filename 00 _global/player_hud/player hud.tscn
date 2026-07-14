@@ -1,16 +1,22 @@
-[gd_scene load_steps=4 format=3 uid="uid://dicudb0t1rd0j"]
+[gd_scene load_steps=7 format=3 uid="uid://dicudb0t1rd0j"]
 
-[ext_resource type="Texture2D" uid="uid://8ehnoal3e8eh" path="res://images/sprites/assets/hp bar.png" id="1_kyp3m"]
 [ext_resource type="Script" uid="uid://ct62uktvpeu7x" path="res://00 _global/player_hud/player_hud.gd" id="2_hud"]
 [ext_resource type="PackedScene" path="res://ui/inventory/player_inventory_screen.tscn" id="3_inventory_screen"]
 [ext_resource type="PackedScene" path="res://ui/trade/trade_screen.tscn" id="4_trade_screen"]
+[ext_resource type="Texture2D" uid="uid://dtgi1dycloyf6" path="res://images/system/ui/ui_1.png" id="5_hud_frame"]
+[ext_resource type="Texture2D" uid="uid://cuaaol6ty0kx6" path="res://images/system/ui/hunger_sleep.png" id="6_need_icons"]
+[ext_resource type="Texture2D" uid="uid://ddyyinsnro3jf" path="res://images/system/ui/ko.png" id="7_ko_icon"]
 
 [sub_resource type="Gradient" id="Gradient_3vx8i"]
 offsets = PackedFloat32Array(0.2470238, 0.98511904)
 colors = PackedColorArray(0.2784314, 0, 0, 1, 0, 0, 0, 1)
 
-[sub_resource type="GradientTexture1D" id="GradientTexture1D_w6j1a"]
+[sub_resource type="GradientTexture2D" id="GradientTexture1D_w6j1a"]
 gradient = SubResource("Gradient_3vx8i")
+width = 219
+height = 9
+fill_from = Vector2(0, 0.5)
+fill_to = Vector2(1, 0.5)
 
 [sub_resource type="Gradient" id="Gradient_74uli"]
 offsets = PackedFloat32Array(0.3065476, 0.8720238)
@@ -18,14 +24,18 @@ colors = PackedColorArray(1, 0, 0.050980393, 1, 0.80784315, 0.011764706, 0.06666
 
 [sub_resource type="GradientTexture2D" id="GradientTexture2D_4h0pc"]
 gradient = SubResource("Gradient_74uli")
+width = 219
+height = 9
+fill_from = Vector2(0, 0.5)
+fill_to = Vector2(1, 0.5)
 
 [sub_resource type="Gradient" id="Gradient_mana_2"]
 colors = PackedColorArray(0.18, 0.07, 0.42, 1, 0.43, 0.13, 0.86, 1)
 
 [sub_resource type="GradientTexture2D" id="GradientTexture2D_mana_2"]
 gradient = SubResource("Gradient_mana_2")
-width = 430
-height = 22
+width = 219
+height = 9
 fill_from = Vector2(0, 0.5)
 fill_to = Vector2(1, 0.5)
 
@@ -35,8 +45,8 @@ colors = PackedColorArray(0.72, 0.8, 0.92, 1, 1, 1, 1, 1)
 
 [sub_resource type="GradientTexture2D" id="GradientTexture2D_mana"]
 gradient = SubResource("Gradient_mana")
-width = 430
-height = 22
+width = 219
+height = 9
 fill_from = Vector2(0, 0.5321285)
 fill_to = Vector2(1, 0.3995984)
 
@@ -63,16 +73,16 @@ grow_vertical = 2
 mouse_filter = 2
 
 [node name="hp margin cont" type="MarginContainer" parent="Control" unique_id=2094121738]
-custom_minimum_size = Vector2(0, 40)
+custom_minimum_size = Vector2(219, 9)
 layout_mode = 0
-offset_right = 465.0
-offset_bottom = 48.0
+offset_left = 54.0
+offset_top = 36.0
+offset_right = 273.0
+offset_bottom = 45.0
 
 [node name="NinePatchRect" type="NinePatchRect" parent="Control/hp margin cont" unique_id=1147600476]
 layout_mode = 2
-texture = ExtResource("1_kyp3m")
-patch_margin_left = 16
-patch_margin_right = 3
+mouse_filter = 2
 
 [node name="hpbar" type="TextureProgressBar" parent="Control/hp margin cont/NinePatchRect" unique_id=1965864052]
 show_behind_parent = true
@@ -80,38 +90,37 @@ layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 6.0
-offset_top = 11.0
-offset_right = -2.0
-offset_bottom = -10.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 value = 100.0
 rounded = true
-nine_patch_stretch = true
 texture_under = SubResource("GradientTexture1D_w6j1a")
 texture_progress = SubResource("GradientTexture2D_4h0pc")
 
 [node name="mana margin cont" type="MarginContainer" parent="Control" unique_id=1236149913]
-custom_minimum_size = Vector2(430, 22)
+custom_minimum_size = Vector2(219, 9)
 layout_mode = 0
-offset_top = 52.0
-offset_right = 430.0
-offset_bottom = 74.0
+offset_left = 54.0
+offset_top = 57.0
+offset_right = 273.0
+offset_bottom = 66.0
 
 [node name="mana_2" type="TextureProgressBar" parent="Control/mana margin cont" unique_id=29787464]
 unique_name_in_owner = true
 layout_mode = 2
 max_value = 300.0
 value = 300.0
+mouse_filter = 2
 texture_progress = SubResource("GradientTexture2D_mana_2")
 
 [node name="mana" type="TextureProgressBar" parent="Control/mana margin cont/mana_2" unique_id=612119304]
 unique_name_in_owner = true
 layout_mode = 0
-offset_right = 430.0
-offset_bottom = 22.0
+offset_right = 219.0
+offset_bottom = 9.0
 max_value = 300.0
+mouse_filter = 2
 texture_progress = SubResource("GradientTexture2D_mana")
 
 [node name="ManaThirdMarker1Shadow" type="ColorRect" parent="Control/mana margin cont/mana_2"]
@@ -120,9 +129,9 @@ anchor_left = 0.33333334
 anchor_right = 0.33333334
 anchor_bottom = 1.0
 offset_left = -2.0
-offset_top = 2.0
+offset_top = 1.0
 offset_right = 2.0
-offset_bottom = -2.0
+offset_bottom = -1.0
 mouse_filter = 2
 color = Color(0, 0, 0, 0.64)
 
@@ -132,9 +141,9 @@ anchor_left = 0.33333334
 anchor_right = 0.33333334
 anchor_bottom = 1.0
 offset_left = -0.5
-offset_top = 2.0
+offset_top = 1.0
 offset_right = 0.5
-offset_bottom = -2.0
+offset_bottom = -1.0
 mouse_filter = 2
 color = Color(1, 1, 1, 0.72)
 
@@ -144,9 +153,9 @@ anchor_left = 0.6666667
 anchor_right = 0.6666667
 anchor_bottom = 1.0
 offset_left = -2.0
-offset_top = 2.0
+offset_top = 1.0
 offset_right = 2.0
-offset_bottom = -2.0
+offset_bottom = -1.0
 mouse_filter = 2
 color = Color(0, 0, 0, 0.64)
 
@@ -156,8 +165,33 @@ anchor_left = 0.6666667
 anchor_right = 0.6666667
 anchor_bottom = 1.0
 offset_left = -0.5
-offset_top = 2.0
+offset_top = 1.0
 offset_right = 0.5
-offset_bottom = -2.0
+offset_bottom = -1.0
 mouse_filter = 2
 color = Color(1, 1, 1, 0.72)
+
+[node name="HudFrame" type="TextureRect" parent="Control"]
+layout_mode = 0
+offset_right = 512.0
+offset_bottom = 256.0
+mouse_filter = 2
+texture = ExtResource("5_hud_frame")
+
+[node name="NeedIcons" type="TextureRect" parent="Control"]
+layout_mode = 0
+offset_left = 304.0
+offset_top = 28.0
+offset_right = 332.0
+offset_bottom = 78.0
+mouse_filter = 2
+texture = ExtResource("6_need_icons")
+
+[node name="KnockoutIcon" type="TextureRect" parent="Control"]
+visible = false
+layout_mode = 0
+offset_top = 70.0
+offset_right = 64.0
+offset_bottom = 125.0
+mouse_filter = 2
+texture = ExtResource("7_ko_icon")

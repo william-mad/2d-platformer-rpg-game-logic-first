@@ -76,7 +76,7 @@ static func matches(current: Dictionary, requested: Dictionary) -> bool:
 	if not current_scene.is_empty() and not requested_scene.is_empty() and current_scene != requested_scene:
 		return false
 
-	for id_key in ["activity_id", "request_id"]:
+	for id_key in ["session_id", "action_session_id", "activity_id", "request_id"]:
 		var current_id := String(current.get(id_key, "")).strip_edges()
 		var requested_id := String(requested.get(id_key, "")).strip_edges()
 		if not current_id.is_empty() and not requested_id.is_empty() and current_id != requested_id:
@@ -186,7 +186,10 @@ static func _same_live_target(current: Dictionary, requested: Dictionary) -> boo
 
 
 static func _has_any_identity(descriptor: Dictionary) -> bool:
-	for key in ["target_npc_id", "spot_id", "activity_id", "request_id", "target_node"]:
+	for key in [
+		"target_npc_id", "spot_id", "session_id", "action_session_id",
+		"activity_id", "request_id", "target_node"
+	]:
 		if descriptor.has(key):
 			return true
 	return false

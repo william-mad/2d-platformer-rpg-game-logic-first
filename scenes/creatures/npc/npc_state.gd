@@ -10,6 +10,7 @@ class_name NpcState extends Node
 var npc: CharacterBody2D
 var machine: NpcStateMachine
 var next_state: NpcState
+var action_session_id: String = ""
 
 
 func init() -> void:
@@ -26,9 +27,38 @@ func enter() -> void:
 
 func begin_enter_without_animation() -> void:
 	next_state = null
+	if machine != null and machine.interaction_overlay == self:
+		action_session_id = (
+			machine.get_active_interaction_session_id()
+			if machine.is_interaction_session_executable_for_state(StringName(name))
+			else ""
+		)
+	else:
+		action_session_id = (
+			machine.get_active_action_session_id()
+			if machine != null and machine.is_active_action_executable_in_state(StringName(name))
+			else ""
+		)
 
 	if stop_horizontal_on_enter:
 		stop_horizontal()
+
+
+func refresh_action_session_binding() -> void:
+	# Same-session descriptor refreshes must not restart timers or one-shot effects.
+	if machine == null:
+		action_session_id = ""
+		return
+	action_session_id = (
+		machine.get_active_interaction_session_id()
+		if machine.interaction_overlay == self
+		else machine.get_active_action_session_id()
+	)
+	on_action_session_refreshed()
+
+
+func on_action_session_refreshed() -> void:
+	pass
 
 
 func exit() -> void:
@@ -97,6 +127,20 @@ func get_active_target() -> Node2D:
 		return null
 
 	return machine.get_active_target()
+
+
+func action_session_is_current() -> bool:
+	if machine == null or action_session_id.is_empty():
+		return false
+	if machine.interaction_overlay == self:
+		return machine.is_interaction_session_current_for_execution(action_session_id)
+	return machine.is_action_session_current_for_execution(action_session_id, StringName(name))
+
+
+func reconcile_invalid_action_session() -> NpcState:
+	if machine == null:
+		return get_state(&"Idle")
+	return machine.reconcile_invalid_action_state_session(self, action_session_id)
 
 
 func stop_horizontal() -> void:

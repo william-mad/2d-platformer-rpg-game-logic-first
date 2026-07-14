@@ -13,11 +13,13 @@ var threat: Node2D
 
 func enter() -> void:
 	super.enter()
-	threat = machine.last_actor if machine.last_actor != null else machine.get_active_target()
+	threat = machine.get_active_action_target()
 	_reset_timer()
 
 
 func physics_process(delta: float) -> NpcState:
+	if not action_session_is_current():
+		return reconcile_invalid_action_session()
 	if threat == null or not is_instance_valid(threat):
 		stop_horizontal()
 		return get_state(&"Idle")

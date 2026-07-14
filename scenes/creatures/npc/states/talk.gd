@@ -96,7 +96,7 @@ func init() -> void:
 func enter() -> void:
 	# Starts a timed talk with the assigned partner or the machine's active target.
 	super.enter()
-	talk_partner = machine.talk_target if machine.talk_target != null else machine.get_active_target()
+	talk_partner = machine.get_talk_target()
 	# The state machine owns the primary/overlay relationship. Talk never reads state
 	# history and never exits or re-enters the activity underneath it.
 	static_task_talk = machine != null and machine.primary_state_continues_under_talk() and not machine.is_primary_state(&"Idle")
@@ -369,7 +369,7 @@ func _partner_machine_is_talking_back(partner_machine: NpcStateMachine) -> bool:
 
 	return (
 		partner_machine.is_in_state(&"Talk")
-		and partner_machine.talk_target == npc
+		and partner_machine.get_talk_target() == npc
 	)
 
 
@@ -722,9 +722,8 @@ func _get_partner_machine() -> NpcStateMachine:
 
 
 func _clear_talk_target() -> void:
-	# Prevents the next Talk state from reusing a stale partner.
-	if machine != null and machine.talk_target == talk_partner:
-		machine.talk_target = null
+	# The interaction controller owns and clears the Talk session after exit.
+	pass
 
 
 func _call_talk_hook(target, method_name: StringName, args: Array) -> void:

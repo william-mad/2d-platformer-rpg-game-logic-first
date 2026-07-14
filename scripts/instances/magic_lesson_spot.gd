@@ -13,6 +13,7 @@ const STATE_RUNNING := &"running"
 const STATE_COMPLETED := &"completed"
 const STATE_DECLINED := &"declined"
 const STATE_CANCELLED := &"cancelled"
+const STATE_FAILED := &"failed"
 
 @export var spot_id: StringName = &"mom_magic_lesson"
 @export var world_definition: NpcSpotDefinition
@@ -53,6 +54,8 @@ var availability_value: float = 0.0
 var last_lesson_result: Dictionary = {}
 var player_action_mode: StringName = &""
 var reward_applied: bool = false
+var active_action_session_id: String = ""
+var active_mom_id: String = ""
 var completed_day: int = -1
 var skipped_day: int = -1
 var zone_visual: Polygon2D
@@ -81,6 +84,10 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	if state == STATE_RUNNING and OS.is_debug_build():
+		print("Magic lesson controller unloaded resumably: npc=%s session=%s phase=running" % [
+			active_mom_id, active_action_session_id
+		])
 	_unlock_participants()
 	_unregister_live_spot()
 
@@ -97,12 +104,15 @@ func _process(delta: float) -> void:
 		set_process(false)
 		return
 
-	if state != STATE_RUNNING:
-		if state == STATE_INVITING and not _lesson_schedule_is_active():
+	if state not in [STATE_INVITING, STATE_RUNNING]:
+		return
+	if state == STATE_INVITING:
+		if not _lesson_schedule_is_active():
 			cancel_lesson(&"schedule_ended")
 			return
-		if state == STATE_INVITING and not _participants_valid():
+		if not _participants_valid():
 			cancel_lesson(&"invalid_participant")
+			return
 		return
 
 	if not _participants_valid():
@@ -144,20 +154,32 @@ func can_start_lesson(mom: Node2D, player: Node2D) -> bool:
 
 
 func begin_invitation(mom: Node2D, player: Node2D) -> bool:
-	if _magic_lesson_disabled():
-		_breadcrumb("magic_lesson:begin_disabled", String(spot_id))
-		return false
-	if not can_start_lesson(mom, player):
+	var invitation_reason := _validate_invitation_start(mom, player)
+	if not invitation_reason.is_empty():
+		_log_lesson_transition(String(state), "inviting", false, invitation_reason)
 		return false
 	if state == STATE_INVITING and mom == active_mom and player == active_player:
 		return true
 
 	var interactor := _get_player_prompt_interactor(player)
 	if interactor == null or not interactor.has_method("show_npc_prompt"):
+		_log_lesson_transition(String(state), "inviting", false, "prompt_interactor_missing")
 		return false
 
 	active_mom = mom
 	active_player = player
+	var machine := mom.get_node_or_null("NpcStateMachine")
+	active_action_session_id = (
+		String(machine.call("get_active_action_session_id"))
+		if machine != null and machine.has_method("get_active_action_session_id")
+		else ""
+	)
+	active_mom_id = _get_npc_id(mom)
+	if active_action_session_id.is_empty() or active_mom_id.is_empty():
+		_log_lesson_transition(String(state), "inviting", false, "lesson_identity_missing")
+		_clear_participants()
+		state = STATE_IDLE
+		return false
 	state = STATE_INVITING
 	reward_applied = false
 	lesson_timer = 0.0
@@ -187,9 +209,18 @@ func accept_lesson(mom: Node2D, player: Node2D, _prompt_id: StringName = &"") ->
 		return false
 	if mom != active_mom or player != active_player:
 		return false
-
-	start_lesson(mom, player)
-	return true
+	var handoff_result := _transition_activity({
+		"expected_lesson_phases": ["inviting", "accepted"],
+		"lesson_phase": "handoff",
+		"last_total_hours": _get_current_total_hours(),
+	})
+	if not bool(handoff_result.get("accepted", false)):
+		_log_lesson_transition("inviting", "handoff", false, String(handoff_result.get(
+			"reason", "handoff_rejected"
+		)))
+		return false
+	var start_result := start_lesson(mom, player, active_action_session_id)
+	return bool(start_result.get("accepted", false))
 
 
 func decline_lesson(mom: Node2D, player: Node2D, _prompt_id: StringName = &"") -> void:
@@ -198,18 +229,48 @@ func decline_lesson(mom: Node2D, player: Node2D, _prompt_id: StringName = &"") -
 	if mom != active_mom or player != active_player:
 		return
 
+	if not _terminal_session_is_current(active_action_session_id):
+		_log_lesson_transition("inviting", "declined", false, "stale_terminal_session")
+		return
+	if not _finish_scheduled_activity(active_action_session_id):
+		return
 	skipped_day = _get_current_day()
 	state = STATE_DECLINED
 	lesson_declined.emit(mom, player)
 	_mark_attempt_consumed()
-	_finish_scheduled_activity()
 	_clear_participants()
 
 
-func start_lesson(mom: Node2D, player: Node2D) -> void:
-	if _magic_lesson_disabled():
-		_breadcrumb("magic_lesson:start_disabled", String(spot_id))
-		return
+func start_lesson(
+	mom: Node2D,
+	player: Node2D,
+	expected_session_id: String = ""
+) -> Dictionary:
+	var validation_reason := _validate_lesson_start(mom, player, expected_session_id)
+	if not validation_reason.is_empty():
+		_log_lesson_transition(
+			_get_persistent_lesson_phase(), "running", false, validation_reason
+		)
+		return {"accepted": false, "reason": validation_reason}
+	if (
+		state == STATE_RUNNING
+		and active_action_session_id == expected_session_id
+		and mom == active_mom
+		and player == active_player
+	):
+		return {"accepted": true, "reason": "already_running"}
+	active_mom_id = _get_npc_id(mom)
+	active_action_session_id = expected_session_id
+	var previous_phase := _get_persistent_lesson_phase()
+	var transition_result := _transition_activity({
+		"expected_lesson_phases": ["handoff", "accepted", "running"],
+		"lesson_phase": "running",
+		"last_total_hours": _get_current_total_hours(),
+	})
+	if not bool(transition_result.get("accepted", false)):
+		var transition_reason := String(transition_result.get("reason", "running_transition_rejected"))
+		_log_lesson_transition(previous_phase, "running", false, transition_reason)
+		return {"accepted": false, "reason": transition_reason}
 	active_mom = mom
 	active_player = player
 	state = STATE_RUNNING
@@ -219,39 +280,53 @@ func start_lesson(mom: Node2D, player: Node2D) -> void:
 	lesson_timer = _get_lesson_real_seconds()
 	_place_participants()
 	_lock_participants()
-	_set_activity_phase(&"running")
 	_update_visual()
 	lesson_started.emit(mom, player)
+	_log_lesson_transition(previous_phase, "running", true, "local_start_accepted")
+	return {"accepted": true, "reason": "started"}
 
 
-func complete_lesson() -> void:
-	if state == STATE_COMPLETED:
-		return
+func complete_lesson(expected_session_id: String = "") -> bool:
+	var expected_session := (
+		expected_session_id if not expected_session_id.is_empty() else active_action_session_id
+	)
+	if state != STATE_RUNNING or not _terminal_session_is_current(expected_session):
+		_log_lesson_transition(String(state), "completed", false, "stale_or_inactive_completion")
+		return false
 
 	var completed_mom := active_mom
 	var completed_player := active_player
 	_finalize_lesson_score(completed_mom, completed_player)
+	if not _finish_scheduled_activity(expected_session):
+		return false
 	_apply_reward_once()
 	completed_day = _get_current_day()
 	state = STATE_COMPLETED
 	_unlock_participants()
 	_mark_attempt_consumed()
-	_finish_scheduled_activity()
 	_update_visual()
 	lesson_completed.emit(completed_mom, completed_player)
 	_clear_participants()
+	return true
 
 
-func cancel_lesson(reason: StringName) -> void:
-	if state == STATE_IDLE or state == STATE_COMPLETED or state == STATE_DECLINED:
-		return
-
+func cancel_lesson(reason: StringName, expected_session_id: String = "") -> bool:
+	if state in [STATE_IDLE, STATE_COMPLETED, STATE_DECLINED, STATE_CANCELLED, STATE_FAILED]:
+		return false
+	var expected_session := (
+		expected_session_id if not expected_session_id.is_empty() else active_action_session_id
+	)
+	if not _terminal_session_is_current(expected_session):
+		_log_lesson_transition(String(state), "cancelled", false, "stale_terminal_session")
+		return false
+	if not _finish_scheduled_activity(expected_session):
+		return false
 	state = STATE_CANCELLED
 	_unlock_participants()
 	lesson_cancelled.emit(reason)
-	_finish_scheduled_activity()
 	_update_visual()
 	_clear_participants()
+	return true
 
 
 func is_invitation_pending_for(mom: Node2D, player: Node2D) -> bool:
@@ -272,6 +347,10 @@ func lesson_is_done_for(_mom: Node2D, _player: Node2D) -> bool:
 
 func get_lesson_state() -> StringName:
 	return state
+
+
+func get_active_lesson_session_id() -> String:
+	return active_action_session_id if state == STATE_RUNNING else ""
 
 
 func get_lesson_progress() -> float:
@@ -394,35 +473,26 @@ func _mark_attempt_consumed() -> void:
 	_set_availability_value(_get_lesson_done_threshold())
 
 
-func _set_activity_phase(phase: StringName) -> void:
-	if active_mom == null or not is_instance_valid(active_mom):
-		return
-
+func _transition_activity(updates: Dictionary) -> Dictionary:
 	var locations := get_node_or_null("/root/NpcLocations")
-	if locations == null or not locations.has_method("set_scheduled_activity_field"):
-		return
-
-	var npc_id := _get_mom_location_id()
-	if npc_id.is_empty():
-		return
-
-	locations.call("set_scheduled_activity_field", npc_id, &"lesson_phase", String(phase))
-	locations.call("set_scheduled_activity_field", npc_id, &"last_total_hours", _get_current_total_hours())
+	if locations == null or not locations.has_method("transition_scheduled_activity"):
+		return {"accepted": false, "reason": "activity_transition_service_missing"}
+	if active_mom_id.is_empty() or active_action_session_id.is_empty():
+		return {"accepted": false, "reason": "lesson_identity_missing"}
+	return locations.call(
+		"transition_scheduled_activity",
+		StringName(active_mom_id),
+		StringName(active_action_session_id),
+		updates
+	)
 
 
 func _set_activity_lesson_score(score: float) -> void:
-	if active_mom == null or not is_instance_valid(active_mom):
-		return
-
-	var locations := get_node_or_null("/root/NpcLocations")
-	if locations == null or not locations.has_method("set_scheduled_activity_field"):
-		return
-
-	var npc_id := _get_mom_location_id()
-	if npc_id.is_empty():
-		return
-
-	locations.call("set_scheduled_activity_field", npc_id, &"lesson_score", score)
+	_transition_activity({
+		"expected_lesson_phases": ["running"],
+		"lesson_score": score,
+		"last_total_hours": _get_current_total_hours(),
+	})
 
 
 func _set_availability_value(new_value: float) -> void:
@@ -461,24 +531,33 @@ func _award_lesson_time_xp(delta: float) -> void:
 	})
 
 
-func _finish_scheduled_activity() -> void:
-	if active_mom == null or not is_instance_valid(active_mom):
-		return
-
+func _finish_scheduled_activity(expected_session_id: String) -> bool:
 	var locations := get_node_or_null("/root/NpcLocations")
 	if locations == null or not locations.has_method("finish_scheduled_activity"):
-		return
-
-	var npc_id := _get_mom_location_id()
-	if npc_id.is_empty():
-		return
-
-	locations.call(
-		"finish_scheduled_activity",
-		npc_id,
-		_get_current_scene_path(),
+		return false
+	if active_mom_id.is_empty() or expected_session_id.is_empty():
+		return false
+	var return_scene_path := _get_current_scene_path()
+	var return_position := (
 		active_mom.global_position
+		if active_mom != null and is_instance_valid(active_mom)
+		else global_position
 	)
+	if locations.has_method("get_record_snapshot"):
+		var record: Dictionary = locations.call("get_record_snapshot", active_mom_id)
+		var activity = record.get("activity", {})
+		if activity is Dictionary:
+			return_scene_path = String(activity.get("return_scene_path", return_scene_path))
+			var saved_return_position = activity.get("return_position", return_position)
+			if saved_return_position is Vector2:
+				return_position = saved_return_position
+	return bool(locations.call(
+		"finish_scheduled_activity",
+		active_mom_id,
+		return_scene_path,
+		return_position,
+		expected_session_id
+	))
 
 
 func _register_live_spot() -> void:
@@ -520,6 +599,154 @@ func _participants_valid() -> bool:
 		and active_player != null
 		and is_instance_valid(active_player)
 	)
+
+
+func _validate_lesson_start(
+	mom: Node2D,
+	player: Node2D,
+	expected_session_id: String
+) -> String:
+	if _magic_lesson_disabled():
+		return "lesson_disabled"
+	if expected_session_id.strip_edges().is_empty():
+		return "expected_session_missing"
+	if mom == null or player == null or not is_instance_valid(mom) or not is_instance_valid(player):
+		return "invalid_participant"
+	if not mom.is_inside_tree() or not player.is_inside_tree() or not is_inside_tree():
+		return "participant_not_in_tree"
+	if state == STATE_RUNNING and active_action_session_id != expected_session_id:
+		return "lesson_spot_owned_by_other_session"
+	var npc_id := _get_npc_id(mom)
+	if npc_id.is_empty():
+		return "mom_id_missing"
+	var machine := mom.get_node_or_null("NpcStateMachine")
+	if machine == null or not machine.has_method("get_active_action_session_id"):
+		return "mom_action_machine_missing"
+	if String(machine.call("get_active_action_session_id")) != expected_session_id:
+		return "mom_active_session_mismatch"
+	if machine.has_method("get_active_action_descriptor"):
+		var active_descriptor: Dictionary = machine.call("get_active_action_descriptor")
+		if String(active_descriptor.get("action_kind", "")) != "InvitePlayer":
+			return "mom_action_kind_mismatch"
+
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations == null or not locations.has_method("get_record_snapshot"):
+		return "npc_locations_missing"
+	var record: Dictionary = locations.call("get_record_snapshot", npc_id)
+	var activity = record.get("activity", {})
+	if not (activity is Dictionary) or activity.is_empty():
+		return "scheduled_activity_missing"
+	if NpcActionSession._descriptor_session_id(activity) != expected_session_id:
+		return "persistent_activity_session_mismatch"
+	var action = record.get("action", {})
+	if action is Dictionary and not action.is_empty():
+		if NpcActionSession._descriptor_session_id(action) != expected_session_id:
+			return "persistent_action_session_mismatch"
+		var metadata = action.get("metadata", {})
+		if metadata is Dictionary and metadata.has("lesson_phase"):
+			if String(metadata.get("lesson_phase", "")) != String(activity.get("lesson_phase", "")):
+				return "lesson_phase_metadata_mismatch"
+	var lesson_phase := String(activity.get("lesson_phase", "inviting"))
+	if lesson_phase not in ["handoff", "accepted", "running"]:
+		return "lesson_phase_not_startable"
+	if not _lesson_schedule_is_active():
+		return "lesson_schedule_inactive"
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if simulator == null or not simulator.has_method("session_owns_spot"):
+		return "reservation_service_missing"
+	if not bool(simulator.call(
+		"session_owns_spot",
+		StringName(npc_id),
+		expected_session_id,
+		spot_id,
+		StringName(String(activity.get("reservation_purpose", "activity")))
+	)):
+		return "lesson_reservation_missing"
+	return ""
+
+
+func _validate_invitation_start(mom: Node2D, player: Node2D) -> String:
+	if _magic_lesson_disabled():
+		return "lesson_disabled"
+	if mom == null or player == null or not is_instance_valid(mom) or not is_instance_valid(player):
+		return "invalid_participant"
+	if state == STATE_INVITING:
+		return "" if mom == active_mom and player == active_player else "invitation_owned_by_other_participants"
+	if state == STATE_RUNNING:
+		return "lesson_already_running"
+	if _attempt_already_used_today():
+		return "lesson_attempt_already_used"
+	if not _world_spot_is_available():
+		return "lesson_spot_unavailable"
+	if not mom.is_inside_tree() or not player.is_inside_tree() or not is_inside_tree():
+		return "participant_not_in_tree"
+	return ""
+
+
+func _terminal_session_is_current(expected_session_id: String) -> bool:
+	if (
+		expected_session_id.is_empty()
+		or expected_session_id != active_action_session_id
+		or active_mom_id.is_empty()
+	):
+		return false
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations == null or not locations.has_method("get_record_snapshot"):
+		return false
+	var record: Dictionary = locations.call("get_record_snapshot", active_mom_id)
+	var activity = record.get("activity", {})
+	if not (activity is Dictionary) or activity.is_empty():
+		return false
+	if NpcActionSession._descriptor_session_id(activity) != expected_session_id:
+		return false
+	var action = record.get("action", {})
+	return (
+		not (action is Dictionary)
+		or action.is_empty()
+		or NpcActionSession._descriptor_session_id(action) == expected_session_id
+	)
+
+
+func _get_persistent_lesson_phase() -> String:
+	if active_mom_id.is_empty():
+		return ""
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations == null or not locations.has_method("get_record_snapshot"):
+		return ""
+	var record: Dictionary = locations.call("get_record_snapshot", active_mom_id)
+	var activity = record.get("activity", {})
+	return String(activity.get("lesson_phase", "")) if activity is Dictionary else ""
+
+
+func _get_npc_id(candidate: Node) -> String:
+	if candidate == null or not is_instance_valid(candidate):
+		return ""
+	if candidate.has_method("get_npc_location_id"):
+		return String(candidate.call("get_npc_location_id")).strip_edges()
+	if candidate.has_meta("npc_location_id"):
+		return String(candidate.get_meta("npc_location_id")).strip_edges()
+	return ""
+
+
+func _log_lesson_transition(
+	old_phase: String,
+	new_phase: String,
+	accepted: bool,
+	reason: String
+) -> void:
+	if not OS.is_debug_build():
+		return
+	var reservation_ids = []
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations != null and locations.has_method("get_record_snapshot") and not active_mom_id.is_empty():
+		var record: Dictionary = locations.call("get_record_snapshot", active_mom_id)
+		var activity = record.get("activity", {})
+		if activity is Dictionary:
+			reservation_ids = activity.get("reservation_ids", [])
+	print("Magic lesson local: npc=%s session=%s phase=%s->%s scene=%s reservation=%s accepted=%s reason=%s" % [
+		active_mom_id, active_action_session_id, old_phase, new_phase,
+		_get_current_scene_path(), str(reservation_ids), str(accepted), reason,
+	])
 
 
 func _clear_participants() -> void:

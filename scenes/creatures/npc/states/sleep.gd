@@ -18,6 +18,10 @@ var sleep_progress_elapsed: float = 0.0
 var active_sleep_target: Node2D
 
 
+func on_action_session_refreshed() -> void:
+	active_sleep_target = machine.get_sleep_target()
+
+
 func enter() -> void:
 	# Walks to a sleep spot first, then starts the long sleep timer.
 	super.enter()
@@ -30,14 +34,8 @@ func enter() -> void:
 		return
 
 	if not is_close_to(active_sleep_target.global_position, machine.stop_distance):
-		machine.move_target = active_sleep_target
-		machine.state_after_move = &"Sleep"
 		machine.call_deferred(
-			"request_state",
-			&"MoveToTarget",
-			active_sleep_target,
-			"walk_to_sleep",
-			20
+			"request_active_action_approach", action_session_id, "walk_to_sleep", 20
 		)
 		return
 
@@ -63,6 +61,8 @@ func exit() -> void:
 
 
 func physics_process(delta: float) -> NpcState:
+	if not action_session_is_current():
+		return reconcile_invalid_action_session()
 	# Sleep need drains gradually while the NPC stays asleep at the sleep spot.
 	stop_horizontal()
 	if _fight_should_interrupt_sleep():
@@ -72,15 +72,14 @@ func physics_process(delta: float) -> NpcState:
 		return get_state(&"Idle")
 
 	if active_sleep_target != null and not _target_can_be_slept_at(active_sleep_target):
-		machine.sleep_target = null
+		machine.set_action_target(&"Sleep", null, action_session_id)
 		active_sleep_target = _resolve_sleep_target()
 		if active_sleep_target == null:
 			_flush_sleep_progress()
 			return get_state(&"Idle")
 
 	if active_sleep_target != null and not is_close_to(active_sleep_target.global_position, machine.stop_distance):
-		machine.move_target = active_sleep_target
-		machine.state_after_move = &"Sleep"
+		machine.begin_active_action_approach(action_session_id)
 		return get_state(&"MoveToTarget")
 
 	if sleep_timer <= 0.0:
@@ -147,18 +146,20 @@ func _resolve_sleep_target() -> Node2D:
 	if machine == null:
 		return null
 
+	var assigned_target := machine.get_sleep_target()
+	if _target_can_be_slept_at(assigned_target):
+		return assigned_target
+
 	if String(sleep_target_path) != "" and machine.npc != null:
 		var configured_target := machine.npc.get_node_or_null(sleep_target_path) as Node2D
 		if _target_can_be_slept_at(configured_target):
+			machine.set_action_target(&"Sleep", configured_target, action_session_id)
 			return configured_target
 
-	if _target_can_be_slept_at(machine.sleep_target):
-		return machine.sleep_target
-
-	machine.sleep_target = null
+	machine.set_action_target(&"Sleep", null, action_session_id)
 	var closest_spot := find_closest_need_spot(&"Sleep", sleep_value_name)
 	if closest_spot != null:
-		machine.sleep_target = closest_spot
+		machine.set_action_target(&"Sleep", closest_spot, action_session_id)
 		return closest_spot
 
 	return null

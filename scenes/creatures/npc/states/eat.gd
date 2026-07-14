@@ -16,6 +16,10 @@ var inventory_food_retry_until_msec: int = 0
 var food_service := FoodConsumptionService.new()
 
 
+func on_action_session_refreshed() -> void:
+	active_eat_target = machine.get_eat_target()
+
+
 func enter() -> void:
 	# Walks to a configured/nearby eat spot first, then starts the eating timer.
 	super.enter()
@@ -48,12 +52,9 @@ func enter() -> void:
 		return
 	if active_eat_target != null and not is_close_to(active_eat_target.global_position, machine.stop_distance):
 		_breadcrumb("npc_eat:walk_to_target", "%s -> %s" % [_npc_label(), active_eat_target.name])
-		machine.move_target = active_eat_target
-		machine.state_after_move = &"Eat"
 		machine.call_deferred(
-			"request_state",
-			&"MoveToTarget",
-			active_eat_target,
+			"request_active_action_approach",
+			action_session_id,
 			"walk_to_eat",
 			20
 		)
@@ -82,8 +83,12 @@ func exit() -> void:
 
 
 func physics_process(delta: float) -> NpcState:
+	if not action_session_is_current():
+		return reconcile_invalid_action_session()
 	# Hunger drains gradually while the NPC stays at the eat spot.
 	stop_horizontal()
+	if _hunger_is_sated():
+		return get_state(&"Idle")
 	if active_eat_target == null or not is_instance_valid(active_eat_target):
 		active_eat_target = _resolve_eat_target()
 		if active_eat_target == null:
@@ -92,14 +97,13 @@ func physics_process(delta: float) -> NpcState:
 
 	if active_eat_target != null and not _target_can_be_eaten_at(active_eat_target):
 		_breadcrumb("npc_eat:target_rejected", "%s %s" % [_npc_label(), active_eat_target.name])
-		machine.eat_target = null
+		machine.set_action_target(&"Eat", null, action_session_id)
 		active_eat_target = _resolve_eat_target()
 		if active_eat_target == null:
 			return get_state(&"Idle")
 
 	if active_eat_target != null and not is_close_to(active_eat_target.global_position, machine.stop_distance):
-		machine.move_target = active_eat_target
-		machine.state_after_move = &"Eat"
+		machine.begin_active_action_approach(action_session_id)
 		return get_state(&"MoveToTarget")
 
 	if eat_timer <= 0.0:
@@ -140,6 +144,8 @@ func can_continue_during_talk() -> bool:
 
 func process_talk_overlay(delta: float) -> StringName:
 	stop_horizontal()
+	if _hunger_is_sated():
+		return &"Idle"
 
 	if active_eat_target == null or not is_instance_valid(active_eat_target):
 		active_eat_target = _resolve_eat_target()
@@ -150,8 +156,7 @@ func process_talk_overlay(delta: float) -> StringName:
 		return &"Idle"
 
 	if active_eat_target != null and not is_close_to(active_eat_target.global_position, machine.stop_distance):
-		machine.move_target = active_eat_target
-		machine.state_after_move = &"Eat"
+		machine.begin_active_action_approach(action_session_id)
 		return &"MoveToTarget"
 
 	if eat_timer <= 0.0 or _hunger_is_sated():
@@ -177,23 +182,26 @@ func _resolve_eat_target() -> Node2D:
 	if machine == null:
 		return null
 
+	var assigned_target := machine.get_eat_target()
+	if _target_can_be_eaten_at(assigned_target):
+		_breadcrumb("npc_eat:target_assigned", "%s -> %s" % [_npc_label(), assigned_target.name])
+		return assigned_target
+
 	if String(eat_target_path) != "" and machine.npc != null:
 		var configured_target := machine.npc.get_node_or_null(eat_target_path) as Node2D
 		if _target_can_be_eaten_at(configured_target):
+			machine.set_action_target(&"Eat", configured_target, action_session_id)
 			_breadcrumb("npc_eat:target_configured", "%s -> %s" % [_npc_label(), configured_target.name])
 			return configured_target
 
-	if _target_can_be_eaten_at(machine.eat_target):
-		_breadcrumb("npc_eat:target_assigned", "%s -> %s" % [_npc_label(), machine.eat_target.name])
-		return machine.eat_target
-
-	machine.eat_target = null
+	machine.set_action_target(&"Eat", null, action_session_id)
 	var closest_spot := find_closest_need_spot(&"Eat", eat_value_name)
 	if closest_spot != null:
-		machine.eat_target = closest_spot
+		machine.set_action_target(&"Eat", closest_spot, action_session_id)
 		_breadcrumb("npc_eat:target_closest", "%s -> %s" % [_npc_label(), closest_spot.name])
 		return closest_spot
 	if Time.get_ticks_msec() >= inventory_food_retry_until_msec and _has_available_inventory_food():
+		machine.set_action_target(&"Eat", npc, action_session_id)
 		return npc
 
 	return null
@@ -240,6 +248,10 @@ func _prepare_inventory_food_if_needed() -> bool:
 	if inventory_food_item_id == &"":
 		return false
 	inventory_food_reservation_id = StringName("eat:%s" % _get_npc_id())
+	if machine != null:
+		machine.register_active_action_reservation(
+			String(inventory_food_reservation_id), action_session_id
+		)
 	var reservation := inventory.reserve_items(
 		inventory_food_reservation_id,
 		{inventory_food_item_id: 1}
@@ -287,13 +299,25 @@ func _should_preserve_inventory_food_reservation() -> bool:
 	if destination_name == &"":
 		destination_name = StringName(machine.current_state.name)
 	if destination_name == &"MoveToTarget":
-		return machine.state_after_move == &"Eat"
-	return destination_name == &"Eat"
+		return (
+			machine.get_active_action_session_id() == action_session_id
+			and machine.active_action != null
+			and machine.active_action.action_kind == &"Eat"
+		)
+	return (
+		destination_name == &"Eat"
+		and machine.get_active_action_session_id() == action_session_id
+	)
 
 
 func _release_inventory_food_reservation() -> void:
 	var inventory := _get_npc_inventory()
-	if inventory != null and inventory_food_reservation_id != &"" and inventory.has_reservation(inventory_food_reservation_id):
+	var may_release := true
+	if machine != null and inventory_food_reservation_id != &"":
+		may_release = machine.claim_active_action_reservation_release(
+			String(inventory_food_reservation_id), action_session_id
+		)
+	if may_release and inventory != null and inventory_food_reservation_id != &"" and inventory.has_reservation(inventory_food_reservation_id):
 		inventory.release_reservation(inventory_food_reservation_id)
 	inventory_food_item_id = &""
 	inventory_food_reservation_id = &""

@@ -10,6 +10,12 @@ var cached_target_position: Vector2
 var refresh_timer: float = 0.0
 
 
+func on_action_session_refreshed() -> void:
+	tracked_target = _resolve_target()
+	if tracked_target != null and is_instance_valid(tracked_target):
+		cached_target_position = tracked_target.global_position
+
+
 func enter() -> void:
 	super.enter()
 	tracked_target = _resolve_target()
@@ -20,8 +26,11 @@ func enter() -> void:
 
 
 func physics_process(delta: float) -> NpcState:
+	if not action_session_is_current():
+		return reconcile_invalid_action_session()
 	if tracked_target == null or not is_instance_valid(tracked_target):
-		return get_state(machine.consume_state_after_move(arrive_state_name))
+		machine.fail_active_action(action_session_id, "movement_target_missing")
+		return get_state(&"Idle")
 
 	# Refresh the target position on a small interval instead of doing extra target work every frame.
 	refresh_timer -= delta
@@ -34,7 +43,7 @@ func physics_process(delta: float) -> NpcState:
 		speed = machine.get_effective_walk_speed()
 
 	if move_toward_position(cached_target_position, speed, machine.stop_distance):
-		return get_state(machine.consume_state_after_move(arrive_state_name))
+		return get_state(machine.finish_active_action_approach(action_session_id, arrive_state_name))
 
 	return next_state
 
@@ -43,12 +52,4 @@ func _resolve_target() -> Node2D:
 	if machine == null:
 		return null
 
-	if String(target_node_path) != "" and machine.npc != null:
-		var configured_target := machine.npc.get_node_or_null(target_node_path) as Node2D
-		if configured_target != null:
-			return configured_target
-
-	if machine.move_target != null and is_instance_valid(machine.move_target):
-		return machine.move_target
-
-	return machine.get_active_target()
+	return machine.get_active_action_target()

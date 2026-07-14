@@ -18,6 +18,10 @@ var active_value_delta_per_game_hour: float = 0.0
 var active_finish_when_value_sated: bool = true
 
 
+func on_action_session_refreshed() -> void:
+	active_routine_target = machine.get_routine_task_target()
+
+
 func enter() -> void:
 	super.enter()
 	active_routine_target = _resolve_routine_target()
@@ -29,14 +33,8 @@ func enter() -> void:
 		return
 
 	if not is_close_to(active_routine_target.global_position, machine.stop_distance):
-		machine.move_target = active_routine_target
-		machine.state_after_move = &"RoutineTask"
 		machine.call_deferred(
-			"request_state",
-			&"MoveToTarget",
-			active_routine_target,
-			"walk_to_routine_task",
-			20
+			"request_active_action_approach", action_session_id, "walk_to_routine_task", 20
 		)
 		return
 
@@ -44,6 +42,8 @@ func enter() -> void:
 
 
 func physics_process(delta: float) -> NpcState:
+	if not action_session_is_current():
+		return reconcile_invalid_action_session()
 	stop_horizontal()
 
 	if active_routine_target == null or not is_instance_valid(active_routine_target):
@@ -59,8 +59,7 @@ func physics_process(delta: float) -> NpcState:
 			return get_state(&"Idle")
 
 	if not is_close_to(active_routine_target.global_position, machine.stop_distance):
-		machine.move_target = active_routine_target
-		machine.state_after_move = &"RoutineTask"
+		machine.begin_active_action_approach(action_session_id)
 		return get_state(&"MoveToTarget")
 
 	if routine_timer <= 0.0:
@@ -90,18 +89,20 @@ func _resolve_routine_target() -> Node2D:
 	if machine == null:
 		return null
 
+	var assigned_target := machine.get_routine_task_target()
+	if _target_can_be_used(assigned_target):
+		return assigned_target
+
 	if String(routine_target_path) != "" and machine.npc != null:
 		var configured_target := machine.npc.get_node_or_null(routine_target_path) as Node2D
 		if _target_can_be_used(configured_target):
+			machine.set_action_target(&"RoutineTask", configured_target, action_session_id)
 			return configured_target
 
-	if _target_can_be_used(machine.routine_task_target):
-		return machine.routine_task_target
-
-	machine.routine_task_target = null
+	machine.set_action_target(&"RoutineTask", null, action_session_id)
 	var closest_spot := find_closest_need_spot(&"RoutineTask", routine_value_name)
 	if closest_spot != null:
-		machine.routine_task_target = closest_spot
+		machine.set_action_target(&"RoutineTask", closest_spot, action_session_id)
 
 	return closest_spot
 
@@ -157,7 +158,7 @@ func _routine_value_is_sated() -> bool:
 
 func _clear_routine_target() -> void:
 	if machine != null:
-		machine.routine_task_target = null
+		machine.set_action_target(&"RoutineTask", null, action_session_id)
 	active_routine_target = null
 	routine_timer = 0.0
 	progress_elapsed = 0.0

@@ -20,6 +20,7 @@ const VALUE_ALIASES := {
 @export var value_max: float = 100.0
 
 @export_group("Serving")
+@export_range(0, 32, 1) var reservation_capacity: int = 1
 @export var restrict_to_target_npc: bool = true
 # Clear owner controls for plug-and-play spots. Leave these empty to use the legacy target_npc_path rule.
 @export var owner_npc_paths: Array[NodePath] = []
@@ -74,6 +75,7 @@ var visual_refresh_timer: float = 0.0
 var request_check_timer: float = 0.0
 var visual_dirty: bool = true
 var request_dirty: bool = true
+var registered_world_spot_id: StringName = &""
 
 
 func _ready() -> void:
@@ -856,18 +858,28 @@ func _record_watchdog_marker(source: StringName, detail: String = "") -> void:
 
 
 func _register_world_spot() -> void:
-	if spot_id == &"":
+	var effective_spot_id := get_persistent_spot_id()
+	if effective_spot_id == &"":
 		return
 
 	var simulator := get_node_or_null("/root/NpcWorldSimulation")
 	if simulator != null and simulator.has_method("register_live_spot"):
-		simulator.call("register_live_spot", spot_id, self)
+		simulator.call("register_live_spot", effective_spot_id, self)
+		registered_world_spot_id = effective_spot_id
+
+
+func get_persistent_spot_id() -> StringName:
+	if spot_id != &"":
+		return spot_id
+	return StringName(String(get_path())) if is_inside_tree() else &""
 
 
 func _unregister_world_spot() -> void:
-	if spot_id == &"":
+	var effective_spot_id := registered_world_spot_id
+	if effective_spot_id == &"":
 		return
 
 	var simulator := get_node_or_null("/root/NpcWorldSimulation")
 	if simulator != null and simulator.has_method("unregister_live_spot"):
-		simulator.call("unregister_live_spot", spot_id, self)
+		simulator.call("unregister_live_spot", effective_spot_id, self)
+	registered_world_spot_id = &""

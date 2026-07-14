@@ -11,6 +11,10 @@ var progress_elapsed: float = 0.0
 var choice_rng := RandomNumberGenerator.new()
 
 
+func on_action_session_refreshed() -> void:
+	active_recreation_target = machine.get_recreation_target()
+
+
 func init() -> void:
 	choice_rng.randomize()
 
@@ -25,14 +29,8 @@ func enter() -> void:
 		machine.call_deferred("request_state", &"Idle", null, "missing_recreation_spot", 20)
 		return
 	if not is_close_to(active_recreation_target.global_position, machine.stop_distance):
-		machine.move_target = active_recreation_target
-		machine.state_after_move = &"Recreation"
 		machine.call_deferred(
-			"request_state",
-			&"MoveToTarget",
-			active_recreation_target,
-			"walk_to_recreation",
-			20
+			"request_active_action_approach", action_session_id, "walk_to_recreation", 20
 		)
 		return
 
@@ -40,6 +38,8 @@ func enter() -> void:
 
 
 func physics_process(delta: float) -> NpcState:
+	if not action_session_is_current():
+		return reconcile_invalid_action_session()
 	# Boredom falls gradually at the chosen spot; fatigue still rises through the machine.
 	stop_horizontal()
 	if active_recreation_target == null or not is_instance_valid(active_recreation_target):
@@ -48,19 +48,18 @@ func physics_process(delta: float) -> NpcState:
 			return get_state(&"Idle")
 
 	if not _target_can_be_used(active_recreation_target):
-		machine.recreation_target = null
+		machine.set_action_target(&"Recreation", null, action_session_id)
 		active_recreation_target = _resolve_recreation_target()
 		if active_recreation_target == null:
 			return get_state(&"Idle")
 
 	if not is_close_to(active_recreation_target.global_position, machine.stop_distance):
-		machine.move_target = active_recreation_target
-		machine.state_after_move = &"Recreation"
+		machine.begin_active_action_approach(action_session_id)
 		return get_state(&"MoveToTarget")
 
 	_apply_recreation_progress(delta)
 	if recreation_value_name == &"" or machine.get_value(recreation_value_name) <= boredom_floor:
-		machine.recreation_target = null
+		machine.set_action_target(&"Recreation", null, action_session_id)
 		return get_state(&"Idle")
 
 	return next_state
@@ -80,19 +79,18 @@ func can_continue_during_talk() -> bool:
 func process_talk_overlay(delta: float) -> StringName:
 	stop_horizontal()
 	if active_recreation_target == null or not is_instance_valid(active_recreation_target):
-		machine.recreation_target = null
+		machine.set_action_target(&"Recreation", null, action_session_id)
 		return &"Idle"
 	if not _target_can_be_used(active_recreation_target):
-		machine.recreation_target = null
+		machine.set_action_target(&"Recreation", null, action_session_id)
 		return &"Idle"
 	if not is_close_to(active_recreation_target.global_position, machine.stop_distance):
-		machine.move_target = active_recreation_target
-		machine.state_after_move = &"Recreation"
+		machine.begin_active_action_approach(action_session_id)
 		return &"MoveToTarget"
 
 	_apply_recreation_progress(delta)
 	if recreation_value_name == &"" or machine.get_value(recreation_value_name) <= boredom_floor:
-		machine.recreation_target = null
+		machine.set_action_target(&"Recreation", null, action_session_id)
 		return &"Idle"
 	return &"Recreation"
 
@@ -125,18 +123,20 @@ func _resolve_recreation_target() -> Node2D:
 	if machine == null:
 		return null
 
+	var assigned_target := machine.get_recreation_target()
+	if _target_can_be_used(assigned_target):
+		return assigned_target
+
 	if String(recreation_target_path) != "" and machine.npc != null:
 		var configured_target := machine.npc.get_node_or_null(recreation_target_path) as Node2D
 		if _target_can_be_used(configured_target):
+			machine.set_action_target(&"Recreation", configured_target, action_session_id)
 			return configured_target
 
-	if _target_can_be_used(machine.recreation_target):
-		return machine.recreation_target
-
-	machine.recreation_target = null
+	machine.set_action_target(&"Recreation", null, action_session_id)
 	var preferred_spot := find_weighted_casual_spot(&"Recreation", choice_rng)
 	if preferred_spot != null:
-		machine.recreation_target = preferred_spot
+		machine.set_action_target(&"Recreation", preferred_spot, action_session_id)
 
 	return preferred_spot
 

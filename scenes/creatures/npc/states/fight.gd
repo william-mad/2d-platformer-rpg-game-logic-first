@@ -84,6 +84,8 @@ func values_changed(
 
 
 func physics_process(delta: float) -> NpcState:
+	if not action_session_is_current():
+		return reconcile_invalid_action_session()
 	var finished_state := _get_finished_fight_state()
 	if finished_state != null:
 		return finished_state
@@ -133,10 +135,12 @@ func _update_target(delta: float) -> void:
 
 func _find_fight_target() -> Node2D:
 	if machine != null:
-		if _can_target_for_fight(machine.last_actor):
-			return machine.last_actor
-		if _can_target_for_fight(machine.target):
-			return machine.target
+		var action_target := machine.get_active_action_target()
+		if _can_target_for_fight(action_target):
+			return action_target
+		var selected_target := machine.get_selected_threat()
+		if _can_target_for_fight(selected_target):
+			return selected_target
 
 	if npc == null or not npc.is_inside_tree():
 		return null
@@ -437,6 +441,9 @@ func _get_finished_fight_state() -> NpcState:
 
 func _set_fight_target(new_target: Node2D) -> void:
 	fight_target = new_target
+	if machine != null:
+		machine.select_combat_target(new_target)
+		machine.set_action_target(&"Fight", new_target, action_session_id)
 	if fight_target != null:
 		fight_target_was_monster = _target_is_monster(fight_target)
 

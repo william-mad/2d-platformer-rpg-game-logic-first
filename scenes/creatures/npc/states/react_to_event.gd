@@ -11,7 +11,7 @@ var reaction_velocity_x: float = 0.0
 func enter() -> void:
 	# Short attention/recoil state for a specific event actor, not normal sight.
 	super.enter()
-	reaction_target = machine.last_actor if machine.last_actor != null else machine.get_active_target()
+	reaction_target = machine.get_active_action_target()
 	reaction_velocity_x = 0.0
 	reaction_timer = reaction_duration
 

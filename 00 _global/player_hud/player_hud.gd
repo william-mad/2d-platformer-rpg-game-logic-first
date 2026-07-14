@@ -1,26 +1,24 @@
 extends CanvasLayer
 
 @onready var hpbar: TextureProgressBar = $"Control/hp margin cont/NinePatchRect/hpbar"
-@onready var hp_container: MarginContainer = $"Control/hp margin cont"
 @onready var mana_bar: TextureProgressBar = $"Control/mana margin cont/mana_2/mana"
 @onready var mana_2_bar: TextureProgressBar = $"Control/mana margin cont/mana_2"
 @onready var control_root: Control = $Control
+@onready var knockout_icon: TextureRect = $Control/KnockoutIcon
 @onready var inventory_screen: PlayerInventoryScreen = $PlayerInventoryScreen
 @onready var trade_screen: TradeScreen = $TradeScreen
 
 const INVENTORY_ACTION: StringName = &"inventory"
 
 const LEVEL_LABEL_SIZE := Vector2(48.0, 18.0)
-const LEVEL_LABEL_GAP := 6.0
+const LEVEL_LABEL_POSITION := Vector2(304.0, 7.0)
 const LEVEL_XP_BAR_HEIGHT := 3.0
-const NEED_LABEL_X := 482.0
-const NEED_BAR_X := 535.0
+const NEED_BAR_X := 336.0
 const NEED_BAR_SIZE := Vector2(118.0, 6.0)
-const NEED_ROW_GAP := 18.0
-const KNOCKOUT_LABEL_X := 482.0
-const KNOCKOUT_BAR_X := 535.0
-const KNOCKOUT_BAR_Y := 46.0
-const KNOCKOUT_BAR_SIZE := Vector2(118.0, 5.0)
+const NEED_ROW_GAP := 21.0
+const KNOCKOUT_BAR_X := 54.0
+const KNOCKOUT_BAR_Y := 98.0
+const KNOCKOUT_BAR_SIZE := Vector2(218.0, 6.0)
 const MANA_ATTACK_NORMAL_COLOR := Color(0.28, 0.62, 1.0, 1.0)
 const MANA_ATTACK_SPECIAL_1_COLOR := Color(0.14, 0.92, 0.72, 1.0)
 const MANA_ATTACK_SPECIAL_2_COLOR := Color(1.0, 0.72, 0.18, 1.0)
@@ -28,7 +26,6 @@ const MANA_ATTACK_SPECIAL_3_COLOR := Color(1.0, 0.22, 0.58, 1.0)
 
 var hunger_bar: TextureProgressBar
 var sleep_need_bar: TextureProgressBar
-var knockout_label: Label
 var knockout_bar: TextureProgressBar
 var level_label: Label
 var level_xp_back: ColorRect
@@ -148,18 +145,22 @@ func set_hp(current_hp: float) -> void:
 	hpbar.value = next_value
 
 
-func setup_knockout(max_knockout: float, current_knockout: float, active: bool = false) -> void:
+func setup_knockout(
+	max_knockout: float,
+	current_knockout: float,
+	active: bool = false,
+	downed: bool = false
+) -> void:
 	_ensure_knockout_bar()
 	knockout_bar.max_value = maxf(max_knockout, 1.0)
-	set_knockout(current_knockout, active)
+	set_knockout(current_knockout, active, downed)
 
 
-func set_knockout(current_knockout: float, active: bool = true) -> void:
+func set_knockout(current_knockout: float, active: bool = true, downed: bool = false) -> void:
 	_ensure_knockout_bar()
 	knockout_bar.value = clampf(current_knockout, 0.0, knockout_bar.max_value)
-	var should_show := active and knockout_bar.value > 0.0
-	knockout_label.visible = should_show
-	knockout_bar.visible = should_show
+	knockout_bar.visible = active and knockout_bar.value > 0.0
+	knockout_icon.visible = downed
 
 
 func setup_mana(max_mana: float, current_mana: float, current_mana_2: float) -> void:
@@ -248,16 +249,14 @@ func _ensure_need_bars() -> void:
 	if hunger_bar != null and is_instance_valid(hunger_bar):
 		return
 
-	var top_offset := 10.0
+	var top_offset := 39.0
 	hunger_bar = _create_need_bar(
 		"HungerNeedBar",
-		"Hunger",
 		top_offset,
 		Color(1.0, 0.57, 0.16, 1.0)
 	)
 	sleep_need_bar = _create_need_bar(
 		"SleepNeedBar",
-		"Sleepy",
 		top_offset + NEED_ROW_GAP,
 		Color(0.42, 0.55, 1.0, 1.0)
 	)
@@ -265,24 +264,9 @@ func _ensure_need_bars() -> void:
 
 func _create_need_bar(
 	bar_name: String,
-	label_text: String,
 	y_offset: float,
 	fill_color: Color
 ) -> TextureProgressBar:
-	var label := Label.new()
-	label.name = "%sLabel" % bar_name
-	label.position = Vector2(NEED_LABEL_X, y_offset - 7.0)
-	label.size = Vector2(47.0, 14.0)
-	label.text = label_text
-	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", 8)
-	label.add_theme_color_override("font_color", fill_color.lerp(Color.WHITE, 0.36))
-	label.add_theme_color_override("font_shadow_color", Color.BLACK)
-	label.add_theme_constant_override("shadow_offset_x", 1)
-	label.add_theme_constant_override("shadow_offset_y", 1)
-	control_root.add_child(label)
-
 	var bar := TextureProgressBar.new()
 	bar.name = bar_name
 	bar.position = Vector2(NEED_BAR_X, y_offset)
@@ -306,21 +290,6 @@ func _create_need_bar(
 func _ensure_knockout_bar() -> void:
 	if knockout_bar != null and is_instance_valid(knockout_bar):
 		return
-
-	knockout_label = Label.new()
-	knockout_label.name = "KnockoutBarLabel"
-	knockout_label.position = Vector2(KNOCKOUT_LABEL_X, KNOCKOUT_BAR_Y - 7.0)
-	knockout_label.size = Vector2(47.0, 14.0)
-	knockout_label.text = "KO"
-	knockout_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	knockout_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	knockout_label.add_theme_font_size_override("font_size", 8)
-	knockout_label.add_theme_color_override("font_color", Color(1.0, 0.86, 0.42, 1.0))
-	knockout_label.add_theme_color_override("font_shadow_color", Color.BLACK)
-	knockout_label.add_theme_constant_override("shadow_offset_x", 1)
-	knockout_label.add_theme_constant_override("shadow_offset_y", 1)
-	knockout_label.visible = false
-	control_root.add_child(knockout_label)
 
 	knockout_bar = TextureProgressBar.new()
 	knockout_bar.name = "KnockoutBar"
@@ -366,14 +335,9 @@ func _ensure_progression_widgets() -> void:
 	if level_label != null and is_instance_valid(level_label):
 		return
 
-	if hp_container != null:
-		var shift := LEVEL_LABEL_SIZE.x + LEVEL_LABEL_GAP
-		hp_container.position.x = shift
-		hp_container.size.x = maxf(hp_container.size.x - shift, 320.0)
-
 	level_label = Label.new()
 	level_label.name = "LevelLabel"
-	level_label.position = Vector2(0.0, 7.0)
+	level_label.position = LEVEL_LABEL_POSITION
 	level_label.size = LEVEL_LABEL_SIZE
 	level_label.text = "Lv 1"
 	level_label.mouse_filter = Control.MOUSE_FILTER_IGNORE

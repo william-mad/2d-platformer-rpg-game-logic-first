@@ -1,6 +1,7 @@
 class_name NpcStateMachine extends Node
 
 const NpcActivityIdentity = preload("res://scripts/systems/npc_activity_identity.gd")
+const NpcActionSessionModel = preload("res://scripts/systems/npc_action_session.gd")
 
 signal state_changed(state_name: StringName, previous_state_name: StringName)
 signal state_request_failed(state_name: StringName, reason: String)
@@ -8,6 +9,7 @@ signal target_changed(target: Node2D)
 signal values_changed(changed_values: Dictionary, actor: Node2D)
 signal values_replaced(values_snapshot: Dictionary, actor: Node2D)
 signal player_interaction_invalidated(reason: String)
+signal action_session_changed(descriptor: Dictionary)
 
 const VALUE_ALIASES := {
 	"sleepiness": "sleep_need",
@@ -307,7 +309,12 @@ enum MonsterSightReaction {
 var npc: CharacterBody2D
 var states: Array[NpcState] = []
 var state_history: Array[NpcState] = []
-# These targets are shared between states so any NPC scene can request movement, work, or talk.
+# Perception and reaction context are deliberately separate from intentional actions.
+var perceived_targets: Array[Node2D] = []
+var selected_threat: Node2D
+var last_event_actor: Node2D
+# Deprecated compatibility mirrors. active_action remains authoritative; old scenes and
+# callers may still populate/read these while migrating to the session getters below.
 var target: Node2D
 var move_target: Node2D
 var work_target: Node2D
@@ -353,6 +360,14 @@ var current_state: NpcState:
 
 
 var interaction_overlay: NpcState
+var active_action: NpcActionSession
+var _proposed_action: NpcActionSession
+var active_interaction_session: NpcActionSession
+var last_terminal_action_session_id: String = ""
+var _action_state_reconciliation_requested: bool = false
+var _action_state_reconciliation_force_reentry: bool = false
+var _pending_stale_state_reconciliation: Dictionary = {}
+var _logged_stale_state_reconciliations: Dictionary = {}
 
 
 var previous_state: NpcState:
@@ -389,6 +404,16 @@ func _physics_process(delta: float) -> void:
 
 	_update_player_interaction_timers(delta)
 	_update_talk_refusal_cooldowns(delta)
+	if _reconcile_requested_active_action_state():
+		_update_passive_needs(delta)
+		if auto_move_and_slide:
+			npc.move_and_slide()
+		return
+	if _reconcile_current_state_action_session_if_needed():
+		_update_passive_needs(delta)
+		if auto_move_and_slide:
+			npc.move_and_slide()
+		return
 	apply_gravity(delta)
 	if _process_npc_damage_hop(delta):
 		_update_passive_needs(delta)
@@ -418,7 +443,10 @@ func _physics_process(delta: float) -> void:
 	var requested_state := state_at_start.physics_process(delta)
 
 	if requested_state != null and state_at_start == current_state:
-		change_state(requested_state, "state_tick")
+		if _pending_stale_reconciliation_matches(state_at_start, requested_state):
+			_commit_stale_state_reconciliation(state_at_start, requested_state)
+		else:
+			change_state(requested_state, "state_tick")
 
 	_update_passive_needs(delta)
 
@@ -510,7 +538,7 @@ func change_state(
 	if new_state == null:
 		return false
 	if String(new_state.name) == "Talk":
-		var requested_partner := talk_target if talk_target != null else get_active_target()
+		var requested_partner := get_talk_target()
 		var overlay_priority := maxi(request_priority, get_effective_task_priority())
 		# MoveToTarget used to replace itself with Talk. Finish that primary movement
 		# into Idle first, then open Talk in the interaction lane.
@@ -520,7 +548,9 @@ func change_state(
 				return _reject_state_request(&"Talk", "missing_idle_for_talk_overlay")
 			if not current_state.can_exit_to(idle_state, overlay_priority):
 				return _reject_state_request(&"Talk", "cannot_finish_talk_approach")
-			if not _commit_state_change(idle_state, "talk_approach_arrived", overlay_priority):
+			if not _commit_state_change(
+				idle_state, "talk_overlay_handoff_approach", overlay_priority
+			):
 				return false
 		return _request_talk_state(requested_partner, reason, overlay_priority, true)
 
@@ -572,6 +602,14 @@ func _commit_state_change(
 		previous_name = StringName(current_state.name)
 		if interaction_overlay != null and not _overlay_survives_primary_transition(new_state):
 			_cancel_interaction_overlay("primary_transition_%s" % String(new_state.name))
+		if (
+			String(new_state.name) == "Idle"
+			and not reason.begins_with("talk_overlay_handoff")
+			and active_action != null
+			and active_action.status == NpcActionSession.Status.ACTIVE
+			and current_state.action_session_id == active_action.session_id
+		):
+			complete_active_action(current_state.action_session_id, reason if not reason.is_empty() else "state_completed")
 		_pending_primary_state = new_state
 		current_state.exit()
 
@@ -580,8 +618,6 @@ func _commit_state_change(
 		state_history.resize(3)
 	previous_state_priority = current_state_priority
 	current_state_priority = applied_priority
-	if String(new_state.name) != "MoveToTarget":
-		state_after_move_priority = 0
 	new_state.next_state = null
 	new_state.enter()
 	_pending_primary_state = null
@@ -619,7 +655,7 @@ func request_state(
 	if state_name == &"":
 		return _reject_state_request(state_name, "empty_state")
 	if String(state_name) == "Talk":
-		var requested_partner := actor if actor != null else talk_target
+		var requested_partner := actor if actor != null else get_talk_target()
 		return _request_talk_state(requested_partner, reason, request_priority, true)
 
 	return _request_state_direct(state_name, actor, reason, request_priority)
@@ -630,11 +666,8 @@ func _get_applied_state_priority(new_state: NpcState, request_priority: int) -> 
 	if pending_state_priority >= 0:
 		applied_priority = maxi(applied_priority, pending_state_priority)
 		pending_state_priority = -1
-	if new_state != null and String(new_state.name) == "MoveToTarget":
-		applied_priority = maxi(
-			applied_priority,
-			maxi(current_state_priority, state_after_move_priority)
-		)
+	if new_state != null and String(new_state.name) == "MoveToTarget" and active_action != null:
+		applied_priority = maxi(applied_priority, maxi(current_state_priority, active_action.priority))
 
 	return applied_priority
 
@@ -651,7 +684,7 @@ func _request_state_direct(
 	if requested_state == null:
 		return _reject_state_request(state_name, "Missing state: %s" % String(state_name))
 	if String(requested_state.name) == "Talk":
-		var requested_partner := actor if actor != null else talk_target
+		var requested_partner := actor if actor != null else get_talk_target()
 		return _request_talk_state(requested_partner, reason, request_priority, true)
 	if String(requested_state.name) == "LookForTalkTarget":
 		if (
@@ -660,7 +693,7 @@ func _request_state_direct(
 		):
 			_breadcrumb("npc_state:talk_search_skip", _get_npc_label())
 			return _reject_state_request(state_name, "talk_search_disabled")
-		if _current_look_for_talk_target_matches(actor):
+		if _current_look_for_talk_target_matches(actor) and _proposed_action == null:
 			last_state_request_failure_reason = ""
 			return true
 		if not _can_start_look_for_talk_target():
@@ -689,6 +722,14 @@ func _request_state_direct(
 		)
 		if _state_request_supports_identity_reentry(transition_state):
 			if is_following_activity_descriptor(request_descriptor):
+				if _proposed_action != null and (
+					active_action == null
+					or active_action.session_id != _proposed_action.session_id
+				):
+					var adopted_session := _proposed_action
+					_proposed_action = null
+					replace_active_action(adopted_session, "adopt_existing_state")
+					return _commit_current_state_reentry(reason, request_priority)
 				last_state_request_failure_reason = ""
 				return true
 			if not NpcActivityIdentity.has_target_identity(request_descriptor):
@@ -698,7 +739,19 @@ func _request_state_direct(
 					state_name,
 					"cannot_retarget_%s" % String(current_state.name)
 				)
-			_commit_state_request_context(actor, request_context)
+			var reentry_context := request_context.duplicate(true)
+			var reentry_session := _consume_or_build_action_session(
+				StringName(transition_state.name), actor, reason, request_priority, reentry_context
+			)
+			if reentry_session != null:
+				var reservation_result := _ensure_action_session_spot_reservation(reentry_session)
+				if not bool(reservation_result.get("accepted", false)):
+					return _reject_state_request(
+						state_name,
+						String(reservation_result.get("status", "spot_reservation_rejected"))
+					)
+				reentry_context["action_session"] = reentry_session
+			_commit_state_request_context(actor, reentry_context)
 			return _commit_current_state_reentry(reason, request_priority)
 		return _reject_state_request(state_name, "state_already_active")
 	if current_state != null and not current_state.can_exit_to(transition_state, request_priority):
@@ -707,7 +760,19 @@ func _request_state_direct(
 			"cannot_exit_%s" % String(current_state.name)
 		)
 
-	_commit_state_request_context(actor, request_context)
+	var committed_context := request_context.duplicate(true)
+	var action_session := _consume_or_build_action_session(
+		StringName(transition_state.name), actor, reason, request_priority, committed_context
+	)
+	if action_session != null:
+		var reservation_result := _ensure_action_session_spot_reservation(action_session)
+		if not bool(reservation_result.get("accepted", false)):
+			return _reject_state_request(
+				state_name,
+				String(reservation_result.get("status", "spot_reservation_rejected"))
+			)
+		committed_context["action_session"] = action_session
+	_commit_state_request_context(actor, committed_context)
 
 	var accepted := _commit_state_change(transition_state, reason, request_priority)
 	_breadcrumb(
@@ -732,8 +797,6 @@ func _commit_current_state_reentry(reason: String, request_priority: int) -> boo
 	reentered_state.exit()
 	previous_state_priority = current_state_priority
 	current_state_priority = applied_priority
-	if String(state_name) != "MoveToTarget":
-		state_after_move_priority = 0
 	reentered_state.next_state = null
 	reentered_state.enter()
 	_pending_primary_state = null
@@ -753,32 +816,988 @@ func _commit_current_state_reentry(reason: String, request_priority: int) -> boo
 
 
 func _commit_state_request_context(actor: Node2D, request_context: Dictionary) -> void:
+	var action_session = request_context.get("action_session", null) as NpcActionSession
+	if action_session != null:
+		replace_active_action(action_session, "request_accepted")
 	if actor != null:
+		last_event_actor = actor
 		last_actor = actor
-		set_target(actor)
+		target = actor
+		if action_session != null and String(action_session.action_kind) in ["Fight", "Flee", "LookForMonster"]:
+			select_combat_target(actor)
 
-	if request_context.has("move_target"):
-		move_target = request_context["move_target"] as Node2D
-	if request_context.has("work_target"):
-		work_target = request_context["work_target"] as Node2D
-	if request_context.has("eat_target"):
-		eat_target = request_context["eat_target"] as Node2D
-	if request_context.has("rest_target"):
-		rest_target = request_context["rest_target"] as Node2D
-	if request_context.has("recreation_target"):
-		recreation_target = request_context["recreation_target"] as Node2D
-	if request_context.has("routine_task_target"):
-		routine_task_target = request_context["routine_task_target"] as Node2D
-	if request_context.has("sleep_target"):
-		sleep_target = request_context["sleep_target"] as Node2D
-	if request_context.has("talk_target"):
-		talk_target = request_context["talk_target"] as Node2D
-	if request_context.has("invitation_spot"):
-		invitation_spot = request_context["invitation_spot"] as Node2D
-	if request_context.has("state_after_move"):
-		state_after_move = StringName(request_context["state_after_move"])
-	if request_context.has("state_after_move_priority"):
-		state_after_move_priority = int(request_context["state_after_move_priority"])
+
+func request_action_from_descriptor(descriptor: Dictionary, live_target: Node2D = null) -> bool:
+	var action_kind := StringName(String(descriptor.get(
+		"action_kind",
+		descriptor.get("state_name", "")
+	)))
+	if action_kind == &"":
+		return _reject_state_request(action_kind, "action_kind_missing")
+	var action_source := StringName(String(descriptor.get("source", "schedule")))
+	var session := NpcActionSessionModel.create(
+		_get_action_owner_id(),
+		action_kind,
+		action_source,
+		live_target,
+		descriptor
+	)
+	if session.status not in [NpcActionSession.Status.PROPOSED, NpcActionSession.Status.ACTIVE]:
+		return _reject_state_request(action_kind, "action_session_not_executable")
+	_proposed_action = session
+	var priority := session.priority
+	var accepted := false
+	match String(action_kind):
+		"Work": accepted = assign_work_target(live_target, priority)
+		"Eat": accepted = assign_eat_target(live_target, priority)
+		"Rest": accepted = assign_rest_target(live_target, priority)
+		"Recreation": accepted = assign_recreation_target(live_target, priority)
+		"RoutineTask": accepted = assign_routine_task_target(live_target, priority)
+		"Sleep": accepted = assign_sleep_target(live_target, priority)
+		"InvitePlayer": accepted = assign_invitation_spot(live_target, priority)
+		"MoveToTarget": accepted = request_action_movement_from_descriptor(
+			descriptor,
+			live_target,
+			StringName(String(descriptor.get(
+				"arrival_state",
+				descriptor.get("resume_state", descriptor.get("destination_action_kind", "Idle"))
+			)))
+		)
+		_:
+			accepted = _request_state_direct(
+				action_kind,
+				live_target,
+				String(descriptor.get("reason", String(action_source))),
+				priority,
+				{}
+			)
+	if _proposed_action == session:
+		_proposed_action = null
+	return accepted
+
+
+func request_action_movement_from_descriptor(
+	descriptor: Dictionary,
+	movement_target: Node2D,
+	destination_action_kind: StringName = &"Idle"
+) -> bool:
+	if movement_target == null or not is_instance_valid(movement_target):
+		return _reject_state_request(&"MoveToTarget", "movement_target_invalid")
+	var logical_kind := StringName(String(descriptor.get(
+		"action_kind",
+		destination_action_kind if destination_action_kind not in [&"", &"Idle"] else &"MoveToTarget"
+	)))
+	if logical_kind == &"MoveToTarget" and destination_action_kind not in [&"", &"Idle", &"MoveToTarget"]:
+		logical_kind = destination_action_kind
+	var arrival_state := StringName(String(descriptor.get(
+		"arrival_state",
+		descriptor.get("resume_state", destination_action_kind)
+	)))
+	if logical_kind != &"MoveToTarget" and arrival_state in [&"", &"Idle", &"MoveToTarget"]:
+		arrival_state = logical_kind
+	elif arrival_state in [&"", &"MoveToTarget"]:
+		arrival_state = logical_kind if logical_kind != &"MoveToTarget" else &"Idle"
+	var movement_descriptor := descriptor.duplicate(true)
+	movement_descriptor["action_kind"] = String(logical_kind)
+	movement_descriptor["phase"] = "moving_to_target"
+	movement_descriptor["arrival_state"] = String(arrival_state)
+	var session := NpcActionSessionModel.create(
+		_get_action_owner_id(),
+		logical_kind,
+		StringName(String(movement_descriptor.get("source", "manual"))),
+		movement_target,
+		movement_descriptor
+	)
+	if session.status not in [NpcActionSession.Status.PROPOSED, NpcActionSession.Status.ACTIVE]:
+		return _reject_state_request(&"MoveToTarget", "action_session_not_executable")
+	_proposed_action = session
+	var accepted := _request_state_direct(
+		&"MoveToTarget",
+		movement_target,
+		String(movement_descriptor.get("reason", "action_travel_handoff")),
+		session.priority,
+		{
+			"destination_action_kind": logical_kind,
+			"arrival_state": arrival_state,
+		}
+	)
+	if _proposed_action == session:
+		_proposed_action = null
+	return accepted
+
+
+func replace_active_action(session: NpcActionSession, reason: String = "replaced") -> bool:
+	if session == null or session.session_id.is_empty() or session.action_kind == &"":
+		return false
+	if session.status in [
+		NpcActionSession.Status.CANCELLING,
+		NpcActionSession.Status.COMPLETED,
+		NpcActionSession.Status.FAILED,
+	]:
+		return false
+	if active_action != null and active_action.session_id == session.session_id:
+		var previous_reservation_ids := active_action.reservation_ids.duplicate()
+		var execution_changed := (
+			active_action.action_kind != session.action_kind
+			or active_action.phase != session.phase
+			or active_action.target_persistent_id != session.target_persistent_id
+			or active_action.get_live_target() != session.get_live_target()
+		)
+		active_action.action_kind = session.action_kind
+		active_action.source = session.source
+		active_action.priority = session.priority
+		active_action.spot_id = session.spot_id
+		active_action.scene_path = session.scene_path
+		active_action.phase = session.phase
+		active_action.arrival_state = session.arrival_state
+		active_action.target_persistent_id = session.target_persistent_id
+		active_action.set_live_target(session.get_live_target())
+		active_action.replace_reservation_ids(session.reservation_ids)
+		_release_replaced_spot_reservations(
+			previous_reservation_ids,
+			active_action.reservation_ids,
+			active_action.session_id
+		)
+		active_action.status = NpcActionSession.Status.ACTIVE
+		active_action.reason = ""
+		_mirror_active_action_to_legacy_fields()
+		_publish_active_action()
+		_action_state_reconciliation_requested = true
+		_action_state_reconciliation_force_reentry = execution_changed
+		return true
+	if active_action != null and active_action.status in [
+		NpcActionSession.Status.PROPOSED,
+		NpcActionSession.Status.ACTIVE,
+		NpcActionSession.Status.CANCELLING,
+	]:
+		cancel_active_action(active_action.session_id, reason)
+	active_action = session
+	active_action.status = NpcActionSession.Status.ACTIVE
+	if active_action.phase in [&"", &"proposed"]:
+		active_action.phase = &"executing"
+	active_action.reason = ""
+	_mirror_active_action_to_legacy_fields()
+	_publish_active_action()
+	_action_state_reconciliation_requested = true
+	_action_state_reconciliation_force_reentry = false
+	_log_action_session("active", "")
+	return true
+
+
+func cancel_active_action(session_id: String, reason: String = "cancelled") -> bool:
+	if not _active_action_id_matches(session_id):
+		_log_stale_action_callback("cancel", session_id)
+		return false
+	active_action.status = NpcActionSession.Status.CANCELLING
+	active_action.reason = reason
+	_release_active_action_reservations_once(reason)
+	last_terminal_action_session_id = active_action.session_id
+	active_action.status = NpcActionSession.Status.FAILED
+	_publish_active_action()
+	_action_state_reconciliation_requested = true
+	_action_state_reconciliation_force_reentry = false
+	_log_action_session("cancelled", reason)
+	return true
+
+
+func complete_active_action(session_id: String, reason: String = "completed") -> bool:
+	if not _active_action_id_matches(session_id):
+		_log_stale_action_callback("complete", session_id)
+		return false
+	active_action.status = NpcActionSession.Status.COMPLETED
+	active_action.reason = reason
+	_release_active_action_reservations_once(reason)
+	last_terminal_action_session_id = active_action.session_id
+	_publish_active_action()
+	_action_state_reconciliation_requested = true
+	_action_state_reconciliation_force_reentry = false
+	_log_action_session("completed", reason)
+	return true
+
+
+func fail_active_action(session_id: String, reason: String) -> bool:
+	return cancel_active_action(session_id, reason)
+
+
+func clear_terminal_action(session_id: String) -> bool:
+	if not _active_action_id_matches(session_id):
+		return false
+	if active_action.status not in [NpcActionSession.Status.COMPLETED, NpcActionSession.Status.FAILED]:
+		return false
+	var cleared_target := active_action.get_live_target()
+	_set_legacy_action_target(active_action.action_kind, null)
+	if move_target == cleared_target:
+		move_target = null
+	if target == cleared_target:
+		target = null
+	active_action = null
+	_publish_active_action()
+	_action_state_reconciliation_requested = true
+	_action_state_reconciliation_force_reentry = false
+	return true
+
+
+func restore_action_descriptor(descriptor: Dictionary) -> bool:
+	if descriptor.is_empty():
+		return false
+	var session := NpcActionSessionModel.create(
+		_get_action_owner_id(),
+		StringName(String(descriptor.get("action_kind", descriptor.get("state_name", "")))),
+		StringName(String(descriptor.get("source", "schedule"))),
+		null,
+		descriptor
+	)
+	if session == null or session.action_kind == &"":
+		return false
+	if session.status in [
+		NpcActionSession.Status.CANCELLING,
+		NpcActionSession.Status.COMPLETED,
+		NpcActionSession.Status.FAILED,
+	]:
+		if active_action != null and active_action.session_id != session.session_id:
+			cancel_active_action(active_action.session_id, "restore_terminal_action")
+		active_action = session
+		_mirror_active_action_to_legacy_fields()
+		_publish_active_action()
+		_action_state_reconciliation_requested = true
+		_action_state_reconciliation_force_reentry = false
+		return true
+	return replace_active_action(session, "restore_persisted_action")
+
+
+func get_active_action_descriptor() -> Dictionary:
+	return active_action.to_descriptor() if active_action != null else {}
+
+
+func get_active_action_session_id() -> String:
+	return active_action.session_id if active_action != null else ""
+
+
+func is_action_session_current_for_execution(
+	session_id: String,
+	state_name: StringName = &""
+) -> bool:
+	var session_matches := (
+		_active_action_id_matches(session_id)
+		and active_action.status == NpcActionSession.Status.ACTIVE
+	)
+	if not session_matches or state_name == &"":
+		return session_matches
+	return String(_get_active_action_execution_state_name()) == String(state_name)
+
+
+func is_interaction_session_current_for_execution(session_id: String) -> bool:
+	return (
+		active_interaction_session != null
+		and not session_id.is_empty()
+		and active_interaction_session.session_id == session_id
+		and active_interaction_session.status == NpcActionSession.Status.ACTIVE
+	)
+
+
+func is_active_action_executable_in_state(state_name: StringName) -> bool:
+	return (
+		active_action != null
+		and active_action.status == NpcActionSession.Status.ACTIVE
+		and String(_get_active_action_execution_state_name()) == String(state_name)
+	)
+
+
+func is_interaction_session_executable_for_state(state_name: StringName) -> bool:
+	return (
+		active_interaction_session != null
+		and active_interaction_session.status == NpcActionSession.Status.ACTIVE
+		and String(active_interaction_session.action_kind) == String(state_name)
+	)
+
+
+func reconcile_invalid_action_state_session(
+	stale_state: NpcState,
+	stale_session_id: String
+) -> NpcState:
+	var destination_name := _get_active_action_execution_state_name()
+	var destination := get_state(destination_name)
+	if destination == null or destination_name == &"Talk":
+		destination_name = &"Idle"
+		destination = get_state(destination_name)
+	if destination == null:
+		return null
+
+	_pending_stale_state_reconciliation = {
+		"state_instance_id": stale_state.get_instance_id() if stale_state != null else 0,
+		"stale_session_id": stale_session_id,
+		"active_session_id": get_active_action_session_id(),
+		"destination_name": String(destination_name),
+	}
+	_log_stale_state_reconciliation_once(stale_state, stale_session_id, destination_name)
+	return destination
+
+
+func _get_active_action_execution_state_name() -> StringName:
+	if active_action == null or active_action.status != NpcActionSession.Status.ACTIVE:
+		return &"Idle"
+	if active_action.phase == &"moving_to_target":
+		return &"MoveToTarget"
+	if active_action.action_kind in [&"", &"MoveToTarget"]:
+		return &"Idle"
+	return active_action.action_kind
+
+
+func _reconcile_current_state_action_session_if_needed() -> bool:
+	var stale_state := current_state
+	if stale_state == null or stale_state.action_session_id.is_empty():
+		return false
+	if is_action_session_current_for_execution(
+		stale_state.action_session_id,
+		StringName(stale_state.name)
+	):
+		return false
+	var destination := reconcile_invalid_action_state_session(
+		stale_state,
+		stale_state.action_session_id
+	)
+	if destination == null:
+		return false
+	return _commit_stale_state_reconciliation(stale_state, destination)
+
+
+func _reconcile_requested_active_action_state() -> bool:
+	if not _action_state_reconciliation_requested or current_state == null:
+		return false
+	var destination_name := _get_active_action_execution_state_name()
+	if destination_name == &"Talk":
+		destination_name = &"Idle"
+	var destination := get_state(destination_name)
+	if destination == null:
+		destination = get_state(&"Idle")
+	if destination == null:
+		return false
+
+	var current_matches := current_state == destination
+	if (
+		current_matches
+		and destination_name == &"Idle"
+		and not _action_state_reconciliation_force_reentry
+	):
+		_action_state_reconciliation_requested = false
+		return false
+	if (
+		current_matches
+		and not _action_state_reconciliation_force_reentry
+		and is_action_session_current_for_execution(
+		current_state.action_session_id,
+		StringName(current_state.name)
+		)
+	):
+		_action_state_reconciliation_requested = false
+		return false
+	if (
+		current_matches
+		and active_action != null
+		and current_state.action_session_id == active_action.session_id
+	):
+		_action_state_reconciliation_requested = false
+		_action_state_reconciliation_force_reentry = false
+		current_state.refresh_action_session_binding()
+		_breadcrumb(
+			"npc_state:refresh_session",
+			"%s state=%s session=%s" % [
+				_get_npc_label(), String(current_state.name), active_action.session_id
+			]
+		)
+		return false
+
+	var state_to_replace := current_state
+	if (
+		not state_to_replace.action_session_id.is_empty()
+		and not is_action_session_current_for_execution(
+			state_to_replace.action_session_id,
+			StringName(state_to_replace.name)
+		)
+	):
+		destination = reconcile_invalid_action_state_session(
+			state_to_replace,
+			state_to_replace.action_session_id
+		)
+		if destination == null:
+			return false
+	_action_state_reconciliation_requested = false
+	_action_state_reconciliation_force_reentry = false
+	return _commit_action_state_reconciliation(
+		state_to_replace,
+		destination,
+		"active_action_state_reconcile"
+	)
+
+
+func _pending_stale_reconciliation_matches(
+	stale_state: NpcState,
+	destination: NpcState
+) -> bool:
+	return (
+		not _pending_stale_state_reconciliation.is_empty()
+		and stale_state != null
+		and destination != null
+		and int(_pending_stale_state_reconciliation.get("state_instance_id", 0)) == stale_state.get_instance_id()
+		and String(_pending_stale_state_reconciliation.get("destination_name", "")) == String(destination.name)
+	)
+
+
+func _commit_stale_state_reconciliation(
+	stale_state: NpcState,
+	destination: NpcState
+) -> bool:
+	if stale_state == null or destination == null or stale_state != current_state:
+		_pending_stale_state_reconciliation.clear()
+		return false
+	_pending_stale_state_reconciliation.clear()
+	return _commit_action_state_reconciliation(
+		stale_state,
+		destination,
+		"stale_action_session_reconcile"
+	)
+
+
+func _commit_action_state_reconciliation(
+	state_to_replace: NpcState,
+	destination: NpcState,
+	reason: String
+) -> bool:
+	if state_to_replace == null or destination == null or state_to_replace != current_state:
+		return false
+	var priority := active_action.priority if active_action != null else 0
+	if destination == state_to_replace:
+		return _commit_current_state_reentry(reason, priority)
+	return _commit_state_change(destination, reason, priority)
+
+
+func _log_stale_state_reconciliation_once(
+	stale_state: NpcState,
+	stale_session_id: String,
+	destination_name: StringName
+) -> void:
+	if not OS.is_debug_build():
+		return
+	var state_name := String(stale_state.name) if stale_state != null else ""
+	var log_key := "%s|%s|%s" % [state_name, stale_session_id, get_active_action_session_id()]
+	if _logged_stale_state_reconciliations.has(log_key):
+		return
+	_logged_stale_state_reconciliations[log_key] = true
+	print("NPC action stale state: npc=%s state=%s old_session=%s active_session=%s destination=%s" % [
+		_get_npc_label(), state_name, stale_session_id,
+		get_active_action_session_id(), String(destination_name),
+	])
+
+
+func get_active_action_target() -> Node2D:
+	if active_action == null:
+		return null
+	var live_target := active_action.get_live_target()
+	if live_target != null:
+		return live_target
+	if active_action.target_persistent_id.is_empty():
+		return null
+	var resolved := _resolve_persistent_action_target(active_action.target_persistent_id)
+	if resolved != null:
+		active_action.set_live_target(resolved)
+	return resolved
+
+
+func get_active_action_target_id() -> StringName:
+	return StringName(active_action.target_persistent_id) if active_action != null else &""
+
+
+func get_active_action_spot_id() -> StringName:
+	return active_action.spot_id if active_action != null else &""
+
+
+func update_active_action_metadata(
+	expected_session_id: String,
+	metadata_updates: Dictionary,
+	scene_path: String = "",
+	publish_change: bool = true
+) -> bool:
+	if not _active_action_id_matches(expected_session_id):
+		_log_stale_action_callback("update_metadata", expected_session_id)
+		return false
+	if active_action.status != NpcActionSession.Status.ACTIVE:
+		return false
+	for key in metadata_updates.keys():
+		active_action.metadata[String(key)] = metadata_updates[key]
+	if not scene_path.is_empty():
+		active_action.scene_path = scene_path
+	if publish_change:
+		_publish_active_action()
+	return true
+
+
+func get_action_target(action_kind: StringName, legacy_target: Node2D = null) -> Node2D:
+	if active_action != null and String(active_action.action_kind) == String(action_kind):
+		var session_target := get_active_action_target()
+		if session_target != null:
+			return session_target
+	return legacy_target if legacy_target != null and is_instance_valid(legacy_target) else null
+
+
+func get_move_target() -> Node2D:
+	var session_target := get_active_action_target()
+	return session_target if session_target != null else (
+		move_target if move_target != null and is_instance_valid(move_target) else null
+	)
+func get_work_target() -> Node2D: return get_action_target(&"Work", work_target)
+func get_eat_target() -> Node2D: return get_action_target(&"Eat", eat_target)
+func get_rest_target() -> Node2D: return get_action_target(&"Rest", rest_target)
+func get_recreation_target() -> Node2D: return get_action_target(&"Recreation", recreation_target)
+func get_routine_task_target() -> Node2D: return get_action_target(&"RoutineTask", routine_task_target)
+func get_sleep_target() -> Node2D: return get_action_target(&"Sleep", sleep_target)
+func get_invitation_spot() -> Node2D: return get_action_target(&"InvitePlayer", invitation_spot)
+func get_talk_target() -> Node2D:
+	if active_interaction_session != null:
+		var session_target := active_interaction_session.get_live_target()
+		if session_target != null:
+			return session_target
+	return talk_target if talk_target != null and is_instance_valid(talk_target) else null
+
+
+func set_action_target(
+	action_kind: StringName,
+	live_target: Node2D,
+	expected_session_id: String = ""
+) -> bool:
+	if active_action == null:
+		if not expected_session_id.is_empty():
+			_log_stale_action_callback("set_target", expected_session_id)
+			return false
+		_set_legacy_action_target(action_kind, live_target)
+		return true
+	if String(active_action.action_kind) != String(action_kind):
+		_log_stale_action_callback("set_target_kind_%s" % String(action_kind), expected_session_id)
+		return false
+	if not expected_session_id.is_empty() and active_action.session_id != expected_session_id:
+		_log_stale_action_callback("set_target", expected_session_id)
+		return false
+	if active_action.status != NpcActionSession.Status.ACTIVE:
+		_log_stale_action_callback("set_target_terminal", expected_session_id)
+		return false
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	var old_spot_id := active_action.spot_id
+	var new_spot_id := _get_stable_spot_id(live_target)
+	var purpose := StringName(String(active_action.metadata.get(
+		"reservation_purpose", "activity"
+	)))
+	var old_reservation_id := ""
+	if old_spot_id != &"" and simulator != null and simulator.has_method("make_spot_reservation_id"):
+		old_reservation_id = String(simulator.call(
+			"make_spot_reservation_id", active_action.session_id, old_spot_id, purpose
+		))
+	var new_reservation_id := ""
+	if new_spot_id != &"" and new_spot_id != old_spot_id:
+		if simulator == null or not simulator.has_method("try_claim_spot"):
+			return false
+		var claim_result: Dictionary = simulator.call(
+			"try_claim_spot",
+			StringName(_get_action_owner_id()),
+			active_action.session_id,
+			new_spot_id,
+			purpose
+		)
+		if not bool(claim_result.get("accepted", false)):
+			last_state_request_failure_reason = String(claim_result.get(
+				"status", "spot_transfer_rejected"
+			))
+			return false
+		new_reservation_id = String(claim_result.get("reservation_id", ""))
+	_set_legacy_action_target(action_kind, live_target)
+	active_action.set_live_target(live_target)
+	active_action.target_persistent_id = NpcActionSessionModel.get_persistent_id(live_target)
+	active_action.spot_id = new_spot_id
+	if not new_reservation_id.is_empty():
+		active_action.add_reservation_id(new_reservation_id)
+	if (
+		not old_reservation_id.is_empty()
+		and old_reservation_id != new_reservation_id
+		and simulator != null
+		and simulator.has_method("release_spot_reservation")
+	):
+		if bool(simulator.call(
+			"release_spot_reservation",
+			old_reservation_id,
+			StringName(_get_action_owner_id()),
+			active_action.session_id
+		)):
+			active_action.remove_reservation_id(old_reservation_id)
+	_publish_active_action()
+	return true
+
+
+func _set_legacy_action_target(action_kind: StringName, live_target: Node2D) -> void:
+	match String(action_kind):
+		"Work": work_target = live_target
+		"Eat": eat_target = live_target
+		"Rest": rest_target = live_target
+		"Recreation": recreation_target = live_target
+		"RoutineTask": routine_task_target = live_target
+		"Sleep": sleep_target = live_target
+		"InvitePlayer": invitation_spot = live_target
+		"Talk": talk_target = live_target
+		"MoveToTarget": move_target = live_target
+
+
+func _mirror_active_action_to_legacy_fields() -> void:
+	if active_action == null:
+		return
+	var live_target := active_action.get_live_target()
+	_set_legacy_action_target(active_action.action_kind, live_target)
+	move_target = live_target
+	if active_action.phase == &"moving_to_target":
+		state_after_move = (
+			active_action.arrival_state
+			if active_action.arrival_state != &""
+			else active_action.action_kind
+		)
+		state_after_move_priority = active_action.priority
+
+
+func _resolve_persistent_action_target(target_id: String) -> Node2D:
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations != null and locations.has_method("get_live_npc"):
+		var live_npc = locations.call("get_live_npc", target_id)
+		if live_npc is Node2D and is_instance_valid(live_npc):
+			return live_npc
+	if not is_inside_tree():
+		return null
+	for group_name in [&"npc_need_spot", &"npc_casual_spot", &"npc_activity_spot"]:
+		for candidate in get_tree().get_nodes_in_group(group_name):
+			var node := candidate as Node2D
+			if node != null and NpcActionSessionModel.get_persistent_id(node) == target_id:
+				return node
+	return null
+
+
+func begin_active_action_approach(expected_session_id: String) -> bool:
+	if not is_action_session_current_for_execution(expected_session_id):
+		_log_stale_action_callback("begin_approach", expected_session_id)
+		return false
+	if get_active_action_target() == null:
+		fail_active_action(expected_session_id, "missing_action_target")
+		return false
+	active_action.phase = &"moving_to_target"
+	if active_action.arrival_state == &"":
+		active_action.arrival_state = (
+			active_action.action_kind
+			if active_action.action_kind != &"MoveToTarget"
+			else &"Idle"
+		)
+	_publish_active_action()
+	_action_state_reconciliation_requested = true
+	_action_state_reconciliation_force_reentry = false
+	return true
+
+
+func request_active_action_approach(
+	expected_session_id: String,
+	reason: String = "move_to_action_target",
+	request_priority: int = -1
+) -> bool:
+	if not begin_active_action_approach(expected_session_id):
+		return false
+	var priority := active_action.priority if request_priority < 0 else request_priority
+	return _request_state_direct(
+		&"MoveToTarget",
+		get_active_action_target(),
+		reason,
+		priority,
+		{
+			"destination_action_kind": active_action.action_kind,
+			"arrival_state": active_action.arrival_state,
+		}
+	)
+
+
+func finish_active_action_approach(
+	expected_session_id: String,
+	fallback_state_name: StringName = &"Idle"
+) -> StringName:
+	if not is_action_session_current_for_execution(expected_session_id):
+		_log_stale_action_callback("finish_approach", expected_session_id)
+		return fallback_state_name
+	if active_action.phase != &"moving_to_target":
+		_log_stale_action_callback("finish_approach_phase", expected_session_id)
+		return fallback_state_name
+	if get_active_action_target() == null:
+		fail_active_action(expected_session_id, "missing_action_target")
+		return fallback_state_name
+	var arrival_state := active_action.arrival_state
+	if arrival_state in [&"", &"MoveToTarget"]:
+		arrival_state = (
+			active_action.action_kind
+			if active_action.action_kind != &"MoveToTarget"
+			else fallback_state_name
+		)
+	if arrival_state in [&"", &"MoveToTarget"]:
+		arrival_state = &"Idle"
+	pending_state_priority = maxi(current_state_priority, active_action.priority)
+	if active_action.action_kind == &"MoveToTarget":
+		complete_active_action(expected_session_id, "movement_arrived")
+		return arrival_state
+	active_action.phase = &"executing"
+	_publish_active_action()
+	_action_state_reconciliation_requested = true
+	_action_state_reconciliation_force_reentry = false
+	return arrival_state
+
+
+func register_active_action_reservation(
+	reservation_id: String,
+	session_id: String = ""
+) -> bool:
+	if active_action == null or active_action.status != NpcActionSession.Status.ACTIVE:
+		return false
+	if not session_id.is_empty() and active_action.session_id != session_id:
+		_log_stale_action_callback("register_reservation", session_id)
+		return false
+	active_action.add_reservation_id(reservation_id)
+	_publish_active_action()
+	return true
+
+
+func claim_active_action_reservation_release(
+	reservation_id: String,
+	session_id: String = ""
+) -> bool:
+	if active_action == null:
+		return true
+	if not session_id.is_empty() and active_action.session_id != session_id:
+		_log_stale_action_callback("release_reservation", session_id)
+		if active_action.reservation_ids.has(reservation_id):
+			return false
+		return true
+	return active_action.claim_reservation_release(reservation_id)
+
+
+func _consume_or_build_action_session(
+	action_kind: StringName,
+	actor: Node2D,
+	reason: String,
+	request_priority: int,
+	request_context: Dictionary
+) -> NpcActionSession:
+	if action_kind == &"" or String(action_kind) == "Idle":
+		return null
+	if (
+		String(action_kind) == "MoveToTarget"
+		and active_action != null
+		and _proposed_action == null
+	):
+		if active_action.phase == &"moving_to_target":
+			return null
+	if _proposed_action != null:
+		var proposed := _proposed_action
+		_proposed_action = null
+		return proposed
+	var logical_kind := action_kind
+	if String(action_kind) == "MoveToTarget":
+		logical_kind = StringName(String(request_context.get(
+			"destination_action_kind",
+			state_after_move if state_after_move != &"" else &"MoveToTarget"
+		)))
+	var descriptor := {
+		"priority": request_priority,
+		"source": String(_get_action_source(reason, actor, logical_kind)),
+		"start_world_time": _get_world_total_hours(),
+	}
+	if String(action_kind) == "MoveToTarget":
+		descriptor["phase"] = "moving_to_target"
+		var arrival_state := StringName(String(request_context.get(
+			"arrival_state",
+			request_context.get("destination_action_kind", "Idle")
+		)))
+		if logical_kind != &"MoveToTarget" and arrival_state in [&"", &"Idle", &"MoveToTarget"]:
+			arrival_state = logical_kind
+		elif arrival_state in [&"", &"MoveToTarget"]:
+			arrival_state = logical_kind if logical_kind != &"MoveToTarget" else &"Idle"
+		descriptor["arrival_state"] = String(arrival_state)
+	var target_id := NpcActionSessionModel.get_persistent_id(actor)
+	if not target_id.is_empty():
+		descriptor["target_persistent_id"] = target_id
+	return NpcActionSessionModel.create(
+		_get_action_owner_id(), logical_kind, StringName(descriptor["source"]), actor, descriptor
+	)
+
+
+func _ensure_action_session_spot_reservation(session: NpcActionSession) -> Dictionary:
+	if session == null:
+		return {"accepted": true, "status": "not_required"}
+	var spot_id := session.spot_id
+	if spot_id == &"":
+		spot_id = _get_stable_spot_id(session.get_live_target())
+		if spot_id == &"":
+			return {"accepted": true, "status": "not_required"}
+		session.spot_id = spot_id
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if simulator == null or not simulator.has_method("try_claim_spot"):
+		return {"accepted": false, "status": "spot_reservation_service_missing"}
+	var purpose := StringName(String(session.metadata.get("reservation_purpose", "activity")))
+	var result: Dictionary = simulator.call(
+		"try_claim_spot",
+		StringName(_get_action_owner_id()),
+		session.session_id,
+		spot_id,
+		purpose
+	)
+	if bool(result.get("accepted", false)):
+		session.add_reservation_id(String(result.get("reservation_id", "")))
+	return result
+
+
+func _get_stable_spot_id(candidate: Node) -> StringName:
+	if candidate == null or not is_instance_valid(candidate):
+		return &""
+	for method_name in [&"get_persistent_spot_id", &"get_spot_id", &"get_world_spot_id"]:
+		if candidate.has_method(method_name):
+			var method_value := String(candidate.call(method_name)).strip_edges()
+			if not method_value.is_empty():
+				return StringName(method_value)
+	for property_info in candidate.get_property_list():
+		if StringName(String(property_info.get("name", ""))) == &"spot_id":
+			return StringName(String(candidate.get(&"spot_id")).strip_edges())
+	return &""
+
+
+func _release_replaced_spot_reservations(
+	previous_ids: PackedStringArray,
+	retained_ids: PackedStringArray,
+	session_id: String
+) -> void:
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if simulator == null or not simulator.has_method("release_spot_reservation"):
+		return
+	for reservation_id in previous_ids:
+		if retained_ids.has(reservation_id):
+			continue
+		simulator.call(
+			"release_spot_reservation",
+			String(reservation_id),
+			StringName(_get_action_owner_id()),
+			session_id
+		)
+
+
+func _active_action_id_matches(session_id: String) -> bool:
+	return active_action != null and not session_id.is_empty() and active_action.session_id == session_id
+
+
+func _release_active_action_reservations_once(reason: String) -> void:
+	if active_action == null:
+		return
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	for reservation_id in active_action.reservation_ids:
+		var reservation_text := String(reservation_id)
+		if active_action.released_reservation_ids.has(reservation_text):
+			continue
+		var released := false
+		if simulator != null and simulator.has_method("release_spot_reservation"):
+			released = bool(simulator.call(
+				"release_spot_reservation",
+				reservation_text,
+				StringName(_get_action_owner_id()),
+				active_action.session_id
+			))
+		elif reservation_text.begins_with("spot:") and simulator != null:
+			released = bool(simulator.call(
+				"release_scheduled_activity_claim",
+				StringName(reservation_text.trim_prefix("spot:")),
+				reason,
+				active_action.session_id,
+				StringName(_get_action_owner_id())
+			))
+		if released:
+			active_action.claim_reservation_release(reservation_text)
+	if simulator != null and simulator.has_method("release_session_spot_reservations"):
+		simulator.call(
+			"release_session_spot_reservations",
+			StringName(_get_action_owner_id()),
+			active_action.session_id
+		)
+
+
+func _get_action_source(reason: String, actor: Node2D, action_kind: StringName) -> StringName:
+	var lower_reason := reason.to_lower()
+	if String(action_kind) in ["Fight", "Flee", "Downed", "Collapse", "DisabledDead", "LookForMonster"]:
+		return &"emergency"
+	if lower_reason.contains("world_activity") or lower_reason.contains("schedule"):
+		return &"schedule"
+	if lower_reason.contains("social") or String(action_kind) in ["Talk", "LookForTalkTarget"]:
+		return &"player" if actor != null and actor.is_in_group("player") else &"social_ai"
+	if lower_reason.contains("value") or lower_reason.contains("need") or String(action_kind) in ["Eat", "Rest", "Sleep"]:
+		return &"need"
+	if actor != null and actor.is_in_group("player"):
+		return &"player"
+	return &"manual"
+
+
+func _get_action_owner_id() -> String:
+	if npc != null and npc.has_method("get_npc_location_id"):
+		var npc_id := String(npc.call("get_npc_location_id")).strip_edges()
+		if not npc_id.is_empty():
+			return npc_id
+	return _get_npc_label()
+
+
+func _get_world_total_hours() -> float:
+	var world_time := get_node_or_null("/root/WorldTime")
+	if world_time != null and world_time.has_method("get_snapshot"):
+		var snapshot: Dictionary = world_time.call("get_snapshot")
+		return float(snapshot.get("total_hours", 0.0))
+	return 0.0
+
+
+func _publish_active_action(sync_record: bool = true) -> void:
+	var descriptor := get_active_action_descriptor()
+	action_session_changed.emit(descriptor.duplicate(true))
+	if not sync_record:
+		return
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations != null and locations.has_method("sync_live_action_descriptor"):
+		locations.call("sync_live_action_descriptor", _get_action_owner_id(), npc, descriptor)
+
+
+func _log_action_session(result: String, reason: String) -> void:
+	if not OS.is_debug_build() or active_action == null:
+		return
+	var diagnostics: Dictionary = {}
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if simulator != null and simulator.has_method("inspect_action_spot_reservations"):
+		diagnostics = simulator.call(
+			"inspect_action_spot_reservations",
+			StringName(_get_action_owner_id()),
+			active_action.session_id,
+			active_action.spot_id,
+			active_action.reservation_ids,
+			StringName(String(active_action.metadata.get("reservation_purpose", "activity")))
+		)
+	print("NPC action: npc=%s session=%s action=%s source=%s status=%s spot=%s reservations=%s owned=%s missing=%s orphaned=%s reason=%s" % [
+		_get_npc_label(), active_action.session_id, String(active_action.action_kind),
+		String(active_action.source), result, String(active_action.spot_id),
+		str(diagnostics.get("actual_reservation_ids", Array(active_action.reservation_ids))),
+		str(diagnostics.get("owns_named_spot", active_action.spot_id == &"")),
+		str(diagnostics.get("missing_reservation_ids", [])),
+		str(diagnostics.get("ledger_ids_absent_from_action", [])),
+		reason,
+	])
+	if result == "active" and active_action.spot_id != &"" and not bool(
+		diagnostics.get("owns_named_spot", false)
+	):
+		push_warning("NPC action names a spot without owning it: npc=%s session=%s spot=%s" % [
+			_get_npc_label(), active_action.session_id, String(active_action.spot_id)
+		])
+
+
+func _log_stale_action_callback(callback_name: String, session_id: String) -> void:
+	if OS.is_debug_build():
+		print("NPC action stale callback: npc=%s callback=%s session=%s active=%s" % [
+			_get_npc_label(), callback_name, session_id, get_active_action_session_id(),
+		])
 
 
 func get_current_activity_descriptor() -> Dictionary:
@@ -807,38 +1826,46 @@ func _get_state_activity_descriptor(state: NpcState) -> Dictionary:
 	var action_kind := StringName(state.name)
 	var activity_target: Node2D
 	if String(action_kind) == "MoveToTarget":
-		action_kind = state_after_move if state_after_move != &"" else &"MoveToTarget"
-		activity_target = move_target
+		action_kind = active_action.action_kind if active_action != null else &"MoveToTarget"
+		activity_target = get_move_target()
 	else:
 		match String(action_kind):
-			"Work":
-				activity_target = work_target
-			"Eat":
-				activity_target = eat_target
-			"Rest":
-				activity_target = rest_target
-			"Recreation":
-				activity_target = recreation_target
-			"RoutineTask":
-				activity_target = routine_task_target
-			"Sleep":
-				activity_target = sleep_target
+			"Work": activity_target = get_work_target()
+			"Eat": activity_target = get_eat_target()
+			"Rest": activity_target = get_rest_target()
+			"Recreation": activity_target = get_recreation_target()
+			"RoutineTask": activity_target = get_routine_task_target()
+			"Sleep": activity_target = get_sleep_target()
+			"InvitePlayer": activity_target = get_invitation_spot()
 			"Talk":
-				activity_target = talk_target
+				activity_target = get_talk_target()
 				var active_talk_partner = _get_property_if_present(state, &"talk_partner", null)
 				if active_talk_partner is Node2D and is_instance_valid(active_talk_partner):
 					activity_target = active_talk_partner
 			"LookForTalkTarget":
-				activity_target = target
+				activity_target = get_action_target(&"LookForTalkTarget", target)
 				var active_search_target = _get_property_if_present(state, &"talk_target", null)
 				if active_search_target is Node2D and is_instance_valid(active_search_target):
 					activity_target = active_search_target
-			"InvitePlayer":
-				activity_target = invitation_spot
 			_:
-				activity_target = target
+				activity_target = get_active_action_target()
+				if activity_target == null:
+					activity_target = target
 
-	return NpcActivityIdentity.describe(action_kind, activity_target)
+	var descriptor := NpcActivityIdentity.describe(action_kind, activity_target)
+	if state == interaction_overlay and active_interaction_session != null:
+		descriptor.merge(active_interaction_session.to_descriptor(), true)
+	elif active_action != null and String(active_action.action_kind) == String(action_kind):
+		var action_descriptor := active_action.to_descriptor()
+		descriptor.merge(action_descriptor, true)
+		# Activity matching distinguishes NPC targets from spots. The session stores one
+		# stable target ID, so expose it under the appropriate compatibility key too.
+		if not active_action.target_persistent_id.is_empty():
+			if String(action_kind) in ["Talk", "LookForTalkTarget"]:
+				descriptor["target_npc_id"] = active_action.target_persistent_id
+			elif active_action.spot_id == &"":
+				descriptor["spot_id"] = active_action.target_persistent_id
+	return descriptor
 
 
 func _get_state_request_activity_descriptor(
@@ -851,8 +1878,7 @@ func _get_state_request_activity_descriptor(
 	var action_kind := StringName(requested_state.name)
 	var activity_target := actor
 	if String(action_kind) == "MoveToTarget":
-		action_kind = StringName(request_context.get("state_after_move", &"MoveToTarget"))
-		activity_target = request_context.get("move_target", actor) as Node2D
+		action_kind = StringName(request_context.get("destination_action_kind", &"MoveToTarget"))
 	else:
 		var target_key := _activity_target_context_key(action_kind)
 		if target_key != &"" and request_context.has(target_key):
@@ -913,9 +1939,15 @@ func _reject_state_request(state_name: StringName, rejection_reason: String) -> 
 		"%s state=%s reason=%s" % [_get_npc_label(), String(state_name), rejection_reason]
 	)
 	if OS.is_debug_build():
+		var session_id := (
+			_proposed_action.session_id
+			if _proposed_action != null
+			else get_active_action_session_id()
+		)
 		print(
-			"NPC state rejected: npc=%s state=%s reason=%s" % [
+			"NPC state rejected: npc=%s session=%s state=%s reason=%s" % [
 				_get_npc_label(),
+				session_id,
 				String(state_name),
 				rejection_reason,
 			]
@@ -935,9 +1967,8 @@ func notify_target_seen(seen_target: Node2D) -> void:
 		return
 	if is_ignoring_player_interaction(seen_target):
 		return
-
-	set_target(seen_target)
-	last_actor = seen_target
+	if not perceived_targets.has(seen_target):
+		perceived_targets.append(seen_target)
 
 	if current_state != null:
 		var requested_state := current_state.target_seen(seen_target)
@@ -990,9 +2021,6 @@ func request_monster_reaction(
 	var applied_priority := seen_monster_reaction_priority
 	if request_priority >= 0:
 		applied_priority = request_priority
-
-	set_target(monster)
-	last_actor = monster
 
 	match seen_monster_reaction:
 		MonsterSightReaction.NONE:
@@ -1133,30 +2161,40 @@ func notify_target_lost(lost_target: Node2D) -> void:
 		if requested_state != null:
 			change_state(requested_state, "target_lost")
 
-	if lost_target == target:
-		target = null
-		target_changed.emit(null)
+	perceived_targets.erase(lost_target)
 
 
-func set_target(new_target: Node2D) -> void:
+func select_combat_target(new_target: Node2D) -> void:
 	if new_target != null and not is_instance_valid(new_target):
 		new_target = null
 	if new_target == npc:
 		new_target = null
+	selected_threat = new_target
+	target_changed.emit(selected_threat)
 
-	target = new_target
-	target_changed.emit(target)
+
+func get_selected_threat() -> Node2D:
+	if selected_threat != null and is_instance_valid(selected_threat) and selected_threat != npc:
+		return selected_threat
+	selected_threat = null
+	return null
+
+
+func get_perceived_targets() -> Array[Node2D]:
+	var live_targets: Array[Node2D] = []
+	for candidate in perceived_targets:
+		if candidate != null and is_instance_valid(candidate) and candidate != npc:
+			live_targets.append(candidate)
+	perceived_targets = live_targets
+	return live_targets.duplicate()
 
 
 func get_active_target() -> Node2D:
-	if target != null and is_instance_valid(target) and target != npc:
-		return target
-
-	var player := get_tree().get_first_node_in_group("player") as Node2D
-	if player != null and is_instance_valid(player) and not is_ignoring_player_interaction(player):
-		return player
-
-	return null
+	# Compatibility name: intentional target only. There is deliberately no player fallback.
+	var action_target := get_active_action_target()
+	if action_target != null:
+		return action_target
+	return target if target != null and is_instance_valid(target) else null
 
 
 func is_in_state(state_name: StringName) -> bool:
@@ -1189,7 +2227,7 @@ func evaluate_persistent_combat_reactions(actor: Node2D = null) -> bool:
 
 	var fight_actor := actor
 	if fight_actor == null:
-		fight_actor = get_active_target()
+		fight_actor = get_selected_threat()
 
 	var anger_fight_rule := _get_matching_anger_fight_rule(fight_actor)
 	if anger_fight_rule.is_empty():
@@ -1204,21 +2242,35 @@ func evaluate_persistent_combat_reactions(actor: Node2D = null) -> bool:
 
 
 func assign_move_target(new_target: Node2D, arrive_state_name: StringName = &"Idle") -> bool:
-	# Sends the NPC to a target, then lets MoveToTarget return into the requested state.
+	# Compatibility wrapper: creates one destination action and starts its movement phase.
 	if new_target == null or not is_instance_valid(new_target):
 		return false
-
-	return _request_state_direct(
+	var arrival_state := arrive_state_name if arrive_state_name != &"" else &"Idle"
+	if arrival_state == &"MoveToTarget":
+		arrival_state = &"Idle"
+	var destination_kind := arrival_state if arrival_state != &"Idle" else &"MoveToTarget"
+	var session := NpcActionSessionModel.create(
+		_get_action_owner_id(), destination_kind, &"manual", new_target,
+		{
+			"priority": 20,
+			"phase": "moving_to_target",
+			"arrival_state": String(arrival_state),
+		}
+	)
+	_proposed_action = session
+	var accepted := _request_state_direct(
 		&"MoveToTarget",
 		new_target,
 		"move_target",
 		20,
 		{
-			"move_target": new_target,
-			"state_after_move": arrive_state_name,
-			"state_after_move_priority": 20,
+			"destination_action_kind": destination_kind,
+			"arrival_state": arrival_state,
 		}
 	)
+	if _proposed_action == session:
+		_proposed_action = null
+	return accepted
 
 
 func assign_work_target(new_target: Node2D, request_priority: int = 20) -> bool:
@@ -1231,7 +2283,7 @@ func assign_work_target(new_target: Node2D, request_priority: int = 20) -> bool:
 		new_target,
 		"work_target",
 		request_priority,
-		{"work_target": new_target, "state_after_move_priority": request_priority}
+		{}
 	)
 
 
@@ -1245,7 +2297,7 @@ func assign_eat_target(new_target: Node2D, request_priority: int = 20) -> bool:
 		new_target,
 		"eat_target",
 		request_priority,
-		{"eat_target": new_target, "state_after_move_priority": request_priority}
+		{}
 	)
 
 
@@ -1259,7 +2311,7 @@ func assign_rest_target(new_target: Node2D, request_priority: int = 20) -> bool:
 		new_target,
 		"rest_target",
 		request_priority,
-		{"rest_target": new_target, "state_after_move_priority": request_priority}
+		{}
 	)
 
 
@@ -1273,7 +2325,7 @@ func assign_recreation_target(new_target: Node2D, request_priority: int = 20) ->
 		new_target,
 		"recreation_target",
 		request_priority,
-		{"recreation_target": new_target, "state_after_move_priority": request_priority}
+		{}
 	)
 
 
@@ -1287,7 +2339,7 @@ func assign_routine_task_target(new_target: Node2D, request_priority: int = 20) 
 		new_target,
 		"routine_task_target",
 		request_priority,
-		{"routine_task_target": new_target, "state_after_move_priority": request_priority}
+		{}
 	)
 
 
@@ -1301,7 +2353,7 @@ func assign_sleep_target(new_target: Node2D, request_priority: int = 20) -> bool
 		new_target,
 		"sleep_target",
 		request_priority,
-		{"sleep_target": new_target, "state_after_move_priority": request_priority}
+		{}
 	)
 
 
@@ -1321,7 +2373,7 @@ func assign_invitation_spot(new_target: Node2D, request_priority: int = 75) -> b
 		new_target,
 		"invitation_spot",
 		request_priority,
-		{"invitation_spot": new_target, "state_after_move_priority": request_priority}
+		{}
 	)
 
 
@@ -1346,8 +2398,7 @@ func begin_player_interaction_hold(actor: Node2D, hold_seconds: float = -1.0) ->
 	var duration := default_player_interaction_hold_seconds if hold_seconds < 0.0 else hold_seconds
 	player_interaction_hold_timer = maxf(duration, 0.0)
 	player_interaction_hold_actor = actor
-	last_actor = actor
-	set_target(actor)
+	last_event_actor = actor
 	_process_player_interaction_hold()
 	return true
 
@@ -1457,11 +2508,6 @@ func start_player_interaction_cooldown(actor: Node2D, cooldown_seconds: float = 
 	player_interaction_cooldown_actor = actor
 	end_player_interaction_hold(actor)
 
-	if target == actor and not is_talking_with(actor):
-		set_target(null)
-	if talk_target == actor and not is_talking_with(actor):
-		talk_target = null
-
 	return true
 
 
@@ -1490,7 +2536,7 @@ func is_talking_with(candidate: Node2D) -> bool:
 	if interaction_overlay.has_method("is_talking_with"):
 		return bool(interaction_overlay.call("is_talking_with", candidate))
 
-	return talk_target == candidate
+	return get_talk_target() == candidate
 
 
 func is_handling_talk_request_with(candidate: Node2D) -> bool:
@@ -1508,10 +2554,6 @@ func cancel_talk_with(candidate: Node2D, reason: String = "cancelled") -> void:
 		if interaction_overlay == overlay_to_cancel:
 			_remove_interaction_overlay(reason)
 
-	if talk_target == candidate:
-		talk_target = null
-
-
 func _request_talk_state(
 	new_target: Node2D,
 	reason: String,
@@ -1520,6 +2562,14 @@ func _request_talk_state(
 ) -> bool:
 	if new_target == null or not is_instance_valid(new_target) or new_target == npc:
 		return _reject_state_request(&"Talk", "invalid_talk_target")
+	if _current_state_is(&"LookForTalkTarget"):
+		if not _current_look_for_talk_target_matches(new_target):
+			return _reject_state_request(&"Talk", "talk_search_partner_mismatch")
+		var idle_state := get_state(&"Idle")
+		if idle_state == null or not current_state.can_exit_to(idle_state, request_priority):
+			return _reject_state_request(&"Talk", "talk_search_handoff_rejected")
+		if not _commit_state_change(idle_state, "talk_overlay_handoff_search", request_priority):
+			return false
 
 	if _talk_request_is_already_being_handled(new_target):
 		return true
@@ -1561,22 +2611,42 @@ func _request_talk_state(
 		_start_talk_refusal_cooldown(new_target)
 		return false
 
-	var partner_started := partner_machine._accept_talk_request(npc, priority, "talk_handshake")
+	var shared_talk_session_id := (
+		active_action.session_id
+		if active_action != null and active_action.source in [&"social_ai", &"player"]
+		else NpcActionSessionModel.make_session_id(
+			_get_action_owner_id(),
+			&"player" if new_target.is_in_group("player") else &"social_ai",
+			&"Talk"
+		)
+	)
+	var partner_started := partner_machine._accept_talk_request(
+		npc, priority, "talk_handshake", shared_talk_session_id
+	)
 	if not partner_started:
 		_reject_state_request(&"Talk", "partner_talk_start_failed")
 		_start_talk_refusal_cooldown(new_target)
 		return false
 
-	var self_started := _accept_talk_request(new_target, priority, reason)
+	var self_started := _accept_talk_request(
+		new_target, priority, reason, shared_talk_session_id
+	)
 	if not self_started:
 		_reject_state_request(&"Talk", "talker_start_failed")
 		partner_machine.cancel_talk_with(npc, "handshake_failed")
 		return false
+	_validate_talk_partner_session(new_target)
+	partner_machine._validate_talk_partner_session(npc)
 
 	return true
 
 
-func _accept_talk_request(new_target: Node2D, request_priority: int, reason: String) -> bool:
+func _accept_talk_request(
+	new_target: Node2D,
+	request_priority: int,
+	reason: String,
+	requested_session_id: String = ""
+) -> bool:
 	if _talk_request_is_already_being_handled(new_target):
 		return true
 
@@ -1586,12 +2656,36 @@ func _accept_talk_request(new_target: Node2D, request_priority: int, reason: Str
 	if not _can_enter_talk_with(new_target, request_priority):
 		return _reject_state_request(&"Talk", "talk_overlay_rejected")
 
-	# Commit Talk-owned context only after both the primary compatibility check and
-	# the partner handshake have accepted the overlay.
+	# Commit the separate interaction session only after the primary and handshake accept.
+	last_event_actor = new_target
 	last_actor = new_target
 	talk_target = new_target
 	interaction_overlay = talk_state
 	interaction_overlay_priority = maxi(request_priority, 0)
+	var session_id := requested_session_id
+	if not requested_session_id.is_empty():
+		session_id = requested_session_id
+	elif active_action != null and active_action.source in [&"social_ai", &"player"]:
+		session_id = active_action.session_id
+	else:
+		session_id = NpcActionSessionModel.make_session_id(
+			_get_action_owner_id(),
+			&"player" if new_target.is_in_group("player") else &"social_ai",
+			&"Talk"
+		)
+	active_interaction_session = NpcActionSessionModel.create(
+		_get_action_owner_id(),
+		&"Talk",
+		&"player" if new_target.is_in_group("player") else &"social_ai",
+		new_target,
+		{
+			"session_id": session_id,
+			"priority": interaction_overlay_priority,
+			"status": "active",
+			"phase": "executing",
+			"metadata": {"primary_session_id": get_active_action_session_id()},
+		}
+	)
 	talk_state.next_state = null
 	talk_state.enter()
 	last_state_request_failure_reason = ""
@@ -1605,6 +2699,10 @@ func _accept_talk_request(new_target: Node2D, request_priority: int, reason: Str
 			interaction_overlay_priority,
 		]
 	)
+	if OS.is_debug_build():
+		print("NPC interaction action: npc=%s session=%s action=Talk status=active" % [
+			_get_npc_label(), get_active_interaction_session_id(),
+		])
 	state_changed.emit(&"Talk", StringName(current_state.name) if current_state != null else &"")
 	return true
 
@@ -1641,13 +2739,15 @@ func _talk_request_is_already_being_handled(candidate: Node2D) -> bool:
 
 	if is_talking_with(candidate):
 		return true
+	if (
+		_current_state_is(&"MoveToTarget")
+		and active_action != null
+		and active_action.action_kind == &"Talk"
+		and get_active_action_target() == candidate
+	):
+		return true
 
-	if not _current_state_is(&"MoveToTarget"):
-		return false
-	if String(state_after_move) != "Talk":
-		return false
-
-	return move_target == candidate or talk_target == candidate or target == candidate
+	return false
 
 
 func _current_look_for_talk_target_matches(candidate: Node2D) -> bool:
@@ -1743,10 +2843,22 @@ func _remove_interaction_overlay(reason: String) -> void:
 	# Clear the slot first so partner callbacks cannot recursively clean it twice.
 	interaction_overlay = null
 	interaction_overlay_priority = 0
+	var removed_interaction_session := active_interaction_session
+	var removed_interaction_session_id := (
+		removed_interaction_session.session_id if removed_interaction_session != null else ""
+	)
+	var removed_talk_partner := (
+		removed_interaction_session.get_live_target() if removed_interaction_session != null else null
+	)
+	active_interaction_session = null
+	if talk_target == removed_talk_partner:
+		talk_target = null
 	removed_overlay.exit()
-	if talk_target != null:
-		if not is_instance_valid(talk_target) or not is_talking_with(talk_target):
-			talk_target = null
+	if active_action != null and active_action.session_id == removed_interaction_session_id:
+		if reason in ["completed", "partner_completed"]:
+			complete_active_action(removed_interaction_session_id, reason)
+		else:
+			cancel_active_action(removed_interaction_session_id, reason)
 	if current_state != null:
 		current_state.resume_presentation_after_talk_overlay()
 	_update_debug_label()
@@ -1767,10 +2879,24 @@ func _remove_interaction_overlay(reason: String) -> void:
 
 func get_effective_task_priority() -> int:
 	var priority := current_state_priority
-	if current_state != null and String(current_state.name) == "MoveToTarget":
-		priority = max(priority, state_after_move_priority)
+	if current_state != null and String(current_state.name) == "MoveToTarget" and active_action != null:
+		priority = max(priority, active_action.priority)
 
 	return priority
+
+
+func get_active_interaction_session_id() -> String:
+	return active_interaction_session.session_id if active_interaction_session != null else ""
+
+
+func _validate_talk_partner_session(partner: Node2D) -> void:
+	if not OS.is_debug_build() or partner == null or not partner.is_in_group("npc"):
+		return
+	var partner_machine := _get_talk_machine_for_target(partner)
+	if partner_machine == null:
+		return
+	if partner_machine.get_active_interaction_session_id() != get_active_interaction_session_id():
+		push_warning("Talk overlay session mismatch for %s and %s." % [_get_npc_label(), partner.name])
 
 
 func _mutual_talk_favor_allows(candidate: Node2D, partner_machine: NpcStateMachine) -> bool:
@@ -1967,7 +3093,7 @@ func replace_values(
 			values.erase(value_key)
 	for value_key in normalized_values.keys():
 		values[value_key] = normalized_values[value_key]
-	last_actor = actor
+	last_event_actor = actor
 	last_changed_values = _normalize_value_delta(changed_values)
 	_record_value_threshold_crossings(previous_values, values, last_changed_values)
 	values_replaced.emit(values.duplicate(true), actor)
@@ -2008,7 +3134,7 @@ func apply_value_delta(
 	if changed_values.is_empty():
 		return false
 
-	last_actor = actor
+	last_event_actor = actor
 	last_changed_values = changed_values.duplicate(true)
 	_record_value_threshold_crossings(previous_values, values, changed_values)
 	values_changed.emit(_get_changed_values_snapshot(changed_values), actor)
@@ -2046,7 +3172,7 @@ func set_value(
 	if changed_values.is_empty():
 		return
 
-	last_actor = actor
+	last_event_actor = actor
 	last_changed_values = changed_values.duplicate(true)
 	_record_value_threshold_crossings(previous_values, values, changed_values)
 	values_changed.emit(_get_changed_values_snapshot(changed_values), actor)
@@ -2117,7 +3243,7 @@ func evaluate_value_reactions(
 	if actor != null and is_instance_valid(actor):
 		safe_actor = actor as Node2D
 	elif actor != null:
-		last_actor = null
+		last_event_actor = null
 
 	var matching_rule := _find_best_matching_rule(changed_values, safe_actor)
 	_breadcrumb(
@@ -2220,19 +3346,8 @@ func apply_gravity(delta: float) -> void:
 
 
 func consume_state_after_move(default_state_name: StringName = &"Idle") -> StringName:
-	var consumed_state := state_after_move
-	var consumed_priority := maxi(state_after_move_priority, current_state_priority)
-
-	if consumed_state == &"":
-		consumed_state = default_state_name
-
-	if consumed_state == &"":
-		consumed_state = &"Idle"
-
-	pending_state_priority = consumed_priority
-	state_after_move = &"Idle"
-	state_after_move_priority = 0
-	return consumed_state
+	# Deprecated compatibility wrapper; destination state and priority live in the session.
+	return finish_active_action_approach(get_active_action_session_id(), default_state_name)
 
 
 func preserve_next_state_priority(priority: int) -> void:
@@ -2660,7 +3775,7 @@ func _run_idle_value_reaction_check() -> void:
 	if suppress_next_idle_value_reaction_check:
 		suppress_next_idle_value_reaction_check = false
 		if is_inside_tree() and active and _value_reactions_enabled():
-			evaluate_persistent_combat_reactions(last_actor)
+			evaluate_persistent_combat_reactions(last_event_actor)
 		return
 
 	if not is_inside_tree() or not active or not _value_reactions_enabled() or current_state == null:
@@ -2669,7 +3784,7 @@ func _run_idle_value_reaction_check() -> void:
 	if String(current_state.name) != "Idle":
 		return
 
-	evaluate_value_reactions(last_actor, {})
+	evaluate_value_reactions(last_event_actor, {})
 
 
 func _resolve_npc() -> void:
@@ -2835,7 +3950,7 @@ func _can_start_look_for_talk_target() -> bool:
 	if not _current_state_is(&"MoveToTarget"):
 		return true
 
-	return state_after_move == &"Talk" or state_after_move == &"LookForTalkTarget"
+	return active_action != null and active_action.action_kind == &"LookForTalkTarget"
 
 
 func _has_available_autonomous_talk_target(rule: Dictionary) -> bool:
@@ -2936,19 +4051,20 @@ func _threshold_effect_matches(effect: Dictionary, previous_value: float, curren
 
 
 func _get_rule_request_actor(actor: Node2D, rule: Dictionary) -> Node2D:
-	# Chooses which seen/active target should be passed into the requested state.
+	# Chooses only explicit event/perception candidates; it never borrows another action's target.
 	if _rule_allows_target(rule, actor):
 		return actor
 
-	if _rule_allows_target(rule, target):
-		return target
+	var threat := get_selected_threat()
+	if _rule_allows_target(rule, threat):
+		return threat
+
+	for perceived_target in get_perceived_targets():
+		if _rule_allows_target(rule, perceived_target):
+			return perceived_target
 
 	if bool(rule.get("requires_target", false)):
 		return null
-
-	var fallback_target := get_active_target()
-	if _rule_allows_target(rule, fallback_target):
-		return fallback_target
 
 	return null
 

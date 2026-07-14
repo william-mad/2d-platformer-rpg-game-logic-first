@@ -3,6 +3,10 @@ class_name NpcCasualSpot extends Node2D
 @export_group("Activity")
 @export var activity_state_name: StringName = &"Recreation"
 
+@export_group("Reservation")
+@export var spot_id: StringName = &""
+@export_range(0, 32, 1) var reservation_capacity: int = 1
+
 @export_group("Serving")
 # Empty owner and tag lists mean any NPC can use this casual spot.
 @export var owner_npc_ids: Array[StringName] = []
@@ -12,9 +16,22 @@ class_name NpcCasualSpot extends Node2D
 @export_range(0.0, 100.0, 0.1) var default_preference_weight: float = 1.0
 @export var npc_preference_weights: Dictionary = {}
 
+var registered_world_spot_id: StringName = &""
+
 
 func _ready() -> void:
 	add_to_group("npc_casual_spot")
+	_register_world_spot()
+
+
+func _exit_tree() -> void:
+	_unregister_world_spot()
+
+
+func get_persistent_spot_id() -> StringName:
+	if spot_id != &"":
+		return spot_id
+	return StringName(String(get_path())) if is_inside_tree() else &""
 
 
 func can_serve_npc_casual_activity(
@@ -86,3 +103,23 @@ func _get_npc_id(npc_node: Node2D) -> StringName:
 		return StringName(String(npc_node.get_meta("npc_location_id")))
 
 	return StringName(String(npc_node.name))
+
+
+func _register_world_spot() -> void:
+	var effective_spot_id := get_persistent_spot_id()
+	if effective_spot_id == &"":
+		return
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if simulator != null and simulator.has_method("register_live_spot"):
+		simulator.call("register_live_spot", effective_spot_id, self)
+		registered_world_spot_id = effective_spot_id
+
+
+func _unregister_world_spot() -> void:
+	var effective_spot_id := registered_world_spot_id
+	if effective_spot_id == &"":
+		return
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if simulator != null and simulator.has_method("unregister_live_spot"):
+		simulator.call("unregister_live_spot", effective_spot_id, self)
+	registered_world_spot_id = &""

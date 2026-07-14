@@ -10,6 +10,10 @@ var active_work_target: Node2D
 var work_progress_elapsed: float = 0.0
 
 
+func on_action_session_refreshed() -> void:
+	active_work_target = machine.get_work_target()
+
+
 func enter() -> void:
 	# Work now clears the area's own work_needed value instead of waiting on a fixed timer.
 	# Resolve the spot-specific clip before playback; super.enter() would play the generic
@@ -52,6 +56,8 @@ func _play_work_animation(work_target: Node2D) -> bool:
 
 
 func physics_process(delta: float) -> NpcState:
+	if not action_session_is_current():
+		return reconcile_invalid_action_session()
 	# Every frame of successful work lowers both the spot's work and the NPC's boredom.
 	stop_horizontal()
 
@@ -65,14 +71,13 @@ func physics_process(delta: float) -> NpcState:
 		return get_state(&"Idle")
 
 	if not _target_can_be_worked(active_work_target):
-		machine.work_target = null
+		machine.set_action_target(&"Work", null, action_session_id)
 		active_work_target = _resolve_work_target()
 		if active_work_target == null:
 			return get_state(&"Idle")
 
 	if not is_close_to(active_work_target.global_position, machine.stop_distance):
-		machine.move_target = active_work_target
-		machine.state_after_move = &"Work"
+		machine.begin_active_action_approach(action_session_id)
 		return get_state(&"MoveToTarget")
 
 	if _target_work_is_done(active_work_target):
@@ -112,12 +117,11 @@ func process_talk_overlay(delta: float) -> StringName:
 		return &"Idle"
 
 	if not _target_can_be_worked(active_work_target):
-		machine.work_target = null
+		machine.set_action_target(&"Work", null, action_session_id)
 		return &"Idle"
 
 	if not is_close_to(active_work_target.global_position, machine.stop_distance):
-		machine.move_target = active_work_target
-		machine.state_after_move = &"Work"
+		machine.begin_active_action_approach(action_session_id)
 		return &"MoveToTarget"
 
 	_apply_work_progress(delta, active_work_target)
@@ -169,18 +173,20 @@ func _resolve_work_target() -> Node2D:
 	if machine == null:
 		return null
 
+	var assigned_target := machine.get_work_target()
+	if _target_can_be_worked(assigned_target):
+		return assigned_target
+
 	if String(work_target_path) != "" and machine.npc != null:
 		var configured_target := machine.npc.get_node_or_null(work_target_path) as Node2D
 		if _target_can_be_worked(configured_target):
+			machine.set_action_target(&"Work", configured_target, action_session_id)
 			return configured_target
 
-	if _target_can_be_worked(machine.work_target):
-		return machine.work_target
-
-	machine.work_target = null
+	machine.set_action_target(&"Work", null, action_session_id)
 	var closest_spot := find_closest_need_spot(&"Work", work_value_name)
 	if closest_spot != null:
-		machine.work_target = closest_spot
+		machine.set_action_target(&"Work", closest_spot, action_session_id)
 		return closest_spot
 
 	return null
@@ -188,9 +194,9 @@ func _resolve_work_target() -> Node2D:
 
 func _walk_to_work_target(work_target: Node2D) -> void:
 	# MoveToTarget will return to Work, where progress can start once the NPC arrives.
-	machine.move_target = work_target
-	machine.state_after_move = &"Work"
-	machine.call_deferred("request_state", &"MoveToTarget", work_target, "walk_to_work", 20)
+	machine.call_deferred(
+		"request_active_action_approach", action_session_id, "walk_to_work", 20
+	)
 
 
 func _target_can_be_worked(work_target: Node2D) -> bool:
