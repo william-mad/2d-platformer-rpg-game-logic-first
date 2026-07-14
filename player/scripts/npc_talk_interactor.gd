@@ -107,12 +107,22 @@ var prompt_decline_method: StringName = &""
 var prompt_completed: bool = false
 var menu_target_can_trade: bool = false
 var interaction_menu_actions: Array[StringName] = []
+var menu_hold_machine: NpcStateMachine
 
 
 func _ready() -> void:
 	player = get_parent() as Node2D
 	body_entered.connect(_on_body_entered)
 	body_exited.connect(_on_body_exited)
+
+
+func _exit_tree() -> void:
+	# The UI may disappear during a scene change; never leave its NPC paused behind.
+	if menu_target_npc != null and is_instance_valid(menu_target_npc):
+		_end_target_menu_hold(menu_target_npc)
+	elif menu_hold_machine != null and is_instance_valid(menu_hold_machine):
+		menu_hold_machine.end_player_interaction_hold(player)
+	_unwatch_target_interaction_gate()
 
 
 func _process(delta: float) -> void:
@@ -172,7 +182,6 @@ func _try_open_interaction_menu() -> void:
 		return
 	menu_target_npc = target_npc
 	active_menu = MENU_INTERACTION
-	_begin_target_menu_hold(target_npc)
 	_show_interaction_menu("")
 	cooldown = cooldown_seconds
 
@@ -214,9 +223,14 @@ func show_npc_prompt(
 	prompt_decline_method = decline_method
 	prompt_completed = false
 	_show_menu(title, options, "")
+	if active_menu != MENU_NPC_PROMPT:
+		return false
 	if timeout_seconds >= 0.0:
 		menu_timer = timeout_seconds
-		_begin_target_menu_hold(npc, timeout_seconds)
+		var hold_result := _begin_target_menu_hold(npc, timeout_seconds)
+		if not bool(hold_result.get("accepted", false)):
+			_invalidate_open_menu(String(hold_result.get("reason", "interaction_hold_rejected")))
+			return false
 	cooldown = cooldown_seconds
 	return true
 
@@ -282,12 +296,16 @@ func _show_gossip_menu(feedback: String = "") -> void:
 func _show_menu(title: String, options: PackedStringArray, feedback: String) -> void:
 	_ensure_menu_ui()
 	if menu_layer == null or menu_panel == null or menu_title_label == null:
+		_close_menu()
+		return
+	var hold_result := _begin_target_menu_hold(menu_target_npc)
+	if not bool(hold_result.get("accepted", false)):
+		_invalidate_open_menu(String(hold_result.get("reason", "interaction_hold_rejected")))
 		return
 
 	menu_layer.visible = true
 	menu_panel.visible = true
 	menu_timer = maxf(menu_choice_timeout_seconds, 0.0)
-	_begin_target_menu_hold(menu_target_npc)
 	menu_title_label.text = title
 	if menu_feedback_label != null:
 		menu_feedback_label.text = feedback
@@ -421,9 +439,19 @@ func _handle_talk_option(selected_index: int) -> void:
 
 	var option_delta := _get_talk_option_delta(selected_index)
 	var selected_interaction_id := StringName("talk_option_%d" % [selected_index + 1])
-	interaction_started.emit(player, menu_target_npc, selected_interaction_id)
-	_apply_interaction_effects(menu_target_npc, option_delta, set_values, selected_interaction_id)
-	interaction_applied.emit(player, menu_target_npc, selected_interaction_id)
+	var target_npc := menu_target_npc
+	var acceptance := _request_social_interaction_acceptance(target_npc)
+	if not bool(acceptance.get("accepted", false)):
+		_reject_social_interaction(
+			target_npc,
+			selected_interaction_id,
+			String(acceptance.get("reason", "talk_request_rejected"))
+		)
+		return
+
+	interaction_started.emit(player, target_npc, selected_interaction_id)
+	_apply_interaction_effects(target_npc, option_delta, set_values, selected_interaction_id)
+	interaction_applied.emit(player, target_npc, selected_interaction_id)
 	_finish_menu_attempt("", true)
 	cooldown = cooldown_seconds
 
@@ -440,10 +468,20 @@ func _handle_gossip_option(selected_index: int) -> void:
 	var gossip_option_index := _get_gossip_talk_option_index()
 	var option_delta := _get_talk_option_delta(gossip_option_index)
 	var selected_interaction_id := &"talk_gossip"
-	interaction_started.emit(player, menu_target_npc, selected_interaction_id)
-	_apply_interaction_effects(menu_target_npc, option_delta, set_values, selected_interaction_id)
-	_call_gossip_hook(menu_target_npc, gossip_subject, option_delta)
-	interaction_applied.emit(player, menu_target_npc, selected_interaction_id)
+	var target_npc := menu_target_npc
+	var acceptance := _request_social_interaction_acceptance(target_npc)
+	if not bool(acceptance.get("accepted", false)):
+		_reject_social_interaction(
+			target_npc,
+			selected_interaction_id,
+			String(acceptance.get("reason", "talk_request_rejected"))
+		)
+		return
+
+	interaction_started.emit(player, target_npc, selected_interaction_id)
+	_apply_interaction_effects(target_npc, option_delta, set_values, selected_interaction_id)
+	_call_gossip_hook(target_npc, gossip_subject, option_delta)
+	interaction_applied.emit(player, target_npc, selected_interaction_id)
 	_finish_menu_attempt("", true)
 	cooldown = cooldown_seconds
 
@@ -580,11 +618,6 @@ func _apply_interaction_effects(
 				evaluate_set_value_reactions
 			)
 
-		if request_talk_state:
-			var talk_started := machine.request_talk(player)
-			if talk_started and skip_requested_talk_state_need_payout:
-				machine.mark_next_talk_need_payout_applied()
-
 	if target_npc.has_method("on_player_npc_interaction"):
 		target_npc.call(
 			"on_player_npc_interaction",
@@ -593,6 +626,54 @@ func _apply_interaction_effects(
 			effect_delta,
 			effect_set_values
 		)
+
+
+func _request_social_interaction_acceptance(target_npc: Node2D) -> Dictionary:
+	# The menu gate has already validated range and identity. Reserve Talk before any effects run.
+	if target_npc == null or not is_instance_valid(target_npc):
+		return {"accepted": false, "reason": "invalid_target"}
+	if player == null or not is_instance_valid(player):
+		return {"accepted": false, "reason": "invalid_player"}
+	var block_reason := _get_block_reason(target_npc)
+	if not block_reason.is_empty():
+		return {"accepted": false, "reason": block_reason}
+	if not request_talk_state:
+		return {"accepted": true, "reason": ""}
+
+	var machine := _get_machine(target_npc)
+	if machine == null:
+		# Legacy SocialNpc receivers without a state machine keep their existing direct-effect behavior.
+		return {"accepted": true, "reason": ""}
+
+	if not machine.request_talk(player):
+		var rejection_reason := "talk_request_rejected"
+		if machine.has_method("get_last_state_request_failure_reason"):
+			var machine_reason := String(machine.call("get_last_state_request_failure_reason"))
+			if not machine_reason.is_empty():
+				rejection_reason = machine_reason
+		return {"accepted": false, "reason": rejection_reason}
+
+	if skip_requested_talk_state_need_payout:
+		machine.mark_next_talk_need_payout_applied()
+	return {"accepted": true, "reason": ""}
+
+
+func _reject_social_interaction(
+	target_npc: Node2D,
+	requested_action: StringName,
+	rejection_reason: String
+) -> void:
+	if OS.is_debug_build():
+		print(
+			"Social interaction rejected: npc=%s action=%s reason=%s" % [
+				_get_npc_label(target_npc),
+				String(requested_action),
+				rejection_reason,
+			]
+		)
+	interaction_blocked.emit(player, target_npc, requested_action, rejection_reason)
+	_finish_menu_attempt("", false)
+	cooldown = cooldown_seconds
 
 
 func _get_pressed_option_index() -> int:
@@ -641,11 +722,17 @@ func _tick_menu_timer(delta: float) -> void:
 
 
 func _update_open_menu() -> void:
-	if not _menu_target_is_still_valid():
+	var invalidation_reason := _get_open_menu_invalidation_reason()
+	if invalidation_reason.is_empty():
+		return
+	if invalidation_reason == "target_left":
 		if active_menu == MENU_NPC_PROMPT:
 			_finish_npc_prompt(false, "target_left")
 			return
 		_finish_menu_attempt("target_left", true)
+		return
+
+	_invalidate_open_menu(invalidation_reason)
 
 
 func _finish_npc_prompt(accepted: bool, reason: String = "") -> void:
@@ -701,16 +788,29 @@ func _finish_menu_attempt(reason: String, apply_npc_cooldown: bool) -> void:
 
 
 func _menu_target_is_still_valid() -> bool:
-	if active_menu == MENU_CLOSED:
-		return true
-	if player == null or not is_instance_valid(player):
-		return false
-	if menu_target_npc == null or not is_instance_valid(menu_target_npc):
-		return false
-	if not _is_valid_npc_candidate(menu_target_npc):
-		return false
+	return _get_open_menu_invalidation_reason().is_empty()
 
-	return player.global_position.distance_to(menu_target_npc.global_position) <= max_distance
+
+func _get_open_menu_invalidation_reason() -> String:
+	if active_menu == MENU_CLOSED:
+		return ""
+	if (
+		menu_layer == null
+		or not is_instance_valid(menu_layer)
+		or menu_panel == null
+		or not is_instance_valid(menu_panel)
+	):
+		return "interaction_ui_missing"
+	if player == null or not is_instance_valid(player):
+		return "invalid_player"
+	if menu_target_npc == null or not is_instance_valid(menu_target_npc):
+		return "target_left"
+	if not _is_valid_npc_candidate(menu_target_npc):
+		return "target_left"
+	if player.global_position.distance_to(menu_target_npc.global_position) > max_distance:
+		return "target_left"
+
+	return _get_block_reason(menu_target_npc)
 
 
 func _menu_is_open() -> bool:
@@ -730,6 +830,7 @@ func _close_menu(release_target_hold: bool = true) -> void:
 		menu_layer.visible = false
 	if menu_panel != null and is_instance_valid(menu_panel):
 		menu_panel.visible = false
+	_unwatch_target_interaction_gate()
 
 
 func _clear_prompt_state() -> void:
@@ -740,18 +841,32 @@ func _clear_prompt_state() -> void:
 	prompt_completed = false
 
 
-func _begin_target_menu_hold(target_npc: Node2D, hold_seconds: float = -1.0) -> void:
+func _begin_target_menu_hold(target_npc: Node2D, hold_seconds: float = -1.0) -> Dictionary:
 	if target_npc == null or not is_instance_valid(target_npc):
-		return
+		return {"accepted": false, "reason": "invalid_target"}
+
+	var gate := _get_authoritative_interaction_gate(target_npc)
+	if not bool(gate.get("accepted", false)):
+		return gate
 
 	var hold_duration := menu_choice_timeout_seconds if hold_seconds < 0.0 else hold_seconds
 	if target_npc.has_method("begin_player_interaction_hold"):
-		target_npc.call("begin_player_interaction_hold", player, hold_duration)
-		return
+		if not bool(target_npc.call("begin_player_interaction_hold", player, hold_duration)):
+			return {"accepted": false, "reason": "interaction_hold_rejected"}
+		_watch_target_interaction_gate(target_npc)
+		return {"accepted": true, "reason": ""}
 
 	var machine := _get_machine(target_npc)
 	if machine != null and machine.has_method("begin_player_interaction_hold"):
-		machine.call("begin_player_interaction_hold", player, hold_duration)
+		if not bool(machine.call("begin_player_interaction_hold", player, hold_duration)):
+			var retry_gate := _get_authoritative_interaction_gate(target_npc)
+			if not bool(retry_gate.get("accepted", false)):
+				return retry_gate
+			return {"accepted": false, "reason": "interaction_hold_rejected"}
+		_watch_target_interaction_gate(target_npc)
+		return {"accepted": true, "reason": ""}
+
+	return {"accepted": true, "reason": ""}
 
 
 func _end_target_menu_hold(target_npc: Node2D) -> void:
@@ -765,6 +880,51 @@ func _end_target_menu_hold(target_npc: Node2D) -> void:
 	var machine := _get_machine(target_npc)
 	if machine != null and machine.has_method("end_player_interaction_hold"):
 		machine.call("end_player_interaction_hold", player)
+
+
+func _watch_target_interaction_gate(target_npc: Node2D) -> void:
+	var machine := _get_machine(target_npc)
+	if machine == menu_hold_machine:
+		return
+
+	_unwatch_target_interaction_gate()
+	menu_hold_machine = machine
+	if menu_hold_machine == null:
+		return
+	if not menu_hold_machine.player_interaction_invalidated.is_connected(
+		_on_target_interaction_invalidated
+	):
+		menu_hold_machine.player_interaction_invalidated.connect(
+			_on_target_interaction_invalidated
+		)
+
+
+func _unwatch_target_interaction_gate() -> void:
+	if menu_hold_machine != null and is_instance_valid(menu_hold_machine):
+		if menu_hold_machine.player_interaction_invalidated.is_connected(
+			_on_target_interaction_invalidated
+		):
+			menu_hold_machine.player_interaction_invalidated.disconnect(
+				_on_target_interaction_invalidated
+			)
+	menu_hold_machine = null
+
+
+func _on_target_interaction_invalidated(reason: String) -> void:
+	if not _menu_is_open():
+		return
+
+	_invalidate_open_menu(reason)
+
+
+func _invalidate_open_menu(reason: String) -> void:
+	var target_npc := menu_target_npc
+	if target_npc != null and is_instance_valid(target_npc):
+		var blocked_interaction_id := prompt_id if active_menu == MENU_NPC_PROMPT else interaction_id
+		interaction_blocked.emit(player, target_npc, blocked_interaction_id, reason)
+		_end_target_menu_hold(target_npc)
+	_close_menu(false)
+	cooldown = cooldown_seconds
 
 
 func _start_target_interaction_cooldown(target_npc: Node2D) -> void:
@@ -842,6 +1002,10 @@ func _is_valid_npc_candidate(candidate: Node2D) -> bool:
 
 func _get_block_reason(target_npc: Node2D) -> String:
 	# Central place for future gates like NPC id, tags, schedule, or custom methods.
+	var authoritative_gate := _get_authoritative_interaction_gate(target_npc)
+	if not bool(authoritative_gate.get("accepted", false)):
+		return String(authoritative_gate.get("reason", "npc_gate_rejected"))
+
 	if _target_is_ignoring_player_interaction(target_npc):
 		return "npc_ignoring_player"
 
@@ -856,6 +1020,23 @@ func _get_block_reason(target_npc: Node2D) -> String:
 			return "npc_gate_rejected"
 
 	return ""
+
+
+func _get_authoritative_interaction_gate(target_npc: Node2D) -> Dictionary:
+	if target_npc == null or not is_instance_valid(target_npc):
+		return {"accepted": false, "reason": "invalid_target"}
+
+	var machine := _get_machine(target_npc)
+	if machine == null or not machine.has_method("can_begin_player_interaction"):
+		return {"accepted": true, "reason": ""}
+
+	var result = machine.call("can_begin_player_interaction", player)
+	if result is Dictionary:
+		return result
+	if bool(result):
+		return {"accepted": true, "reason": ""}
+
+	return {"accepted": false, "reason": "npc_gate_rejected"}
 
 
 func _npc_id_is_allowed(target_npc: Node2D) -> bool:

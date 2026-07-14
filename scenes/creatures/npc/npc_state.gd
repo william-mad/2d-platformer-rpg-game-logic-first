@@ -17,14 +17,18 @@ func init() -> void:
 
 
 func enter() -> void:
-	next_state = null
-
-	if stop_horizontal_on_enter:
-		stop_horizontal()
+	begin_enter_without_animation()
 
 	# This is the shared animation hook for every NPC state.
 	if animation_name != &"":
 		play_animation(animation_name)
+
+
+func begin_enter_without_animation() -> void:
+	next_state = null
+
+	if stop_horizontal_on_enter:
+		stop_horizontal()
 
 
 func exit() -> void:
@@ -54,6 +58,25 @@ func physics_process(_delta: float) -> NpcState:
 	return next_state
 
 
+func can_continue_during_talk() -> bool:
+	# Talk is an explicit overlay, not a primary state. Stationary activities opt in:
+	# Eat, Work, Rest, and passive Recreation may keep their reservations and timers alive.
+	# Sleep, movement, combat, incapacitation, death, and travel remain incompatible by default.
+	return false
+
+
+func process_talk_overlay(_delta: float) -> StringName:
+	# Opted-in primary states update only the activity work that is safe during Talk.
+	# They must not run their normal movement/transition loop through this hook.
+	return StringName(name) if can_continue_during_talk() else &""
+
+
+func resume_presentation_after_talk_overlay() -> void:
+	# Restores presentation only; it deliberately does not call enter() or reset state data.
+	if animation_name != &"":
+		play_animation(animation_name)
+
+
 func can_exit_to(_new_state: NpcState, _request_priority: int) -> bool:
 	return true
 
@@ -81,9 +104,10 @@ func stop_horizontal() -> void:
 		npc.velocity.x = 0.0
 
 
-func play_animation(state_animation_name: StringName) -> void:
+func play_animation(state_animation_name: StringName) -> bool:
 	if machine != null:
-		machine.play_animation(state_animation_name)
+		return machine.play_animation(state_animation_name)
+	return false
 
 
 func face_x_direction(x_direction: float) -> void:

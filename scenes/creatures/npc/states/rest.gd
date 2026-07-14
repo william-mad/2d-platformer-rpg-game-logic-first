@@ -81,6 +81,35 @@ func physics_process(_delta: float) -> NpcState:
 	return next_state
 
 
+func can_continue_during_talk() -> bool:
+	if rest_value_name == &"" or machine.get_value(rest_value_name) <= tired_floor:
+		return false
+	if active_rest_target == null:
+		return resting_in_place
+	return (
+		is_instance_valid(active_rest_target)
+		and _target_can_be_rested_at(active_rest_target)
+		and is_close_to(active_rest_target.global_position, machine.stop_distance)
+	)
+
+
+func process_talk_overlay(_delta: float) -> StringName:
+	stop_horizontal()
+	if rest_value_name == &"" or machine.get_value(rest_value_name) <= tired_floor:
+		machine.rest_target = null
+		return &"Idle"
+	if active_rest_target == null:
+		return &"Rest" if resting_in_place else &"Idle"
+	if not is_instance_valid(active_rest_target) or not _target_can_be_rested_at(active_rest_target):
+		machine.rest_target = null
+		return &"Idle"
+	if not is_close_to(active_rest_target.global_position, machine.stop_distance):
+		machine.move_target = active_rest_target
+		machine.state_after_move = &"Rest"
+		return &"MoveToTarget"
+	return &"Rest"
+
+
 func is_resting_in_place() -> bool:
 	return resting_in_place and active_rest_target == null
 

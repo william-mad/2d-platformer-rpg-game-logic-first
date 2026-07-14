@@ -153,6 +153,13 @@ func exit() -> void:
 		_air_ledge_assist_cast.enabled = false
 
 
+func get_player_interaction_block_reason(_actor: Node2D = null) -> String:
+	if _transition_phase != TransitionPhase.FOLLOWING:
+		return "npc_travel_transition"
+
+	return ""
+
+
 func physics_process(delta: float) -> NpcState:
 	_jump_cooldown = maxf(_jump_cooldown - delta, 0.0)
 	_height_jump_cooldown = maxf(_height_jump_cooldown - delta, 0.0)

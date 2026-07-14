@@ -8,7 +8,6 @@ class_name NpcStateEat extends NpcState
 var eat_timer: float = 0.0
 var total_eat_seconds: float = 0.0
 var active_eat_target: Node2D
-var resume_from_talk_overlay: bool = false
 var meal_sated_marked: bool = false
 var inventory_food_item_id: StringName = &""
 var inventory_food_reservation_id: StringName = &""
@@ -22,7 +21,7 @@ func enter() -> void:
 	super.enter()
 	_breadcrumb(
 		"npc_eat:enter",
-		"%s hunger=%.2f resume=%s" % [_npc_label(), machine.get_value(eat_value_name), str(resume_from_talk_overlay)]
+		"%s hunger=%.2f" % [_npc_label(), machine.get_value(eat_value_name)]
 	)
 	if _eat_state_disabled():
 		_breadcrumb("npc_eat:disabled", _npc_label())
@@ -32,27 +31,7 @@ func enter() -> void:
 		stop_horizontal()
 		return
 
-	if not resume_from_talk_overlay:
-		meal_sated_marked = false
-
-	if resume_from_talk_overlay:
-		resume_from_talk_overlay = false
-		if active_eat_target == null or not is_instance_valid(active_eat_target):
-			active_eat_target = _resolve_eat_target()
-		if (
-			active_eat_target == null
-			or eat_timer <= 0.0
-			or _hunger_is_sated()
-			or not _target_can_be_eaten_at(active_eat_target)
-		):
-			if _hunger_is_sated():
-				_mark_meal_sated_if_needed()
-				_breadcrumb("npc_eat:sated_on_resume", _npc_label())
-			next_state = get_state(&"Idle")
-			stop_horizontal()
-			return
-		stop_horizontal()
-		return
+	meal_sated_marked = false
 
 	active_eat_target = _resolve_eat_target()
 	if active_eat_target == null:
@@ -98,7 +77,8 @@ func exit() -> void:
 		"%s hunger=%.2f timer=%.2f" % [_npc_label(), machine.get_value(eat_value_name), eat_timer]
 	)
 	super.exit()
-	call_deferred("_release_inventory_food_if_cancelled")
+	# Talk no longer exits Eat, so a real exit can release synchronously and exactly once.
+	_release_inventory_food_if_cancelled()
 
 
 func physics_process(delta: float) -> NpcState:
@@ -170,7 +150,9 @@ func process_talk_overlay(delta: float) -> StringName:
 		return &"Idle"
 
 	if active_eat_target != null and not is_close_to(active_eat_target.global_position, machine.stop_distance):
-		return &"Eat"
+		machine.move_target = active_eat_target
+		machine.state_after_move = &"Eat"
+		return &"MoveToTarget"
 
 	if eat_timer <= 0.0 or _hunger_is_sated():
 		return &"Idle"
@@ -189,11 +171,6 @@ func process_talk_overlay(delta: float) -> StringName:
 		return &"Idle"
 
 	return &"Eat"
-
-
-func prepare_resume_from_talk_overlay() -> void:
-	resume_from_talk_overlay = true
-
 
 func _resolve_eat_target() -> Node2D:
 	# Target priority: exported path, assigned spot, then closest matching Eat spot.
@@ -306,12 +283,12 @@ func _release_inventory_food_if_cancelled() -> void:
 func _should_preserve_inventory_food_reservation() -> bool:
 	if not using_inventory_food or machine == null or machine.current_state == null:
 		return false
-	var current_name := StringName(machine.current_state.name)
-	if current_name == &"MoveToTarget":
+	var destination_name := machine.get_pending_primary_state_name()
+	if destination_name == &"":
+		destination_name = StringName(machine.current_state.name)
+	if destination_name == &"MoveToTarget":
 		return machine.state_after_move == &"Eat"
-	if current_name == &"Talk":
-		return machine.current_state.get("continued_task_state") == self
-	return current_name == &"Eat"
+	return destination_name == &"Eat"
 
 
 func _release_inventory_food_reservation() -> void:

@@ -78,13 +78,11 @@ var talk_total_duration: float = 0.0
 var talk_partner: Node2D
 var talk_started_handled: bool = false
 var talk_finished_handled: bool = false
+var talk_completed_successfully: bool = false
 var following_partner: bool = false
 var approaching_partner: bool = false
 var approach_timer: float = 0.0
 var maximum_distance_cancel_timer: float = 0.0
-var continued_task_state: NpcState
-var continued_task_return_state_name: StringName = &"Idle"
-var continued_task_priority: int = 0
 var static_task_talk: bool = false
 var talk_limits_label: Label
 var spread_rng := RandomNumberGenerator.new()
@@ -99,12 +97,12 @@ func enter() -> void:
 	# Starts a timed talk with the assigned partner or the machine's active target.
 	super.enter()
 	talk_partner = machine.talk_target if machine.talk_target != null else machine.get_active_target()
-	continued_task_state = _get_continued_task_state()
-	continued_task_return_state_name = _get_continued_task_state_name()
-	continued_task_priority = machine.previous_state_priority if machine != null else 0
-	static_task_talk = continued_task_state != null
+	# The state machine owns the primary/overlay relationship. Talk never reads state
+	# history and never exits or re-enters the activity underneath it.
+	static_task_talk = machine != null and machine.primary_state_continues_under_talk() and not machine.is_primary_state(&"Idle")
 	talk_started_handled = false
 	talk_finished_handled = false
+	talk_completed_successfully = false
 	following_partner = false
 	approaching_partner = false
 	approach_timer = talk_approach_timeout
@@ -145,7 +143,6 @@ func exit() -> void:
 	_hide_talk_limits()
 	if talk_started_handled and not talk_finished_handled:
 		_cancel_talk_action("state_exit")
-	_clear_continued_task_state()
 
 
 func physics_process(delta: float) -> NpcState:
@@ -156,8 +153,6 @@ func physics_process(delta: float) -> NpcState:
 
 	if talk_started_handled and _update_maximum_talk_distance_cancel(delta):
 		return _get_after_talk_state()
-
-	_update_continued_task_progress(delta)
 
 	if approaching_partner:
 		if _update_talk_approach(delta):
@@ -210,6 +205,20 @@ func cancel_talk_with(candidate: Node2D, reason: String = "cancelled") -> void:
 	_cancel_talk_action(reason)
 
 
+func complete_talk_with(candidate: Node2D) -> void:
+	if not is_talking_with(candidate):
+		return
+	_finish_talk_action()
+
+
+func refresh_overlay_presentation() -> void:
+	if (following_partner or approaching_partner) and not static_task_talk and follow_animation_name != &"":
+		play_animation(follow_animation_name)
+	elif animation_name != &"":
+		play_animation(animation_name)
+	_face_talk_partner()
+
+
 func can_be_interrupted_by_scheduled_activity(_request_priority: int) -> bool:
 	if talk_finished_handled:
 		return true
@@ -237,78 +246,13 @@ func get_talk_approach_distance() -> float:
 	return maxf(talk_range * preferred_talk_distance_ratio, 0.0)
 
 
-func continues_state_during_talk(state_name: StringName) -> bool:
-	return static_task_talk and continued_task_return_state_name == state_name
-
-
-func _get_continued_task_state() -> NpcState:
-	if machine == null or machine.state_history.size() < 2:
-		return null
-
-	var previous_state := machine.state_history[1] as NpcState
-	if previous_state == null or not is_instance_valid(previous_state):
-		return null
-	if not previous_state.has_method("process_talk_overlay"):
-		return null
-	if previous_state.has_method("can_continue_during_talk"):
-		if not bool(previous_state.call("can_continue_during_talk")):
-			return null
-
-	return previous_state
-
-
-func _get_continued_task_state_name() -> StringName:
-	if continued_task_state == null or not is_instance_valid(continued_task_state):
-		return end_state_name
-
-	return StringName(continued_task_state.name)
-
-
-func _clear_continued_task_state() -> void:
-	continued_task_state = null
-	continued_task_return_state_name = &"Idle"
-	continued_task_priority = 0
-	static_task_talk = false
-
-
-func _update_continued_task_progress(delta: float) -> void:
-	if continued_task_state == null or not is_instance_valid(continued_task_state):
-		_clear_continued_task_state()
-		return
-	if not continued_task_state.has_method("process_talk_overlay"):
-		_clear_continued_task_state()
-		return
-
-	var next_state_name = continued_task_state.call("process_talk_overlay", delta)
-	if typeof(next_state_name) == TYPE_NIL:
-		return
-
-	var next_name := StringName(String(next_state_name))
-	if next_name != &"":
-		continued_task_return_state_name = next_name
-
-
 func _get_after_talk_state() -> NpcState:
-	var next_state_name := end_state_name
-	if static_task_talk and continued_task_return_state_name != &"":
-		next_state_name = continued_task_return_state_name
-
-	if (
-		static_task_talk
-		and continued_task_state != null
-		and is_instance_valid(continued_task_state)
-		and next_state_name == StringName(continued_task_state.name)
-	):
-		if continued_task_state.has_method("prepare_resume_from_talk_overlay"):
-			continued_task_state.call("prepare_resume_from_talk_overlay")
-		if machine != null and machine.has_method("preserve_next_state_priority"):
-			machine.call("preserve_next_state_priority", continued_task_priority)
-
-	var after_state := get_state(next_state_name)
+	# A non-null result tells the state machine to close this overlay. It is not a
+	# request to exit, re-enter, or otherwise replace the primary state.
+	var after_state := get_state(end_state_name)
 	if after_state != null:
 		return after_state
-
-	return get_state(end_state_name)
+	return self
 
 
 func _start_static_partner_wait() -> void:
@@ -340,6 +284,7 @@ func _finish_talk_action() -> void:
 	stop_horizontal()
 	_hide_talk_limits()
 	talk_finished_handled = true
+	talk_completed_successfully = true
 	var changed_values := {}
 
 	var skip_own_need_payout := machine.consume_next_talk_need_payout_already_applied()
@@ -381,6 +326,7 @@ func _cancel_talk_action(reason: String) -> void:
 	following_partner = false
 	_hide_talk_limits()
 	talk_finished_handled = true
+	talk_completed_successfully = false
 	if talk_started_handled:
 		var valid_partner := talk_partner if is_instance_valid(talk_partner) else null
 		talk_cancelled.emit(npc, valid_partner, reason)
@@ -422,8 +368,7 @@ func _partner_machine_is_talking_back(partner_machine: NpcStateMachine) -> bool:
 		return bool(partner_machine.call("is_talking_with", npc))
 
 	return (
-		partner_machine.current_state != null
-		and String(partner_machine.current_state.name) == "Talk"
+		partner_machine.is_in_state(&"Talk")
 		and partner_machine.talk_target == npc
 	)
 

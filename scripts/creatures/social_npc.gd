@@ -122,6 +122,9 @@ const STAT_KEY_ALIASES := {
 @onready var npc_inventory: NpcInventoryComponent = get_node_or_null("NpcInventory") as NpcInventoryComponent
 @onready var npc_inventory_drop: NpcInventoryDropComponent = get_node_or_null("NpcInventoryDrop") as NpcInventoryDropComponent
 @onready var merchant_component: MerchantComponent = get_node_or_null("Merchant") as MerchantComponent
+@onready var npc_animation_controller: NpcAnimationController = (
+	get_node_or_null("NpcAnimationController") as NpcAnimationController
+)
 # Optional child component. If present, social values can drive the reusable NPC states.
 @onready var npc_state_machine: NpcStateMachine = get_node_or_null("NpcStateMachine") as NpcStateMachine
 
@@ -671,6 +674,7 @@ func _get_world_simulation_profile() -> Dictionary:
 		},
 		"social_seeking": {
 			"enabled": npc_state_machine.cross_scene_talk_enabled,
+			"allow_remote_visits": npc_state_machine.cross_scene_talk_enabled,
 			"talk_need_threshold": npc_state_machine.cross_scene_talk_need_threshold,
 			"priority": npc_state_machine.cross_scene_talk_priority,
 			"minimum_npc_favor": npc_state_machine.cross_scene_minimum_npc_favor,
@@ -1091,6 +1095,11 @@ func _react_to_event(actor: Node2D, favor_delta: float) -> void:
 func _update_facing() -> void:
 	if direction == 0:
 		direction = 1
+	if (
+		npc_animation_controller != null
+		and npc_animation_controller.face_x_direction(float(direction))
+	):
+		return
 
 	sight_pivot.scale.x = direction
 

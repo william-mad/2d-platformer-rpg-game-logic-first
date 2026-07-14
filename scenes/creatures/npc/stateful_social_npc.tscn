@@ -2,8 +2,12 @@
 
 [ext_resource type="PackedScene" path="res://scenes/creatures/social_npc.tscn" id="1_social"]
 [ext_resource type="PackedScene" path="res://scenes/creatures/npc/npc_state_machine.tscn" id="2_machine"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/npc_animation_controller.gd" id="3_animation"]
 
 [node name="StatefulSocialNpc" instance=ExtResource("1_social")]
+
+[node name="NpcAnimationController" type="Node" parent="."]
+script = ExtResource("3_animation")
 
 [node name="NpcStateMachine" parent="." instance=ExtResource("2_machine")]
 debug_label_path = NodePath("StateLabel")

@@ -15,6 +15,7 @@ const MEAL_OWNER_CLEANUP := "cleanup"
 const MEAL_CYCLE_EPSILON := 0.001
 const INVITE_PLAYER_STATE := &"InvitePlayer"
 const MagicLessonRemoteInvitationScene := preload("res://scripts/instances/magic_lesson_remote_invitation.gd")
+const NpcActivityIdentity = preload("res://scripts/systems/npc_activity_identity.gd")
 
 @export var simulation_interval_seconds: float = 10.0
 @export var simulated_talk_need_drop: float = 40.0
@@ -299,7 +300,6 @@ func _process(delta: float) -> void:
 
 func simulate_now() -> void:
 	# Only saved records are simulated; unloaded NPC scenes never need a running state machine.
-	_social_planner.begin_simulation_pass()
 	if _world_simulation_debug_disabled():
 		_log_world_simulation_disabled("simulate_now")
 		return
@@ -343,6 +343,7 @@ func simulate_now() -> void:
 		profile_synchronize_usec = Time.get_ticks_usec() - profile_stage_start_usec
 		profile_stage_start_usec = Time.get_ticks_usec()
 	var records: Dictionary = locations.call("get_records_snapshot")
+	_social_planner.begin_simulation_pass()
 	if profiling_enabled:
 		profile_snapshot_usec = Time.get_ticks_usec() - profile_stage_start_usec
 		profile_stage_start_usec = Time.get_ticks_usec()
@@ -871,7 +872,11 @@ func _wake_live_npc_after_sleep_skip(live_npc: Node, slept_during_skip: bool = f
 		):
 			machine.call("suppress_next_idle_value_reaction")
 		_prepare_live_npc_after_sleep_skip(live_npc, machine)
-		machine.call("request_state", &"Idle", null, "player_sleep_skip_wake", 1000)
+		var wake_accepted := bool(machine.call(
+			"request_state", &"Idle", null, "player_sleep_skip_wake", 1000
+		))
+		if not wake_accepted:
+			_breadcrumb("npc_world:sleep_skip_wake_reject", live_npc.name)
 		return
 
 	var current_state = machine.get("current_state")
@@ -880,7 +885,11 @@ func _wake_live_npc_after_sleep_skip(live_npc: Node, slept_during_skip: bool = f
 	if not ["Sleep", "Collapse", "Rest"].has(String(current_state.name)):
 		return
 
-	machine.call("request_state", &"Idle", null, "player_sleep_skip", 100)
+	var idle_accepted := bool(machine.call(
+		"request_state", &"Idle", null, "player_sleep_skip", 100
+	))
+	if not idle_accepted:
+		_breadcrumb("npc_world:sleep_skip_idle_reject", live_npc.name)
 
 
 func _prepare_live_npc_after_sleep_skip(live_npc: Node, machine: Node) -> void:
@@ -1079,10 +1088,14 @@ func resume_live_activity(npc_id: StringName, npc: Node) -> void:
 	var definition := spot_definitions.get(spot_id, null) as NpcSpotDefinition
 	if definition == null:
 		_breadcrumb("npc_world:resume_live_missing_definition", "%s %s" % [String(npc_id), String(spot_id)])
+		_rollback_committed_live_activity(
+			npc_id, activity, spot_id, locations, "spot_definition_missing"
+		)
 		return
 	var spot := _get_live_activity_spot(spot_id, definition, activity)
 	if spot == null or not is_instance_valid(spot):
 		_breadcrumb("npc_world:resume_live_missing_spot", "%s %s" % [String(npc_id), String(spot_id)])
+		_rollback_committed_live_activity(npc_id, activity, spot_id, locations, "live_spot_missing")
 		return
 	if _debug_definition_disabled(definition):
 		_breadcrumb("npc_world:resume_live_disabled_definition", "%s %s" % [String(npc_id), String(spot_id)])
@@ -1097,20 +1110,28 @@ func resume_live_activity(npc_id: StringName, npc: Node) -> void:
 	var machine := npc.get_node_or_null("NpcStateMachine")
 	if machine == null:
 		_breadcrumb("npc_world:resume_live_no_machine", String(npc_id))
+		_rollback_committed_live_activity(
+			npc_id, activity, spot_id, locations, "state_machine_missing"
+		)
 		return
 	if not _live_activity_can_continue(npc_id, npc, machine, definition, spot):
 		_breadcrumb("npc_world:resume_live_finish_live_invalid", "%s %s" % [String(npc_id), String(spot_id)])
 		_finish_activity(npc_id, record, activity, spot_id, locations)
 		return
-	if not _npc_is_following_activity(machine, definition, spot):
+	var activity_descriptor := _get_activity_descriptor(definition, spot, activity)
+	if not _npc_is_following_activity(machine, definition, spot, activity):
 		if locations.has_method("is_npc_available_for_scheduled_activity"):
 			if not bool(locations.call(
 				"is_npc_available_for_scheduled_activity",
 				String(npc_id),
 				definition.state_name,
-				definition.priority
+				definition.priority,
+				activity_descriptor
 			)):
 				_breadcrumb("npc_world:resume_live_unavailable", "%s %s" % [String(npc_id), String(spot_id)])
+				_rollback_committed_live_activity(
+					npc_id, activity, spot_id, locations, "npc_unavailable"
+				)
 				return
 	var accepted_invitation_running := _resume_accepted_invitation_activity(
 		npc_id,
@@ -1121,23 +1142,52 @@ func resume_live_activity(npc_id: StringName, npc: Node) -> void:
 	)
 	if accepted_invitation_running:
 		_breadcrumb("npc_world:resume_live_started_accepted_lesson", "%s %s" % [String(npc_id), String(spot_id)])
-	if _npc_is_following_activity(machine, definition, spot):
+	if _npc_is_following_activity(machine, definition, spot, activity):
 		_breadcrumb("npc_world:resume_live_already_following", "%s %s" % [String(npc_id), String(spot_id)])
 		return
 
-	var assignment_method := definition.get_assignment_method()
-	if assignment_method != &"" and machine.has_method(assignment_method):
-		if bool(machine.call(assignment_method, spot, definition.priority)):
-			_breadcrumb("npc_world:resume_live_assigned", "%s %s" % [String(npc_id), String(spot_id)])
-			return
-	elif machine.has_method("request_state"):
-		machine.call("request_state", definition.state_name, spot, "world_activity", definition.priority)
-		_breadcrumb("npc_world:resume_live_requested", "%s %s" % [String(npc_id), String(spot_id)])
+	var assignment_result := _request_live_activity_assignment(
+		machine,
+		definition,
+		spot,
+		activity
+	)
+	if bool(assignment_result.get("accepted", false)):
+		_breadcrumb("npc_world:resume_live_assigned", "%s %s" % [String(npc_id), String(spot_id)])
 		return
+	_rollback_committed_live_activity(
+		npc_id,
+		activity,
+		spot_id,
+		locations,
+		String(assignment_result.get("reason", "assignment_rejected"))
+	)
 
-	if machine.has_method("request_state"):
-		machine.call("request_state", definition.state_name, spot, "world_activity", definition.priority)
-		_breadcrumb("npc_world:resume_live_requested", "%s %s" % [String(npc_id), String(spot_id)])
+
+func _rollback_committed_live_activity(
+	npc_id: StringName,
+	activity: Dictionary,
+	spot_id: StringName,
+	locations: Node,
+	reason: String
+) -> void:
+	var rolled_back := false
+	if locations != null and locations.has_method("rollback_scheduled_activity"):
+		rolled_back = bool(locations.call(
+			"rollback_scheduled_activity",
+			String(npc_id),
+			activity,
+			reason
+		))
+	if rolled_back:
+		_release_spot(spot_id)
+	_log_activity_transaction(
+		npc_id,
+		activity,
+		spot_id,
+		"rollback" if rolled_back else "rollback_failed",
+		reason
+	)
 
 
 func _live_activity_can_continue(
@@ -1174,23 +1224,26 @@ func _live_activity_can_continue(
 			return false
 		return bool(spot.call("can_start_lesson", inviter_2d, player))
 
-	if definition.state_name != &"Eat":
-		return true
 	if spot == null or not is_instance_valid(spot):
 		return false
-	if not spot.has_method("can_serve_npc_need"):
-		return true
 
 	var npc_2d := npc as Node2D
 	if npc_2d == null:
 		return false
-
-	return bool(spot.call(
-		"can_serve_npc_need",
-		npc_2d,
-		definition.state_name,
-		StringName(value_name)
-	))
+	if spot.has_method("can_serve_npc_need"):
+		return bool(spot.call(
+			"can_serve_npc_need",
+			npc_2d,
+			definition.state_name,
+			StringName(value_name)
+		))
+	if spot.has_method("can_serve_npc_casual_activity"):
+		return bool(spot.call(
+			"can_serve_npc_casual_activity",
+			npc_2d,
+			definition.state_name
+		))
+	return true
 
 
 func _resume_accepted_invitation_activity(
@@ -1224,18 +1277,380 @@ func _resume_accepted_invitation_activity(
 func _npc_is_following_activity(
 	machine: Node,
 	definition: NpcSpotDefinition,
-	spot: Node2D
+	spot: Node2D,
+	activity: Dictionary = {}
 ) -> bool:
+	if machine == null or definition == null:
+		return false
+	var requested_descriptor := _get_activity_descriptor(definition, spot, activity)
+	if machine.has_method("is_following_activity_descriptor"):
+		return bool(machine.call("is_following_activity_descriptor", requested_descriptor))
+
+	# Compatibility for older/simple machines still requires the exact live target.
 	var current_state = machine.get("current_state")
 	if current_state != null and _state_names_match(StringName(current_state.name), definition.state_name):
-		return true
+		return _get_legacy_machine_activity_target(machine, definition.state_name) == spot
 	if current_state == null or String(current_state.name) != "MoveToTarget":
 		return false
-
 	return (
-		machine.get("move_target") == spot
-		and _state_names_match(StringName(machine.get("state_after_move")), definition.state_name)
+		_get_property_if_present(machine, &"move_target", null) == spot
+		and _state_names_match(
+			StringName(_get_property_if_present(machine, &"state_after_move", &"")),
+			definition.state_name
+		)
 	)
+
+
+func _get_activity_descriptor(
+	definition: NpcSpotDefinition,
+	spot: Node2D = null,
+	activity: Dictionary = {}
+) -> Dictionary:
+	if definition == null:
+		return {}
+	var action_kind := StringName(String(activity.get("state_name", definition.state_name)))
+	var spot_id := StringName(String(activity.get("spot_id", definition.spot_id)))
+	var scene_path := String(activity.get("target_scene_path", definition.scene_path))
+	return NpcActivityIdentity.describe(
+		action_kind,
+		spot,
+		spot_id,
+		scene_path,
+		String(activity.get("activity_id", "")),
+		String(activity.get("request_id", ""))
+	)
+
+
+func _get_pending_travel_activity_descriptor(
+	pending_travel: Dictionary,
+	locations: Node
+) -> Dictionary:
+	var nested_activity = pending_travel.get("activity", {})
+	if nested_activity is Dictionary and not nested_activity.is_empty():
+		var nested_spot_id := StringName(String(nested_activity.get("spot_id", "")))
+		var nested_definition := spot_definitions.get(nested_spot_id, null) as NpcSpotDefinition
+		if nested_definition != null:
+			var nested_spot := live_spots.get(nested_spot_id, null) as Node2D
+			return _get_activity_descriptor(nested_definition, nested_spot, nested_activity)
+
+	var requested_state := StringName(String(pending_travel.get("requested_state_name", "")))
+	var target_npc_id := String(pending_travel.get("social_target_id", "")).strip_edges()
+	var live_target: Node2D
+	if target_npc_id == PLAYER_SOCIAL_TARGET_ID:
+		live_target = get_tree().get_first_node_in_group("player") as Node2D
+	elif not target_npc_id.is_empty() and locations != null and locations.has_method("get_live_npc"):
+		live_target = locations.call("get_live_npc", target_npc_id) as Node2D
+
+	return NpcActivityIdentity.describe(
+		requested_state,
+		live_target,
+		StringName(String(pending_travel.get("spot_id", ""))),
+		String(pending_travel.get("target_scene_path", "")),
+		String(pending_travel.get("activity_id", "")),
+		String(pending_travel.get("request_id", "")),
+		target_npc_id
+	)
+
+
+func accept_scheduled_activity_proposal(
+	npc_id: StringName,
+	activity: Dictionary,
+	target_scene_path: String,
+	live_npc: Node,
+	requires_live_assignment: bool,
+	locations: Node
+) -> Dictionary:
+	var spot_id := StringName(String(activity.get("spot_id", "")))
+	var pending_reservation := _pending_activity_reservation_matches(
+		npc_id,
+		activity,
+		locations
+	)
+	var reservation_held := pending_reservation and int(spot_claim_counts.get(spot_id, 0)) > 0
+	var definition := spot_definitions.get(spot_id, null) as NpcSpotDefinition
+	var validation_reason := _validate_activity_proposal(
+		npc_id,
+		activity,
+		target_scene_path,
+		definition
+	)
+	if not validation_reason.is_empty():
+		return _reject_activity_proposal(
+			npc_id, activity, spot_id, validation_reason, reservation_held, pending_reservation
+		)
+
+	if not reservation_held:
+		if not _spot_has_capacity(definition):
+			return _reject_activity_proposal(
+				npc_id, activity, spot_id, "spot_capacity_unavailable", false, pending_reservation
+			)
+		_claim_spot(spot_id)
+		reservation_held = true
+		_log_activity_transaction(npc_id, activity, spot_id, "reserved", "temporary_claim")
+
+	if not requires_live_assignment:
+		_log_activity_transaction(npc_id, activity, spot_id, "accepted", "offscreen_validated")
+		return {
+			"accepted": true,
+			"reason": "offscreen_validated",
+			"spot_id": String(spot_id),
+			"live_assigned": false,
+		}
+
+	if live_npc == null or not is_instance_valid(live_npc):
+		return _reject_activity_proposal(
+			npc_id, activity, spot_id, "live_npc_invalid", reservation_held, pending_reservation
+		)
+	var spot := _get_live_activity_spot(spot_id, definition, activity)
+	if spot == null or not is_instance_valid(spot):
+		return _reject_activity_proposal(
+			npc_id, activity, spot_id, "live_spot_missing", reservation_held, pending_reservation
+		)
+	var machine := live_npc.get_node_or_null("NpcStateMachine")
+	if machine == null:
+		return _reject_activity_proposal(
+			npc_id, activity, spot_id, "state_machine_missing", reservation_held, pending_reservation
+		)
+	if not _live_activity_can_continue(npc_id, live_npc, machine, definition, spot):
+		return _reject_activity_proposal(
+			npc_id, activity, spot_id, "live_target_rejected", reservation_held, pending_reservation
+		)
+
+	var descriptor := _get_activity_descriptor(definition, spot, activity)
+	if not _npc_is_following_activity(machine, definition, spot, activity):
+		if locations == null or not locations.has_method("is_npc_available_for_scheduled_activity"):
+			return _reject_activity_proposal(
+				npc_id, activity, spot_id, "availability_check_missing", reservation_held, pending_reservation
+			)
+		if not bool(locations.call(
+			"is_npc_available_for_scheduled_activity",
+			String(npc_id),
+			definition.state_name,
+			definition.priority,
+			descriptor
+		)):
+			return _reject_activity_proposal(
+				npc_id, activity, spot_id, "npc_unavailable", reservation_held, pending_reservation
+			)
+
+	var assignment_result := _request_live_activity_assignment(
+		machine,
+		definition,
+		spot,
+		activity
+	)
+	if not bool(assignment_result.get("accepted", false)):
+		return _reject_activity_proposal(
+			npc_id,
+			activity,
+			spot_id,
+			String(assignment_result.get("reason", "assignment_rejected")),
+			reservation_held,
+			pending_reservation
+		)
+
+	_log_activity_transaction(npc_id, activity, spot_id, "accepted", "live_assignment_accepted")
+	return {
+		"accepted": true,
+		"reason": "live_assignment_accepted",
+		"spot_id": String(spot_id),
+		"live_assigned": true,
+	}
+
+
+func confirm_scheduled_activity_proposal(npc_id: StringName, activity: Dictionary) -> void:
+	var spot_id := StringName(String(activity.get("spot_id", "")))
+	_log_activity_transaction(npc_id, activity, spot_id, "committed", "record_committed")
+
+
+func release_scheduled_activity_claim(spot_id: StringName, reason: String = "released") -> void:
+	_release_spot(spot_id)
+	if OS.is_debug_build():
+		print("NPC activity claim released: spot=%s reason=%s" % [String(spot_id), reason])
+
+
+func _validate_activity_proposal(
+	npc_id: StringName,
+	activity: Dictionary,
+	target_scene_path: String,
+	definition: NpcSpotDefinition
+) -> String:
+	if activity.is_empty():
+		return "activity_empty"
+	var spot_id := StringName(String(activity.get("spot_id", "")))
+	if spot_id == &"":
+		return "spot_id_missing"
+	if definition == null:
+		return "spot_definition_missing"
+	if _debug_definition_disabled(definition):
+		return "spot_definition_disabled"
+	if target_scene_path.is_empty():
+		return "target_scene_missing"
+	var activity_scene := String(activity.get("target_scene_path", target_scene_path))
+	if activity_scene.is_empty() or activity_scene != target_scene_path:
+		return "target_scene_mismatch"
+	var requested_state := StringName(String(activity.get("state_name", "")))
+	if requested_state == &"" or not _state_names_match(requested_state, definition.state_name):
+		return "activity_state_mismatch"
+	if (
+		_definition_is_meal_cycle_managed(definition)
+		and not _meal_cycle_definition_can_start(
+			definition,
+			npc_id,
+			_get_current_time_of_day_hours()
+		)
+	):
+		return "meal_cycle_unavailable"
+	if not _definition_is_meal_cycle_managed(definition) and not definition.allows_npc_id(npc_id):
+		return "npc_not_allowed_for_spot"
+	if not _spot_runtime_is_available(definition):
+		return "spot_runtime_unavailable"
+	return ""
+
+
+func _request_live_activity_assignment(
+	machine: Node,
+	definition: NpcSpotDefinition,
+	spot: Node2D,
+	activity: Dictionary
+) -> Dictionary:
+	if _npc_is_following_activity(machine, definition, spot, activity):
+		return {"accepted": true, "reason": "already_following"}
+
+	var accepted := false
+	var assignment_method := definition.get_assignment_method()
+	if assignment_method != &"":
+		if not machine.has_method(assignment_method):
+			return {"accepted": false, "reason": "assignment_method_missing"}
+		accepted = bool(machine.call(assignment_method, spot, definition.priority))
+	else:
+		if not machine.has_method("request_state"):
+			return {"accepted": false, "reason": "state_request_method_missing"}
+		accepted = bool(machine.call(
+			"request_state",
+			definition.state_name,
+			spot,
+			"world_activity",
+			definition.priority
+		))
+
+	if accepted:
+		return {"accepted": true, "reason": "assignment_accepted"}
+	var reason := "assignment_rejected"
+	if machine.has_method("get_last_state_request_failure_reason"):
+		var machine_reason := String(machine.call("get_last_state_request_failure_reason"))
+		if not machine_reason.is_empty():
+			reason = machine_reason
+	return {"accepted": false, "reason": reason}
+
+
+func _pending_activity_reservation_matches(
+	npc_id: StringName,
+	activity: Dictionary,
+	locations: Node
+) -> bool:
+	if locations == null or not locations.has_method("get_npc_location"):
+		return false
+	var record = locations.call("get_npc_location", String(npc_id))
+	if not (record is Dictionary):
+		return false
+	var pending = record.get("pending_travel", {})
+	if not (pending is Dictionary):
+		return false
+	var pending_activity = pending.get("activity", {})
+	if not (pending_activity is Dictionary):
+		return false
+	return (
+		String(pending_activity.get("spot_id", "")) == String(activity.get("spot_id", ""))
+		and String(pending_activity.get("state_name", "")) == String(activity.get("state_name", ""))
+	)
+
+
+func _reject_activity_proposal(
+	npc_id: StringName,
+	activity: Dictionary,
+	spot_id: StringName,
+	reason: String,
+	reservation_held: bool,
+	clear_pending: bool
+) -> Dictionary:
+	if reservation_held:
+		_release_spot(spot_id)
+	_log_activity_transaction(npc_id, activity, spot_id, "rejected", reason)
+	if reservation_held:
+		_log_activity_transaction(npc_id, activity, spot_id, "rollback", reason)
+	return {
+		"accepted": false,
+		"reason": reason,
+		"spot_id": String(spot_id),
+		"live_assigned": false,
+		"clear_pending": clear_pending,
+	}
+
+
+func _log_activity_transaction(
+	npc_id: StringName,
+	activity: Dictionary,
+	spot_id: StringName,
+	result: String,
+	reason: String
+) -> void:
+	_breadcrumb(
+		"npc_world:activity_transaction",
+		"%s %s %s %s" % [String(npc_id), String(spot_id), result, reason]
+	)
+	if OS.is_debug_build():
+		print(
+			"NPC activity transaction: npc=%s proposed=%s scene=%s spot=%s result=%s reason=%s" % [
+				String(npc_id),
+				String(activity.get("state_name", "unknown")),
+				String(activity.get("target_scene_path", "")),
+				String(spot_id),
+				result,
+				reason,
+			]
+		)
+
+
+func _get_legacy_machine_activity_target(machine: Node, state_name: StringName) -> Node2D:
+	var property_name := &"target"
+	match String(state_name):
+		"Work":
+			property_name = &"work_target"
+		"Eat":
+			property_name = &"eat_target"
+		"Rest":
+			property_name = &"rest_target"
+		"Recreation":
+			property_name = &"recreation_target"
+		"RoutineTask":
+			property_name = &"routine_task_target"
+		"Sleep":
+			property_name = &"sleep_target"
+		"Talk":
+			property_name = &"talk_target"
+		"InvitePlayer":
+			if _has_property(machine, &"invitation_spot"):
+				property_name = &"invitation_spot"
+			elif _has_property(machine, &"assigned_invitation_spot"):
+				property_name = &"assigned_invitation_spot"
+	var value = _get_property_if_present(machine, property_name, null)
+	return value as Node2D
+
+
+func _get_property_if_present(object: Object, property_name: StringName, fallback):
+	if not _has_property(object, property_name):
+		return fallback
+	return object.get(property_name)
+
+
+func _has_property(object: Object, property_name: StringName) -> bool:
+	if object == null:
+		return false
+	for property in object.get_property_list():
+		if StringName(property.get("name", &"")) == property_name:
+			return true
+	return false
 
 
 func _activity_can_continue(
@@ -1772,6 +2187,35 @@ func _try_start_social_seek(
 	if not (target_position is Vector2):
 		target_position = Vector2.ZERO
 	var social_target_id := String(candidate.get("target_id", ""))
+	var target_record: Dictionary = {}
+	if social_target_id != PLAYER_SOCIAL_TARGET_ID:
+		var target_record_value = records.get(social_target_id, {})
+		if not (target_record_value is Dictionary):
+			_log_social_plan_result(npc_id, social_target_id, "", false, "target_record_missing")
+			return false
+		target_record = target_record_value
+	var reservation := _social_planner.reserve_pair(
+		String(npc_id),
+		record,
+		social_target_id,
+		target_record,
+		locations,
+		seek_priority,
+		player,
+		records
+	)
+	if not bool(reservation.get("accepted", false)):
+		_log_social_plan_result(
+			npc_id,
+			social_target_id,
+			"",
+			false,
+			String(reservation.get("reason", "reservation_rejected"))
+		)
+		return false
+	var session_id := String(reservation.get("session_id", ""))
+	var accepted := false
+	var rejection_reason := "social_request_rejected"
 
 	var live_npc: Node2D
 	if locations.has_method("get_live_npc"):
@@ -1779,59 +2223,77 @@ func _try_start_social_seek(
 	if seeker_scene_path == target_scene_path:
 		var live_target := _get_live_social_target(candidate, locations)
 		if live_npc != null and live_target != null:
-			return _request_live_social_seek(
+			accepted = _request_live_social_seek(
 				npc_id,
 				live_npc,
 				live_target,
 				seek_priority,
 				locations
 			)
-		if live_npc == null and live_target == null and social_target_id != PLAYER_SOCIAL_TARGET_ID:
-			return _complete_simulated_conversation(
+			rejection_reason = "live_seek_rejected"
+		elif live_npc == null and live_target == null and social_target_id != PLAYER_SOCIAL_TARGET_ID:
+			accepted = _complete_simulated_conversation(
 				npc_id,
 				social_target_id,
 				record,
 				records,
-				locations
+				locations,
+				session_id
 			)
-		if live_npc == null and locations.has_method("move_simulated_npc_for_social_visit"):
-			return bool(locations.call(
+			rejection_reason = "simulated_conversation_commit_rejected"
+		elif live_npc == null and locations.has_method("move_simulated_npc_for_social_visit"):
+			accepted = bool(locations.call(
 				"move_simulated_npc_for_social_visit",
 				String(npc_id),
 				target_scene_path,
 				target_position,
 				social_target_id
 			))
-		return false
-
-	if live_npc != null:
+			rejection_reason = "social_visit_move_rejected"
+		else:
+			rejection_reason = "same_scene_participant_not_live_together"
+	elif live_npc != null:
 		var departure_door := _find_departure_door(target_scene_path, live_npc)
-		if departure_door == null or not locations.has_method("prepare_scheduled_travel"):
-			return false
-		var pending_travel := {
-			"mode": "social",
-			"target_scene_path": target_scene_path,
-			"target_position": target_position,
-			"social_target_id": social_target_id,
-			"requested_state_name": "LookForTalkTarget",
-			"requested_priority": seek_priority,
-		}
-		return bool(locations.call(
-			"prepare_scheduled_travel",
-			String(npc_id),
-			pending_travel,
-			departure_door
-		))
-
-	if locations.has_method("move_simulated_npc_for_social_visit"):
-		return bool(locations.call(
+		if departure_door != null and locations.has_method("prepare_scheduled_travel"):
+			var pending_travel := {
+				"mode": "social",
+				"target_scene_path": target_scene_path,
+				"target_position": target_position,
+				"social_target_id": social_target_id,
+				"social_session_id": session_id,
+				"requested_state_name": "LookForTalkTarget",
+				"requested_priority": seek_priority,
+			}
+			accepted = bool(locations.call(
+				"prepare_scheduled_travel",
+				String(npc_id),
+				pending_travel,
+				departure_door
+			))
+			rejection_reason = "scheduled_social_travel_rejected"
+		else:
+			rejection_reason = "social_departure_unavailable"
+	elif locations.has_method("move_simulated_npc_for_social_visit"):
+		accepted = bool(locations.call(
 			"move_simulated_npc_for_social_visit",
 			String(npc_id),
 			target_scene_path,
 			target_position,
 			social_target_id
 		))
-	return false
+		rejection_reason = "remote_social_visit_rejected"
+	else:
+		rejection_reason = "remote_social_visit_unsupported"
+
+	_social_planner.finish_session(session_id, accepted)
+	_log_social_plan_result(
+		npc_id,
+		social_target_id,
+		session_id,
+		accepted,
+		"" if accepted else rejection_reason
+	)
+	return accepted
 
 
 func _record_has_non_social_pending_travel(record: Dictionary) -> bool:
@@ -1845,20 +2307,24 @@ func _record_has_non_social_pending_travel(record: Dictionary) -> bool:
 
 
 func _get_social_seek_settings(record: Dictionary) -> Dictionary:
+	var defaults := {
+		"enabled": true,
+		"talk_need_threshold": 70.0,
+		"priority": 60,
+		"minimum_npc_favor": 10.0,
+		"player_target_chance": 0.35,
+		"allow_remote_visits": true,
+	}
 	var node_state = record.get("node_state", {})
 	if node_state is Dictionary:
 		var profile = node_state.get("world_simulation_profile", {})
 		if profile is Dictionary:
 			var settings = profile.get("social_seeking", {})
 			if settings is Dictionary and not settings.is_empty():
-				return settings
-	return {
-		"enabled": true,
-		"talk_need_threshold": 70.0,
-		"priority": 60,
-		"minimum_npc_favor": 10.0,
-		"player_target_chance": 0.35,
-	}
+				var merged := defaults.duplicate(true)
+				merged.merge(settings, true)
+				return merged
+	return defaults
 
 
 func _record_social_candidate_evaluation() -> void:
@@ -1887,15 +2353,20 @@ func _request_live_social_seek(
 	var machine := npc.get_node_or_null("NpcStateMachine")
 	if machine == null or not machine.has_method("request_state"):
 		return false
-	var current_state = machine.get("current_state")
-	if current_state != null and String(current_state.name) in ["Talk", "LookForTalkTarget"]:
-		return true
+	var seek_descriptor := NpcActivityIdentity.describe(&"LookForTalkTarget", target)
+	if machine.has_method("is_following_activity_descriptor"):
+		if bool(machine.call("is_following_activity_descriptor", seek_descriptor)):
+			return true
+		var talk_descriptor := NpcActivityIdentity.describe(&"Talk", target)
+		if bool(machine.call("is_following_activity_descriptor", talk_descriptor)):
+			return true
 	if locations.has_method("is_npc_available_for_scheduled_activity"):
 		if not bool(locations.call(
 			"is_npc_available_for_scheduled_activity",
 			String(npc_id),
 			&"LookForTalkTarget",
-			seek_priority
+			seek_priority,
+			seek_descriptor
 		)):
 			return false
 	return bool(machine.call(
@@ -1912,28 +2383,79 @@ func _complete_simulated_conversation(
 	target_id: String,
 	record: Dictionary,
 	records: Dictionary,
-	locations: Node
+	locations: Node,
+	session_id: String
 ) -> bool:
-	if target_id.is_empty() or not records.has(target_id):
+	if target_id.is_empty() or session_id.is_empty() or not records.has(target_id):
 		return false
 	var target_record = records[target_id]
 	if not (target_record is Dictionary):
 		return false
-	_set_saved_stat(record, "talk_need", _get_saved_stat(record, "talk_need") - simulated_talk_need_drop)
-	_set_saved_stat(record, "boredom", _get_saved_stat(record, "boredom") - simulated_talk_boredom_drop)
+	var seeker_update := record.duplicate(true)
+	var target_update: Dictionary = target_record.duplicate(true)
+	var seeker_last_session := String(seeker_update.get("last_completed_social_session_id", ""))
+	var target_last_session := String(target_update.get("last_completed_social_session_id", ""))
+	if seeker_last_session == session_id or target_last_session == session_id:
+		# A fully completed pair is idempotent. A one-sided marker is rejected rather than
+		# applying the social reward a second time to one participant.
+		return seeker_last_session == session_id and target_last_session == session_id
+
+	seeker_update["social_session_id"] = session_id
+	seeker_update["social_session_partner_id"] = target_id
+	target_update["social_session_id"] = session_id
+	target_update["social_session_partner_id"] = String(npc_id)
+	_set_saved_stat(seeker_update, "talk_need", _get_saved_stat(seeker_update, "talk_need") - simulated_talk_need_drop)
+	_set_saved_stat(seeker_update, "boredom", _get_saved_stat(seeker_update, "boredom") - simulated_talk_boredom_drop)
 	_set_saved_stat(
-		target_record,
+		target_update,
 		"talk_need",
-		_get_saved_stat(target_record, "talk_need") - simulated_partner_talk_need_drop
+		_get_saved_stat(target_update, "talk_need") - simulated_partner_talk_need_drop
 	)
-	record["social_visit_target_id"] = ""
-	target_record["social_visit_target_id"] = ""
+	seeker_update["social_visit_target_id"] = ""
+	target_update["social_visit_target_id"] = ""
+	seeker_update["last_completed_social_session_id"] = session_id
+	target_update["last_completed_social_session_id"] = session_id
+	seeker_update["social_session_id"] = ""
+	seeker_update["social_session_partner_id"] = ""
+	target_update["social_session_id"] = ""
+	target_update["social_session_partner_id"] = ""
+	if locations == null or not locations.has_method("update_simulated_social_pair"):
+		return false
+	if not bool(locations.call(
+		"update_simulated_social_pair",
+		String(npc_id),
+		seeker_update,
+		target_id,
+		target_update
+	)):
+		return false
+	record.clear()
+	record.merge(seeker_update, true)
+	target_record.clear()
+	target_record.merge(target_update, true)
 	records[String(npc_id)] = record
 	records[target_id] = target_record
-	if locations.has_method("update_simulated_record"):
-		_apply_simulated_record_update(locations, String(npc_id), record)
-		_apply_simulated_record_update(locations, target_id, target_record)
 	return true
+
+
+func _log_social_plan_result(
+	npc_id: StringName,
+	target_id: String,
+	session_id: String,
+	accepted: bool,
+	reason: String
+) -> void:
+	if not OS.is_debug_build():
+		return
+	print(
+		"[NpcSocial] npc=%s target=%s session=%s %s reason=%s" % [
+			String(npc_id),
+			target_id,
+			session_id,
+			"accepted" if accepted else "rejected",
+			reason,
+		]
+	)
 
 
 func _try_start_activity(
@@ -1972,11 +2494,14 @@ func _try_start_activity(
 		return
 
 	if locations.has_method("is_npc_available_for_scheduled_activity"):
+		var requested_spot := live_spots.get(definition.spot_id, null) as Node2D
+		var requested_activity := _get_activity_descriptor(definition, requested_spot)
 		if not bool(locations.call(
 			"is_npc_available_for_scheduled_activity",
 			String(npc_id),
 			definition.state_name,
-			definition.priority
+			definition.priority,
+			requested_activity
 		)):
 			return
 
@@ -2023,15 +2548,34 @@ func _try_start_activity(
 			"requested_priority": definition.priority,
 			"activity": activity,
 		}
-		if bool(locations.call(
+		if not _spot_has_capacity(definition):
+			_log_activity_transaction(
+				npc_id, activity, definition.spot_id, "rejected", "spot_capacity_unavailable"
+			)
+			return
+		var previous_claim_count := int(spot_claim_counts.get(definition.spot_id, 0))
+		_claim_spot(definition.spot_id)
+		_log_activity_transaction(
+			npc_id, activity, definition.spot_id, "reserved", "scheduled_travel"
+		)
+		var travel_accepted := bool(locations.call(
 			"prepare_scheduled_travel",
 			String(npc_id),
 			pending_travel,
 			departure_door
-		)):
-			_claim_spot(definition.spot_id)
+		))
+		if travel_accepted:
+			_log_activity_transaction(
+				npc_id, activity, definition.spot_id, "accepted", "scheduled_travel"
+			)
 			_breadcrumb("npc_world:start_activity_travel", "%s %s" % [String(npc_id), String(definition.spot_id)])
 			activity_started.emit(npc_id, definition.spot_id)
+		else:
+			if int(spot_claim_counts.get(definition.spot_id, 0)) > previous_claim_count:
+				_release_spot(definition.spot_id)
+			_log_activity_transaction(
+				npc_id, activity, definition.spot_id, "rollback", "scheduled_travel_rejected"
+			)
 		return
 
 	if not locations.has_method("begin_scheduled_activity"):
@@ -2045,7 +2589,6 @@ func _try_start_activity(
 	)):
 		return
 
-	_claim_spot(definition.spot_id)
 	_breadcrumb("npc_world:start_activity", "%s %s" % [String(npc_id), String(definition.spot_id)])
 	activity_started.emit(npc_id, definition.spot_id)
 
@@ -2139,8 +2682,7 @@ func _resume_pending_travel(
 	var target_scene_path := String(pending_travel.get("target_scene_path", ""))
 	var departure_door := _find_departure_door(target_scene_path, npc)
 	if departure_door == null:
-		if locations.has_method("cancel_pending_scheduled_travel"):
-			locations.call("cancel_pending_scheduled_travel", String(npc_id))
+		_rollback_pending_travel(npc_id, pending_travel, locations, "departure_door_missing")
 		return
 	if _npc_is_moving_to_door(npc, departure_door):
 		return
@@ -2148,15 +2690,45 @@ func _resume_pending_travel(
 	var requested_state_name := StringName(String(pending_travel.get("requested_state_name", "")))
 	var requested_priority := int(pending_travel.get("requested_priority", 0))
 	if locations.has_method("is_npc_available_for_scheduled_activity"):
+		var pending_descriptor := _get_pending_travel_activity_descriptor(pending_travel, locations)
 		if not bool(locations.call(
 			"is_npc_available_for_scheduled_activity",
 			String(npc_id),
 			requested_state_name,
-			requested_priority
+			requested_priority,
+			pending_descriptor
 		)):
+			_rollback_pending_travel(npc_id, pending_travel, locations, "npc_unavailable")
 			return
-	if locations.has_method("resume_pending_scheduled_travel"):
-		locations.call("resume_pending_scheduled_travel", String(npc_id), departure_door)
+	if not locations.has_method("resume_pending_scheduled_travel"):
+		_rollback_pending_travel(npc_id, pending_travel, locations, "travel_resume_method_missing")
+		return
+	var resumed := bool(locations.call(
+		"resume_pending_scheduled_travel",
+		String(npc_id),
+		departure_door
+	))
+	if not resumed:
+		_rollback_pending_travel(npc_id, pending_travel, locations, "travel_assignment_rejected")
+
+
+func _rollback_pending_travel(
+	npc_id: StringName,
+	pending_travel: Dictionary,
+	locations: Node,
+	reason: String
+) -> void:
+	var activity = pending_travel.get("activity", {})
+	if activity is Dictionary and not activity.is_empty():
+		_log_activity_transaction(
+			npc_id,
+			activity,
+			StringName(String(activity.get("spot_id", ""))),
+			"rollback",
+			reason
+		)
+	if locations != null and locations.has_method("cancel_pending_scheduled_travel"):
+		locations.call("cancel_pending_scheduled_travel", String(npc_id))
 
 
 func _commit_pending_travel_offscreen(
@@ -2195,14 +2767,25 @@ func _commit_pending_travel_offscreen(
 		var definition := spot_definitions.get(spot_id, null) as NpcSpotDefinition
 		if _debug_definition_disabled(definition):
 			_breadcrumb("npc_world:commit_travel_disabled_definition", "%s %s" % [String(npc_id), String(spot_id)])
+			_rollback_pending_travel(
+				npc_id, pending_travel, locations, "spot_definition_disabled"
+			)
 			return
-		if locations.has_method("begin_scheduled_activity"):
-			locations.call(
+		if not locations.has_method("begin_scheduled_activity"):
+			_rollback_pending_travel(
+				npc_id, pending_travel, locations, "begin_activity_method_missing"
+			)
+			return
+		var committed := bool(locations.call(
 				"begin_scheduled_activity",
 				String(npc_id),
 				activity,
 				target_scene_path,
 				target_position
+			))
+		if not committed:
+			_rollback_pending_travel(
+				npc_id, pending_travel, locations, "offscreen_activity_commit_rejected"
 			)
 
 
@@ -2422,12 +3005,17 @@ func _finish_activity(
 			"requested_priority": 100,
 			"spot_id": String(spot_id),
 		}
-		locations.call(
+		var finish_travel_accepted := bool(locations.call(
 			"prepare_scheduled_travel",
 			String(npc_id),
 			pending_travel,
 			departure_door
-		)
+		))
+		if not finish_travel_accepted:
+			_breadcrumb(
+				"npc_world:finish_activity_travel_reject",
+				"%s %s" % [String(npc_id), String(spot_id)]
+			)
 		return
 
 	var finished := false
@@ -2474,7 +3062,18 @@ func _detach_live_npc_from_finished_activity(
 	if not _npc_is_following_activity(machine, definition, spot):
 		return
 
-	machine.call("request_state", &"Idle", null, "world_activity_finished", definition.priority)
+	var idle_accepted := bool(machine.call(
+		"request_state",
+		&"Idle",
+		null,
+		"world_activity_finished",
+		definition.priority
+	))
+	if not idle_accepted:
+		_breadcrumb(
+			"npc_world:finish_activity_idle_reject",
+			"%s %s" % [live_npc.name, String(spot_id)]
+		)
 
 
 func _find_departure_door(target_scene_path: String, npc: Node2D) -> Node2D:
@@ -2607,6 +3206,16 @@ func _claim_spot(spot_id: StringName) -> void:
 	if spot_id == &"":
 		return
 	spot_claim_counts[spot_id] = int(spot_claim_counts.get(spot_id, 0)) + 1
+
+
+func _release_spot(spot_id: StringName) -> void:
+	if spot_id == &"":
+		return
+	var next_count := int(spot_claim_counts.get(spot_id, 0)) - 1
+	if next_count <= 0:
+		spot_claim_counts.erase(spot_id)
+	else:
+		spot_claim_counts[spot_id] = next_count
 
 
 func _spot_has_capacity(definition: NpcSpotDefinition) -> bool:

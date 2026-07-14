@@ -56,6 +56,16 @@ func physics_process(delta: float) -> NpcState:
 	return next_state
 
 
+func can_continue_during_talk() -> bool:
+	return true
+
+
+func process_talk_overlay(_delta: float) -> StringName:
+	# Conversation owns facing/movement while an otherwise idle NPC talks.
+	stop_horizontal()
+	return &"Idle"
+
+
 func _maybe_start_idle_wander() -> void:
 	_reset_wander_timer()
 	if rng.randf() > idle_wander_chance:

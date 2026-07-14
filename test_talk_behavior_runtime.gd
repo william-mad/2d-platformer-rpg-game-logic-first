@@ -80,10 +80,18 @@ func _initialize() -> void:
 
 
 func _run_tests() -> void:
-	_test_active_talk_blocks_routine_interrupts()
+	_test_talk_overlay_does_not_replace_primary()
+	_test_rejected_state_request_preserves_targets()
+	_test_rejected_player_social_choice_applies_no_effects()
+	_test_player_interaction_gate_blocks_emergency_states()
+	_test_emergency_state_invalidates_open_menu_and_resumes_processing()
+	_test_missing_interaction_ui_releases_player_interaction_hold()
 	_test_active_talk_allows_emergency_interrupt()
+	_test_emergency_cancels_both_talk_overlays_once()
+	_test_eat_lifecycle_is_not_restarted_by_talk()
 	_test_duplicate_talk_request_does_not_restart_talk()
 	_test_duplicate_move_to_talk_request_is_ignored()
+	_test_move_to_talk_arrival_opens_overlay()
 	_test_far_talk_request_approaches_without_cancel_loop()
 	_test_hungry_reaction_waits_without_usable_eat_spot()
 	_test_hungry_reaction_uses_available_eat_spot()
@@ -96,6 +104,7 @@ func _run_tests() -> void:
 	_test_monster_damage_does_not_change_social_anger()
 	_test_monster_fight_respects_low_health_stop()
 	_test_look_for_monster_after_kill_finds_next_monster()
+	_test_look_for_monster_ignores_freed_last_actor()
 	_test_unrelated_fight_does_not_scan_monsters_by_default()
 	_test_npc_prompt_calls_accept_once()
 	_test_remote_magic_lesson_config_is_cached()
@@ -103,26 +112,197 @@ func _run_tests() -> void:
 	_test_title_scene_instantiates_without_crashing()
 
 
-func _test_active_talk_blocks_routine_interrupts() -> void:
+func _test_talk_overlay_does_not_replace_primary() -> void:
 	var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
 	var machine: NpcStateMachine = setup["machine"]
 
 	_expect_true(machine.request_talk(setup["partner"], 60, false), "close talk starts")
-	_expect_state(machine, "Talk", "NPC is in Talk before routine requests")
+	_expect_state(machine, "Talk", "is_in_state recognizes the Talk overlay")
+	_expect_primary_state(machine, "Idle", "Talk leaves Idle in the primary lane")
+	_expect_equal(machine.state_history.size(), 1, "Talk does not add itself to primary history")
 
-	_expect_false(machine.request_state(&"Work", null, "test_work", 20), "Work cannot interrupt active Talk")
-	_expect_state(machine, "Talk", "Talk remains active after Work request")
-	_expect_false(machine.request_state(&"Work", null, "test_work_high", 95), "high-priority Work is still routine")
-	_expect_state(machine, "Talk", "Talk remains active after high-priority Work request")
+	_expect_true(
+		machine.request_state(&"RoutineTask", null, "test_routine", 30),
+		"an incompatible primary request can replace the activity"
+	)
+	_expect_primary_state(machine, "RoutineTask", "RoutineTask becomes the primary state")
+	_expect_false(machine.is_in_state(&"Talk"), "incompatible primary transition cancels Talk")
+	_free_setup(setup)
 
-	_expect_false(machine.request_state(&"Eat", null, "test_eat", 50), "Eat cannot interrupt active Talk")
-	_expect_state(machine, "Talk", "Talk remains active after Eat request")
+
+func _test_rejected_state_request_preserves_targets() -> void:
+	var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var machine: NpcStateMachine = setup["machine"]
+	var partner: Node2D = setup["partner"]
+	var rejected_target := Node2D.new()
+	rejected_target.name = "RejectedTarget"
+	root.add_child(rejected_target)
+	setup["monster"] = rejected_target
+
+	_expect_true(machine.request_talk(partner, 60, false), "talk starts before target-preservation check")
+	var previous_actor := machine.last_actor
+	var previous_target := machine.target
+	var previous_talk_target := machine.talk_target
+	var previous_work_target := machine.work_target
+	machine.state_after_move_priority = 73
 
 	_expect_false(
-		machine.request_state(&"RoutineTask", null, "test_routine", 30),
-		"RoutineTask cannot interrupt active Talk"
+		machine.request_state(&"MissingTestState", rejected_target, "missing_state_test", 20),
+		"missing state request reports failure"
 	)
-	_expect_state(machine, "Talk", "Talk remains active after RoutineTask request")
+	_expect_state(machine, "Talk", "rejected request leaves active overlay unchanged")
+	_expect_primary_state(machine, "Idle", "rejected request leaves primary state unchanged")
+	_expect_true(machine.last_actor == previous_actor, "rejected request preserves last actor")
+	_expect_true(machine.target == previous_target, "rejected request preserves generic target")
+	_expect_true(machine.talk_target == previous_talk_target, "rejected request preserves talk target")
+	_expect_true(machine.work_target == previous_work_target, "rejected request preserves specialized target")
+	_expect_equal(machine.state_after_move_priority, 73, "rejected request preserves request context")
+	_free_setup(setup)
+
+
+func _test_rejected_player_social_choice_applies_no_effects() -> void:
+	var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var npc: CharacterBody2D = setup["npc"]
+	var machine: NpcStateMachine = setup["machine"]
+	var partner: Node2D = setup["partner"]
+	var player_node := CharacterBody2D.new()
+	player_node.name = "Player"
+	player_node.add_to_group("player")
+	player_node.global_position = Vector2(4.0, 0.0)
+	root.add_child(player_node)
+	setup["player"] = player_node
+	npc.add_to_group("npc")
+
+	var interactor := PlayerNpcTalkInteractor.new()
+	interactor.name = "NpcTalkInteractor"
+	player_node.add_child(interactor)
+	interactor.active_menu = &"talk"
+	interactor.menu_target_npc = npc
+
+	var blocked_events: Array[String] = []
+	var applied_events: Array[StringName] = []
+	interactor.interaction_blocked.connect(
+		func(_player: Node2D, _npc: Node2D, interaction_id: StringName, reason: String) -> void:
+			blocked_events.append("%s:%s" % [String(interaction_id), reason])
+	)
+	interactor.interaction_applied.connect(
+		func(_player: Node2D, _npc: Node2D, interaction_id: StringName) -> void:
+			applied_events.append(interaction_id)
+	)
+
+	_expect_true(machine.request_talk(partner, 60, false), "NPC is busy talking before player choice")
+	interactor.call("_show_talk_menu", "")
+	var values_before := machine.values.duplicate(true)
+	interactor.call("_handle_talk_option", 0)
+
+	_expect_equal(blocked_events.size(), 1, "rejected player social choice emits blocked once")
+	_expect_equal(applied_events.size(), 0, "rejected player social choice does not emit applied")
+	_expect_equal(machine.values, values_before, "rejected player social choice does not change NPC values")
+	_expect_true(machine.is_talking_with(partner), "rejected player choice preserves existing conversation")
+	_free_setup(setup)
+
+
+func _test_player_interaction_gate_blocks_emergency_states() -> void:
+	for blocked_state in [
+		{"name": &"Fight", "reason": "npc_fighting"},
+		{"name": &"Flee", "reason": "npc_fleeing"},
+		{"name": &"Downed", "reason": "npc_downed"},
+		{"name": &"DisabledDead", "reason": "npc_disabled"},
+	]:
+		var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+		var machine: NpcStateMachine = setup["machine"]
+		var player_node := CharacterBody2D.new()
+		player_node.name = "GatePlayer"
+		player_node.add_to_group("player")
+		root.add_child(player_node)
+		setup["player"] = player_node
+
+		_expect_true(
+			machine.request_state(blocked_state["name"], player_node, "interaction_gate_test", 1000),
+			"%s starts for interaction gate test" % String(blocked_state["name"])
+		)
+		var gate := machine.can_begin_player_interaction(player_node)
+		_expect_false(bool(gate.get("accepted", true)), "%s rejects player interaction" % String(blocked_state["name"]))
+		_expect_equal(
+			String(gate.get("reason", "")),
+			blocked_state["reason"],
+			"%s reports its interaction rejection reason" % String(blocked_state["name"])
+		)
+		_free_setup(setup)
+
+	var normal_setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var normal_machine: NpcStateMachine = normal_setup["machine"]
+	var normal_player := CharacterBody2D.new()
+	normal_player.name = "NormalInteractionPlayer"
+	normal_player.add_to_group("player")
+	root.add_child(normal_player)
+	normal_setup["player"] = normal_player
+	for allowed_state in [&"Work", &"Eat", &"Rest"]:
+		_expect_true(
+			normal_machine.request_state(allowed_state, null, "interaction_gate_allowed", 1000),
+			"%s starts for normal interaction gate test" % String(allowed_state)
+		)
+		var allowed_gate := normal_machine.can_begin_player_interaction(normal_player)
+		_expect_true(
+			bool(allowed_gate.get("accepted", false)),
+			"%s remains eligible for player interaction" % String(allowed_state)
+		)
+	_free_setup(normal_setup)
+
+
+func _test_emergency_state_invalidates_open_menu_and_resumes_processing() -> void:
+	var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var npc: CharacterBody2D = setup["npc"]
+	var machine: NpcStateMachine = setup["machine"]
+	npc.add_to_group("npc")
+	var player_node := CharacterBody2D.new()
+	player_node.name = "EmergencyMenuPlayer"
+	player_node.add_to_group("player")
+	player_node.global_position = Vector2(4.0, 0.0)
+	root.add_child(player_node)
+	setup["player"] = player_node
+	var interactor := PlayerNpcTalkInteractor.new()
+	interactor.name = "NpcTalkInteractor"
+	player_node.add_child(interactor)
+	interactor.nearby_npcs.append(npc)
+
+	interactor.call("_try_open_interaction_menu")
+	_expect_equal(String(interactor.active_menu), "interaction", "interaction menu opens for an idle NPC")
+	_expect_true(machine.player_interaction_hold_timer > 0.0, "open menu enables the NPC interaction hold")
+
+	_expect_true(machine.request_state(&"Collapse", null, "emergency_during_menu", 1000), "emergency starts while menu is open")
+	_expect_equal(String(interactor.active_menu), "", "emergency immediately closes the interaction menu")
+	_expect_equal(machine.player_interaction_hold_timer, 0.0, "emergency immediately clears interaction hold")
+
+	var collapse_state := machine.current_state as NpcStateCollapse
+	var timer_before := collapse_state.collapse_timer
+	machine._physics_process(0.25)
+	_expect_true(collapse_state.collapse_timer < timer_before, "emergency state keeps processing after hold invalidation")
+	_free_setup(setup)
+
+
+func _test_missing_interaction_ui_releases_player_interaction_hold() -> void:
+	var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var npc: CharacterBody2D = setup["npc"]
+	var machine: NpcStateMachine = setup["machine"]
+	npc.add_to_group("npc")
+	var player_node := CharacterBody2D.new()
+	player_node.name = "MissingInteractionUiPlayer"
+	player_node.add_to_group("player")
+	player_node.global_position = Vector2(4.0, 0.0)
+	root.add_child(player_node)
+	setup["player"] = player_node
+	var interactor := PlayerNpcTalkInteractor.new()
+	interactor.name = "NpcTalkInteractor"
+	player_node.add_child(interactor)
+	interactor.nearby_npcs.append(npc)
+
+	interactor.call("_try_open_interaction_menu")
+	_expect_true(machine.player_interaction_hold_timer > 0.0, "menu hold is active before UI removal")
+	interactor.menu_layer.free()
+	interactor._process(0.01)
+	_expect_equal(machine.player_interaction_hold_timer, 0.0, "missing interaction UI releases the NPC hold")
+	_expect_equal(String(interactor.active_menu), "", "missing interaction UI invalidates the menu")
 	_free_setup(setup)
 
 
@@ -133,7 +313,72 @@ func _test_active_talk_allows_emergency_interrupt() -> void:
 	_expect_true(machine.request_talk(setup["partner"], 60, false), "talk starts before emergency")
 	_expect_true(machine.request_state(&"Collapse", null, "test_collapse", 95), "Collapse can interrupt Talk")
 	_expect_state(machine, "Collapse", "emergency state takes control")
+	_expect_true(machine.interaction_overlay == null, "emergency clears the Talk overlay immediately")
 	_free_setup(setup)
+
+
+func _test_eat_lifecycle_is_not_restarted_by_talk() -> void:
+	var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var machine: NpcStateMachine = setup["machine"]
+	machine.values["hunger"] = 75.0
+	var eat_spot := EmptyFoodSpot.new()
+	eat_spot.name = "OverlayEatSpot"
+	eat_spot.global_position = Vector2.ZERO
+	root.add_child(eat_spot)
+	setup["spot"] = eat_spot
+
+	_expect_true(machine.assign_eat_target(eat_spot, 60), "Eat starts before overlay lifecycle check")
+	var eat_state := machine.current_state as NpcStateEat
+	_expect_true(eat_state != null, "Eat is the primary state")
+	var timer_before := eat_state.eat_timer
+
+	_expect_true(machine.request_talk(setup["partner"], 60, false), "Talk overlays active Eat")
+	_expect_primary_state(machine, "Eat", "Eat remains primary while talking")
+	_expect_true(machine.interaction_overlay is NpcStateTalk, "Talk occupies the interaction overlay slot")
+	_expect_equal(eat_state.eat_timer, timer_before, "Talk start does not restart the Eat timer")
+
+	machine.cancel_talk_with(setup["partner"], "test_complete")
+	_expect_primary_state(machine, "Eat", "ending Talk does not re-enter or replace Eat")
+	_expect_true(machine.current_state == eat_state, "the same entered Eat instance remains authoritative")
+	_expect_equal(eat_state.eat_timer, timer_before, "Talk end does not reset the Eat timer")
+	_free_setup(setup)
+
+
+func _test_emergency_cancels_both_talk_overlays_once() -> void:
+	var first := _create_talk_setup(Vector2.ZERO, Vector2(-100.0, 0.0))
+	var second := _create_talk_setup(Vector2(8.0, 0.0), Vector2(100.0, 0.0))
+	var first_npc: CharacterBody2D = first["npc"]
+	var second_npc: CharacterBody2D = second["npc"]
+	var first_machine: NpcStateMachine = first["machine"]
+	var second_machine: NpcStateMachine = second["machine"]
+	first_npc.add_to_group("npc")
+	second_npc.add_to_group("npc")
+	first_machine.npc_talk_requires_mutual_favor = false
+	second_machine.npc_talk_requires_mutual_favor = false
+
+	var cancel_counts := [0, 0]
+	(first_machine.get_state(&"Talk") as NpcStateTalk).talk_cancelled.connect(
+		func(_talker: Node2D, _partner: Node2D, _reason: String) -> void:
+			cancel_counts[0] += 1
+	)
+	(second_machine.get_state(&"Talk") as NpcStateTalk).talk_cancelled.connect(
+		func(_talker: Node2D, _partner: Node2D, _reason: String) -> void:
+			cancel_counts[1] += 1
+	)
+
+	_expect_true(first_machine.request_talk(second_npc, 60, true), "mutual NPC Talk starts")
+	_expect_true(first_machine.is_talking_with(second_npc), "first NPC owns its Talk overlay")
+	_expect_true(second_machine.is_talking_with(first_npc), "second NPC owns its Talk overlay")
+	_expect_true(
+		first_machine.request_state(&"Collapse", second_npc, "symmetric_overlay_test", 1000),
+		"emergency primary transition is accepted"
+	)
+	_expect_true(first_machine.interaction_overlay == null, "emergency clears initiating overlay")
+	_expect_true(second_machine.interaction_overlay == null, "emergency clears partner overlay")
+	_expect_equal(cancel_counts, [1, 1], "both Talk overlays emit cancellation exactly once")
+
+	_free_setup(first)
+	_free_setup(second)
 
 
 func _test_duplicate_talk_request_does_not_restart_talk() -> void:
@@ -142,7 +387,7 @@ func _test_duplicate_talk_request_does_not_restart_talk() -> void:
 	var partner: Node2D = setup["partner"]
 
 	_expect_true(machine.request_talk(partner, 60, false), "initial talk starts")
-	var talk_state := machine.current_state as NpcStateTalk
+	var talk_state := machine.interaction_overlay as NpcStateTalk
 	talk_state.talk_timer = 0.42
 
 	_expect_true(machine.request_talk(partner, 60, false), "duplicate talk request is accepted as already handled")
@@ -168,6 +413,24 @@ func _test_duplicate_move_to_talk_request_is_ignored() -> void:
 	_free_setup(setup)
 
 
+func _test_move_to_talk_arrival_opens_overlay() -> void:
+	var setup := _create_talk_setup(Vector2.ZERO, Vector2(120.0, 0.0))
+	var npc: CharacterBody2D = setup["npc"]
+	var machine: NpcStateMachine = setup["machine"]
+	var partner: Node2D = setup["partner"]
+
+	machine.move_target = partner
+	machine.talk_target = partner
+	machine.state_after_move = &"Talk"
+	_expect_true(machine.request_state(&"MoveToTarget", partner, "walk_to_talk", 60), "talk approach starts")
+	npc.global_position = partner.global_position
+	machine._physics_process(0.1)
+
+	_expect_primary_state(machine, "Idle", "completed talk approach returns primary lane to Idle")
+	_expect_true(machine.is_talking_with(partner), "completed talk approach opens Talk overlay")
+	_free_setup(setup)
+
+
 func _test_far_talk_request_approaches_without_cancel_loop() -> void:
 	var setup := _create_talk_setup(Vector2.ZERO, Vector2(500.0, 0.0))
 	var machine: NpcStateMachine = setup["machine"]
@@ -175,7 +438,7 @@ func _test_far_talk_request_approaches_without_cancel_loop() -> void:
 
 	_expect_true(machine.request_talk(partner, 60, false), "far talk request enters pending Talk approach")
 	_expect_state(machine, "Talk", "far request is represented as Talk approach")
-	var talk_state := machine.current_state as NpcStateTalk
+	var talk_state := machine.interaction_overlay as NpcStateTalk
 	_expect_false(talk_state.talk_started_handled, "far request has not started conversation effects")
 	_expect_true(talk_state.approaching_partner, "far request is approaching partner")
 
@@ -417,6 +680,29 @@ func _test_look_for_monster_after_kill_finds_next_monster() -> void:
 	_free_setup(setup)
 
 
+func _test_look_for_monster_ignores_freed_last_actor() -> void:
+	var setup := _create_combat_npc("FreedTargetHunter", Vector2.ZERO)
+	var machine: NpcStateMachine = setup["machine"]
+	var search_state := machine.get_state(&"LookForMonster") as NpcStateLookForMonster
+	_expect_true(search_state != null, "combat NPC has freed-target-safe monster search")
+	if search_state == null:
+		_free_setup(setup)
+		return
+
+	search_state.require_visibility = false
+	var freed_monster := _create_test_monster(Vector2(32.0, 0.0))
+	var live_monster := _create_test_monster(Vector2(96.0, 0.0))
+	machine.last_actor = freed_monster
+	freed_monster.free()
+
+	var found_target = search_state.call("_find_monster_target")
+	_expect_true(found_target == live_monster, "monster search skips a freed last_actor and finds a live target")
+	_expect_true(machine.last_actor == null, "monster search clears the stale last_actor reference")
+
+	_free_nodes([live_monster])
+	_free_setup(setup)
+
+
 func _test_unrelated_fight_does_not_scan_monsters_by_default() -> void:
 	var setup := _create_combat_npc("AngryDefender", Vector2.ZERO)
 	var machine: NpcStateMachine = setup["machine"]
@@ -600,7 +886,12 @@ func _create_talk_setup(npc_position: Vector2, partner_position: Vector2) -> Dic
 	_add_state(machine, NpcStateWork.new(), "Work")
 	_add_state(machine, NpcStateEat.new(), "Eat")
 	_add_state(machine, NpcStateRoutineTask.new(), "RoutineTask")
+	_add_state(machine, NpcStateRest.new(), "Rest")
 	_add_state(machine, NpcStateCollapse.new(), "Collapse")
+	_add_state(machine, NpcStateFight.new(), "Fight")
+	_add_state(machine, NpcStateFlee.new(), "Flee")
+	_add_state(machine, NpcStateDowned.new(), "Downed")
+	_add_state(machine, NpcStateDisabledDead.new(), "DisabledDead")
 	_add_state(machine, _make_talk_state(), "Talk")
 	npc.add_child(machine)
 
@@ -785,6 +1076,11 @@ func _free_nodes(nodes: Array) -> void:
 
 
 func _expect_state(machine: NpcStateMachine, expected_state: String, label: String) -> void:
+	var in_state := machine != null and machine.is_in_state(StringName(expected_state))
+	_expect_true(in_state, label)
+
+
+func _expect_primary_state(machine: NpcStateMachine, expected_state: String, label: String) -> void:
 	var current_name := ""
 	if machine != null and machine.current_state != null:
 		current_name = String(machine.current_state.name)

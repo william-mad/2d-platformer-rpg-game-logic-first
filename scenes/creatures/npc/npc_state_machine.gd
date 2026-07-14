@@ -1,10 +1,13 @@
 class_name NpcStateMachine extends Node
 
+const NpcActivityIdentity = preload("res://scripts/systems/npc_activity_identity.gd")
+
 signal state_changed(state_name: StringName, previous_state_name: StringName)
 signal state_request_failed(state_name: StringName, reason: String)
 signal target_changed(target: Node2D)
 signal values_changed(changed_values: Dictionary, actor: Node2D)
 signal values_replaced(values_snapshot: Dictionary, actor: Node2D)
+signal player_interaction_invalidated(reason: String)
 
 const VALUE_ALIASES := {
 	"sleepiness": "sleep_need",
@@ -17,6 +20,15 @@ const STATE_ALIASES := {
 	"NoticeActor": "ReactToEvent",
 	"routine_task": "RoutineTask",
 	"Routine Task": "RoutineTask",
+}
+
+const PLAYER_INTERACTION_BLOCKED_STATE_REASONS := {
+	"Fight": "npc_fighting",
+	"Flee": "npc_fleeing",
+	"Downed": "npc_downed",
+	"DisabledDead": "npc_disabled",
+	"Collapse": "npc_emergency",
+	"ReactToEvent": "npc_emergency_reaction",
 }
 
 enum MonsterSightReaction {
@@ -129,6 +141,7 @@ enum MonsterSightReaction {
 @export_range(0.1, 24.0, 0.1, "suffix:h") var anger_full_decay_game_hours: float = 4.0
 
 @export_group("Optional Nodes")
+@export var animation_controller_path: NodePath
 @export var animation_player_path: NodePath
 @export var sprite_path: NodePath
 @export var debug_label_path: NodePath
@@ -314,7 +327,9 @@ var suppress_next_idle_value_reaction_check: bool = false
 var passive_need_elapsed_seconds: float = 0.0
 var current_state_priority: int = 0
 var previous_state_priority: int = 0
+var interaction_overlay_priority: int = 0
 var pending_state_priority: int = -1
+var last_state_request_failure_reason: String = ""
 var next_talk_need_payout_already_applied: bool = false
 var talk_refusal_cooldowns: Dictionary = {}
 var player_interaction_hold_timer: float = 0.0
@@ -323,11 +338,22 @@ var player_interaction_cooldown_timer: float = 0.0
 var player_interaction_cooldown_actor: Node2D
 var passive_need_skip_logged: bool = false
 
-var current_state: NpcState:
+var primary_state: NpcState:
 	get:
 		if state_history.is_empty():
 			return null
 		return state_history.front()
+
+
+# Compatibility alias: current_state now always means the authoritative primary lane.
+# Use is_in_state(&"Talk") or interaction_overlay for effective interaction checks.
+var current_state: NpcState:
+	get:
+		return primary_state
+
+
+var interaction_overlay: NpcState
+
 
 var previous_state: NpcState:
 	get:
@@ -336,6 +362,8 @@ var previous_state: NpcState:
 		return state_history[1]
 
 var _state_lookup: Dictionary = {}
+var _pending_primary_state: NpcState
+var _animation_controller: Node
 var _animation_player: AnimationPlayer
 var _sprite_2d: Sprite2D
 var _debug_label: Label
@@ -369,13 +397,23 @@ func _physics_process(delta: float) -> void:
 		return
 
 	if _player_interaction_hold_is_active():
-		_process_player_interaction_hold()
+		var hold_gate := can_begin_player_interaction(player_interaction_hold_actor)
+		if bool(hold_gate.get("accepted", false)):
+			_process_player_interaction_hold()
+			_update_passive_needs(delta)
+			if auto_move_and_slide:
+				npc.move_and_slide()
+			return
+		_invalidate_player_interaction_hold(String(hold_gate.get("reason", "interaction_unavailable")))
+
+	if interaction_overlay != null:
+		_process_interaction_overlay(delta)
 		_update_passive_needs(delta)
 		if auto_move_and_slide:
 			npc.move_and_slide()
 		return
 
-	# Only the active state runs per-frame behavior; value-rule decisions stay event-driven.
+	# Only the primary state runs per-frame behavior; value-rule decisions stay event-driven.
 	var state_at_start := current_state
 	var requested_state := state_at_start.physics_process(delta)
 
@@ -386,6 +424,38 @@ func _physics_process(delta: float) -> void:
 
 	if auto_move_and_slide:
 		npc.move_and_slide()
+
+
+func _process_interaction_overlay(delta: float) -> void:
+	# The primary remains entered while Talk owns the interaction lane. Compatible
+	# activities receive only their documented overlay-safe update, never physics_process().
+	var overlay_at_start := interaction_overlay
+	var primary_at_start := current_state
+	if overlay_at_start == null or primary_at_start == null:
+		return
+
+	var primary_result = primary_at_start.process_talk_overlay(delta)
+	if interaction_overlay != overlay_at_start:
+		return
+	if primary_at_start == current_state and typeof(primary_result) != TYPE_NIL:
+		var requested_primary_name := StringName(String(primary_result))
+		if requested_primary_name != &"" and requested_primary_name != StringName(primary_at_start.name):
+			var requested_primary := get_state(requested_primary_name)
+			if requested_primary == null:
+				_cancel_interaction_overlay("missing_overlay_primary_%s" % String(requested_primary_name))
+				return
+			change_state(requested_primary, "talk_overlay_primary_tick", current_state_priority)
+
+	if interaction_overlay != overlay_at_start:
+		return
+	var overlay_result := overlay_at_start.physics_process(delta)
+	if interaction_overlay != overlay_at_start or overlay_result == null:
+		return
+
+	if bool(_get_property_if_present(overlay_at_start, &"talk_completed_successfully", false)):
+		_complete_interaction_overlay("completed", true)
+	else:
+		_remove_interaction_overlay("cancelled")
 
 
 func _process_npc_damage_hop(delta: float) -> bool:
@@ -439,18 +509,35 @@ func change_state(
 	# Switches the active child state and gives the old state a clean exit.
 	if new_state == null:
 		return false
+	if String(new_state.name) == "Talk":
+		var requested_partner := talk_target if talk_target != null else get_active_target()
+		var overlay_priority := maxi(request_priority, get_effective_task_priority())
+		# MoveToTarget used to replace itself with Talk. Finish that primary movement
+		# into Idle first, then open Talk in the interaction lane.
+		if _current_state_is(&"MoveToTarget"):
+			var idle_state := get_state(&"Idle")
+			if idle_state == null:
+				return _reject_state_request(&"Talk", "missing_idle_for_talk_overlay")
+			if not current_state.can_exit_to(idle_state, overlay_priority):
+				return _reject_state_request(&"Talk", "cannot_finish_talk_approach")
+			if not _commit_state_change(idle_state, "talk_approach_arrived", overlay_priority):
+				return false
+		return _request_talk_state(requested_partner, reason, overlay_priority, true)
+
+	var requested_name := StringName(new_state.name)
 	if _is_active_travel_companion():
-		var requested_name := String(new_state.name)
-		if requested_name == "Idle":
+		if String(requested_name) == "Idle":
 			var follow_state := get_state(&"TravelFollow")
 			if follow_state != null:
 				new_state = follow_state
-		elif requested_name in ["Work", "Recreation", "RoutineTask", "LookForTalkTarget", "InvitePlayer", "Sleep", "Rest"]:
-			state_request_failed.emit(StringName(requested_name), "Travel companion social/schedule activity disabled")
-			return false
+		elif String(requested_name) in ["Work", "Recreation", "RoutineTask", "LookForTalkTarget", "InvitePlayer", "Sleep", "Rest"]:
+			return _reject_state_request(
+				requested_name,
+				"Travel companion social/schedule activity disabled"
+			)
 
 	if current_state == new_state:
-		return false
+		return _reject_state_request(requested_name, "state_already_active")
 
 	if current_state != null and not current_state.can_exit_to(new_state, request_priority):
 		_breadcrumb(
@@ -463,13 +550,29 @@ func change_state(
 				request_priority,
 			]
 		)
-		state_request_failed.emit(StringName(new_state.name), reason)
-		return false
+		return _reject_state_request(
+			StringName(new_state.name),
+			"cannot_exit_%s" % String(current_state.name)
+		)
+
+	return _commit_state_change(new_state, reason, request_priority)
+
+
+func _commit_state_change(
+	new_state: NpcState,
+	reason: String,
+	request_priority: int
+) -> bool:
+	# Callers validate the transition and commit request context before entering here.
+	last_state_request_failure_reason = ""
 
 	var applied_priority := _get_applied_state_priority(new_state, request_priority)
 	var previous_name := &""
 	if current_state != null:
 		previous_name = StringName(current_state.name)
+		if interaction_overlay != null and not _overlay_survives_primary_transition(new_state):
+			_cancel_interaction_overlay("primary_transition_%s" % String(new_state.name))
+		_pending_primary_state = new_state
 		current_state.exit()
 
 	state_history.push_front(new_state)
@@ -481,6 +584,10 @@ func change_state(
 		state_after_move_priority = 0
 	new_state.next_state = null
 	new_state.enter()
+	_pending_primary_state = null
+	if interaction_overlay != null and interaction_overlay.has_method("refresh_overlay_presentation"):
+		interaction_overlay.call("refresh_overlay_presentation")
+	_invalidate_player_interaction_for_current_state()
 
 	_update_debug_label()
 	_breadcrumb(
@@ -510,7 +617,7 @@ func request_state(
 ) -> bool:
 	# External code can call this to force a state without waiting for value rules.
 	if state_name == &"":
-		return false
+		return _reject_state_request(state_name, "empty_state")
 	if String(state_name) == "Talk":
 		var requested_partner := actor if actor != null else talk_target
 		return _request_talk_state(requested_partner, reason, request_priority, true)
@@ -536,38 +643,289 @@ func _request_state_direct(
 	state_name: StringName,
 	actor: Node2D = null,
 	reason: String = "manual",
-	request_priority: int = 0
+	request_priority: int = 0,
+	request_context: Dictionary = {}
 ) -> bool:
-	if actor != null:
-		last_actor = actor
-		set_target(actor)
-
+	# Resolve and validate first. Request-owned targets are committed only once change_state accepts.
 	var requested_state := get_state(state_name)
 	if requested_state == null:
-		_breadcrumb("npc_state:request_reject", "%s missing %s" % [_get_npc_label(), String(state_name)])
-		state_request_failed.emit(state_name, "Missing state: %s" % String(state_name))
-		return false
+		return _reject_state_request(state_name, "Missing state: %s" % String(state_name))
+	if String(requested_state.name) == "Talk":
+		var requested_partner := actor if actor != null else talk_target
+		return _request_talk_state(requested_partner, reason, request_priority, true)
 	if String(requested_state.name) == "LookForTalkTarget":
 		if (
 			DebugToolsConfig.TROUBLESHOOTING_MODE
 			and DebugToolsConfig.DEBUG_DISABLE_TALK_SEARCH
 		):
 			_breadcrumb("npc_state:talk_search_skip", _get_npc_label())
-			state_request_failed.emit(state_name, "talk_search_disabled")
-			return false
+			return _reject_state_request(state_name, "talk_search_disabled")
 		if _current_look_for_talk_target_matches(actor):
+			last_state_request_failure_reason = ""
 			return true
 		if not _can_start_look_for_talk_target():
 			_breadcrumb("npc_state:request_reject", "%s moving_to_target %s" % [_get_npc_label(), String(state_name)])
-			state_request_failed.emit(state_name, "moving_to_target")
-			return false
+			return _reject_state_request(state_name, "moving_to_target")
 
-	var accepted := change_state(requested_state, reason, request_priority)
+	var transition_state := requested_state
+	if _is_active_travel_companion() and String(transition_state.name) == "Idle":
+		var follow_state := get_state(&"TravelFollow")
+		if follow_state != null:
+			transition_state = follow_state
+	elif (
+		_is_active_travel_companion()
+		and String(transition_state.name) in ["Work", "Recreation", "RoutineTask", "LookForTalkTarget", "InvitePlayer", "Sleep", "Rest"]
+	):
+		return _reject_state_request(
+			state_name,
+			"Travel companion social/schedule activity disabled"
+		)
+
+	if current_state == transition_state:
+		var request_descriptor := _get_state_request_activity_descriptor(
+			transition_state,
+			actor,
+			request_context
+		)
+		if _state_request_supports_identity_reentry(transition_state):
+			if is_following_activity_descriptor(request_descriptor):
+				last_state_request_failure_reason = ""
+				return true
+			if not NpcActivityIdentity.has_target_identity(request_descriptor):
+				return _reject_state_request(state_name, "missing_activity_identity")
+			if not current_state.can_exit_to(transition_state, request_priority):
+				return _reject_state_request(
+					state_name,
+					"cannot_retarget_%s" % String(current_state.name)
+				)
+			_commit_state_request_context(actor, request_context)
+			return _commit_current_state_reentry(reason, request_priority)
+		return _reject_state_request(state_name, "state_already_active")
+	if current_state != null and not current_state.can_exit_to(transition_state, request_priority):
+		return _reject_state_request(
+			state_name,
+			"cannot_exit_%s" % String(current_state.name)
+		)
+
+	_commit_state_request_context(actor, request_context)
+
+	var accepted := _commit_state_change(transition_state, reason, request_priority)
 	_breadcrumb(
 		"npc_state:request",
 		"%s %s %s" % [_get_npc_label(), String(state_name), "accept" if accepted else "reject"]
 	)
 	return accepted
+
+
+func _commit_current_state_reentry(reason: String, request_priority: int) -> bool:
+	# Identity-aware target changes restart the same state without duplicating history.
+	var reentered_state := current_state
+	if reentered_state == null:
+		return false
+
+	last_state_request_failure_reason = ""
+	if interaction_overlay != null:
+		_cancel_interaction_overlay("primary_reentry_%s" % String(reentered_state.name))
+	var applied_priority := _get_applied_state_priority(reentered_state, request_priority)
+	var state_name := StringName(reentered_state.name)
+	_pending_primary_state = reentered_state
+	reentered_state.exit()
+	previous_state_priority = current_state_priority
+	current_state_priority = applied_priority
+	if String(state_name) != "MoveToTarget":
+		state_after_move_priority = 0
+	reentered_state.next_state = null
+	reentered_state.enter()
+	_pending_primary_state = null
+	_invalidate_player_interaction_for_current_state()
+	_update_debug_label()
+	_breadcrumb(
+		"npc_state:reenter",
+		"%s state=%s reason=%s priority=%d" % [
+			_get_npc_label(),
+			String(state_name),
+			reason,
+			applied_priority,
+		]
+	)
+	state_changed.emit(state_name, state_name)
+	return true
+
+
+func _commit_state_request_context(actor: Node2D, request_context: Dictionary) -> void:
+	if actor != null:
+		last_actor = actor
+		set_target(actor)
+
+	if request_context.has("move_target"):
+		move_target = request_context["move_target"] as Node2D
+	if request_context.has("work_target"):
+		work_target = request_context["work_target"] as Node2D
+	if request_context.has("eat_target"):
+		eat_target = request_context["eat_target"] as Node2D
+	if request_context.has("rest_target"):
+		rest_target = request_context["rest_target"] as Node2D
+	if request_context.has("recreation_target"):
+		recreation_target = request_context["recreation_target"] as Node2D
+	if request_context.has("routine_task_target"):
+		routine_task_target = request_context["routine_task_target"] as Node2D
+	if request_context.has("sleep_target"):
+		sleep_target = request_context["sleep_target"] as Node2D
+	if request_context.has("talk_target"):
+		talk_target = request_context["talk_target"] as Node2D
+	if request_context.has("invitation_spot"):
+		invitation_spot = request_context["invitation_spot"] as Node2D
+	if request_context.has("state_after_move"):
+		state_after_move = StringName(request_context["state_after_move"])
+	if request_context.has("state_after_move_priority"):
+		state_after_move_priority = int(request_context["state_after_move_priority"])
+
+
+func get_current_activity_descriptor() -> Dictionary:
+	return _get_state_activity_descriptor(current_state)
+
+
+func is_following_activity_descriptor(requested_descriptor: Dictionary) -> bool:
+	if NpcActivityIdentity.matches(get_current_activity_descriptor(), requested_descriptor):
+		return true
+
+	# The primary descriptor remains the scheduled activity; compare Talk separately
+	# so a social plan only matches its actual overlay partner.
+	if interaction_overlay != null:
+		return NpcActivityIdentity.matches(
+			_get_state_activity_descriptor(interaction_overlay),
+			requested_descriptor
+		)
+
+	return false
+
+
+func _get_state_activity_descriptor(state: NpcState) -> Dictionary:
+	if state == null:
+		return {}
+
+	var action_kind := StringName(state.name)
+	var activity_target: Node2D
+	if String(action_kind) == "MoveToTarget":
+		action_kind = state_after_move if state_after_move != &"" else &"MoveToTarget"
+		activity_target = move_target
+	else:
+		match String(action_kind):
+			"Work":
+				activity_target = work_target
+			"Eat":
+				activity_target = eat_target
+			"Rest":
+				activity_target = rest_target
+			"Recreation":
+				activity_target = recreation_target
+			"RoutineTask":
+				activity_target = routine_task_target
+			"Sleep":
+				activity_target = sleep_target
+			"Talk":
+				activity_target = talk_target
+				var active_talk_partner = _get_property_if_present(state, &"talk_partner", null)
+				if active_talk_partner is Node2D and is_instance_valid(active_talk_partner):
+					activity_target = active_talk_partner
+			"LookForTalkTarget":
+				activity_target = target
+				var active_search_target = _get_property_if_present(state, &"talk_target", null)
+				if active_search_target is Node2D and is_instance_valid(active_search_target):
+					activity_target = active_search_target
+			"InvitePlayer":
+				activity_target = invitation_spot
+			_:
+				activity_target = target
+
+	return NpcActivityIdentity.describe(action_kind, activity_target)
+
+
+func _get_state_request_activity_descriptor(
+	requested_state: NpcState,
+	actor: Node2D,
+	request_context: Dictionary
+) -> Dictionary:
+	if requested_state == null:
+		return {}
+	var action_kind := StringName(requested_state.name)
+	var activity_target := actor
+	if String(action_kind) == "MoveToTarget":
+		action_kind = StringName(request_context.get("state_after_move", &"MoveToTarget"))
+		activity_target = request_context.get("move_target", actor) as Node2D
+	else:
+		var target_key := _activity_target_context_key(action_kind)
+		if target_key != &"" and request_context.has(target_key):
+			activity_target = request_context[target_key] as Node2D
+	return NpcActivityIdentity.describe(action_kind, activity_target)
+
+
+func _state_request_supports_identity_reentry(requested_state: NpcState) -> bool:
+	if requested_state == null:
+		return false
+	return String(requested_state.name) in [
+		"MoveToTarget",
+		"Work",
+		"Eat",
+		"Rest",
+		"Recreation",
+		"RoutineTask",
+		"Sleep",
+		"LookForTalkTarget",
+		"InvitePlayer",
+	]
+
+
+func _activity_target_context_key(action_kind: StringName) -> StringName:
+	match String(action_kind):
+		"Work":
+			return &"work_target"
+		"Eat":
+			return &"eat_target"
+		"Rest":
+			return &"rest_target"
+		"Recreation":
+			return &"recreation_target"
+		"RoutineTask":
+			return &"routine_task_target"
+		"Sleep":
+			return &"sleep_target"
+		"Talk":
+			return &"talk_target"
+		"InvitePlayer":
+			return &"invitation_spot"
+	return &""
+
+
+func _get_property_if_present(object: Object, property_name: StringName, fallback):
+	if object == null:
+		return fallback
+	for property in object.get_property_list():
+		if StringName(property.get("name", &"")) == property_name:
+			return object.get(property_name)
+	return fallback
+
+
+func _reject_state_request(state_name: StringName, rejection_reason: String) -> bool:
+	last_state_request_failure_reason = rejection_reason
+	_breadcrumb(
+		"npc_state:request_reject",
+		"%s state=%s reason=%s" % [_get_npc_label(), String(state_name), rejection_reason]
+	)
+	if OS.is_debug_build():
+		print(
+			"NPC state rejected: npc=%s state=%s reason=%s" % [
+				_get_npc_label(),
+				String(state_name),
+				rejection_reason,
+			]
+		)
+	state_request_failed.emit(state_name, rejection_reason)
+	return false
+
+
+func get_last_state_request_failure_reason() -> String:
+	return last_state_request_failure_reason
 
 
 func notify_target_seen(seen_target: Node2D) -> void:
@@ -802,7 +1160,19 @@ func get_active_target() -> Node2D:
 
 
 func is_in_state(state_name: StringName) -> bool:
+	if interaction_overlay != null and String(interaction_overlay.name) == String(state_name):
+		return true
+	return is_primary_state(state_name)
+
+
+func is_primary_state(state_name: StringName) -> bool:
 	return current_state != null and String(current_state.name) == String(state_name)
+
+
+func get_pending_primary_state_name() -> StringName:
+	if _pending_primary_state == null:
+		return &""
+	return StringName(_pending_primary_state.name)
 
 
 func get_flee_fear_threshold() -> float:
@@ -838,11 +1208,17 @@ func assign_move_target(new_target: Node2D, arrive_state_name: StringName = &"Id
 	if new_target == null or not is_instance_valid(new_target):
 		return false
 
-	move_target = new_target
-	state_after_move = arrive_state_name
-	state_after_move_priority = 20
-	set_target(new_target)
-	return request_state(&"MoveToTarget", new_target, "move_target", 20)
+	return _request_state_direct(
+		&"MoveToTarget",
+		new_target,
+		"move_target",
+		20,
+		{
+			"move_target": new_target,
+			"state_after_move": arrive_state_name,
+			"state_after_move_priority": 20,
+		}
+	)
 
 
 func assign_work_target(new_target: Node2D, request_priority: int = 20) -> bool:
@@ -850,9 +1226,13 @@ func assign_work_target(new_target: Node2D, request_priority: int = 20) -> bool:
 	if new_target == null or not is_instance_valid(new_target):
 		return false
 
-	work_target = new_target
-	state_after_move_priority = request_priority
-	return request_state(&"Work", new_target, "work_target", request_priority)
+	return _request_state_direct(
+		&"Work",
+		new_target,
+		"work_target",
+		request_priority,
+		{"work_target": new_target, "state_after_move_priority": request_priority}
+	)
 
 
 func assign_eat_target(new_target: Node2D, request_priority: int = 20) -> bool:
@@ -860,9 +1240,13 @@ func assign_eat_target(new_target: Node2D, request_priority: int = 20) -> bool:
 	if new_target == null or not is_instance_valid(new_target):
 		return false
 
-	eat_target = new_target
-	state_after_move_priority = request_priority
-	return request_state(&"Eat", new_target, "eat_target", request_priority)
+	return _request_state_direct(
+		&"Eat",
+		new_target,
+		"eat_target",
+		request_priority,
+		{"eat_target": new_target, "state_after_move_priority": request_priority}
+	)
 
 
 func assign_rest_target(new_target: Node2D, request_priority: int = 20) -> bool:
@@ -870,9 +1254,13 @@ func assign_rest_target(new_target: Node2D, request_priority: int = 20) -> bool:
 	if new_target == null or not is_instance_valid(new_target):
 		return false
 
-	rest_target = new_target
-	state_after_move_priority = request_priority
-	return request_state(&"Rest", new_target, "rest_target", request_priority)
+	return _request_state_direct(
+		&"Rest",
+		new_target,
+		"rest_target",
+		request_priority,
+		{"rest_target": new_target, "state_after_move_priority": request_priority}
+	)
 
 
 func assign_recreation_target(new_target: Node2D, request_priority: int = 20) -> bool:
@@ -880,9 +1268,13 @@ func assign_recreation_target(new_target: Node2D, request_priority: int = 20) ->
 	if new_target == null or not is_instance_valid(new_target):
 		return false
 
-	recreation_target = new_target
-	state_after_move_priority = request_priority
-	return request_state(&"Recreation", new_target, "recreation_target", request_priority)
+	return _request_state_direct(
+		&"Recreation",
+		new_target,
+		"recreation_target",
+		request_priority,
+		{"recreation_target": new_target, "state_after_move_priority": request_priority}
+	)
 
 
 func assign_routine_task_target(new_target: Node2D, request_priority: int = 20) -> bool:
@@ -890,9 +1282,13 @@ func assign_routine_task_target(new_target: Node2D, request_priority: int = 20) 
 	if new_target == null or not is_instance_valid(new_target):
 		return false
 
-	routine_task_target = new_target
-	state_after_move_priority = request_priority
-	return request_state(&"RoutineTask", new_target, "routine_task_target", request_priority)
+	return _request_state_direct(
+		&"RoutineTask",
+		new_target,
+		"routine_task_target",
+		request_priority,
+		{"routine_task_target": new_target, "state_after_move_priority": request_priority}
+	)
 
 
 func assign_sleep_target(new_target: Node2D, request_priority: int = 20) -> bool:
@@ -900,9 +1296,13 @@ func assign_sleep_target(new_target: Node2D, request_priority: int = 20) -> bool
 	if new_target == null or not is_instance_valid(new_target):
 		return false
 
-	sleep_target = new_target
-	state_after_move_priority = request_priority
-	return request_state(&"Sleep", new_target, "sleep_target", request_priority)
+	return _request_state_direct(
+		&"Sleep",
+		new_target,
+		"sleep_target",
+		request_priority,
+		{"sleep_target": new_target, "state_after_move_priority": request_priority}
+	)
 
 
 func assign_invitation_spot(new_target: Node2D, request_priority: int = 75) -> bool:
@@ -916,9 +1316,13 @@ func assign_invitation_spot(new_target: Node2D, request_priority: int = 75) -> b
 	if new_target == null or not is_instance_valid(new_target):
 		return false
 
-	invitation_spot = new_target
-	state_after_move_priority = request_priority
-	return request_state(&"InvitePlayer", new_target, "invitation_spot", request_priority)
+	return _request_state_direct(
+		&"InvitePlayer",
+		new_target,
+		"invitation_spot",
+		request_priority,
+		{"invitation_spot": new_target, "state_after_move_priority": request_priority}
+	)
 
 
 func request_talk(
@@ -935,9 +1339,8 @@ func request_talk(
 
 
 func begin_player_interaction_hold(actor: Node2D, hold_seconds: float = -1.0) -> bool:
-	if not _is_player_interaction_actor(actor):
-		return false
-	if is_ignoring_player_interaction(actor):
+	var gate := can_begin_player_interaction(actor)
+	if not bool(gate.get("accepted", false)):
 		return false
 
 	var duration := default_player_interaction_hold_seconds if hold_seconds < 0.0 else hold_seconds
@@ -949,6 +1352,31 @@ func begin_player_interaction_hold(actor: Node2D, hold_seconds: float = -1.0) ->
 	return true
 
 
+func can_begin_player_interaction(actor: Node2D = null) -> Dictionary:
+	if actor != null and not _is_player_interaction_actor(actor):
+		return {"accepted": false, "reason": "invalid_player"}
+	if not active or npc == null or not is_instance_valid(npc):
+		return {"accepted": false, "reason": "npc_inactive"}
+	if actor != null and is_ignoring_player_interaction(actor):
+		return {"accepted": false, "reason": "npc_ignoring_player"}
+	if get_value(&"hp", 1.0) <= 0.0:
+		return {"accepted": false, "reason": "npc_dead"}
+	if get_value(&"disabled", 0.0) >= 1.0:
+		return {"accepted": false, "reason": "npc_disabled"}
+
+	var scene_handoff_reason := _get_scene_handoff_interaction_block_reason()
+	if not scene_handoff_reason.is_empty():
+		return {"accepted": false, "reason": scene_handoff_reason}
+
+	var state_reason := _get_current_state_interaction_block_reason(actor)
+	if not state_reason.is_empty():
+		return {"accepted": false, "reason": state_reason}
+	if _npc_is_knocked_out():
+		return {"accepted": false, "reason": "npc_knocked_out"}
+
+	return {"accepted": true, "reason": ""}
+
+
 func end_player_interaction_hold(actor: Node2D = null) -> void:
 	if actor != null and player_interaction_hold_actor != actor:
 		return
@@ -957,6 +1385,60 @@ func end_player_interaction_hold(actor: Node2D = null) -> void:
 	player_interaction_hold_actor = null
 	if npc != null:
 		npc.velocity.x = 0.0
+
+
+func _invalidate_player_interaction_hold(reason: String) -> void:
+	player_interaction_hold_timer = 0.0
+	player_interaction_hold_actor = null
+	if npc != null:
+		npc.velocity.x = 0.0
+	player_interaction_invalidated.emit(reason)
+
+
+func _invalidate_player_interaction_for_current_state() -> void:
+	var state_reason := _get_current_state_interaction_block_reason(player_interaction_hold_actor)
+	if state_reason.is_empty():
+		return
+
+	_invalidate_player_interaction_hold(state_reason)
+
+
+func _get_current_state_interaction_block_reason(actor: Node2D = null) -> String:
+	if current_state == null:
+		return "npc_state_unavailable"
+	if current_state.has_method("get_player_interaction_block_reason"):
+		var custom_reason := String(current_state.call("get_player_interaction_block_reason", actor))
+		if not custom_reason.is_empty():
+			return custom_reason
+
+	return String(PLAYER_INTERACTION_BLOCKED_STATE_REASONS.get(String(current_state.name), ""))
+
+
+func _npc_is_knocked_out() -> bool:
+	if _current_state_is(&"Downed"):
+		return true
+	if npc != null:
+		var downed_value = _get_npc_property_if_exists(&"is_downed", false)
+		if typeof(downed_value) == TYPE_BOOL and bool(downed_value):
+			return true
+
+	return get_value(&"knockout", 0.0) >= 100.0
+
+
+func _get_scene_handoff_interaction_block_reason() -> String:
+	if not is_inside_tree():
+		return "npc_scene_handoff"
+
+	var scene_loader := get_node_or_null("/root/SceneLoader")
+	if scene_loader != null and bool(scene_loader.get("loading_in_progress")):
+		return "npc_scene_handoff"
+
+	var runtime := get_node_or_null("/root/PlayerRuntime")
+	if runtime != null and runtime.has_method("has_pending_player_data"):
+		if bool(runtime.call("has_pending_player_data")):
+			return "npc_scene_handoff"
+
+	return ""
 
 
 func start_player_interaction_cooldown(actor: Node2D, cooldown_seconds: float = -1.0) -> bool:
@@ -1003,10 +1485,10 @@ func can_accept_talk_request(candidate: Node2D, request_priority: int = -1) -> b
 func is_talking_with(candidate: Node2D) -> bool:
 	if candidate == null or not is_instance_valid(candidate):
 		return false
-	if current_state == null or String(current_state.name) != "Talk":
+	if interaction_overlay == null or String(interaction_overlay.name) != "Talk":
 		return false
-	if current_state.has_method("is_talking_with"):
-		return bool(current_state.call("is_talking_with", candidate))
+	if interaction_overlay.has_method("is_talking_with"):
+		return bool(interaction_overlay.call("is_talking_with", candidate))
 
 	return talk_target == candidate
 
@@ -1019,8 +1501,12 @@ func cancel_talk_with(candidate: Node2D, reason: String = "cancelled") -> void:
 	if candidate == null or not is_instance_valid(candidate):
 		return
 
-	if is_talking_with(candidate) and current_state != null and current_state.has_method("cancel_talk_with"):
-		current_state.call("cancel_talk_with", candidate, reason)
+	if is_talking_with(candidate) and interaction_overlay != null:
+		var overlay_to_cancel := interaction_overlay
+		if overlay_to_cancel.has_method("cancel_talk_with"):
+			overlay_to_cancel.call("cancel_talk_with", candidate, reason)
+		if interaction_overlay == overlay_to_cancel:
+			_remove_interaction_overlay(reason)
 
 	if talk_target == candidate:
 		talk_target = null
@@ -1033,17 +1519,13 @@ func _request_talk_state(
 	require_mutual_handshake: bool
 ) -> bool:
 	if new_target == null or not is_instance_valid(new_target) or new_target == npc:
-		if talk_target == npc:
-			talk_target = null
-		state_request_failed.emit(&"Talk", "invalid_talk_target")
-		return false
+		return _reject_state_request(&"Talk", "invalid_talk_target")
 
 	if _talk_request_is_already_being_handled(new_target):
 		return true
 
 	if is_ignoring_player_interaction(new_target) and not is_talking_with(new_target):
-		state_request_failed.emit(&"Talk", "player_interaction_cooldown")
-		return false
+		return _reject_state_request(&"Talk", "player_interaction_cooldown")
 
 	var partner_machine := _get_talk_machine_for_target(new_target)
 	var is_npc_partner := (
@@ -1056,6 +1538,8 @@ func _request_talk_state(
 		priority = 0
 
 	if not is_npc_partner:
+		if not _can_enter_talk_with(new_target, priority):
+			return _reject_state_request(&"Talk", "talker_cannot_enter_talk")
 		return _accept_talk_request(new_target, priority, reason)
 
 	if (
@@ -1063,40 +1547,30 @@ func _request_talk_state(
 		and npc_talk_requires_mutual_favor
 		and not _mutual_talk_favor_allows(new_target, partner_machine)
 	):
-		state_request_failed.emit(&"Talk", "mutual_favor_too_low")
+		_reject_state_request(&"Talk", "mutual_favor_too_low")
 		_start_talk_refusal_cooldown(new_target)
 		return false
 
 	if not _can_enter_talk_with(new_target, priority):
-		state_request_failed.emit(&"Talk", "talker_cannot_enter_talk")
-		return false
+		return _reject_state_request(&"Talk", "talker_cannot_enter_talk")
 
 	if not partner_machine.can_accept_talk_request(npc, priority):
-		state_request_failed.emit(&"Talk", "partner_refused_talk")
+		_reject_state_request(&"Talk", "partner_refused_talk")
 		if partner_machine.has_signal(&"state_request_failed"):
 			partner_machine.state_request_failed.emit(&"Talk", "talk_refused")
 		_start_talk_refusal_cooldown(new_target)
 		return false
 
-	talk_target = new_target
-	set_target(new_target)
-	partner_machine.talk_target = npc
-	partner_machine.set_target(npc)
-
 	var partner_started := partner_machine._accept_talk_request(npc, priority, "talk_handshake")
 	if not partner_started:
-		state_request_failed.emit(&"Talk", "partner_talk_start_failed")
+		_reject_state_request(&"Talk", "partner_talk_start_failed")
 		_start_talk_refusal_cooldown(new_target)
-		if talk_target == new_target:
-			talk_target = null
 		return false
 
 	var self_started := _accept_talk_request(new_target, priority, reason)
 	if not self_started:
-		state_request_failed.emit(&"Talk", "talker_start_failed")
+		_reject_state_request(&"Talk", "talker_start_failed")
 		partner_machine.cancel_talk_with(npc, "handshake_failed")
-		if talk_target == new_target:
-			talk_target = null
 		return false
 
 	return true
@@ -1106,8 +1580,33 @@ func _accept_talk_request(new_target: Node2D, request_priority: int, reason: Str
 	if _talk_request_is_already_being_handled(new_target):
 		return true
 
+	var talk_state := get_state(&"Talk")
+	if talk_state == null:
+		return _reject_state_request(&"Talk", "missing_talk_overlay")
+	if not _can_enter_talk_with(new_target, request_priority):
+		return _reject_state_request(&"Talk", "talk_overlay_rejected")
+
+	# Commit Talk-owned context only after both the primary compatibility check and
+	# the partner handshake have accepted the overlay.
+	last_actor = new_target
 	talk_target = new_target
-	return _request_state_direct(&"Talk", new_target, reason, request_priority)
+	interaction_overlay = talk_state
+	interaction_overlay_priority = maxi(request_priority, 0)
+	talk_state.next_state = null
+	talk_state.enter()
+	last_state_request_failure_reason = ""
+	_update_debug_label()
+	_breadcrumb(
+		"npc_state:overlay_enter",
+		"%s primary=%s overlay=Talk reason=%s priority=%d" % [
+			_get_npc_label(),
+			String(current_state.name) if current_state != null else "",
+			reason,
+			interaction_overlay_priority,
+		]
+	)
+	state_changed.emit(&"Talk", StringName(current_state.name) if current_state != null else &"")
+	return true
 
 
 func _can_enter_talk_with(candidate: Node2D, request_priority: int) -> bool:
@@ -1120,7 +1619,7 @@ func _can_enter_talk_with(candidate: Node2D, request_priority: int) -> bool:
 	if _talk_request_is_already_being_handled(candidate):
 		return true
 
-	if current_state != null and String(current_state.name) == "Talk":
+	if interaction_overlay != null:
 		return false
 
 	var talk_state := get_state(&"Talk")
@@ -1130,7 +1629,7 @@ func _can_enter_talk_with(candidate: Node2D, request_priority: int) -> bool:
 	if _should_refuse_talk_for_priority(request_priority):
 		return false
 
-	if current_state != null and not current_state.can_exit_to(talk_state, request_priority):
+	if not primary_state_continues_under_talk():
 		return false
 
 	return true
@@ -1167,7 +1666,7 @@ func _should_refuse_talk_for_priority(request_priority: int) -> bool:
 		return false
 	if current_state == null:
 		return false
-	if _current_state_is(&"Idle") or _current_state_is(&"Talk"):
+	if _current_state_is(&"Idle"):
 		return false
 	if _current_state_can_continue_during_talk():
 		return false
@@ -1182,12 +1681,88 @@ func _should_refuse_talk_for_priority(request_priority: int) -> bool:
 
 
 func _current_state_can_continue_during_talk() -> bool:
-	if current_state == null:
-		return false
-	if not current_state.has_method("can_continue_during_talk"):
-		return false
+	return primary_state_continues_under_talk()
 
-	return bool(current_state.call("can_continue_during_talk"))
+
+func primary_state_continues_under_talk() -> bool:
+	# Only stationary, lifecycle-safe primaries opt in. Eat, Work, Rest, passive
+	# Recreation, and Idle may continue. Sleep, Fight, Flee, Downed/death, movement,
+	# scene travel, invitations, and other non-interruptible states reject Talk.
+	return current_state != null and current_state.can_continue_during_talk()
+
+
+func _overlay_survives_primary_transition(new_state: NpcState) -> bool:
+	# An activity completing into Idle does not invalidate the conversation. All other
+	# primary transitions conservatively cancel Talk before the old primary exits.
+	return new_state != null and String(new_state.name) == "Idle"
+
+
+func _cancel_interaction_overlay(reason: String) -> void:
+	var overlay_to_cancel := interaction_overlay
+	if overlay_to_cancel == null:
+		return
+	var partner_value = _get_property_if_present(overlay_to_cancel, &"talk_partner", null)
+	var partner := partner_value as Node2D if partner_value != null and is_instance_valid(partner_value) else null
+	if partner != null and is_instance_valid(partner) and overlay_to_cancel.has_method("cancel_talk_with"):
+		overlay_to_cancel.call("cancel_talk_with", partner, reason)
+	if interaction_overlay == overlay_to_cancel:
+		_remove_interaction_overlay(reason)
+
+
+func _complete_interaction_overlay(reason: String, synchronize_partner: bool) -> void:
+	var completed_overlay := interaction_overlay
+	if completed_overlay == null:
+		return
+	var partner_value = _get_property_if_present(completed_overlay, &"talk_partner", null)
+	var partner := partner_value as Node2D if partner_value != null and is_instance_valid(partner_value) else null
+	# Finish the linked side while this overlay is still visible. Each Talk then sees
+	# the other as active and applies its own completion payout exactly once.
+	if synchronize_partner and partner != null:
+		var partner_machine := _get_talk_machine_for_target(partner)
+		if partner_machine != null and partner_machine != self:
+			partner_machine._finish_talk_overlay_from_partner(npc)
+	if interaction_overlay == completed_overlay:
+		_remove_interaction_overlay(reason)
+
+
+func _finish_talk_overlay_from_partner(candidate: Node2D) -> void:
+	if not is_talking_with(candidate) or interaction_overlay == null:
+		return
+	var completed_overlay := interaction_overlay
+	if completed_overlay.has_method("complete_talk_with"):
+		completed_overlay.call("complete_talk_with", candidate)
+	if interaction_overlay == completed_overlay:
+		_remove_interaction_overlay("partner_completed")
+
+
+func _remove_interaction_overlay(reason: String) -> void:
+	var removed_overlay := interaction_overlay
+	if removed_overlay == null:
+		return
+
+	# Clear the slot first so partner callbacks cannot recursively clean it twice.
+	interaction_overlay = null
+	interaction_overlay_priority = 0
+	removed_overlay.exit()
+	if talk_target != null:
+		if not is_instance_valid(talk_target) or not is_talking_with(talk_target):
+			talk_target = null
+	if current_state != null:
+		current_state.resume_presentation_after_talk_overlay()
+	_update_debug_label()
+	_breadcrumb(
+		"npc_state:overlay_exit",
+		"%s overlay=%s primary=%s reason=%s" % [
+			_get_npc_label(),
+			String(removed_overlay.name),
+			String(current_state.name) if current_state != null else "",
+			reason,
+		]
+	)
+	state_changed.emit(
+		StringName(current_state.name) if current_state != null else &"",
+		StringName(removed_overlay.name)
+	)
 
 
 func get_effective_task_priority() -> int:
@@ -1258,10 +1833,6 @@ func _start_talk_refusal_cooldown(refused_target: Node2D) -> void:
 		float(talk_refusal_cooldowns.get(key, 0.0)),
 		npc_talk_refusal_cooldown_seconds
 	)
-	if talk_target == refused_target:
-		talk_target = null
-	if target == refused_target:
-		set_target(null)
 
 
 func _get_talk_refusal_cooldown_key(candidate: Node2D) -> String:
@@ -1570,31 +2141,37 @@ func evaluate_value_reactions(
 	)
 
 
-func play_animation(state_animation_name: StringName) -> void:
-	# Animation hook:
-	# 1. If the NPC script has _play_animation/play_animation, let it decide.
-	# 2. Otherwise, play an AnimationPlayer child if it has the requested name.
+func play_animation(state_animation_name: StringName) -> bool:
+	if _animation_controller != null and _animation_controller.has_method("request_animation"):
+		return bool(_animation_controller.call("request_animation", state_animation_name, true))
+
+	# Legacy compatibility for NPCs that have not adopted NpcAnimationController yet.
 	if npc != null:
 		if npc.has_method("_play_animation"):
-			npc.call("_play_animation", state_animation_name)
-			return
+			var private_result = npc.call("_play_animation", state_animation_name)
+			return bool(private_result) if typeof(private_result) == TYPE_BOOL else true
 
 		if npc.has_method("play_animation"):
-			npc.call("play_animation", state_animation_name)
-			return
+			var public_result = npc.call("play_animation", state_animation_name)
+			return bool(public_result) if typeof(public_result) == TYPE_BOOL else true
 
 	if _animation_player == null:
-		return
+		return false
 
 	if _animation_player.current_animation == state_animation_name:
-		return
+		return true
 
 	if _animation_player.has_animation(state_animation_name):
 		_animation_player.play(state_animation_name)
+		return true
+	return false
 
 
 func face_x_direction(x_direction: float) -> void:
 	if npc == null or x_direction == 0.0:
+		return
+	if _animation_controller != null and _animation_controller.has_method("face_x_direction"):
+		_animation_controller.call("face_x_direction", x_direction)
 		return
 
 	if npc.has_method("_face_x_direction"):
@@ -2046,9 +2623,8 @@ func _current_state_matches_any(state_names: Array[StringName]) -> bool:
 	for state_name in state_names:
 		if _current_state_is(state_name):
 			return true
-		if current_state != null and current_state.has_method("continues_state_during_talk"):
-			if bool(current_state.call("continues_state_during_talk", state_name)):
-				return true
+		if interaction_overlay != null and String(interaction_overlay.name) == String(state_name):
+			return true
 
 	return false
 
@@ -2111,6 +2687,12 @@ func _cache_optional_nodes() -> void:
 	if npc == null:
 		return
 
+	_animation_controller = _get_optional_npc_node(
+		animation_controller_path,
+		"NpcAnimationController"
+	)
+	if _animation_controller != null and _animation_controller.has_method("bind_npc"):
+		_animation_controller.call("bind_npc", npc)
 	_animation_player = _get_optional_npc_node(animation_player_path, "AnimationPlayer") as AnimationPlayer
 	_sprite_2d = _get_optional_npc_node(sprite_path, "Sprite2D") as Sprite2D
 	_debug_label = _get_optional_npc_node(debug_label_path, "Label") as Label
@@ -2631,10 +3213,24 @@ func _set_npc_property_if_exists(property_name: String, value) -> void:
 			return
 
 
+func _get_npc_property_if_exists(property_name: StringName, fallback):
+	if npc == null:
+		return fallback
+
+	for property in npc.get_property_list():
+		if String(property.get("name", "")) == String(property_name):
+			return npc.get(property_name)
+
+	return fallback
+
+
 func _update_debug_label() -> void:
 	if _debug_label == null or current_state == null:
 		return
 
+	if interaction_overlay != null:
+		_debug_label.text = "%s + %s" % [current_state.name, interaction_overlay.name]
+		return
 	_debug_label.text = current_state.name
 
 

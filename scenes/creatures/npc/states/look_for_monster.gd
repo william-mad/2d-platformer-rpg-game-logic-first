@@ -68,10 +68,18 @@ func is_searching_for_monster_target(candidate: Node2D) -> bool:
 
 
 func _find_monster_target() -> Node2D:
-	if machine != null and _is_allowed_monster_target(machine.target):
-		return machine.target
-	if machine != null and _is_allowed_monster_target(machine.last_actor):
-		return machine.last_actor
+	if machine != null:
+		var active_target := _get_live_node_2d(machine.target)
+		if _is_allowed_monster_target(active_target):
+			return active_target
+		if machine.target != null and not is_instance_valid(machine.target):
+			machine.target = null
+
+		var last_actor := _get_live_node_2d(machine.last_actor)
+		if _is_allowed_monster_target(last_actor):
+			return last_actor
+		if machine.last_actor != null and not is_instance_valid(machine.last_actor):
+			machine.last_actor = null
 
 	if npc == null or not npc.is_inside_tree():
 		return null
@@ -80,7 +88,7 @@ func _find_monster_target() -> Node2D:
 	var closest_distance_squared := INF
 	for group_name in target_groups:
 		for candidate in npc.get_tree().get_nodes_in_group(String(group_name)):
-			var candidate_node := candidate as Node2D
+			var candidate_node := _get_live_node_2d(candidate)
 			if not _is_allowed_monster_target(candidate_node):
 				continue
 
@@ -94,20 +102,29 @@ func _find_monster_target() -> Node2D:
 	return closest_target
 
 
-func _is_allowed_monster_target(candidate: Node2D) -> bool:
+func _get_live_node_2d(candidate) -> Node2D:
+	# Keep this boundary untyped: a freed Object cannot be passed to a Node2D-typed
+	# parameter, so validity must be checked before the cast.
 	if candidate == null or not is_instance_valid(candidate):
+		return null
+	return candidate as Node2D
+
+
+func _is_allowed_monster_target(candidate) -> bool:
+	var candidate_node := _get_live_node_2d(candidate)
+	if candidate_node == null:
 		return false
-	if candidate == npc:
+	if candidate_node == npc:
 		return false
-	if candidate.is_queued_for_deletion():
+	if candidate_node.is_queued_for_deletion():
 		return false
-	if machine != null and not machine.is_monster_target(candidate):
+	if machine != null and not machine.is_monster_target(candidate_node):
 		return false
-	if _target_is_defeated(candidate):
+	if _target_is_defeated(candidate_node):
 		return false
-	if not candidate.has_method("take_damage"):
+	if not candidate_node.has_method("take_damage"):
 		return false
-	if require_visibility and not _can_see_target(candidate):
+	if require_visibility and not _can_see_target(candidate_node):
 		return false
 
 	return true

@@ -12,7 +12,9 @@ var work_progress_elapsed: float = 0.0
 
 func enter() -> void:
 	# Work now clears the area's own work_needed value instead of waiting on a fixed timer.
-	super.enter()
+	# Resolve the spot-specific clip before playback; super.enter() would play the generic
+	# work clip first and then immediately replace it.
+	begin_enter_without_animation()
 	active_work_target = _resolve_work_target()
 	work_progress_elapsed = 0.0
 
@@ -35,7 +37,7 @@ func enter() -> void:
 	stop_horizontal()
 
 
-func _play_work_animation(work_target: Node2D) -> void:
+func _play_work_animation(work_target: Node2D) -> bool:
 	var target_animation := animation_name
 	if work_target != null and work_target.has_method("get_routine_task_animation_name"):
 		var configured_animation := StringName(String(
@@ -45,7 +47,8 @@ func _play_work_animation(work_target: Node2D) -> void:
 			target_animation = configured_animation
 
 	if target_animation != &"":
-		play_animation(target_animation)
+		return play_animation(target_animation)
+	return false
 
 
 func physics_process(delta: float) -> NpcState:
@@ -108,17 +111,24 @@ func process_talk_overlay(delta: float) -> StringName:
 	if _target_work_is_done(active_work_target):
 		return &"Idle"
 
-	if not is_close_to(active_work_target.global_position, machine.stop_distance):
-		return &"Work"
-
 	if not _target_can_be_worked(active_work_target):
-		return &"Work"
+		machine.work_target = null
+		return &"Idle"
+
+	if not is_close_to(active_work_target.global_position, machine.stop_distance):
+		machine.move_target = active_work_target
+		machine.state_after_move = &"Work"
+		return &"MoveToTarget"
 
 	_apply_work_progress(delta, active_work_target)
 	if _target_work_is_done(active_work_target):
 		return &"Idle"
 
 	return &"Work"
+
+
+func resume_presentation_after_talk_overlay() -> void:
+	_play_work_animation(active_work_target)
 
 
 func _apply_work_progress(delta: float, work_target: Node2D) -> void:

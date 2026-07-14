@@ -215,7 +215,8 @@ func get_live_npc(npc_id: String) -> Node:
 func is_npc_available_for_scheduled_activity(
 	npc_id: String,
 	requested_state_name: StringName = &"",
-	requested_priority: int = 0
+	requested_priority: int = 0,
+	requested_activity: Dictionary = {}
 ) -> bool:
 	# Off-screen NPCs are represented by their record and are available by default.
 	var npc := get_live_npc(npc_id)
@@ -234,9 +235,20 @@ func is_npc_available_for_scheduled_activity(
 		return true
 
 	var current_state_name := String(current_state.name)
-	if requested_state_name != &"" and current_state_name == String(requested_state_name):
-		_breadcrumb("npc_locations:availability", "%s already_%s accept" % [npc_id, current_state_name])
-		return true
+	if not requested_activity.is_empty() and machine.has_method("is_following_activity_descriptor"):
+		if bool(machine.call("is_following_activity_descriptor", requested_activity)):
+			_breadcrumb(
+				"npc_locations:availability",
+				"%s already_%s_identity accept" % [npc_id, String(requested_state_name)]
+			)
+			return true
+	elif requested_state_name != &"" and current_state_name == String(requested_state_name):
+		# Legacy callers without a target identity fall through to the state's normal
+		# interruption policy. State name alone is not proof of the same activity.
+		_breadcrumb(
+			"npc_locations:availability",
+			"%s ambiguous_%s check_interrupt" % [npc_id, current_state_name]
+		)
 
 	# Each state declares this itself, so even low-priority routines such as Work can
 	# interrupt opt-in states without overriding danger, combat, collapse, or death.
@@ -276,12 +288,47 @@ func prepare_scheduled_travel(
 		return false
 
 	_breadcrumb("npc_locations:prepare_travel", "%s -> %s" % [npc_id, target_scene_path.get_file()])
-	_refresh_live_record(npc_id)
-	var record: Dictionary = npc_records[npc_id]
+	var npc := get_live_npc(npc_id) as Node2D
+	if npc == null or departure_door == null or not is_instance_valid(departure_door):
+		_breadcrumb("npc_locations:prepare_travel_missing_live_target", npc_id)
+		return false
+	var original_record: Dictionary = (npc_records[npc_id] as Dictionary).duplicate(true)
+	var record: Dictionary = original_record.duplicate(true)
+	if not _capture_live_npc_into_record(npc_id, npc, record):
+		_breadcrumb("npc_locations:prepare_travel_capture_reject", npc_id)
+		return false
+
+	var accepted := false
+	var already_at_door := (
+		departure_door is Area2D
+		and (departure_door as Area2D).overlaps_body(npc)
+		and departure_door.has_method("try_travel_npc")
+	)
+	if already_at_door:
+		# Reaching an eligible travel door is itself acceptance; completion is checked
+		# synchronously after the pending record is installed below.
+		accepted = true
+	else:
+		var machine := npc.get_node_or_null("NpcStateMachine")
+		if machine == null or not machine.has_method("assign_move_target"):
+			_breadcrumb("npc_locations:prepare_travel_no_machine", npc_id)
+			return false
+		accepted = bool(machine.call("assign_move_target", departure_door, &"Idle"))
+
+	if not accepted:
+		_breadcrumb("npc_locations:prepare_travel_assignment_reject", npc_id)
+		return false
+
 	record["pending_travel"] = pending_travel.duplicate(true)
 	npc_records[npc_id] = record
-
-	return resume_pending_scheduled_travel(npc_id, departure_door)
+	if already_at_door:
+		var travelled := bool(departure_door.call("try_travel_npc", npc))
+		if not travelled:
+			npc_records[npc_id] = original_record
+			_breadcrumb("npc_locations:prepare_travel_door_reject", npc_id)
+			return false
+	_breadcrumb("npc_locations:prepare_travel_accept", npc_id)
+	return true
 
 
 func resume_pending_scheduled_travel(npc_id: String, departure_door: Node2D) -> bool:
@@ -293,8 +340,7 @@ func resume_pending_scheduled_travel(npc_id: String, departure_door: Node2D) -> 
 	if departure_door is Area2D and (departure_door as Area2D).overlaps_body(npc):
 		if departure_door.has_method("try_travel_npc"):
 			_breadcrumb("npc_locations:resume_pending_door", npc_id)
-			departure_door.call_deferred("try_travel_npc", npc)
-			return true
+			return bool(departure_door.call("try_travel_npc", npc))
 
 	var machine := npc.get_node_or_null("NpcStateMachine")
 	if machine == null or not machine.has_method("assign_move_target"):
@@ -354,8 +400,78 @@ func cancel_pending_scheduled_travel(npc_id: String) -> void:
 		return
 
 	var record: Dictionary = npc_records[npc_id]
+	var pending = record.get("pending_travel", {})
+	if pending is Dictionary:
+		var pending_activity = pending.get("activity", {})
+		if pending_activity is Dictionary and not pending_activity.is_empty():
+			_notify_activity_claim_release(
+				StringName(String(pending_activity.get("spot_id", ""))),
+				"pending_travel_cancelled"
+			)
 	record["pending_travel"] = {}
 	npc_records[npc_id] = record
+
+
+func rollback_scheduled_activity(
+	npc_id: String,
+	expected_activity: Dictionary,
+	reason: String = "activity_rejected"
+) -> bool:
+	if not npc_records.has(npc_id):
+		return false
+	var record: Dictionary = npc_records[npc_id]
+	var current_activity = record.get("activity", {})
+	if not (current_activity is Dictionary) or not _activity_records_match(
+		current_activity,
+		expected_activity
+	):
+		return false
+	record["activity"] = {}
+	var pending = record.get("pending_travel", {})
+	if pending is Dictionary:
+		var pending_activity = pending.get("activity", {})
+		if pending_activity is Dictionary and _activity_records_match(
+			pending_activity,
+			expected_activity
+		):
+			record["pending_travel"] = {}
+	npc_records[npc_id] = record
+	_breadcrumb("npc_locations:activity_rollback", "%s %s" % [npc_id, reason])
+	return true
+
+
+func _rollback_pending_activity_record(npc_id: String, expected_activity: Dictionary) -> void:
+	if not npc_records.has(npc_id):
+		return
+	var record: Dictionary = npc_records[npc_id]
+	var pending = record.get("pending_travel", {})
+	if not (pending is Dictionary):
+		return
+	var pending_activity = pending.get("activity", {})
+	if not (pending_activity is Dictionary) or not _activity_records_match(
+		pending_activity,
+		expected_activity
+	):
+		return
+	record["pending_travel"] = {}
+	npc_records[npc_id] = record
+
+
+func _activity_records_match(left: Dictionary, right: Dictionary) -> bool:
+	var left_spot := String(left.get("spot_id", ""))
+	var right_spot := String(right.get("spot_id", ""))
+	if left_spot.is_empty() or left_spot != right_spot:
+		return false
+	var left_state := String(left.get("state_name", ""))
+	var right_state := String(right.get("state_name", ""))
+	if not left_state.is_empty() and not right_state.is_empty() and left_state != right_state:
+		return false
+	for id_key in ["activity_id", "request_id"]:
+		var left_id := String(left.get(id_key, ""))
+		var right_id := String(right.get(id_key, ""))
+		if not left_id.is_empty() and not right_id.is_empty() and left_id != right_id:
+			return false
+	return true
 
 
 func move_simulated_npc_for_social_visit(
@@ -423,10 +539,12 @@ func begin_scheduled_activity(
 		"npc_locations:begin_activity_start",
 		"%s %s -> %s" % [npc_id, String(activity.get("spot_id", "")), target_scene_path.get_file()]
 	)
-	_refresh_live_record(npc_id)
-	var record: Dictionary = npc_records[npc_id]
+	var record: Dictionary = (npc_records[npc_id] as Dictionary).duplicate(true)
 	var from_scene_path := String(record.get("scene_path", ""))
 	var live_npc := get_live_npc(npc_id)
+	if live_npc != null and not _capture_live_npc_into_record(npc_id, live_npc, record):
+		_breadcrumb("npc_locations:begin_activity_capture_reject", npc_id)
+		return false
 	var spawn_position := _get_activity_arrival_position(
 		from_scene_path,
 		target_scene_path,
@@ -436,10 +554,41 @@ func begin_scheduled_activity(
 	# The target position is only a spawn/simulation endpoint for unloaded travel.
 	if (
 		live_npc != null
-		and from_scene_path == target_scene_path
 		and target_scene_path == get_current_scene_path()
 	):
 		spawn_position = _get_node_position(live_npc)
+
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if simulator == null or not simulator.has_method("accept_scheduled_activity_proposal"):
+		_breadcrumb("npc_locations:begin_activity_no_transaction_coordinator", npc_id)
+		return false
+	var requires_live_assignment := (
+		live_npc != null
+		and target_scene_path == get_current_scene_path()
+	)
+	var proposal_result = simulator.call(
+		"accept_scheduled_activity_proposal",
+		StringName(npc_id),
+		activity,
+		target_scene_path,
+		live_npc,
+		requires_live_assignment,
+		self
+	)
+	if not (proposal_result is Dictionary) or not bool(proposal_result.get("accepted", false)):
+		if proposal_result is Dictionary and bool(proposal_result.get("clear_pending", false)):
+			_rollback_pending_activity_record(npc_id, activity)
+		var rejection_reason := (
+			String(proposal_result.get("reason", "proposal_rejected"))
+			if proposal_result is Dictionary
+			else "invalid_proposal_result"
+		)
+		_breadcrumb(
+			"npc_locations:begin_activity_assignment_reject",
+			"%s %s" % [npc_id, rejection_reason]
+		)
+		return false
+
 	record["activity"] = activity.duplicate(true)
 	record["pending_travel"] = {}
 	record["previous_scene_path"] = ""
@@ -448,6 +597,12 @@ func begin_scheduled_activity(
 	record["spawn_random"] = false
 	record["last_travel_msec"] = Time.get_ticks_msec()
 	npc_records[npc_id] = record
+	if simulator.has_method("confirm_scheduled_activity_proposal"):
+		simulator.call(
+			"confirm_scheduled_activity_proposal",
+			StringName(npc_id),
+			activity
+		)
 
 	if live_npc != null and target_scene_path != get_current_scene_path():
 		live_npcs.erase(npc_id)
@@ -460,7 +615,8 @@ func begin_scheduled_activity(
 
 	if target_scene_path == active_scene_path:
 		if live_npc != null:
-			_resume_scheduled_activity_deferred(npc_id, live_npc)
+			if not bool(proposal_result.get("live_assigned", false)):
+				_resume_scheduled_activity_deferred(npc_id, live_npc)
 		else:
 			call_deferred("_spawn_missing_npcs_for_active_scene")
 
@@ -474,6 +630,31 @@ func update_simulated_record(npc_id: String, record: Dictionary) -> void:
 		return
 
 	npc_records[npc_id] = record.duplicate(true)
+
+
+func update_simulated_social_pair(
+	first_npc_id: String,
+	first_record: Dictionary,
+	second_npc_id: String,
+	second_record: Dictionary
+) -> bool:
+	# Validate the whole pair before either saved record changes.
+	if (
+		first_npc_id.is_empty()
+		or second_npc_id.is_empty()
+		or first_npc_id == second_npc_id
+		or first_record.is_empty()
+		or second_record.is_empty()
+		or not npc_records.has(first_npc_id)
+		or not npc_records.has(second_npc_id)
+		or is_npc_live(first_npc_id)
+		or is_npc_live(second_npc_id)
+	):
+		return false
+
+	npc_records[first_npc_id] = first_record.duplicate(true)
+	npc_records[second_npc_id] = second_record.duplicate(true)
+	return true
 
 
 func set_scheduled_activity_field(
@@ -557,6 +738,10 @@ func finish_scheduled_activity(
 	_breadcrumb("npc_locations:finish_activity_start", "%s -> %s" % [npc_id, return_scene_path.get_file()])
 	_refresh_live_record(npc_id)
 	var record: Dictionary = npc_records[npc_id]
+	var committed_activity = record.get("activity", {})
+	var committed_spot_id := &""
+	if committed_activity is Dictionary:
+		committed_spot_id = StringName(String(committed_activity.get("spot_id", "")))
 	var from_scene_path := String(record.get("scene_path", ""))
 	var destination_scene_path := return_scene_path if not return_scene_path.is_empty() else from_scene_path
 	var live_npc := get_live_npc(npc_id)
@@ -581,6 +766,7 @@ func finish_scheduled_activity(
 	record["spawn_random"] = false
 	record["last_travel_msec"] = Time.get_ticks_msec()
 	npc_records[npc_id] = record
+	_notify_activity_claim_release(committed_spot_id, "activity_finished")
 
 	if live_npc != null and String(record["scene_path"]) != get_current_scene_path():
 		live_npcs.erase(npc_id)
@@ -692,6 +878,10 @@ func _build_initial_record(
 		"node_state": _get_npc_state(npc),
 		"activity": {},
 		"pending_travel": {},
+		"social_visit_target_id": "",
+		"social_session_id": "",
+		"social_session_partner_id": "",
+		"last_completed_social_session_id": "",
 		"inventory": _fresh_empty_inventory_save_data(),
 		"last_simulated_total_hours": _get_world_total_hours(),
 		"spawn_random": false,
@@ -848,6 +1038,11 @@ func _normalize_loaded_record(npc_id: String, saved_record: Dictionary) -> Dicti
 	record["previous_scene_path"] = String(record.get("previous_scene_path", ""))
 	record["spawn_random"] = bool(record.get("spawn_random", false))
 	record["social_visit_target_id"] = String(record.get("social_visit_target_id", ""))
+	record["social_session_id"] = String(record.get("social_session_id", ""))
+	record["social_session_partner_id"] = String(record.get("social_session_partner_id", ""))
+	record["last_completed_social_session_id"] = String(
+		record.get("last_completed_social_session_id", "")
+	)
 
 	if not (record.get("last_position", null) is Vector2):
 		record["last_position"] = Vector2.ZERO
@@ -1232,6 +1427,14 @@ func _has_property(object: Object, property_name: StringName) -> bool:
 			return true
 
 	return false
+
+
+func _notify_activity_claim_release(spot_id: StringName, reason: String) -> void:
+	if spot_id == &"":
+		return
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if simulator != null and simulator.has_method("release_scheduled_activity_claim"):
+		simulator.call("release_scheduled_activity_claim", spot_id, reason)
 
 
 func _resume_scheduled_activity_deferred(npc_id: String, npc: Node) -> void:

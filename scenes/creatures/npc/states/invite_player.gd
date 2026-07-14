@@ -91,6 +91,15 @@ func can_be_interrupted_by_scheduled_activity(_request_priority: int) -> bool:
 	return false
 
 
+func get_player_interaction_block_reason(actor: Node2D = null) -> String:
+	if player != null and is_instance_valid(player) and actor != null and actor != player:
+		return "npc_invitation_reserved"
+	if not invitation_started:
+		return "npc_invitation_approach"
+
+	return ""
+
+
 func can_exit_to(new_state: NpcState, request_priority: int) -> bool:
 	if new_state == null:
 		return false

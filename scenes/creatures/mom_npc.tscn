@@ -14,6 +14,7 @@
 [ext_resource type="Resource" path="res://data/travel_policies/default_companion.tres" id="12_travel_policy"]
 [ext_resource type="Texture2D" uid="uid://4gp1piwttkar" path="res://images/sprites/characters/mom/mom_actions_1.png" id="12_wgv2s"]
 [ext_resource type="Texture2D" uid="uid://eixnph1trhyh" path="res://images/sprites/characters/mom/walk_1_mom.png" id="13_svwi8"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/npc_animation_controller.gd" id="14_animation"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_agoec"]
 radius = 15.0
@@ -88,7 +89,7 @@ tracks/4/keys = {
 }
 tracks/5/type = "value"
 tracks/5/imported = false
-tracks/5/enabled = true
+tracks/5/enabled = false
 tracks/5/path = NodePath("Sprite2D:flip_h")
 tracks/5/interp = 1
 tracks/5/loop_wrap = true
@@ -292,7 +293,7 @@ tracks/4/keys = {
 }
 tracks/5/type = "value"
 tracks/5/imported = false
-tracks/5/enabled = true
+tracks/5/enabled = false
 tracks/5/path = NodePath("Sprite2D:flip_h")
 tracks/5/interp = 1
 tracks/5/loop_wrap = true
@@ -496,7 +497,7 @@ tracks/4/keys = {
 }
 tracks/5/type = "value"
 tracks/5/imported = false
-tracks/5/enabled = true
+tracks/5/enabled = false
 tracks/5/path = NodePath("Sprite2D:flip_h")
 tracks/5/interp = 1
 tracks/5/loop_wrap = true
@@ -653,6 +654,18 @@ offset_bottom = -132.0
 value = 100.0
 show_percentage = false
 script = ExtResource("3_hp_bar")
+
+[node name="NpcAnimationController" type="Node" parent="."]
+script = ExtResource("14_animation")
+animation_aliases = {
+"fight": "run",
+"flee": "run",
+"lesson": "class_1",
+"meal_prep": "meal_prep_1",
+"move": "walk_1",
+"notice_player": "see_player",
+"work": "work_1"
+}
 
 [node name="NpcStateMachine" parent="." unique_id=733584758 instance=ExtResource("4_state_machine")]
 walk_speed = 77.0

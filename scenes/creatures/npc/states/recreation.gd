@@ -66,6 +66,37 @@ func physics_process(delta: float) -> NpcState:
 	return next_state
 
 
+func can_continue_during_talk() -> bool:
+	return (
+		active_recreation_target != null
+		and is_instance_valid(active_recreation_target)
+		and _target_can_be_used(active_recreation_target)
+		and is_close_to(active_recreation_target.global_position, machine.stop_distance)
+		and recreation_value_name != &""
+		and machine.get_value(recreation_value_name) > boredom_floor
+	)
+
+
+func process_talk_overlay(delta: float) -> StringName:
+	stop_horizontal()
+	if active_recreation_target == null or not is_instance_valid(active_recreation_target):
+		machine.recreation_target = null
+		return &"Idle"
+	if not _target_can_be_used(active_recreation_target):
+		machine.recreation_target = null
+		return &"Idle"
+	if not is_close_to(active_recreation_target.global_position, machine.stop_distance):
+		machine.move_target = active_recreation_target
+		machine.state_after_move = &"Recreation"
+		return &"MoveToTarget"
+
+	_apply_recreation_progress(delta)
+	if recreation_value_name == &"" or machine.get_value(recreation_value_name) <= boredom_floor:
+		machine.recreation_target = null
+		return &"Idle"
+	return &"Recreation"
+
+
 func _apply_recreation_progress(delta: float) -> void:
 	progress_elapsed += delta
 	var tick_seconds := maxf(progress_tick_seconds, 0.0)
