@@ -17,6 +17,13 @@ const VALUE_ALIASES := {
 	"talk_interest": "talk_need",
 }
 
+const STORED_ONLY_VALUE_KEYS := {
+	"curiosity": true,
+	"sadness": true,
+	"energy": true,
+	"suspicion": true,
+}
+
 const STATE_ALIASES := {
 	"ReactToPlayer": "ReactToEvent",
 	"NoticeActor": "ReactToEvent",
@@ -114,7 +121,6 @@ enum MonsterSightReaction {
 @export_range(0.0, 100.0, 0.1) var cross_scene_talk_need_threshold: float = 70.0
 @export_range(0, 100, 1) var cross_scene_talk_priority: int = 60
 @export_range(0.0, 100.0, 0.1) var cross_scene_minimum_npc_favor: float = 10.0
-@export_range(0.0, 1.0, 0.01) var cross_scene_player_target_chance: float = 0.35
 @export var block_talk_search_while_moving_to_target: bool = true
 
 @export_group("NPC Talk Handshake")
@@ -253,12 +259,6 @@ enum MonsterSightReaction {
 		"requires_idle": true,
 		"priority": 60
 	},
-	"curious": {
-		"value": "curiosity",
-		"state": "ReactToEvent",
-		"at_least": 50.0,
-		"priority": 40
-	},
 	"favor_dropped": {
 		"value": "favor",
 		"state": "ReactToEvent",
@@ -337,7 +337,8 @@ var previous_state_priority: int = 0
 var interaction_overlay_priority: int = 0
 var pending_state_priority: int = -1
 var last_state_request_failure_reason: String = ""
-var next_talk_need_payout_already_applied: bool = false
+var pending_player_talk_payout_session_id: String = ""
+var prepaid_talk_session_id: String = ""
 var talk_refusal_cooldowns: Dictionary = {}
 var player_interaction_hold_timer: float = 0.0
 var player_interaction_hold_actor: Node2D
@@ -396,6 +397,11 @@ func _ready() -> void:
 
 	if active and current_state == null:
 		request_state(initial_state_name, null, "initial")
+
+
+func _exit_tree() -> void:
+	if interaction_overlay != null:
+		_cancel_interaction_overlay("scene_exit")
 
 
 func _physics_process(delta: float) -> void:
@@ -552,9 +558,27 @@ func change_state(
 				idle_state, "talk_overlay_handoff_approach", overlay_priority
 			):
 				return false
-		return _request_talk_state(requested_partner, reason, overlay_priority, true)
+		return _request_talk_state(
+			requested_partner, reason, overlay_priority, true,
+			_resolve_talk_initiating_source(&"", requested_partner, reason)
+		)
 
 	var requested_name := StringName(new_state.name)
+	var continuing_social_approach := (
+		requested_name == &"LookForTalkTarget"
+		and reason == "state_tick"
+		and _current_state_is(&"MoveToTarget")
+		and active_action != null
+		and active_action.status == NpcActionSession.Status.ACTIVE
+		and active_action.action_kind == &"LookForTalkTarget"
+		and active_action.phase == &"executing"
+	)
+	if (
+		requested_name == &"LookForTalkTarget"
+		and is_socially_engaged()
+		and not continuing_social_approach
+	):
+		return _reject_state_request(requested_name, "already_socially_engaged")
 	if _is_active_travel_companion():
 		if String(requested_name) == "Idle":
 			var follow_state := get_state(&"TravelFollow")
@@ -656,7 +680,10 @@ func request_state(
 		return _reject_state_request(state_name, "empty_state")
 	if String(state_name) == "Talk":
 		var requested_partner := actor if actor != null else get_talk_target()
-		return _request_talk_state(requested_partner, reason, request_priority, true)
+		return _request_talk_state(
+			requested_partner, reason, request_priority, true,
+			_resolve_talk_initiating_source(&"", requested_partner, reason)
+		)
 
 	return _request_state_direct(state_name, actor, reason, request_priority)
 
@@ -685,7 +712,10 @@ func _request_state_direct(
 		return _reject_state_request(state_name, "Missing state: %s" % String(state_name))
 	if String(requested_state.name) == "Talk":
 		var requested_partner := actor if actor != null else get_talk_target()
-		return _request_talk_state(requested_partner, reason, request_priority, true)
+		return _request_talk_state(
+			requested_partner, reason, request_priority, true,
+			_resolve_talk_initiating_source(&"", requested_partner, reason)
+		)
 	if String(requested_state.name) == "LookForTalkTarget":
 		if (
 			DebugToolsConfig.TROUBLESHOOTING_MODE
@@ -693,6 +723,8 @@ func _request_state_direct(
 		):
 			_breadcrumb("npc_state:talk_search_skip", _get_npc_label())
 			return _reject_state_request(state_name, "talk_search_disabled")
+		if is_socially_engaged():
+			return _reject_state_request(state_name, "already_socially_engaged")
 		if _current_look_for_talk_target_matches(actor) and _proposed_action == null:
 			last_state_request_failure_reason = ""
 			return true
@@ -1015,6 +1047,43 @@ func complete_active_action(session_id: String, reason: String = "completed") ->
 	return true
 
 
+func complete_social_search_handoff(expected_session_id: String) -> bool:
+	if expected_session_id.is_empty():
+		return false
+	if (
+		interaction_overlay == null
+		or String(interaction_overlay.name) != "Talk"
+		or active_interaction_session == null
+		or active_interaction_session.status != NpcActionSession.Status.ACTIVE
+		or active_interaction_session.session_id != expected_session_id
+	):
+		return false
+	if active_action == null:
+		return last_terminal_action_session_id == expected_session_id
+	if (
+		active_action.session_id != expected_session_id
+		or active_action.action_kind != &"LookForTalkTarget"
+	):
+		return false
+	if active_action.status == NpcActionSession.Status.COMPLETED:
+		return active_action.reason == "talk_handoff_completed"
+	if active_action.status != NpcActionSession.Status.ACTIVE:
+		return false
+
+	var preserved_overlay := interaction_overlay
+	var preserved_interaction := active_interaction_session
+	if not complete_active_action(expected_session_id, "talk_handoff_completed"):
+		return false
+	if (
+		interaction_overlay != preserved_overlay
+		or active_interaction_session != preserved_interaction
+		or not is_interaction_session_current_for_execution(expected_session_id)
+	):
+		push_warning("Talk handoff completion disturbed the accepted overlay for %s." % _get_npc_label())
+		return false
+	return true
+
+
 func fail_active_action(session_id: String, reason: String) -> bool:
 	return cancel_active_action(session_id, reason)
 
@@ -1331,12 +1400,12 @@ func update_active_action_metadata(
 	return true
 
 
-func get_action_target(action_kind: StringName, legacy_target: Node2D = null) -> Node2D:
+func get_action_target(action_kind: StringName, legacy_target = null) -> Node2D:
 	if active_action != null and String(active_action.action_kind) == String(action_kind):
 		var session_target := get_active_action_target()
 		if session_target != null:
 			return session_target
-	return legacy_target if legacy_target != null and is_instance_valid(legacy_target) else null
+	return legacy_target as Node2D if is_instance_valid(legacy_target) else null
 
 
 func get_move_target() -> Node2D:
@@ -1727,7 +1796,9 @@ func _get_action_source(reason: String, actor: Node2D, action_kind: StringName) 
 		return &"emergency"
 	if lower_reason.contains("world_activity") or lower_reason.contains("schedule"):
 		return &"schedule"
-	if lower_reason.contains("social") or String(action_kind) in ["Talk", "LookForTalkTarget"]:
+	if lower_reason.contains("social") or action_kind == &"LookForTalkTarget":
+		return &"social_ai"
+	if action_kind == &"Talk":
 		return &"player" if actor != null and actor.is_in_group("player") else &"social_ai"
 	if lower_reason.contains("value") or lower_reason.contains("need") or String(action_kind) in ["Eat", "Rest", "Sleep"]:
 		return &"need"
@@ -1776,15 +1847,16 @@ func _log_action_session(result: String, reason: String) -> void:
 			active_action.reservation_ids,
 			StringName(String(active_action.metadata.get("reservation_purpose", "activity")))
 		)
-	print("NPC action: npc=%s session=%s action=%s source=%s status=%s spot=%s reservations=%s owned=%s missing=%s orphaned=%s reason=%s" % [
-		_get_npc_label(), active_action.session_id, String(active_action.action_kind),
-		String(active_action.source), result, String(active_action.spot_id),
-		str(diagnostics.get("actual_reservation_ids", Array(active_action.reservation_ids))),
-		str(diagnostics.get("owns_named_spot", active_action.spot_id == &"")),
-		str(diagnostics.get("missing_reservation_ids", [])),
-		str(diagnostics.get("ledger_ids_absent_from_action", [])),
-		reason,
-	])
+	if _verbose_npc_logging_enabled():
+		print("NPC action: npc=%s session=%s action=%s source=%s status=%s spot=%s reservations=%s owned=%s missing=%s orphaned=%s reason=%s" % [
+			_get_npc_label(), active_action.session_id, String(active_action.action_kind),
+			String(active_action.source), result, String(active_action.spot_id),
+			str(diagnostics.get("actual_reservation_ids", Array(active_action.reservation_ids))),
+			str(diagnostics.get("owns_named_spot", active_action.spot_id == &"")),
+			str(diagnostics.get("missing_reservation_ids", [])),
+			str(diagnostics.get("ledger_ids_absent_from_action", [])),
+			reason,
+		])
 	if result == "active" and active_action.spot_id != &"" and not bool(
 		diagnostics.get("owns_named_spot", false)
 	):
@@ -1852,6 +1924,8 @@ func _get_state_activity_descriptor(state: NpcState) -> Dictionary:
 				if activity_target == null:
 					activity_target = target
 
+	if not is_instance_valid(activity_target):
+		activity_target = null
 	var descriptor := NpcActivityIdentity.describe(action_kind, activity_target)
 	if state == interaction_overlay and active_interaction_session != null:
 		descriptor.merge(active_interaction_session.to_descriptor(), true)
@@ -1883,6 +1957,8 @@ func _get_state_request_activity_descriptor(
 		var target_key := _activity_target_context_key(action_kind)
 		if target_key != &"" and request_context.has(target_key):
 			activity_target = request_context[target_key] as Node2D
+	if not is_instance_valid(activity_target):
+		activity_target = null
 	return NpcActivityIdentity.describe(action_kind, activity_target)
 
 
@@ -2303,7 +2379,7 @@ func assign_eat_target(new_target: Node2D, request_priority: int = 20) -> bool:
 
 func assign_rest_target(new_target: Node2D, request_priority: int = 20) -> bool:
 	# Stores a fatigue-rest spot without changing the NPC's sleep need.
-	if new_target == null or not is_instance_valid(new_target):
+	if not _can_assign_casual_activity_target(new_target, &"Rest"):
 		return false
 
 	return _request_state_direct(
@@ -2317,7 +2393,7 @@ func assign_rest_target(new_target: Node2D, request_priority: int = 20) -> bool:
 
 func assign_recreation_target(new_target: Node2D, request_priority: int = 20) -> bool:
 	# Stores a recreation spot so the NPC can walk there before lowering boredom.
-	if new_target == null or not is_instance_valid(new_target):
+	if not _can_assign_casual_activity_target(new_target, &"Recreation"):
 		return false
 
 	return _request_state_direct(
@@ -2326,6 +2402,18 @@ func assign_recreation_target(new_target: Node2D, request_priority: int = 20) ->
 		"recreation_target",
 		request_priority,
 		{}
+	)
+
+
+func _can_assign_casual_activity_target(
+	candidate: Node2D,
+	activity_state: StringName
+) -> bool:
+	return (
+		candidate != null
+		and is_instance_valid(candidate)
+		and candidate.has_method("can_serve_npc_casual_activity")
+		and bool(candidate.call("can_serve_npc_casual_activity", npc, activity_state))
 	)
 
 
@@ -2380,14 +2468,18 @@ func assign_invitation_spot(new_target: Node2D, request_priority: int = 75) -> b
 func request_talk(
 	new_target: Node2D,
 	request_priority: int = -1,
-	require_mutual_handshake: bool = true
+	require_mutual_handshake: bool = true,
+	initiating_source: StringName = &""
 ) -> bool:
 	# Starts Talk with a known partner, using a two-sided handshake for NPC partners.
 	var priority := request_priority
 	if priority < 0:
 		priority = npc_talk_handshake_priority
 
-	return _request_talk_state(new_target, "talk", priority, require_mutual_handshake)
+	var source := _resolve_talk_initiating_source(initiating_source, new_target, "talk")
+	return _request_talk_state(
+		new_target, "talk", priority, require_mutual_handshake, source
+	)
 
 
 func begin_player_interaction_hold(actor: Node2D, hold_seconds: float = -1.0) -> bool:
@@ -2539,6 +2631,38 @@ func is_talking_with(candidate: Node2D) -> bool:
 	return get_talk_target() == candidate
 
 
+func has_active_talk_overlay() -> bool:
+	return (
+		interaction_overlay != null
+		and String(interaction_overlay.name) == "Talk"
+		and active_interaction_session != null
+		and active_interaction_session.status == NpcActionSession.Status.ACTIVE
+		and active_interaction_session.action_kind == &"Talk"
+	)
+
+
+func is_socially_engaged() -> bool:
+	# This is the authoritative live gate for both the planner and direct state requests.
+	if has_active_talk_overlay():
+		return true
+	if (
+		_proposed_action != null
+		and _proposed_action.action_kind == &"Talk"
+		and _proposed_action.status in [
+			NpcActionSession.Status.PROPOSED,
+			NpcActionSession.Status.ACTIVE,
+		]
+	):
+		return true
+	if (
+		active_action != null
+		and active_action.status == NpcActionSession.Status.ACTIVE
+		and active_action.action_kind in [&"Talk", &"LookForTalkTarget"]
+	):
+		return true
+	return false
+
+
 func is_handling_talk_request_with(candidate: Node2D) -> bool:
 	return _talk_request_is_already_being_handled(candidate)
 
@@ -2558,7 +2682,8 @@ func _request_talk_state(
 	new_target: Node2D,
 	reason: String,
 	request_priority: int,
-	require_mutual_handshake: bool
+	require_mutual_handshake: bool,
+	initiating_source: StringName
 ) -> bool:
 	if new_target == null or not is_instance_valid(new_target) or new_target == npc:
 		return _reject_state_request(&"Talk", "invalid_talk_target")
@@ -2586,11 +2711,14 @@ func _request_talk_state(
 	var priority := request_priority
 	if priority < 0:
 		priority = 0
+	var talk_source := _resolve_talk_initiating_source(
+		initiating_source, new_target, reason
+	)
 
 	if not is_npc_partner:
 		if not _can_enter_talk_with(new_target, priority):
 			return _reject_state_request(&"Talk", "talker_cannot_enter_talk")
-		return _accept_talk_request(new_target, priority, reason)
+		return _accept_talk_request(new_target, priority, reason, "", talk_source)
 
 	if (
 		require_mutual_handshake
@@ -2612,16 +2740,22 @@ func _request_talk_state(
 		return false
 
 	var shared_talk_session_id := (
-		active_action.session_id
-		if active_action != null and active_action.source in [&"social_ai", &"player"]
+		_proposed_action.session_id
+		if (
+			_proposed_action != null
+			and _proposed_action.action_kind == &"Talk"
+			and _proposed_action.source == talk_source
+		)
+		else active_action.session_id
+		if active_action != null and active_action.source == talk_source
 		else NpcActionSessionModel.make_session_id(
 			_get_action_owner_id(),
-			&"player" if new_target.is_in_group("player") else &"social_ai",
+			talk_source,
 			&"Talk"
 		)
 	)
 	var partner_started := partner_machine._accept_talk_request(
-		npc, priority, "talk_handshake", shared_talk_session_id
+		npc, priority, "talk_handshake", shared_talk_session_id, talk_source
 	)
 	if not partner_started:
 		_reject_state_request(&"Talk", "partner_talk_start_failed")
@@ -2629,7 +2763,7 @@ func _request_talk_state(
 		return false
 
 	var self_started := _accept_talk_request(
-		new_target, priority, reason, shared_talk_session_id
+		new_target, priority, reason, shared_talk_session_id, talk_source
 	)
 	if not self_started:
 		_reject_state_request(&"Talk", "talker_start_failed")
@@ -2645,7 +2779,8 @@ func _accept_talk_request(
 	new_target: Node2D,
 	request_priority: int,
 	reason: String,
-	requested_session_id: String = ""
+	requested_session_id: String = "",
+	initiating_source: StringName = &""
 ) -> bool:
 	if _talk_request_is_already_being_handled(new_target):
 		return true
@@ -2662,28 +2797,40 @@ func _accept_talk_request(
 	talk_target = new_target
 	interaction_overlay = talk_state
 	interaction_overlay_priority = maxi(request_priority, 0)
+	var talk_source := _resolve_talk_initiating_source(
+		initiating_source, new_target, reason
+	)
 	var session_id := requested_session_id
 	if not requested_session_id.is_empty():
 		session_id = requested_session_id
-	elif active_action != null and active_action.source in [&"social_ai", &"player"]:
+	elif (
+		_proposed_action != null
+		and _proposed_action.action_kind == &"Talk"
+		and _proposed_action.source == talk_source
+	):
+		session_id = _proposed_action.session_id
+	elif active_action != null and active_action.source == talk_source:
 		session_id = active_action.session_id
 	else:
 		session_id = NpcActionSessionModel.make_session_id(
 			_get_action_owner_id(),
-			&"player" if new_target.is_in_group("player") else &"social_ai",
+			talk_source,
 			&"Talk"
 		)
 	active_interaction_session = NpcActionSessionModel.create(
 		_get_action_owner_id(),
 		&"Talk",
-		&"player" if new_target.is_in_group("player") else &"social_ai",
+		talk_source,
 		new_target,
 		{
 			"session_id": session_id,
 			"priority": interaction_overlay_priority,
 			"status": "active",
 			"phase": "executing",
-			"metadata": {"primary_session_id": get_active_action_session_id()},
+			"metadata": {
+				"primary_session_id": get_active_action_session_id(),
+				"initiating_source": String(talk_source),
+			},
 		}
 	)
 	talk_state.next_state = null
@@ -2699,7 +2846,7 @@ func _accept_talk_request(
 			interaction_overlay_priority,
 		]
 	)
-	if OS.is_debug_build():
+	if OS.is_debug_build() and _verbose_npc_logging_enabled():
 		print("NPC interaction action: npc=%s session=%s action=Talk status=active" % [
 			_get_npc_label(), get_active_interaction_session_id(),
 		])
@@ -2803,7 +2950,9 @@ func _cancel_interaction_overlay(reason: String) -> void:
 		return
 	var partner_value = _get_property_if_present(overlay_to_cancel, &"talk_partner", null)
 	var partner := partner_value as Node2D if partner_value != null and is_instance_valid(partner_value) else null
-	if partner != null and is_instance_valid(partner) and overlay_to_cancel.has_method("cancel_talk_with"):
+	if overlay_to_cancel.has_method("cancel_talk_session"):
+		overlay_to_cancel.call("cancel_talk_session", reason)
+	elif partner != null and is_instance_valid(partner) and overlay_to_cancel.has_method("cancel_talk_with"):
 		overlay_to_cancel.call("cancel_talk_with", partner, reason)
 	if interaction_overlay == overlay_to_cancel:
 		_remove_interaction_overlay(reason)
@@ -2830,7 +2979,7 @@ func _finish_talk_overlay_from_partner(candidate: Node2D) -> void:
 		return
 	var completed_overlay := interaction_overlay
 	if completed_overlay.has_method("complete_talk_with"):
-		completed_overlay.call("complete_talk_with", candidate)
+		completed_overlay.call("complete_talk_with", candidate, "partner_completed")
 	if interaction_overlay == completed_overlay:
 		_remove_interaction_overlay("partner_completed")
 
@@ -2851,10 +3000,18 @@ func _remove_interaction_overlay(reason: String) -> void:
 		removed_interaction_session.get_live_target() if removed_interaction_session != null else null
 	)
 	active_interaction_session = null
+	if pending_player_talk_payout_session_id == removed_interaction_session_id:
+		pending_player_talk_payout_session_id = ""
+	if prepaid_talk_session_id == removed_interaction_session_id:
+		prepaid_talk_session_id = ""
 	if talk_target == removed_talk_partner:
 		talk_target = null
 	removed_overlay.exit()
-	if active_action != null and active_action.session_id == removed_interaction_session_id:
+	if (
+		active_action != null
+		and active_action.status == NpcActionSession.Status.ACTIVE
+		and active_action.session_id == removed_interaction_session_id
+	):
 		if reason in ["completed", "partner_completed"]:
 			complete_active_action(removed_interaction_session_id, reason)
 		else:
@@ -2887,6 +3044,10 @@ func get_effective_task_priority() -> int:
 
 func get_active_interaction_session_id() -> String:
 	return active_interaction_session.session_id if active_interaction_session != null else ""
+
+
+func get_active_interaction_source() -> StringName:
+	return active_interaction_session.source if active_interaction_session != null else &""
 
 
 func _validate_talk_partner_session(partner: Node2D) -> void:
@@ -3042,15 +3203,57 @@ func is_talk_refusal_on_cooldown(candidate: Node2D) -> bool:
 	return float(talk_refusal_cooldowns.get(key, 0.0)) > 0.0
 
 
-func mark_next_talk_need_payout_applied() -> void:
-	# Player-pressed talk can apply stats instantly, then use Talk only for timing/hooks.
-	next_talk_need_payout_already_applied = true
+func mark_next_talk_need_payout_applied(expected_session_id: String = "") -> bool:
+	# The player UI calls this before applying its effects. Keep it pending until a
+	# player-authored value change confirms that effects reached this exact session.
+	var active_session_id := get_active_interaction_session_id()
+	if expected_session_id.is_empty():
+		expected_session_id = active_session_id
+	if (
+		not has_active_talk_overlay()
+		or active_session_id.is_empty()
+		or active_session_id != expected_session_id
+		or get_active_interaction_source() != &"player"
+	):
+		return false
+	pending_player_talk_payout_session_id = active_session_id
+	return true
 
 
-func consume_next_talk_need_payout_already_applied() -> bool:
-	var was_already_applied := next_talk_need_payout_already_applied
-	next_talk_need_payout_already_applied = false
-	return was_already_applied
+func consume_next_talk_need_payout_already_applied(expected_session_id: String = "") -> bool:
+	var active_session_id := get_active_interaction_session_id()
+	var exact_match := (
+		not expected_session_id.is_empty()
+		and expected_session_id == active_session_id
+		and prepaid_talk_session_id == expected_session_id
+		and get_active_interaction_source() == &"player"
+	)
+	if exact_match:
+		prepaid_talk_session_id = ""
+		pending_player_talk_payout_session_id = ""
+	return exact_match
+
+
+func is_active_talk_payout_prepaid() -> bool:
+	var active_session_id := get_active_interaction_session_id()
+	return (
+		not active_session_id.is_empty()
+		and prepaid_talk_session_id == active_session_id
+		and get_active_interaction_source() == &"player"
+	)
+
+
+func _confirm_pending_player_talk_payout(actor: Node2D) -> void:
+	if actor == null or not is_instance_valid(actor) or not actor.is_in_group("player"):
+		return
+	var active_session_id := get_active_interaction_session_id()
+	if (
+		not active_session_id.is_empty()
+		and pending_player_talk_payout_session_id == active_session_id
+		and get_active_interaction_source() == &"player"
+	):
+		prepaid_talk_session_id = active_session_id
+		pending_player_talk_payout_session_id = ""
 
 
 func disable(reason: String = "disabled") -> void:
@@ -3095,10 +3298,12 @@ func replace_values(
 		values[value_key] = normalized_values[value_key]
 	last_event_actor = actor
 	last_changed_values = _normalize_value_delta(changed_values)
+	_remove_stored_only_values(last_changed_values)
 	_record_value_threshold_crossings(previous_values, values, last_changed_values)
 	values_replaced.emit(values.duplicate(true), actor)
 
-	_notify_current_state_values_changed(actor)
+	if not last_changed_values.is_empty():
+		_notify_current_state_values_changed(actor)
 
 	if evaluate_reactions and _value_reactions_enabled():
 		evaluate_value_reactions(actor, last_changed_values)
@@ -3113,6 +3318,7 @@ func apply_value_delta(
 	_normalize_values_in_place(values)
 	var previous_values := values.duplicate(true)
 	var normalized_delta := _normalize_value_delta(value_delta)
+	_remove_stored_only_values(normalized_delta)
 	var changed_values: Dictionary = {}
 
 	for value_key in normalized_delta.keys():
@@ -3133,6 +3339,7 @@ func apply_value_delta(
 
 	if changed_values.is_empty():
 		return false
+	_confirm_pending_player_talk_payout(actor)
 
 	last_event_actor = actor
 	last_changed_values = changed_values.duplicate(true)
@@ -3155,6 +3362,8 @@ func set_value(
 	_normalize_values_in_place(values)
 	var previous_values := values.duplicate(true)
 	var key := _canonical_value_key(value_name)
+	if _is_stored_only_value(key):
+		return
 	var previous_value := _variant_to_float(values.get(key, 0.0))
 	var next_value := value
 
@@ -3171,6 +3380,7 @@ func set_value(
 	_apply_threshold_effects(changed_values)
 	if changed_values.is_empty():
 		return
+	_confirm_pending_player_talk_payout(actor)
 
 	last_event_actor = actor
 	last_changed_values = changed_values.duplicate(true)
@@ -3856,6 +4066,8 @@ func _find_best_matching_rule(changed_values: Dictionary, actor: Node2D = null) 
 
 		var rule_dictionary: Dictionary = rule
 		var value_key := _canonical_value_key(rule_dictionary.get("value", rule_name))
+		if _is_stored_only_value(value_key):
+			continue
 		var value = values.get(value_key, rule_dictionary.get("default", 0.0))
 		var value_changed := changed_values.has(value_key)
 		var value_delta = changed_values.get(value_key, 0.0)
@@ -3873,6 +4085,8 @@ func _find_best_matching_rule(changed_values: Dictionary, actor: Node2D = null) 
 		):
 			continue
 		if state_name == &"LookForTalkTarget":
+			if is_socially_engaged():
+				continue
 			if not _can_start_look_for_talk_target():
 				continue
 			if not _has_available_autonomous_talk_target(rule_dictionary):
@@ -3953,6 +4167,38 @@ func _can_start_look_for_talk_target() -> bool:
 	return active_action != null and active_action.action_kind == &"LookForTalkTarget"
 
 
+func _resolve_talk_initiating_source(
+	requested_source: StringName,
+	partner: Node2D,
+	reason: String
+) -> StringName:
+	if requested_source != &"":
+		return requested_source
+	if _proposed_action != null and _proposed_action.action_kind == &"Talk":
+		return _proposed_action.source
+	if (
+		active_action != null
+		and active_action.status == NpcActionSession.Status.ACTIVE
+		and active_action.action_kind in [&"Talk", &"LookForTalkTarget"]
+	):
+		return active_action.source
+	var lower_reason := reason.to_lower()
+	if lower_reason.contains("schedule"):
+		return &"schedule"
+	if lower_reason.contains("script"):
+		return &"scripted"
+	if lower_reason.contains("social"):
+		return &"social_ai"
+	if lower_reason.contains("player"):
+		return &"player"
+	# Compatibility: direct legacy calls used the partner type as their only signal.
+	if partner != null and is_instance_valid(partner) and partner.is_in_group("player"):
+		return &"player"
+	if partner != null and is_instance_valid(partner) and partner.is_in_group("npc"):
+		return &"social_ai"
+	return &"manual"
+
+
 func _has_available_autonomous_talk_target(rule: Dictionary) -> bool:
 	if npc == null or not npc.is_inside_tree():
 		return false
@@ -3980,6 +4226,7 @@ func _apply_threshold_effects(changed_values: Dictionary) -> void:
 		return
 
 	var normalized_delta := _normalize_value_delta(effect_delta)
+	_remove_stored_only_values(normalized_delta)
 	for value_key in normalized_delta.keys():
 		var key := String(value_key)
 		var previous_value := _variant_to_float(values.get(key, 0.0))
@@ -4006,6 +4253,8 @@ func _collect_threshold_effect_delta(changed_values: Dictionary) -> Dictionary:
 
 		var effect_dictionary: Dictionary = effect
 		var value_key := _canonical_value_key(effect_dictionary.get("value", effect_name))
+		if _is_stored_only_value(value_key):
+			continue
 		if not changed_values.has(value_key):
 			continue
 
@@ -4052,6 +4301,11 @@ func _threshold_effect_matches(effect: Dictionary, previous_value: float, curren
 
 func _get_rule_request_actor(actor: Node2D, rule: Dictionary) -> Node2D:
 	# Chooses only explicit event/perception candidates; it never borrows another action's target.
+	# Passive location activities resolve their own authored spot and must not turn the
+	# most recent social actor into a destination.
+	var requested_state := StringName(String(rule.get("state", "")))
+	if requested_state in [&"Rest", &"Recreation"]:
+		return null
 	if _rule_allows_target(rule, actor):
 		return actor
 
@@ -4311,6 +4565,16 @@ func _canonical_value_key(value_key) -> String:
 	return key
 
 
+func _is_stored_only_value(value_key) -> bool:
+	return STORED_ONLY_VALUE_KEYS.has(_canonical_value_key(value_key))
+
+
+func _remove_stored_only_values(value_changes: Dictionary) -> void:
+	for value_key in value_changes.keys():
+		if _is_stored_only_value(value_key):
+			value_changes.erase(value_key)
+
+
 func _canonical_state_key(state_name) -> String:
 	var key := String(state_name)
 	if STATE_ALIASES.has(key):
@@ -4356,6 +4620,13 @@ func _value_reactions_enabled() -> bool:
 	return not (
 		DebugToolsConfig.TROUBLESHOOTING_MODE
 		and DebugToolsConfig.DEBUG_DISABLE_VALUE_REACTIONS
+	)
+
+
+func _verbose_npc_logging_enabled() -> bool:
+	return (
+		DebugToolsConfig.TROUBLESHOOTING_MODE
+		and DebugToolsConfig.DEBUG_ENABLE_VERBOSE_NPC_LOGS
 	)
 
 

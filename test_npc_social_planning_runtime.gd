@@ -31,24 +31,6 @@ class LocalLocations:
 		return true
 
 
-class RemoteLocations:
-	extends Node
-
-	func get_live_npc(_npc_id: String) -> Node:
-		return null
-
-	func get_current_scene_path() -> String:
-		return "res://town.tscn"
-
-	func move_simulated_npc_for_social_visit(
-		_npc_id: String,
-		_target_scene_path: String,
-		_target_position: Vector2,
-		_social_target_id: String
-	) -> bool:
-		return true
-
-
 class DescriptorMachine:
 	extends Node
 
@@ -62,7 +44,7 @@ class DescriptorMachine:
 func _initialize() -> void:
 	await process_frame
 	_test_availability_filters()
-	_test_same_scene_preference_and_remote_gate()
+	_test_social_candidates_stay_in_the_same_scene()
 	_test_pair_reservations_last_for_the_pass()
 	_test_simulated_rewards_commit_once()
 	await process_frame
@@ -107,7 +89,7 @@ func _test_availability_filters() -> void:
 	locations.free()
 
 
-func _test_same_scene_preference_and_remote_gate() -> void:
+func _test_social_candidates_stay_in_the_same_scene() -> void:
 	var planner := SocialPlanner.new()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 4
@@ -120,8 +102,6 @@ func _test_same_scene_preference_and_remote_gate() -> void:
 	var settings := {
 		"priority": 60,
 		"minimum_npc_favor": 10.0,
-		"player_target_chance": 0.0,
-		"allow_remote_visits": true,
 	}
 	var local_locations := LocalLocations.new()
 	planner.begin_simulation_pass()
@@ -134,12 +114,7 @@ func _test_same_scene_preference_and_remote_gate() -> void:
 	selected = planner.choose_candidate(
 		&"seeker", seeker, remote_only, local_locations, settings, null, null, rng
 	)
-	_expect(selected.is_empty(), "remote candidate is rejected without visit/travel support")
-	var remote_locations := RemoteLocations.new()
-	selected = planner.choose_candidate(
-		&"seeker", seeker, remote_only, remote_locations, settings, null, null, rng
-	)
-	_expect(String(selected.get("target_id", "")) == "remote", "supported remote visit may be planned")
+	_expect(selected.is_empty(), "remote candidate cannot trigger a spontaneous scene visit")
 
 	var player := Node2D.new()
 	root.add_child(player)
@@ -170,7 +145,6 @@ func _test_same_scene_preference_and_remote_gate() -> void:
 	talker.queue_free()
 	player.queue_free()
 	local_locations.free()
-	remote_locations.free()
 
 
 func _test_pair_reservations_last_for_the_pass() -> void:

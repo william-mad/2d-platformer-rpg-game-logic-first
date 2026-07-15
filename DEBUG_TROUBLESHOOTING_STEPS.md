@@ -25,7 +25,7 @@ Breadcrumbs are written to `user://crash_breadcrumbs.log` and also printed. Each
    If this helps, inspect `meal_cycle:*`, `work_spot:meal_state`, and `npc_world:meal_cycle_*`.
 5. Set `DEBUG_DISABLE_EAT_STATE = true`, then `DEBUG_DISABLE_REST_STATE = true`.
    These isolate live state entry and per-frame state logic.
-6. Set `DEBUG_DISABLE_TALK_SEARCH = true`, then `DEBUG_DISABLE_CROSS_SCENE_TALK = true`.
+6. Set `DEBUG_DISABLE_TALK_SEARCH = true` to isolate autonomous conversation starts.
    These isolate NPC talk target scanning and social travel.
 7. Set `DEBUG_DISABLE_PASSIVE_NEEDS = true`, then `DEBUG_DISABLE_VALUE_REACTIONS = true`.
    These isolate hunger/tired/talk/boredom growth and automatic state requests.

@@ -82,6 +82,13 @@ static func create(
 	var descriptor_metadata = descriptor.get("metadata", {})
 	if descriptor_metadata is Dictionary:
 		session.metadata = descriptor_metadata.duplicate(true)
+	# Preserve scheduled identity/value hints used by exact-target activity states.
+	for metadata_key in [
+		"activity_id", "scheduled_activity_id", "schedule_activity_id",
+		"value_name", "target_scene_path",
+	]:
+		if descriptor.has(metadata_key) and not session.metadata.has(metadata_key):
+			session.metadata[metadata_key] = descriptor[metadata_key]
 	session.set_live_target(live_target)
 	if session.target_persistent_id.is_empty():
 		session.target_persistent_id = get_persistent_id(live_target)

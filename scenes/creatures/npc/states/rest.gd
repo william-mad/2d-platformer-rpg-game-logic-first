@@ -151,14 +151,13 @@ func _resolve_rest_target() -> Node2D:
 func _target_can_be_rested_at(rest_target: Node2D) -> bool:
 	if rest_target == null or not is_instance_valid(rest_target):
 		return false
-
-	if rest_target.has_method("can_serve_npc_casual_activity"):
-		var accepted := bool(rest_target.call("can_serve_npc_casual_activity", npc, &"Rest"))
-		if not accepted:
-			_breadcrumb("npc_rest:spot_reject", "%s %s" % [_npc_label(), rest_target.name])
-		return accepted
-
-	return true
+	if not rest_target.has_method("can_serve_npc_casual_activity"):
+		_breadcrumb("npc_rest:spot_reject", "%s %s" % [_npc_label(), rest_target.name])
+		return false
+	var accepted := bool(rest_target.call("can_serve_npc_casual_activity", npc, &"Rest"))
+	if not accepted:
+		_breadcrumb("npc_rest:spot_reject", "%s %s" % [_npc_label(), rest_target.name])
+	return accepted
 
 
 func _rest_state_disabled() -> bool:

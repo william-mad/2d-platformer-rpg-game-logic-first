@@ -166,7 +166,6 @@ position = Vector2(-1020, 368)
 target_npc_path = NodePath("../TestNpc")
 extra_target_npc_paths = [NodePath("../BlueprintNpc")]
 set_values = {
-"curiosity": 0.0,
 "disabled": 0.0,
 "favor": 50.0,
 "fear": 0.0,

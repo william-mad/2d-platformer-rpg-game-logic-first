@@ -1,5 +1,12 @@
 class_name SocialNpc extends CharacterBody2D
 
+const STORED_ONLY_STAT_KEYS := {
+	"curiosity": true,
+	"sadness": true,
+	"energy": true,
+	"suspicion": true,
+}
+
 signal target_seen(target: Node2D)
 signal target_lost(target: Node2D)
 signal social_stats_changed(stats: Dictionary)
@@ -97,7 +104,6 @@ const STAT_KEY_ALIASES := {
 		"ignore_self_as_target": true,
 		"stat_delta": {
 			"fear": 15.0,
-			"curiosity": 10.0,
 			"trust": -4.0
 		},
 		"state_request": "ReactToEvent",
@@ -243,6 +249,9 @@ func apply_social_event(
 		return false
 
 	var normalized_delta := _normalize_stat_delta(stat_delta)
+	_remove_stored_only_stats(normalized_delta)
+	if normalized_delta.is_empty():
+		return false
 	if _state_machine_active():
 		# The state machine owns active NPC values and emits the canonical result back to this NPC.
 		return npc_state_machine.apply_value_delta(normalized_delta, actor)
@@ -674,11 +683,9 @@ func _get_world_simulation_profile() -> Dictionary:
 		},
 		"social_seeking": {
 			"enabled": npc_state_machine.cross_scene_talk_enabled,
-			"allow_remote_visits": npc_state_machine.cross_scene_talk_enabled,
 			"talk_need_threshold": npc_state_machine.cross_scene_talk_need_threshold,
 			"priority": npc_state_machine.cross_scene_talk_priority,
 			"minimum_npc_favor": npc_state_machine.cross_scene_minimum_npc_favor,
-			"player_target_chance": npc_state_machine.cross_scene_player_target_chance,
 		},
 		"anger_decay": {
 			"enabled": npc_state_machine.anger_decay_enabled,
@@ -1053,6 +1060,12 @@ func _canonical_stat_key(stat_key) -> String:
 		return String(STAT_KEY_ALIASES[key])
 
 	return key
+
+
+func _remove_stored_only_stats(stat_changes: Dictionary) -> void:
+	for stat_key in stat_changes.keys():
+		if STORED_ONLY_STAT_KEYS.has(_canonical_stat_key(stat_key)):
+			stat_changes.erase(stat_key)
 
 
 func _apply_gravity(delta: float) -> void:

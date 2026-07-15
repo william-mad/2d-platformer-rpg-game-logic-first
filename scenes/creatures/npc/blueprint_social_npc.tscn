@@ -34,7 +34,6 @@ event_bus_reactions = {
 "state_request": "ReactToEvent",
 "stat_delta": {
 "anger": 8.0,
-"curiosity": 12.0,
 "fear": 25.0,
 "trust": -6.0
 }
@@ -49,12 +48,6 @@ default_work_time = 2.5
 default_talk_time = 2.0
 default_flee_time = 4.0
 value_state_rules = {
-"curious": {
-"at_least": 35.0,
-"priority": 40,
-"state": "ReactToEvent",
-"value": "curiosity"
-},
 "dead_hp": {
 "at_most": 0.0,
 "priority": 100,

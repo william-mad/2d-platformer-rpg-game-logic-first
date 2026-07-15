@@ -4,6 +4,12 @@ extends RefCounted
 
 const DEFAULT_PASSIVE_HEALING_PER_GAME_DAY := 10.0
 const DEFAULT_STARVATION_DAMAGE_PER_GAME_DAY := 5.0
+const STORED_ONLY_VALUE_KEYS := {
+	"curiosity": true,
+	"sadness": true,
+	"energy": true,
+	"suspicion": true,
+}
 
 
 func advance_needs(
@@ -29,7 +35,11 @@ func advance_needs(
 	if not (tired_settings is Dictionary):
 		tired_settings = {}
 	var tired_value_name := String(tired_settings.get("value_name", "tired"))
-	if not tired_value_name.is_empty() and not social_stats.has(tired_value_name):
+	if (
+		not tired_value_name.is_empty()
+		and not _is_stored_only_value(tired_value_name)
+		and not social_stats.has(tired_value_name)
+	):
 		social_stats[tired_value_name] = 0.0
 		node_state["social_stats"] = social_stats
 		record["node_state"] = node_state
@@ -52,6 +62,8 @@ func advance_needs(
 
 	for value_key in rates.keys():
 		var value_name := String(value_key)
+		if STORED_ONLY_VALUE_KEYS.has(value_name):
+			continue
 		if not social_stats.has(value_name):
 			continue
 		if _passive_value_is_paused(value_name, paused_state_name):
@@ -181,7 +193,7 @@ func _apply_tired_change(
 	if not bool(settings.get("enabled", true)) or game_hours <= 0.0:
 		return
 	var value_name := String(settings.get("value_name", "tired"))
-	if value_name.is_empty():
+	if value_name.is_empty() or _is_stored_only_value(value_name):
 		return
 	var state_text := String(state_name)
 	var rate := 0.0
@@ -253,7 +265,7 @@ func _apply_loneliness_recovery(
 	if not bool(settings.get("enabled", true)):
 		return
 	var lonely_name := String(settings.get("value_name", "lonely"))
-	if lonely_name.is_empty() or not social_stats.has(lonely_name):
+	if lonely_name.is_empty() or _is_stored_only_value(lonely_name) or not social_stats.has(lonely_name):
 		return
 	var threshold := float(settings.get("talk_need_below", 50.0))
 	if initial_talk_need >= threshold:
@@ -282,7 +294,7 @@ func _apply_emotion_decay(
 	var anger_decay = profile.get("anger_decay", {})
 	if anger_decay is Dictionary and bool(anger_decay.get("enabled", false)):
 		var anger_name := String(anger_decay.get("value_name", "anger"))
-		if social_stats.has(anger_name):
+		if not _is_stored_only_value(anger_name) and social_stats.has(anger_name):
 			var anger := float(social_stats[anger_name])
 			var full_hours := maxf(float(anger_decay.get("full_decay_game_hours", 4.0)), 0.001)
 			social_stats[anger_name] = maxf(anger - (100.0 / full_hours) * game_hours, 0.0)
@@ -290,7 +302,7 @@ func _apply_emotion_decay(
 	if not (fear_decay is Dictionary) or not bool(fear_decay.get("enabled", false)):
 		return
 	var fear_name := String(fear_decay.get("value_name", "fear"))
-	if not social_stats.has(fear_name):
+	if _is_stored_only_value(fear_name) or not social_stats.has(fear_name):
 		return
 	var fear := float(social_stats[fear_name])
 	var panic_floor := float(fear_decay.get("panic_floor", 90.0))
@@ -307,6 +319,10 @@ func _apply_emotion_decay(
 		var slow_rate := float(fear_decay.get("slow_decay_per_game_hour", 5.0))
 		fear = maxf(fear - slow_rate * game_hours, stop_value)
 	social_stats[fear_name] = fear
+
+
+func _is_stored_only_value(value_name: String) -> bool:
+	return STORED_ONLY_VALUE_KEYS.has(value_name)
 
 
 func _passive_value_is_paused(value_name: String, state_name: StringName) -> bool:

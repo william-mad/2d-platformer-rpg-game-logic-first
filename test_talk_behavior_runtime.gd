@@ -70,6 +70,49 @@ class EmptyFoodSpot:
 		return 0.0
 
 
+class MealCompletionFoodSpot:
+	extends Node2D
+
+	var meal_sated_count: int = 0
+	var consume_count: int = 0
+
+	func can_serve_npc_need(
+		_npc_node: Node2D,
+		_requested_state_name: StringName,
+		_requested_value_name: StringName = &""
+	) -> bool:
+		return true
+
+	func consume_eat_amount(requested_hunger_amount: float) -> float:
+		consume_count += 1
+		return requested_hunger_amount
+
+	func mark_npc_meal_sated(
+		_npc_node: Node2D,
+		_need_value_name: StringName = &"hunger"
+	) -> bool:
+		meal_sated_count += 1
+		return true
+
+
+class RoutineTaskTestSpot:
+	extends Node2D
+
+	var persistent_spot_id: StringName = &""
+	var last_value_name: StringName = &""
+
+	func get_world_spot_id() -> StringName:
+		return persistent_spot_id
+
+	func can_serve_npc_need(
+		_npc_node: Node2D,
+		_requested_state_name: StringName,
+		requested_value_name: StringName = &""
+	) -> bool:
+		last_value_name = requested_value_name
+		return true
+
+
 class TestMonster:
 	extends CharacterBody2D
 
@@ -93,7 +136,18 @@ class TestMonster:
 
 func _initialize() -> void:
 	await process_frame
-	_run_tests()
+	if OS.get_cmdline_user_args().has("--social-search-handoff-only"):
+		_test_social_search_handoff_completes_primary_action()
+	elif OS.get_cmdline_user_args().has("--casual-target-only"):
+		_test_passive_casual_activities_ignore_social_actor()
+	elif OS.get_cmdline_user_args().has("--talk-ring-only"):
+		_test_talk_duration_and_progress_ring()
+	elif OS.get_cmdline_user_args().has("--stored-only-values-only"):
+		_test_stored_only_values_do_not_change_or_drive_behavior()
+	elif OS.get_cmdline_user_args().has("--scheduled-sleep-only"):
+		_test_scheduled_sleep_does_not_wake_when_need_is_sated()
+	else:
+		_run_tests()
 	if _failures.is_empty():
 		print("NPC talk behavior runtime tests passed.")
 		quit(0)
@@ -106,6 +160,9 @@ func _initialize() -> void:
 
 func _run_tests() -> void:
 	_test_talk_overlay_does_not_replace_primary()
+	_test_talk_duration_and_progress_ring()
+	_test_stored_only_values_do_not_change_or_drive_behavior()
+	_test_scheduled_sleep_does_not_wake_when_need_is_sated()
 	_test_rejected_state_request_preserves_targets()
 	_test_rejected_player_social_choice_applies_no_effects()
 	_test_player_interaction_gate_blocks_emergency_states()
@@ -114,10 +171,14 @@ func _run_tests() -> void:
 	_test_active_talk_allows_emergency_interrupt()
 	_test_emergency_cancels_both_talk_overlays_once()
 	_test_eat_lifecycle_is_not_restarted_by_talk()
+	_test_sated_eat_marks_meal_without_consuming()
+	_test_routine_task_exact_target_does_not_fall_back()
 	_test_duplicate_talk_request_does_not_restart_talk()
 	_test_duplicate_move_to_talk_request_is_ignored()
 	_test_move_to_talk_arrival_opens_overlay()
 	_test_far_talk_request_approaches_without_cancel_loop()
+	_test_social_search_handoff_completes_primary_action()
+	_test_passive_casual_activities_ignore_social_actor()
 	_test_hungry_reaction_waits_without_usable_eat_spot()
 	_test_hungry_reaction_uses_available_eat_spot()
 	_test_eat_state_stops_when_food_spot_supplies_nothing()
@@ -152,6 +213,158 @@ func _test_talk_overlay_does_not_replace_primary() -> void:
 	)
 	_expect_primary_state(machine, "RoutineTask", "RoutineTask becomes the primary state")
 	_expect_false(machine.is_in_state(&"Talk"), "incompatible primary transition cancels Talk")
+	_free_setup(setup)
+
+
+func _test_talk_duration_and_progress_ring() -> void:
+	var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var npc: CharacterBody2D = setup["npc"]
+	var machine: NpcStateMachine = setup["machine"]
+	var talk_state := machine.get_state(&"Talk") as NpcStateTalk
+	talk_state.talk_duration = 5.0
+	talk_state.show_talk_limits = true
+	talk_state.maximum_talk_distance = 100000.0
+
+	_expect_true(
+		machine.request_talk(setup["partner"], 60, false),
+		"five-second Talk starts"
+	)
+	_expect_approx(talk_state.talk_total_duration, 5.0, 0.001, "Talk duration is five seconds")
+	var ring := npc.get_node_or_null("TalkProgressRing") as Control
+	_expect_true(ring != null, "Talk creates its progress ring")
+	if ring != null:
+		_expect_true(ring.visible, "Talk progress ring is visible")
+		_expect_equal(ring.size, Vector2(14.0, 14.0), "Talk progress ring stays very small")
+		_expect_equal(
+			ring.get("ring_color"),
+			Color(0.2, 0.95, 0.35, 1.0),
+			"Talk progress ring is green"
+		)
+		var initial_ratio := float(ring.get("progress_ratio"))
+		machine._physics_process(1.0)
+		_expect_true(
+			float(ring.get("progress_ratio")) < initial_ratio,
+			"Talk progress ring counts down"
+		)
+	machine._physics_process(4.1)
+	_expect_true(machine.interaction_overlay == null, "five-second Talk completes normally")
+	_expect_true(talk_state.talk_completed_successfully, "five-second Talk reaches successful completion")
+	_expect_false(ring.visible if ring != null else true, "Talk progress ring hides on completion")
+	_free_setup(setup)
+
+
+func _test_stored_only_values_do_not_change_or_drive_behavior() -> void:
+	var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var machine: NpcStateMachine = setup["machine"]
+	var player_actor: CharacterBody2D = setup["partner"]
+	player_actor.add_to_group("player")
+	machine.value_reactions_enabled = true
+	var original_values := {
+		"curiosity": float(machine.values.get("curiosity", 0.0)),
+		"sadness": float(machine.values.get("sadness", 0.0)),
+		"energy": float(machine.values.get("energy", 0.0)),
+		"suspicion": float(machine.values.get("suspicion", 0.0)),
+	}
+	_expect_false(machine.apply_value_delta({
+		"curiosity": 60.0,
+		"sadness": 20.0,
+		"energy": -50.0,
+		"suspicion": 30.0,
+	}, player_actor, true), "stored-only runtime deltas are ignored")
+	for value_name in original_values.keys():
+		_expect_equal(machine.values[value_name], original_values[value_name], "%s stays unchanged" % value_name)
+	_expect_primary_state(machine, "Idle", "stored-only values do not start a state")
+
+	machine.set_value(&"curiosity", 99.0, player_actor, true)
+	_expect_equal(machine.values["curiosity"], original_values["curiosity"], "direct runtime setter ignores curiosity")
+
+	var saved_values := machine.values.duplicate(true)
+	saved_values["curiosity"] = 37.0
+	saved_values["sadness"] = 12.0
+	saved_values["energy"] = 81.0
+	saved_values["suspicion"] = 9.0
+	machine.replace_values(saved_values, player_actor, {
+		"curiosity": 37.0,
+		"sadness": 12.0,
+		"energy": -19.0,
+		"suspicion": 9.0,
+	}, true)
+	_expect_equal(machine.values["curiosity"], 37.0, "saved curiosity remains a numeric field")
+	_expect_equal(machine.values["sadness"], 12.0, "saved sadness remains a numeric field")
+	_expect_equal(machine.values["energy"], 81.0, "saved energy remains a numeric field")
+	_expect_equal(machine.values["suspicion"], 9.0, "saved suspicion remains a numeric field")
+	_expect_primary_state(machine, "Idle", "loading stored-only values does not start a state")
+
+	var simulated_record := {
+		"node_state": {
+			"social_stats": saved_values.duplicate(true),
+			"world_simulation_profile": {
+				"passive_needs_enabled": true,
+				"rates_per_game_hour": {
+					"curiosity": 10.0,
+					"sadness": 10.0,
+					"energy": -10.0,
+					"suspicion": 10.0,
+					"hunger": 2.0,
+				},
+			},
+		},
+	}
+	var hunger_before := float(saved_values.get("hunger", 0.0))
+	_expect_true(NpcNeedsSimulator.new().advance_needs(simulated_record, 1.0, &"Idle"), "offscreen needs still advance")
+	var simulated_values: Dictionary = simulated_record["node_state"]["social_stats"]
+	for value_name in ["curiosity", "sadness", "energy", "suspicion"]:
+		_expect_equal(simulated_values[value_name], saved_values[value_name], "%s ignores offscreen rates" % value_name)
+	_expect_equal(simulated_values["hunger"], hunger_before + 2.0, "active needs still use offscreen rates")
+	_free_setup(setup)
+
+
+func _test_scheduled_sleep_does_not_wake_when_need_is_sated() -> void:
+	var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var machine: NpcStateMachine = setup["machine"]
+	var sleep_state := machine.get_state(&"Sleep") as NpcStateSleep
+	sleep_state.sleep_duration = 10.0
+	machine.values["sleep_need"] = 55.0
+	var bed := EmptyFoodSpot.new()
+	bed.name = "ScheduledBed"
+	bed.global_position = Vector2.ZERO
+	root.add_child(bed)
+	setup["spot"] = bed
+
+	_expect_true(machine.request_action_from_descriptor({
+		"session_id": "scheduled-sleep-session",
+		"action_kind": "Sleep",
+		"state_name": "Sleep",
+		"source": "schedule",
+		"spot_id": "mom_bed",
+		"scene_path": "res://scenes/testscenes/realhometest.tscn",
+		"priority": 70,
+		"status": "proposed",
+	}, bed), "scheduled bed sleep starts")
+	_expect_primary_state(machine, "Sleep", "scheduled bed sleep is active")
+	machine.values["sleep_need"] = 0.0
+	machine._physics_process(0.1)
+	_expect_primary_state(
+		machine,
+		"Sleep",
+		"scheduled sleep remains active after sleep_need reaches zero"
+	)
+	_expect_equal(
+		machine.get_active_action_session_id(),
+		"scheduled-sleep-session",
+		"scheduled sleep retains its action session"
+	)
+	var bed_definition := load("res://data/npc_spots/mom_bed.tres") as NpcSpotDefinition
+	_expect_true(bed_definition != null, "Mom bed definition loads")
+	if bed_definition != null:
+		_expect_false(
+			bed_definition.require_npc_value_threshold,
+			"Mom's bedtime remains scheduled while sleep_need is below its entry threshold"
+		)
+		_expect_false(
+			bed_definition.finish_when_npc_value_sated,
+			"offscreen Mom sleep also remains scheduled after the need is sated"
+		)
 	_free_setup(setup)
 
 
@@ -367,6 +580,358 @@ func _test_eat_lifecycle_is_not_restarted_by_talk() -> void:
 	_expect_true(machine.current_state == eat_state, "the same entered Eat instance remains authoritative")
 	_expect_equal(eat_state.eat_timer, timer_before, "Talk end does not reset the Eat timer")
 	_free_setup(setup)
+
+
+func _test_social_search_handoff_completes_primary_action() -> void:
+	var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var npc: CharacterBody2D = setup["npc"]
+	var partner: CharacterBody2D = setup["partner"]
+	var machine: NpcStateMachine = setup["machine"]
+	npc.add_to_group("npc")
+	partner.add_to_group("player")
+	machine.values["talk_need"] = 80.0
+	var session_id := "social-search-handoff-session"
+
+	_expect_true(machine.request_action_from_descriptor({
+		"session_id": session_id,
+		"action_kind": "LookForTalkTarget",
+		"source": "social_ai",
+		"target_npc_id": "handoff-partner",
+		"priority": 60,
+		"status": "proposed",
+	}, partner), "social search session A starts")
+	_expect_primary_state(machine, "LookForTalkTarget", "social search is the primary state")
+
+	machine._physics_process(0.01)
+	_expect_primary_state(machine, "Idle", "accepted Talk hands the primary lane to Idle")
+	_expect_true(machine.interaction_overlay is NpcStateTalk, "accepted Talk overlay remains active")
+	_expect_true(machine.is_socially_engaged(), "accepted Talk is authoritatively socially engaged")
+	_expect_equal(
+		machine.get_active_interaction_session_id(),
+		session_id,
+		"Talk overlay preserves social search session A"
+	)
+	_expect_equal(
+		machine.get_active_interaction_source(),
+		&"social_ai",
+		"autonomous Talk with the player preserves its initiating source"
+	)
+	_expect_false(
+		machine.is_active_talk_payout_prepaid(),
+		"autonomous Talk with the player is not prepaid"
+	)
+	_expect_false(
+		machine.mark_next_talk_need_payout_applied(session_id),
+		"social_ai session cannot be marked prepaid as a player interaction"
+	)
+	var terminal_search := machine.get_active_action_descriptor()
+	_expect_equal(
+		String(terminal_search.get("status", "")),
+		"completed",
+		"primary social search is terminal after Talk acceptance"
+	)
+	_expect_equal(
+		String(terminal_search.get("reason", "")),
+		"talk_handoff_completed",
+		"primary social search records the handoff completion reason"
+	)
+	_expect_false(
+		machine.is_action_session_current_for_execution(session_id, &"LookForTalkTarget"),
+		"terminal social search is no longer executable"
+	)
+
+	machine._physics_process(0.01)
+	_expect_primary_state(machine, "Idle", "action reconciliation does not restore social search")
+	_expect_true(machine.interaction_overlay is NpcStateTalk, "reconciliation preserves Talk")
+
+	var simulator := root.get_node_or_null("NpcWorldSimulation")
+	var locations := root.get_node_or_null("NpcLocations")
+	for interval_index in 2:
+		_expect_false(
+			bool(simulator.call(
+				"_request_live_social_seek", &"focused_handoff_npc", npc, partner,
+				60, locations, "replacement-search-%d" % interval_index, "__player__"
+			)),
+			"world interval %d rejects a replacement social search" % (interval_index + 1)
+		)
+		_expect_true(
+			machine.interaction_overlay is NpcStateTalk,
+			"world interval %d preserves the accepted Talk" % (interval_index + 1)
+		)
+		_expect_equal(
+			machine.get_active_interaction_session_id(), session_id,
+			"world interval %d preserves the accepted session" % (interval_index + 1)
+		)
+
+	_expect_false(machine.request_action_from_descriptor({
+		"session_id": "defensive-replacement-search",
+		"action_kind": "LookForTalkTarget",
+		"source": "social_ai",
+		"target_npc_id": "__player__",
+		"priority": 60,
+		"status": "proposed",
+	}, partner), "state machine defensively rejects a replacement search")
+	_expect_equal(
+		machine.get_last_state_request_failure_reason(),
+		"already_socially_engaged",
+		"defensive search rejection reports the engagement reason"
+	)
+	_expect_true(machine.interaction_overlay is NpcStateTalk, "defensive rejection does not cancel Talk")
+	_expect_equal(
+		machine.get_active_interaction_session_id(), session_id,
+		"defensive rejection has no interaction-session side effect"
+	)
+
+	var talk_state := machine.interaction_overlay as NpcStateTalk
+	talk_state.talk_timer = 0.0
+	machine._physics_process(0.01)
+	_expect_true(machine.interaction_overlay == null, "completed Talk closes its overlay")
+	_expect_equal(machine.get_value(&"talk_need"), 40.0, "completed Talk applies its normal need delta")
+	_expect_equal(talk_state.terminal_source, "social_ai", "terminal diagnostic retains social_ai source")
+
+	var record := {
+		"scene_path": "res://focused_social_handoff.tscn",
+		"node_state": {"social_stats": {"talk_need": machine.get_value(&"talk_need")}},
+		"activity": {},
+		"pending_travel": {},
+	}
+	_expect_false(
+		bool(simulator.call(
+			"_try_start_social_seek", &"focused_handoff_npc", record,
+			{"focused_handoff_npc": record}, locations, -1
+		)),
+		"immediate simulation pass rejects a new search below the Talk threshold"
+	)
+	_expect_primary_state(machine, "Idle", "immediate simulation pass leaves search inactive")
+
+	var cancellation_reasons: Array[String] = []
+	_expect_true(
+		machine.request_talk(partner, 60, false, &"social_ai"),
+		"autonomous Talk restarts before the emergency check"
+	)
+	var emergency_talk := machine.interaction_overlay as NpcStateTalk
+	emergency_talk.talk_cancelled.connect(
+		func(_talker: Node2D, _partner: Node2D, reason: String) -> void:
+			cancellation_reasons.append(reason)
+	)
+	_expect_true(
+		machine.request_state(&"Fight", partner, "social_guard_emergency", 1000),
+		"Fight remains available during Talk"
+	)
+	_expect_primary_state(machine, "Fight", "emergency replaces the primary state")
+	_expect_true(machine.interaction_overlay == null, "emergency cancels the Talk overlay")
+	_expect_equal(
+		cancellation_reasons,
+		["primary_transition_Fight"],
+		"emergency cancellation retains its primary-transition reason"
+	)
+	_free_setup(setup)
+
+
+func _test_passive_casual_activities_ignore_social_actor() -> void:
+	var recreation_setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var recreation_machine: NpcStateMachine = recreation_setup["machine"]
+	var recreation_partner: CharacterBody2D = recreation_setup["partner"]
+	recreation_partner.add_to_group("npc")
+	_expect_false(
+		recreation_machine.assign_recreation_target(recreation_partner, 20),
+		"an NPC cannot be assigned as a Recreation spot"
+	)
+	_expect_primary_state(
+		recreation_machine, "Idle", "rejected Recreation person target has no state side effect"
+	)
+	var recreation_spot := NpcCasualSpot.new()
+	recreation_spot.name = "FocusedRecreationSpot"
+	recreation_spot.spot_id = &"focused_recreation_spot"
+	recreation_spot.activity_state_name = &"Recreation"
+	recreation_spot.global_position = Vector2(20.0, 0.0)
+	root.add_child(recreation_spot)
+	recreation_setup["spot"] = recreation_spot
+	recreation_machine.values["boredom"] = 60.0
+	recreation_machine.values["tired"] = 0.0
+	recreation_machine.value_reactions_enabled = true
+	_expect_true(
+		recreation_machine.evaluate_value_reactions(recreation_partner, {}),
+		"passive boredom starts Recreation"
+	)
+	_expect_primary_state(recreation_machine, "Recreation", "passive Recreation starts normally")
+	_expect_true(
+		recreation_machine.get_active_action_target() == recreation_spot,
+		"passive Recreation selects the authored casual spot"
+	)
+	_expect_false(
+		recreation_machine.get_active_action_target() == recreation_partner,
+		"passive Recreation does not inherit the recent social NPC"
+	)
+	_free_setup(recreation_setup)
+
+	var rest_setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var rest_machine: NpcStateMachine = rest_setup["machine"]
+	var rest_partner: CharacterBody2D = rest_setup["partner"]
+	rest_partner.add_to_group("player")
+	_expect_false(
+		rest_machine.assign_rest_target(rest_partner, 20),
+		"the player cannot be assigned as a Rest spot"
+	)
+	_expect_primary_state(rest_machine, "Idle", "rejected Rest person target has no state side effect")
+	var rest_spot := NpcCasualSpot.new()
+	rest_spot.name = "FocusedRestSpot"
+	rest_spot.spot_id = &"focused_rest_spot"
+	rest_spot.activity_state_name = &"Rest"
+	rest_spot.global_position = Vector2(20.0, 0.0)
+	root.add_child(rest_spot)
+	rest_setup["spot"] = rest_spot
+	var rest_state := rest_machine.get_state(&"Rest") as NpcStateRest
+	rest_state.rest_in_place_chance = 0.0
+	rest_machine.values["tired"] = 60.0
+	rest_machine.values["boredom"] = 0.0
+	rest_machine.value_reactions_enabled = true
+	_expect_true(
+		rest_machine.evaluate_value_reactions(rest_partner, {}),
+		"passive tiredness starts Rest"
+	)
+	_expect_primary_state(rest_machine, "Rest", "passive Rest starts normally")
+	_expect_true(
+		rest_machine.get_active_action_target() == rest_spot,
+		"passive Rest selects the authored casual spot"
+	)
+	_expect_false(
+		rest_machine.get_active_action_target() == rest_partner,
+		"passive Rest does not inherit the recent player"
+	)
+	_free_setup(rest_setup)
+
+
+func _test_sated_eat_marks_meal_without_consuming() -> void:
+	var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var machine: NpcStateMachine = setup["machine"]
+	machine.values["hunger"] = 0.0
+	var eat_spot := MealCompletionFoodSpot.new()
+	eat_spot.name = "AlreadySatedMealSpot"
+	eat_spot.global_position = Vector2.ZERO
+	root.add_child(eat_spot)
+	setup["spot"] = eat_spot
+
+	_expect_true(machine.assign_eat_target(eat_spot, 60), "already-sated Eat request is accepted")
+	var eat_state := machine.current_state as NpcStateEat
+	_expect_true(eat_state != null, "already-sated Eat binds its action session")
+	_expect_equal(eat_spot.meal_sated_count, 1, "already-sated Eat marks meal completion on entry")
+	_expect_equal(eat_spot.consume_count, 0, "already-sated Eat consumes no spot food")
+	_expect_equal(eat_state.eat_timer, 0.0, "already-sated Eat starts no timer")
+
+	machine._physics_process(0.01)
+	_expect_primary_state(machine, "Idle", "already-sated Eat returns to Idle")
+	_expect_equal(eat_spot.meal_sated_count, 1, "meal completion marking remains idempotent")
+	machine.clear_terminal_action(machine.get_active_action_session_id())
+	var freed_target := Node2D.new()
+	root.add_child(freed_target)
+	machine.target = freed_target
+	freed_target.free()
+	_expect_equal(
+		machine.get_action_target(&"Work", freed_target),
+		null,
+		"freed legacy action targets resolve safely to null"
+	)
+	_expect_false(
+		machine.get_current_activity_descriptor().has("target_node"),
+		"current activity descriptor ignores a freed legacy target"
+	)
+	_free_setup(setup)
+
+	var talk_setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var talk_machine: NpcStateMachine = talk_setup["machine"]
+	talk_machine.values["hunger"] = 10.0
+	var talk_eat_spot := MealCompletionFoodSpot.new()
+	talk_eat_spot.name = "TalkOverlayMealSpot"
+	talk_eat_spot.global_position = Vector2.ZERO
+	root.add_child(talk_eat_spot)
+	talk_setup["spot"] = talk_eat_spot
+	_expect_true(talk_machine.assign_eat_target(talk_eat_spot, 60), "Eat starts before Talk")
+	var talk_eat_state := talk_machine.current_state as NpcStateEat
+	_expect_true(talk_machine.request_talk(talk_setup["partner"], 60, false), "Talk overlays Eat")
+	talk_machine.values["hunger"] = 0.0
+	_expect_equal(
+		talk_eat_state.process_talk_overlay(0.01),
+		&"Idle",
+		"sated Talk-overlay Eat requests Idle"
+	)
+	_expect_equal(talk_eat_spot.meal_sated_count, 1, "sated Talk-overlay Eat marks meal completion")
+	_expect_equal(talk_eat_spot.consume_count, 0, "sated Talk-overlay Eat consumes no additional food")
+	_free_setup(talk_setup)
+
+
+func _test_routine_task_exact_target_does_not_fall_back() -> void:
+	var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var machine: NpcStateMachine = setup["machine"]
+	var shower_spot := RoutineTaskTestSpot.new()
+	shower_spot.name = "ScheduledShowerSpot"
+	shower_spot.persistent_spot_id = &"mom_shower"
+	shower_spot.add_to_group("npc_need_spot")
+	root.add_child(shower_spot)
+	setup["spot"] = shower_spot
+	var wrong_spot := RoutineTaskTestSpot.new()
+	wrong_spot.name = "WrongRoutineSpot"
+	wrong_spot.add_to_group("npc_need_spot")
+	root.add_child(wrong_spot)
+	setup["monster"] = wrong_spot
+
+	_expect_true(machine.request_action_from_descriptor({
+		"session_id": "scheduled-shower-session",
+		"action_kind": "RoutineTask",
+		"source": "schedule",
+		"spot_id": "mom_shower",
+		"scheduled_activity_id": "morning-shower",
+		"value_name": "cleanliness",
+		"priority": 85,
+		"status": "proposed",
+	}, shower_spot), "scheduled shower RoutineTask starts at its exact spot")
+	var routine_state := machine.current_state as NpcStateRoutineTask
+	_expect_true(routine_state != null, "scheduled shower enters RoutineTask")
+	_expect_equal(
+		shower_spot.last_value_name,
+		&"cleanliness",
+		"scheduled RoutineTask validation uses the action's intended value"
+	)
+	shower_spot.free()
+	setup.erase("spot")
+	machine._physics_process(0.01)
+	var failed_descriptor := machine.get_active_action_descriptor()
+	_expect_equal(
+		String(failed_descriptor.get("reason", "")),
+		"scheduled_routine_spot_missing",
+		"missing exact shower spot fails the scheduled session explicitly"
+	)
+	_expect_true(
+		routine_state.active_routine_target != wrong_spot,
+		"scheduled shower never adopts another RoutineTask spot"
+	)
+	_free_setup(setup)
+
+	var autonomous_setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var autonomous_machine: NpcStateMachine = autonomous_setup["machine"]
+	var initial_spot := RoutineTaskTestSpot.new()
+	initial_spot.name = "AutonomousInitialRoutineSpot"
+	initial_spot.add_to_group("npc_need_spot")
+	root.add_child(initial_spot)
+	autonomous_setup["spot"] = initial_spot
+	var fallback_spot := RoutineTaskTestSpot.new()
+	fallback_spot.name = "AutonomousFallbackRoutineSpot"
+	fallback_spot.add_to_group("npc_need_spot")
+	root.add_child(fallback_spot)
+	autonomous_setup["monster"] = fallback_spot
+	_expect_true(
+		autonomous_machine.assign_routine_task_target(initial_spot, 20),
+		"identity-free autonomous RoutineTask starts"
+	)
+	var autonomous_state := autonomous_machine.current_state as NpcStateRoutineTask
+	initial_spot.free()
+	autonomous_setup.erase("spot")
+	autonomous_machine._physics_process(0.01)
+	_expect_true(
+		autonomous_state.active_routine_target == fallback_spot,
+		"identity-free autonomous RoutineTask retains nearest-spot fallback"
+	)
+	_free_setup(autonomous_setup)
 
 
 func _test_emergency_cancels_both_talk_overlays_once() -> void:
@@ -912,6 +1477,10 @@ func _create_talk_setup(npc_position: Vector2, partner_position: Vector2) -> Dic
 	_add_state(machine, NpcStateEat.new(), "Eat")
 	_add_state(machine, NpcStateRoutineTask.new(), "RoutineTask")
 	_add_state(machine, NpcStateRest.new(), "Rest")
+	_add_state(machine, NpcStateRecreation.new(), "Recreation")
+	_add_state(machine, NpcStateSleep.new(), "Sleep")
+	_add_state(machine, NpcStateReactToEvent.new(), "ReactToEvent")
+	_add_state(machine, NpcStateLookForTalkTarget.new(), "LookForTalkTarget")
 	_add_state(machine, NpcStateCollapse.new(), "Collapse")
 	_add_state(machine, NpcStateFight.new(), "Fight")
 	_add_state(machine, NpcStateFlee.new(), "Flee")

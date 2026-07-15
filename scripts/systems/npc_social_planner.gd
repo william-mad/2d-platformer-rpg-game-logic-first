@@ -73,6 +73,8 @@ func get_participant_availability(
 	var machine := live_npc.get_node_or_null("NpcStateMachine")
 	if machine == null:
 		return _rejected("live_state_machine_missing")
+	if machine.has_method("is_socially_engaged") and bool(machine.call("is_socially_engaged")):
+		return _rejected("already_socially_engaged")
 	var current_state = machine.get("current_state")
 	var current_state_name := String(current_state.name) if current_state != null else ""
 	if current_state_name == "Sleep":
@@ -194,8 +196,7 @@ func choose_candidate(
 	if not bool(seeker_gate.get("accepted", false)):
 		return {}
 	var seeker_scene_path := String(record.get("scene_path", ""))
-	var local_candidates: Array[Dictionary] = []
-	var remote_candidates: Array[Dictionary] = []
+	var candidates: Array[Dictionary] = []
 	var player_gate := get_participant_availability(
 		PLAYER_SOCIAL_TARGET_ID,
 		{},
@@ -207,12 +208,12 @@ func choose_candidate(
 	)
 	if bool(player_gate.get("accepted", false)):
 		var player_scene_path := String(locations.call("get_current_scene_path"))
-		_add_candidate({
+		_add_same_scene_candidate({
 			"target_id": PLAYER_SOCIAL_TARGET_ID,
 			"scene_path": player_scene_path,
 			"position": player.global_position,
 			"is_player": true,
-		}, seeker_scene_path, local_candidates, remote_candidates)
+		}, seeker_scene_path, candidates)
 
 	var owner_id := _get_record_relationship_id(npc_id, record)
 	var minimum_favor := float(settings.get("minimum_npc_favor", 10.0))
@@ -259,19 +260,13 @@ func choose_candidate(
 			var target_live := locations.call("get_live_npc", target_id) as Node2D
 			if target_live != null:
 				target_position = target_live.global_position
-		_add_candidate({
+		_add_same_scene_candidate({
 			"target_id": target_id,
 			"scene_path": String(target_record.get("scene_path", "")),
 			"position": target_position,
 			"is_player": false,
-		}, seeker_scene_path, local_candidates, remote_candidates)
+		}, seeker_scene_path, candidates)
 
-	var allow_remote := bool(settings.get("allow_remote_visits", false)) and _supports_remote_visit(locations)
-	var candidates: Array[Dictionary] = []
-	if not local_candidates.is_empty():
-		candidates = local_candidates
-	elif allow_remote:
-		candidates = remote_candidates
 	if candidates.is_empty():
 		return {}
 	var preferred_target_id := String(record.get("social_visit_target_id", ""))
@@ -279,11 +274,6 @@ func choose_candidate(
 		if not preferred_target_id.is_empty() and String(candidate.get("target_id", "")) == preferred_target_id:
 			return candidate
 
-	var player_chance := clampf(float(settings.get("player_target_chance", 0.35)), 0.0, 1.0)
-	if rng.randf() < player_chance:
-		for candidate in candidates:
-			if bool(candidate.get("is_player", false)):
-				return candidate
 	return candidates[rng.randi_range(0, candidates.size() - 1)]
 
 
@@ -305,18 +295,15 @@ func _get_cached_favor(
 	return favor
 
 
-func _add_candidate(
+func _add_same_scene_candidate(
 	candidate: Dictionary,
 	seeker_scene_path: String,
-	local_candidates: Array[Dictionary],
-	remote_candidates: Array[Dictionary]
+	candidates: Array[Dictionary]
 ) -> void:
-	if String(candidate.get("scene_path", "")).is_empty():
+	var candidate_scene_path := String(candidate.get("scene_path", ""))
+	if candidate_scene_path.is_empty() or candidate_scene_path != seeker_scene_path:
 		return
-	if String(candidate.get("scene_path", "")) == seeker_scene_path:
-		local_candidates.append(candidate)
-	else:
-		remote_candidates.append(candidate)
+	candidates.append(candidate)
 
 
 func _get_record_relationship_id(npc_id: StringName, record: Dictionary) -> String:
@@ -374,13 +361,6 @@ func _get_record_unavailability_reason(record: Dictionary, as_seeker: bool) -> S
 		elif not INTERRUPTIBLE_SIMULATED_ACTIVITY_STATES.has(activity_state):
 			return "non_interruptible_activity"
 	return ""
-
-
-func _supports_remote_visit(locations: Node) -> bool:
-	return locations != null and (
-		locations.has_method("move_simulated_npc_for_social_visit")
-		or locations.has_method("prepare_scheduled_travel")
-	)
 
 
 func _player_is_in_live_conversation(

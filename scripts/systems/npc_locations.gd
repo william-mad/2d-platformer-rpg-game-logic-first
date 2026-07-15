@@ -6,33 +6,12 @@ signal npc_registered(npc_id: String, npc: Node, scene_path: String)
 signal npc_travelled(npc_id: String, from_scene_path: String, to_scene_path: String)
 signal npc_spawned(npc_id: String, npc: Node, scene_path: String)
 
-@export var return_check_seconds: float = 60.0
-@export_range(0.0, 1.0, 0.01) var return_chance_per_check: float = 0.18
 @export var randomize_spawn_positions: bool = true
 
 var npc_records: Dictionary = {}
 var live_npcs: Dictionary = {}
 var active_scene_context: Node
 var active_scene_path: String = ""
-var return_timer: float = 0.0
-
-var rng := RandomNumberGenerator.new()
-
-
-func _ready() -> void:
-	rng.randomize()
-	_update_return_processing()
-
-
-func _process(delta: float) -> void:
-	return_timer += delta
-	if return_timer < return_check_seconds:
-		return
-
-	return_timer = 0.0
-	_try_return_travelling_npcs()
-
-
 func register_npc(npc: Node) -> bool:
 	if npc == null or not is_instance_valid(npc):
 		return false
@@ -387,18 +366,6 @@ func _request_pending_travel_movement(
 			))
 			descriptor["source"] = String(nested_activity.get("source", "schedule"))
 			descriptor["target_persistent_id"] = String(nested_activity.get("spot_id", ""))
-		elif String(pending_travel.get("mode", "")) == "social":
-			descriptor = {
-				"session_id": String(pending_travel.get("social_session_id", "")),
-				"action_kind": "LookForTalkTarget",
-				"source": "social_ai",
-				"target_persistent_id": String(pending_travel.get("social_target_id", "")),
-				"scene_path": String(pending_travel.get("target_scene_path", "")),
-				"priority": int(pending_travel.get("requested_priority", 60)),
-				"status": "proposed",
-				"start_world_time": _get_world_total_hours(),
-			}
-			destination_kind = &"LookForTalkTarget"
 		else:
 			var existing_action = record.get("action", {})
 			if existing_action is Dictionary:
@@ -451,14 +418,8 @@ func complete_pending_scheduled_travel(npc: Node, door_target_scene_path: String
 			String(pending.get("action_session_id", ""))
 		)
 	if mode == "social":
-		return _complete_social_travel(
-			npc_id,
-			npc,
-			door_target_scene_path,
-			target_position,
-			String(pending.get("social_target_id", "")),
-			String(pending.get("social_session_id", ""))
-		)
+		cancel_pending_scheduled_travel(npc_id)
+		return false
 
 	var activity = pending.get("activity", {})
 	if not (activity is Dictionary) or activity.is_empty():
@@ -585,6 +546,8 @@ func move_simulated_npc_for_social_visit(
 		return false
 	var record: Dictionary = npc_records[npc_id]
 	var from_scene_path := String(record.get("scene_path", ""))
+	if target_scene_path != from_scene_path:
+		return false
 	record["pending_travel"] = {}
 	record["activity"] = {}
 	var social_action := NpcActionSessionModel.create(npc_id, &"LookForTalkTarget", &"social_ai", null, {
@@ -600,54 +563,9 @@ func move_simulated_npc_for_social_visit(
 	record["social_visit_target_id"] = social_target_id
 	record["last_position"] = target_position
 	record["spawn_random"] = false
-	if from_scene_path == target_scene_path:
-		npc_records[npc_id] = record
-		if target_scene_path == active_scene_path:
-			call_deferred("_spawn_missing_npcs_for_active_scene")
-		return true
-
-	_move_record_to_scene(npc_id, record, target_scene_path, false)
-	return true
-
-
-func _complete_social_travel(
-	npc_id: String,
-	npc: Node,
-	target_scene_path: String,
-	target_position: Vector2,
-	social_target_id: String,
-	requested_session_id: String = ""
-) -> bool:
-	if not npc_records.has(npc_id):
-		return false
-	var record: Dictionary = npc_records[npc_id]
-	_capture_live_npc_into_record(npc_id, npc, record)
-	record["pending_travel"] = {}
-	record["activity"] = {}
-	var social_session_id := requested_session_id
-	if social_session_id.is_empty():
-		social_session_id = String(record.get("social_session_id", ""))
-	if social_session_id.is_empty():
-		social_session_id = String(record.get("action", {}).get("session_id", ""))
-	var social_action := NpcActionSessionModel.create(npc_id, &"LookForTalkTarget", &"social_ai", null, {
-		"session_id": social_session_id,
-		"action_kind": "LookForTalkTarget",
-		"source": "social_ai",
-		"target_persistent_id": social_target_id,
-		"scene_path": target_scene_path,
-		"status": "active",
-		"start_world_time": _get_world_total_hours(),
-	})
-	record["action"] = social_action.to_descriptor()
-	record["social_visit_target_id"] = social_target_id
-	record["last_position"] = target_position
-	record["spawn_random"] = false
-
-	var live_npc := get_live_npc(npc_id)
-	if live_npc != null:
-		live_npcs.erase(npc_id)
-		live_npc.queue_free()
-	_move_record_to_scene(npc_id, record, target_scene_path, false)
+	npc_records[npc_id] = record
+	if target_scene_path == active_scene_path:
+		call_deferred("_spawn_missing_npcs_for_active_scene")
 	return true
 
 
@@ -779,7 +697,6 @@ func begin_scheduled_activity(
 		else:
 			call_deferred("_spawn_missing_npcs_for_active_scene")
 
-	_update_return_processing()
 	_breadcrumb("npc_locations:begin_activity_end", "%s %s" % [npc_id, String(activity.get("spot_id", ""))])
 	return true
 
@@ -1033,7 +950,6 @@ func transition_scheduled_activity(
 		_emit_location_event(npc_key, from_scene_path, target_scene_path)
 	if relocate_npc and target_scene_path == active_scene_path:
 		call_deferred("_spawn_missing_npcs_for_active_scene")
-	_update_return_processing()
 	_log_lesson_transition(npc_key, expected_session, activity, updates, true, "accepted")
 	return {
 		"accepted": true,
@@ -1084,14 +1000,12 @@ func apply_simulated_record(
 
 	npc_records[npc_id] = record.duplicate(true)
 	if not apply_to_live_npc:
-		_update_return_processing()
 		return
 
 	var live_npc := get_live_npc(npc_id)
 	if live_npc == null:
 		if String(record.get("scene_path", "")) == active_scene_path:
 			call_deferred("_spawn_missing_npcs_for_active_scene")
-		_update_return_processing()
 		return
 
 	var target_scene_path := String(record.get("scene_path", ""))
@@ -1101,7 +1015,6 @@ func apply_simulated_record(
 		live_npc.queue_free()
 		if target_scene_path == active_scene_path:
 			call_deferred("_spawn_missing_npcs_for_active_scene")
-		_update_return_processing()
 		return
 
 	if live_npc.has_method("apply_npc_location_save_data"):
@@ -1111,7 +1024,6 @@ func apply_simulated_record(
 		_place_npc(live_npc, position_value)
 		record["last_position"] = _get_node_position(live_npc)
 		npc_records[npc_id] = record.duplicate(true)
-	_update_return_processing()
 
 
 func finish_scheduled_activity(
@@ -1201,7 +1113,6 @@ func finish_scheduled_activity(
 		if live_npc == null:
 			call_deferred("_spawn_missing_npcs_for_active_scene")
 
-	_update_return_processing()
 	_breadcrumb("npc_locations:finish_activity_end", "%s -> %s" % [npc_id, destination_scene_path.get_file()])
 	return true
 
@@ -1210,7 +1121,6 @@ func get_save_data() -> Dictionary:
 	synchronize_live_records()
 	return {
 		"active_scene_path": active_scene_path,
-		"return_timer": return_timer,
 		"records": npc_records.duplicate(true),
 	}
 
@@ -1221,11 +1131,9 @@ func apply_save_data(data: Dictionary) -> void:
 	npc_records.clear()
 	active_scene_context = null
 	active_scene_path = ""
-	return_timer = 0.0
 
 	var saved_records = data.get("records", data)
 	if not (saved_records is Dictionary):
-		_update_return_processing()
 		return
 
 	for npc_id_key in saved_records.keys():
@@ -1242,7 +1150,6 @@ func apply_save_data(data: Dictionary) -> void:
 		_breadcrumb("npc_locations:restore_record", npc_id)
 		npc_records[npc_id] = _normalize_loaded_record(npc_id, saved_record)
 
-	_update_return_processing()
 	_breadcrumb("npc_locations:apply_save_end", "records=%d" % npc_records.size())
 
 
@@ -1652,53 +1559,6 @@ func _move_record_to_scene(
 	if target_scene_path == active_scene_path:
 		call_deferred("_spawn_missing_npcs_for_active_scene")
 
-	_update_return_processing()
-
-
-func _try_return_travelling_npcs() -> void:
-	var now := Time.get_ticks_msec()
-	var min_travel_age_msec := int(return_check_seconds * 1000.0)
-	var returned_count := 0
-
-	for npc_id in npc_records.keys():
-		var record: Dictionary = npc_records[npc_id]
-		var activity = record.get("activity", {})
-		if activity is Dictionary and not activity.is_empty():
-			continue
-		var previous_scene_path := String(record.get("previous_scene_path", ""))
-		var scene_path := String(record.get("scene_path", ""))
-		if previous_scene_path.is_empty() or previous_scene_path == scene_path:
-			continue
-
-		var last_travel_msec := int(record.get("last_travel_msec", 0))
-		if now - last_travel_msec < min_travel_age_msec:
-			continue
-
-		if rng.randf() > return_chance_per_check:
-			continue
-
-		_return_npc_to_previous_scene(String(npc_id), record)
-		returned_count += 1
-
-	_update_return_processing()
-	if returned_count > 0:
-		_record_watchdog_marker(&"npc_locations:return", "%d" % returned_count)
-
-
-func _return_npc_to_previous_scene(npc_id: String, record: Dictionary) -> void:
-	var return_scene_path := String(record.get("previous_scene_path", ""))
-	if return_scene_path.is_empty():
-		return
-
-	var live_npc = live_npcs.get(npc_id, null) as Node
-	if live_npc != null and is_instance_valid(live_npc):
-		_capture_live_npc_into_record(npc_id, live_npc, record)
-		live_npc.queue_free()
-		live_npcs.erase(npc_id)
-
-	_move_record_to_scene(npc_id, record, return_scene_path, true)
-
-
 func _spawn_missing_npcs_for_active_scene() -> void:
 	if active_scene_context == null or not is_instance_valid(active_scene_context):
 		_breadcrumb("npc_locations:spawn_missing_no_context", active_scene_path.get_file())
@@ -1973,26 +1833,6 @@ func _resume_scheduled_activity_deferred(npc_id: String, npc: Node) -> void:
 
 	_breadcrumb("npc_locations:resume_activity_deferred", npc_id)
 	simulator.call_deferred("resume_live_activity", StringName(npc_id), npc)
-
-
-func _update_return_processing() -> void:
-	set_process(_has_travelling_records())
-
-
-func _has_travelling_records() -> bool:
-	for npc_id in npc_records.keys():
-		var record = npc_records[npc_id]
-		if not (record is Dictionary):
-			continue
-
-		var previous_scene_path := String(record.get("previous_scene_path", ""))
-		if previous_scene_path.is_empty():
-			continue
-
-		if previous_scene_path != String(record.get("scene_path", "")):
-			return true
-
-	return false
 
 
 func _record_watchdog_marker(source: StringName, detail: String = "") -> void:

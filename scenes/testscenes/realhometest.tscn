@@ -1,17 +1,17 @@
-[gd_scene load_steps=18 format=3]
+[gd_scene format=3 uid="uid://qs6l6u4pq1bx"]
 
-[ext_resource type="PackedScene" path="res://player/player.tscn" id="1_player"]
-[ext_resource type="Script" path="res://scripts/systems/npc_location_scene.gd" id="2_location_scene"]
+[ext_resource type="PackedScene" uid="uid://by1aphre1t601" path="res://player/player.tscn" id="1_player"]
+[ext_resource type="Script" uid="uid://ctcqm70yhr0sv" path="res://scripts/systems/npc_location_scene.gd" id="2_location_scene"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_travel_door.tscn" id="3_door"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_need_spot.tscn" id="4_need_spot"]
 [ext_resource type="PackedScene" path="res://scenes/ui/character_stats_overlay.tscn" id="5_stats_overlay"]
 [ext_resource type="Resource" path="res://data/npc_spots/mom_bed.tres" id="6_mom_bed"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_rest_spot.tscn" id="7_rest_spot"]
 [ext_resource type="PackedScene" path="res://scenes/things/player_sleep_spot.tscn" id="8_player_sleep_spot"]
-[ext_resource type="Script" path="res://scripts/instances/player_spawn.gd" id="9_player_spawn"]
+[ext_resource type="Script" uid="uid://bamkt5f56h1bc" path="res://scripts/instances/player_spawn.gd" id="9_player_spawn"]
 [ext_resource type="Resource" path="res://data/npc_spots/mom_shower.tres" id="10_mom_shower"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_shower_spot.tscn" id="11_shower_spot"]
-[ext_resource type="Script" path="res://scripts/instances/magic_lesson_spot.gd" id="12_magic_lesson"]
+[ext_resource type="Script" uid="uid://dc4b4o2l8t4ql" path="res://scripts/instances/magic_lesson_spot.gd" id="12_magic_lesson"]
 [ext_resource type="Resource" path="res://data/npc_spots/mom_magic_lesson.tres" id="13_mom_magic_lesson"]
 [ext_resource type="PackedScene" path="res://scenes/things/player_cooking_station.tscn" id="14_cooking_station"]
 
@@ -24,146 +24,142 @@ size = Vector2(48, 720)
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_right_wall"]
 size = Vector2(48, 720)
 
-[node name="RealHomeTest" type="Node2D"]
+[node name="RealHomeTest" type="Node2D" unique_id=1113784681]
 
-[node name="RoomWall" type="Polygon2D" parent="."]
+[node name="RoomWall" type="Polygon2D" parent="." unique_id=892358017]
 color = Color(0.34, 0.38, 0.4, 1)
 polygon = PackedVector2Array(-1152, -320, 1152, -320, 1152, 368, -1152, 368)
 
-[node name="WallPanel" type="Polygon2D" parent="."]
+[node name="WallPanel" type="Polygon2D" parent="." unique_id=1001138362]
 color = Color(0.48, 0.45, 0.39, 1)
 polygon = PackedVector2Array(-1096, -250, 1096, -250, 1096, 310, -1096, 310)
 
-[node name="FloorVisual" type="Polygon2D" parent="."]
+[node name="FloorVisual" type="Polygon2D" parent="." unique_id=314922938]
 color = Color(0.22, 0.25, 0.23, 1)
 polygon = PackedVector2Array(-1152, 368, 1152, 368, 1152, 432, -1152, 432)
 
-[node name="BedFrame" type="Polygon2D" parent="."]
+[node name="BedFrame" type="Polygon2D" parent="." unique_id=1318282401]
 position = Vector2(220, 331)
 color = Color(0.27, 0.14, 0.08, 1)
 polygon = PackedVector2Array(-82, -31, 82, -31, 82, 31, -82, 31)
 
-[node name="BedBlanket" type="Polygon2D" parent="."]
+[node name="BedBlanket" type="Polygon2D" parent="." unique_id=31450021]
 position = Vector2(239, 323)
 color = Color(0.22, 0.48, 0.56, 1)
 polygon = PackedVector2Array(-55, -22, 55, -22, 55, 22, -55, 22)
 
-[node name="BedPillow" type="Polygon2D" parent="."]
+[node name="BedPillow" type="Polygon2D" parent="." unique_id=1719823572]
 position = Vector2(169, 321)
 color = Color(0.9, 0.88, 0.78, 1)
 polygon = PackedVector2Array(-23, -16, 23, -16, 23, 16, -23, 16)
 
-[node name="BathroomPassageFrame" type="Polygon2D" parent="."]
+[node name="BathroomPassageFrame" type="Polygon2D" parent="." unique_id=1220262403]
 position = Vector2(520, 310)
 color = Color(0.16, 0.18, 0.19, 1)
 polygon = PackedVector2Array(-38, -78, 38, -78, 38, 58, -38, 58)
 
-[node name="BathroomPassageOpening" type="Polygon2D" parent="."]
+[node name="BathroomPassageOpening" type="Polygon2D" parent="." unique_id=843543949]
 position = Vector2(520, 320)
 color = Color(0.08, 0.12, 0.13, 1)
 polygon = PackedVector2Array(-28, -62, 28, -62, 28, 48, -28, 48)
 
-[node name="BathroomPassageSign" type="Label" parent="."]
+[node name="BathroomPassageSign" type="Label" parent="." unique_id=660645774]
 offset_left = 482.0
 offset_top = 224.0
 offset_right = 558.0
 offset_bottom = 248.0
-text = "Bath"
-horizontal_alignment = 1
-vertical_alignment = 1
 theme_override_colors/font_color = Color(0.84, 0.94, 0.96, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
 theme_override_constants/shadow_offset_x = 1
 theme_override_constants/shadow_offset_y = 1
+text = "Bath"
+horizontal_alignment = 1
+vertical_alignment = 1
 
-[node name="Floor" type="StaticBody2D" parent="."]
+[node name="Floor" type="StaticBody2D" parent="." unique_id=806082404]
 position = Vector2(0, 400)
-collision_layer = 1
 collision_mask = 6
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="Floor"]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Floor" unique_id=1162402761]
 shape = SubResource("RectangleShape2D_floor")
 
-[node name="LeftWall" type="StaticBody2D" parent="."]
+[node name="LeftWall" type="StaticBody2D" parent="." unique_id=1359547808]
 position = Vector2(-1176, 72)
-collision_layer = 1
 collision_mask = 6
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="LeftWall"]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="LeftWall" unique_id=1803288995]
 shape = SubResource("RectangleShape2D_left_wall")
 
-[node name="RightWall" type="StaticBody2D" parent="."]
+[node name="RightWall" type="StaticBody2D" parent="." unique_id=690333840]
 position = Vector2(1176, 72)
-collision_layer = 1
 collision_mask = 6
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="RightWall"]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="RightWall" unique_id=1826432330]
 shape = SubResource("RectangleShape2D_right_wall")
 
-[node name="NpcLocationScene" type="Node" parent="."]
+[node name="NpcLocationScene" type="Node" parent="." unique_id=738533555]
 script = ExtResource("2_location_scene")
 scene_path = "res://scenes/testscenes/realhometest.tscn"
-ground_y = 368.0
 spawn_x_min = -1050.0
 spawn_x_max = 1050.0
 
-[node name="Player" parent="." instance=ExtResource("1_player")]
-position = Vector2(-350, 368)
+[node name="Player" parent="." unique_id=1227827088 instance=ExtResource("1_player")]
+position = Vector2(-450, 365)
 
-[node name="Camera2D" type="Camera2D" parent="Player"]
+[node name="Camera2D" type="Camera2D" parent="Player" unique_id=1962546624]
 position = Vector2(0, -50)
 limit_left = -1152
 limit_top = -320
 limit_right = 1152
 limit_bottom = 432
 
-[node name="OutsideDoor" parent="." instance=ExtResource("3_door")]
+[node name="OutsideDoor" parent="." unique_id=1318597514 instance=ExtResource("3_door")]
 position = Vector2(-450, 368)
 target_scene_path = "res://scenes/testscenes/realtest1.tscn"
 target_spawn_id = &"from_realhometest"
 owner_ids = Array[StringName]([&"mom", &"player"])
 
-[node name="PlayerSpawnFromYard" type="Marker2D" parent="."]
-position = Vector2(-350, 368)
+[node name="PlayerSpawnFromYard" type="Marker2D" parent="." unique_id=334133969]
+position = Vector2(-450, 367)
 script = ExtResource("9_player_spawn")
 spawn_id = &"from_realtest1"
 
-[node name="MomSleepNeedSpot" parent="." instance=ExtResource("4_need_spot")]
+[node name="MomSleepNeedSpot" parent="." unique_id=1566033196 instance=ExtResource("4_need_spot")]
 position = Vector2(220, 368)
 save_id = "realhometest_mom_sleep"
 world_definition = ExtResource("6_mom_bed")
 restrict_to_target_npc = false
 label_prefix = "Mom Sleep"
 
-[node name="MomShowerRoutineSpot" parent="." instance=ExtResource("11_shower_spot")]
-position = Vector2(440, 368)
+[node name="MomShowerRoutineSpot" parent="." unique_id=613272069 instance=ExtResource("11_shower_spot")]
+position = Vector2(426, 323)
 save_id = "realhometest_mom_shower"
 spot_id = &"mom_shower"
 world_definition = ExtResource("10_mom_shower")
 called_npc_ids = Array[StringName]([&"mom"])
 
-[node name="PlayerSleepSpot" parent="." instance=ExtResource("8_player_sleep_spot")]
+[node name="PlayerSleepSpot" parent="." unique_id=1428672319 instance=ExtResource("8_player_sleep_spot")]
 position = Vector2(80, 368)
 
-[node name="HomeRestSpot" parent="." instance=ExtResource("7_rest_spot")]
+[node name="HomeRestSpot" parent="." unique_id=2057314550 instance=ExtResource("7_rest_spot")]
 position = Vector2(-120, 368)
 owner_npc_ids = Array[StringName]([&"mom"])
 npc_preference_weights = {
 "mom": 4.0
 }
 
-[node name="KitchenStove" parent="." instance=ExtResource("14_cooking_station")]
+[node name="KitchenStove" parent="." unique_id=766221443 instance=ExtResource("14_cooking_station")]
 position = Vector2(760, 368)
 
-[node name="MomMagicLessonSpot" type="Node2D" parent="."]
+[node name="MomMagicLessonSpot" type="Node2D" parent="." unique_id=668963211]
 position = Vector2(-860, 368)
 script = ExtResource("12_magic_lesson")
 world_definition = ExtResource("13_mom_magic_lesson")
 
-[node name="MomLessonPosition" type="Marker2D" parent="MomMagicLessonSpot"]
+[node name="MomLessonPosition" type="Marker2D" parent="MomMagicLessonSpot" unique_id=1540572963]
 position = Vector2(-96, 0)
 
-[node name="PlayerLessonPosition" type="Marker2D" parent="MomMagicLessonSpot"]
+[node name="PlayerLessonPosition" type="Marker2D" parent="MomMagicLessonSpot" unique_id=2055724212]
 position = Vector2(96, 0)
 
-[node name="CharacterStatsOverlay" parent="." instance=ExtResource("5_stats_overlay")]
+[node name="CharacterStatsOverlay" parent="." unique_id=1403932194 instance=ExtResource("5_stats_overlay")]

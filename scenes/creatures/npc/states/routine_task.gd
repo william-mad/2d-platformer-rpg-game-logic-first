@@ -16,6 +16,7 @@ var progress_elapsed: float = 0.0
 var active_value_name: StringName = &""
 var active_value_delta_per_game_hour: float = 0.0
 var active_finish_when_value_sated: bool = true
+var warned_resolution_failures: Dictionary = {}
 
 
 func on_action_session_refreshed() -> void:
@@ -24,12 +25,16 @@ func on_action_session_refreshed() -> void:
 
 func enter() -> void:
 	super.enter()
+	var exact_target_bound := _active_routine_is_exact_target_bound()
 	active_routine_target = _resolve_routine_target()
 	progress_elapsed = 0.0
 
 	if active_routine_target == null:
 		routine_timer = 0.0
-		machine.call_deferred("request_state", &"Idle", null, "missing_routine_task_spot", 20)
+		if exact_target_bound:
+			next_state = get_state(&"Idle")
+		else:
+			machine.call_deferred("request_state", &"Idle", null, "missing_routine_task_spot", 20)
 		return
 
 	if not is_close_to(active_routine_target.global_position, machine.stop_distance):
@@ -46,17 +51,22 @@ func physics_process(delta: float) -> NpcState:
 		return reconcile_invalid_action_session()
 	stop_horizontal()
 
-	if active_routine_target == null or not is_instance_valid(active_routine_target):
+	if _active_routine_is_exact_target_bound():
 		active_routine_target = _resolve_routine_target()
 		if active_routine_target == null:
-			_clear_routine_target()
-			return get_state(&"Idle")
+			return reconcile_invalid_action_session()
+	else:
+		if active_routine_target == null or not is_instance_valid(active_routine_target):
+			active_routine_target = _resolve_routine_target()
+			if active_routine_target == null:
+				_clear_routine_target()
+				return get_state(&"Idle")
 
-	if not _target_can_be_used(active_routine_target):
-		_clear_routine_target()
-		active_routine_target = _resolve_routine_target()
-		if active_routine_target == null:
-			return get_state(&"Idle")
+		if not _target_can_be_used(active_routine_target):
+			_clear_routine_target()
+			active_routine_target = _resolve_routine_target()
+			if active_routine_target == null:
+				return get_state(&"Idle")
 
 	if not is_close_to(active_routine_target.global_position, machine.stop_distance):
 		machine.begin_active_action_approach(action_session_id)
@@ -88,6 +98,9 @@ func _begin_routine_task(routine_target: Node2D) -> void:
 func _resolve_routine_target() -> Node2D:
 	if machine == null:
 		return null
+	var descriptor: Dictionary = machine.get_active_action_descriptor()
+	if _descriptor_is_exact_target_bound(descriptor):
+		return _resolve_exact_routine_target(descriptor)
 
 	var assigned_target := machine.get_routine_task_target()
 	if _target_can_be_used(assigned_target):
@@ -107,7 +120,31 @@ func _resolve_routine_target() -> Node2D:
 	return closest_spot
 
 
-func _target_can_be_used(routine_target: Node2D) -> bool:
+func _resolve_exact_routine_target(descriptor: Dictionary) -> Node2D:
+	var expected_scene := _descriptor_expected_scene(descriptor)
+	var actual_scene := _get_current_scene_path()
+	if not expected_scene.is_empty() and actual_scene != expected_scene:
+		_fail_exact_routine_action(
+			"routine_wrong_scene", descriptor, expected_scene, actual_scene
+		)
+		return null
+
+	var assigned_target := machine.get_active_action_target()
+	var expected_spot := _descriptor_expected_spot(descriptor)
+	if (
+		assigned_target == null
+		or not is_instance_valid(assigned_target)
+		or not _target_matches_expected_spot(assigned_target, expected_spot)
+		or not _target_can_be_used(assigned_target, descriptor)
+	):
+		_fail_exact_routine_action(
+			"scheduled_routine_spot_missing", descriptor, expected_scene, actual_scene
+		)
+		return null
+	return assigned_target
+
+
+func _target_can_be_used(routine_target: Node2D, descriptor: Dictionary = {}) -> bool:
 	if routine_target == null or not is_instance_valid(routine_target):
 		return false
 	if routine_target.has_method("can_serve_npc_need"):
@@ -115,10 +152,128 @@ func _target_can_be_used(routine_target: Node2D) -> bool:
 			"can_serve_npc_need",
 			npc,
 			&"RoutineTask",
-			active_value_name
+			_descriptor_intended_value_name(descriptor)
 		))
 
 	return true
+
+
+func _active_routine_is_exact_target_bound() -> bool:
+	if machine == null or action_session_id.is_empty():
+		return false
+	if machine.get_active_action_session_id() != action_session_id:
+		return false
+	return _descriptor_is_exact_target_bound(machine.get_active_action_descriptor())
+
+
+func _descriptor_is_exact_target_bound(descriptor: Dictionary) -> bool:
+	if String(descriptor.get("action_kind", "")) != "RoutineTask":
+		return false
+	var metadata = descriptor.get("metadata", {})
+	return (
+		String(descriptor.get("source", "")) == "schedule"
+		or not _descriptor_expected_spot(descriptor).is_empty()
+		or _dictionary_has_nonempty_value(
+			descriptor, ["activity_id", "scheduled_activity_id", "schedule_activity_id"]
+		)
+		or (
+			metadata is Dictionary
+			and _dictionary_has_nonempty_value(
+				metadata, ["activity_id", "scheduled_activity_id", "schedule_activity_id"]
+			)
+		)
+		or not _descriptor_expected_scene(descriptor).is_empty()
+	)
+
+
+func _descriptor_expected_spot(descriptor: Dictionary) -> String:
+	var spot_id := String(descriptor.get("spot_id", "")).strip_edges()
+	if not spot_id.is_empty():
+		return spot_id
+	var metadata = descriptor.get("metadata", {})
+	return String(metadata.get("spot_id", "")).strip_edges() if metadata is Dictionary else ""
+
+
+func _descriptor_expected_scene(descriptor: Dictionary) -> String:
+	var scene_path := String(descriptor.get(
+		"scene_path", descriptor.get("target_scene_path", "")
+	)).strip_edges()
+	if not scene_path.is_empty():
+		return scene_path
+	var metadata = descriptor.get("metadata", {})
+	if not (metadata is Dictionary):
+		return ""
+	return String(metadata.get(
+		"scene_path", metadata.get("target_scene_path", "")
+	)).strip_edges()
+
+
+func _descriptor_intended_value_name(descriptor: Dictionary) -> StringName:
+	var value_name := String(descriptor.get("value_name", "")).strip_edges()
+	var metadata = descriptor.get("metadata", {})
+	if value_name.is_empty() and metadata is Dictionary:
+		value_name = String(metadata.get("value_name", "")).strip_edges()
+	return StringName(value_name) if not value_name.is_empty() else routine_value_name
+
+
+func _dictionary_has_nonempty_value(dictionary: Dictionary, keys: Array[String]) -> bool:
+	for key in keys:
+		if not String(dictionary.get(key, "")).strip_edges().is_empty():
+			return true
+	return false
+
+
+func _target_matches_expected_spot(routine_target: Node2D, expected_spot: String) -> bool:
+	if expected_spot.is_empty():
+		return true
+	return NpcActivityIdentity.get_persistent_spot_id(
+		routine_target, &"RoutineTask"
+	) == expected_spot
+
+
+func _get_current_scene_path() -> String:
+	if npc != null and is_instance_valid(npc) and npc.is_inside_tree():
+		var scene_tree := npc.get_tree()
+		if scene_tree != null and scene_tree.current_scene != null:
+			var scene_path := String(scene_tree.current_scene.scene_file_path).strip_edges()
+			if not scene_path.is_empty():
+				return scene_path
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations != null and locations.has_method("get_current_scene_path"):
+		return String(locations.call("get_current_scene_path")).strip_edges()
+	return ""
+
+
+func _fail_exact_routine_action(
+	reason: String,
+	descriptor: Dictionary,
+	expected_scene: String,
+	actual_scene: String
+) -> void:
+	if machine == null or action_session_id.is_empty():
+		return
+	if machine.get_active_action_session_id() != action_session_id:
+		return
+	var warning_key := "%s|%s" % [action_session_id, reason]
+	if OS.is_debug_build() and not warned_resolution_failures.has(warning_key):
+		warned_resolution_failures[warning_key] = true
+		push_warning(
+			"RoutineTask target failure: npc=%s session=%s expected_spot=%s expected_scene=%s actual_scene=%s reason=%s" % [
+				_get_npc_label(), action_session_id, _descriptor_expected_spot(descriptor),
+				expected_scene, actual_scene, reason,
+			]
+		)
+	machine.fail_active_action(action_session_id, reason)
+
+
+func _get_npc_label() -> String:
+	if npc != null and is_instance_valid(npc):
+		if npc.has_method("get_npc_location_id"):
+			var npc_id := String(npc.call("get_npc_location_id")).strip_edges()
+			if not npc_id.is_empty():
+				return "%s(%s)" % [npc.name, npc_id]
+		return String(npc.name)
+	return "unknown"
 
 
 func _apply_routine_progress(delta: float) -> void:

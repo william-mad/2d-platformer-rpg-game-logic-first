@@ -155,6 +155,7 @@ func _run_tests() -> void:
 	_test_activity_selector_delegate_matches_helper(simulator)
 	_test_sleep_wake_delegate_routes_home(simulator)
 	_test_sleep_window_skip_routes_to_bed(simulator)
+	_test_mom_bedtime_outprioritizes_midnight_social_need(simulator)
 	_test_magic_lesson_can_interrupt_afternoon_work(simulator)
 	_test_magic_lesson_invite_targets_live_player_scene(simulator)
 	_test_accepted_magic_lesson_resume_assigns_invite_state(simulator, world_time, locations)
@@ -1108,6 +1109,28 @@ func _make_sleep_definition(spot_id: StringName) -> NpcSpotDefinition:
 	definition.need_threshold = 71.0
 	definition.priority = 70
 	return definition
+
+
+func _test_mom_bedtime_outprioritizes_midnight_social_need(simulator: Node) -> void:
+	var record := {
+		"scene_path": "res://scenes/testscenes/realtest1.tscn",
+		"node_state": {
+			"social_stats": {
+				"sleep_need": 55.0,
+				"talk_need": 90.0,
+			},
+		},
+	}
+	var definition := simulator.call("_find_best_definition", &"mom", record, 0.0) as NpcSpotDefinition
+	_expect_true(definition != null, "Mom has a scheduled activity at midnight")
+	if definition == null:
+		return
+	_expect_equal(definition.spot_id, &"mom_bed", "Mom's bed wins at midnight with sleep_need 55")
+	var social_settings: Dictionary = simulator.call("_get_social_seek_settings", record)
+	_expect_true(
+		definition.priority > int(social_settings.get("priority", 60)),
+		"bedtime priority blocks midnight social seeking"
+	)
 
 
 func _expect_equal(actual, expected, message: String) -> void:

@@ -36,6 +36,14 @@ func enter() -> void:
 		return
 
 	meal_sated_marked = false
+	active_eat_target = machine.get_eat_target()
+	if _hunger_is_sated():
+		_mark_meal_sated_if_needed()
+		eat_timer = 0.0
+		total_eat_seconds = 0.0
+		next_state = get_state(&"Idle")
+		stop_horizontal()
+		return
 
 	active_eat_target = _resolve_eat_target()
 	if active_eat_target == null:
@@ -88,6 +96,7 @@ func physics_process(delta: float) -> NpcState:
 	# Hunger drains gradually while the NPC stays at the eat spot.
 	stop_horizontal()
 	if _hunger_is_sated():
+		_mark_meal_sated_if_needed()
 		return get_state(&"Idle")
 	if active_eat_target == null or not is_instance_valid(active_eat_target):
 		active_eat_target = _resolve_eat_target()
@@ -120,7 +129,10 @@ func physics_process(delta: float) -> NpcState:
 		_breadcrumb("npc_eat:no_progress", _npc_label())
 		return get_state(&"Idle")
 
-	if _hunger_is_sated() or eat_timer <= 0.0:
+	if _hunger_is_sated():
+		_mark_meal_sated_if_needed()
+		return get_state(&"Idle")
+	if eat_timer <= 0.0:
 		return get_state(&"Idle")
 
 	return next_state
@@ -145,6 +157,7 @@ func can_continue_during_talk() -> bool:
 func process_talk_overlay(delta: float) -> StringName:
 	stop_horizontal()
 	if _hunger_is_sated():
+		_mark_meal_sated_if_needed()
 		return &"Idle"
 
 	if active_eat_target == null or not is_instance_valid(active_eat_target):
@@ -159,7 +172,10 @@ func process_talk_overlay(delta: float) -> StringName:
 		machine.begin_active_action_approach(action_session_id)
 		return &"MoveToTarget"
 
-	if eat_timer <= 0.0 or _hunger_is_sated():
+	if _hunger_is_sated():
+		_mark_meal_sated_if_needed()
+		return &"Idle"
+	if eat_timer <= 0.0:
 		return &"Idle"
 
 	eat_timer -= delta
@@ -172,7 +188,10 @@ func process_talk_overlay(delta: float) -> StringName:
 	if not made_progress and not _hunger_is_sated():
 		return &"Idle"
 
-	if _hunger_is_sated() or eat_timer <= 0.0:
+	if _hunger_is_sated():
+		_mark_meal_sated_if_needed()
+		return &"Idle"
+	if eat_timer <= 0.0:
 		return &"Idle"
 
 	return &"Eat"

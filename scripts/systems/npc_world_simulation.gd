@@ -6,6 +6,12 @@ signal activity_finished(npc_id: StringName, spot_id: StringName)
 const SPOT_DATA_DIRECTORY := "res://data/npc_spots"
 const PLAYER_SOCIAL_TARGET_ID := "__player__"
 const DEFAULT_SLEEP_SKIP_WAKE_HUNGER_MAX := 60.0
+const STORED_ONLY_VALUE_KEYS := {
+	"curiosity": true,
+	"sadness": true,
+	"energy": true,
+	"suspicion": true,
+}
 const MEAL_STAGE_PREP_WORK := "prep_work"
 const MEAL_STAGE_FOOD := "food"
 const MEAL_STAGE_CLEANUP_WORK := "cleanup_work"
@@ -734,10 +740,11 @@ func _apply_sleep_skip_body_values(
 		reset_values = {
 			"sleep_need": 0.0,
 			"tired": 0.0,
-			"energy": 100.0,
 		}
 	for value_key in reset_values.keys():
 		var value_name := String(value_key)
+		if STORED_ONLY_VALUE_KEYS.has(value_name):
+			continue
 		if value_name.is_empty() or not social_stats.has(value_name):
 			continue
 		social_stats[value_name] = clampf(float(reset_values[value_key]), 0.0, 100.0)
@@ -951,7 +958,11 @@ func _apply_full_sleep_health_restore(
 		return
 
 	var health_value_name := String(options.get("health_value_name", "hp"))
-	if health_value_name.is_empty() or not social_stats.has(health_value_name):
+	if (
+		health_value_name.is_empty()
+		or STORED_ONLY_VALUE_KEYS.has(health_value_name)
+		or not social_stats.has(health_value_name)
+	):
 		return
 
 	var full_health := clampf(float(options.get("full_sleep_hp", 100.0)), 0.0, 100.0)
@@ -2288,7 +2299,7 @@ func _try_start_social_seek(
 ) -> bool:
 	if _social_planning_suppressed:
 		return false
-	if _record_has_non_social_pending_travel(record):
+	if _record_has_pending_travel(record):
 		return false
 	if DebugToolsConfig.TROUBLESHOOTING_MODE and DebugToolsConfig.DEBUG_DISABLE_TALK_SEARCH:
 		_breadcrumb("npc_world:social_seek_skip", String(npc_id))
@@ -2302,6 +2313,18 @@ func _try_start_social_seek(
 		return false
 	if _get_saved_stat(record, "talk_need") < float(settings.get("talk_need_threshold", 70.0)):
 		return false
+	var live_npc: Node2D
+	if locations.has_method("get_live_npc"):
+		live_npc = locations.call("get_live_npc", String(npc_id)) as Node2D
+	if live_npc != null:
+		var live_machine := live_npc.get_node_or_null("NpcStateMachine")
+		if (
+			live_machine != null
+			and live_machine.has_method("is_socially_engaged")
+			and bool(live_machine.call("is_socially_engaged"))
+		):
+			_log_social_plan_result(npc_id, "", "", false, "already_socially_engaged")
+			return false
 
 	var relationships := get_node_or_null("/root/Relationships")
 	var player := get_tree().get_first_node_in_group("player") as Node2D
@@ -2326,12 +2349,8 @@ func _try_start_social_seek(
 	var seeker_scene_path := String(record.get("scene_path", ""))
 	if target_scene_path.is_empty() or seeker_scene_path.is_empty():
 		return false
-	if (
-		DebugToolsConfig.TROUBLESHOOTING_MODE
-		and DebugToolsConfig.DEBUG_DISABLE_CROSS_SCENE_TALK
-		and target_scene_path != seeker_scene_path
-	):
-		_breadcrumb("npc_world:cross_scene_talk_skip", "%s -> %s" % [String(npc_id), target_scene_path.get_file()])
+	if target_scene_path != seeker_scene_path:
+		_log_social_plan_result(npc_id, "", "", false, "remote_social_visit_disabled")
 		return false
 	var target_position = candidate.get("position", Vector2.ZERO)
 	if not (target_position is Vector2):
@@ -2367,9 +2386,6 @@ func _try_start_social_seek(
 	var accepted := false
 	var rejection_reason := "social_request_rejected"
 
-	var live_npc: Node2D
-	if locations.has_method("get_live_npc"):
-		live_npc = locations.call("get_live_npc", String(npc_id)) as Node2D
 	if seeker_scene_path == target_scene_path:
 		var live_target := _get_live_social_target(candidate, locations)
 		if live_npc != null and live_target != null:
@@ -2401,35 +2417,6 @@ func _try_start_social_seek(
 			rejection_reason = "social_visit_move_rejected"
 		else:
 			rejection_reason = "same_scene_participant_not_live_together"
-	elif live_npc != null:
-		var departure_door := _find_departure_door(target_scene_path, live_npc)
-		if departure_door != null and locations.has_method("prepare_scheduled_travel"):
-			var pending_travel := {
-				"mode": "social",
-				"target_scene_path": target_scene_path,
-				"target_position": target_position,
-				"social_target_id": social_target_id,
-				"social_session_id": session_id,
-				"requested_state_name": "LookForTalkTarget",
-				"requested_priority": seek_priority,
-			}
-			accepted = bool(locations.call(
-				"prepare_scheduled_travel",
-				String(npc_id),
-				pending_travel,
-				departure_door
-			))
-			rejection_reason = "scheduled_social_travel_rejected"
-		else:
-			rejection_reason = "social_departure_unavailable"
-	elif locations.has_method("move_simulated_npc_for_social_visit"):
-		accepted = _call_move_simulated_social_visit(
-			locations, String(npc_id), target_scene_path, target_position,
-			social_target_id, session_id
-		)
-		rejection_reason = "remote_social_visit_rejected"
-	else:
-		rejection_reason = "remote_social_visit_unsupported"
 
 	_social_planner.finish_session(session_id, accepted)
 	_log_social_plan_result(
@@ -2442,14 +2429,9 @@ func _try_start_social_seek(
 	return accepted
 
 
-func _record_has_non_social_pending_travel(record: Dictionary) -> bool:
+func _record_has_pending_travel(record: Dictionary) -> bool:
 	var pending = record.get("pending_travel", {})
-	if not (pending is Dictionary) or pending.is_empty():
-		return false
-
-	var pending_mode := String(pending.get("mode", ""))
-	var pending_state := String(pending.get("requested_state_name", ""))
-	return pending_mode != "social" and not ["Talk", "LookForTalkTarget"].has(pending_state)
+	return pending is Dictionary and not pending.is_empty()
 
 
 func _get_social_seek_settings(record: Dictionary) -> Dictionary:
@@ -2458,8 +2440,6 @@ func _get_social_seek_settings(record: Dictionary) -> Dictionary:
 		"talk_need_threshold": 70.0,
 		"priority": 60,
 		"minimum_npc_favor": 10.0,
-		"player_target_chance": 0.35,
-		"allow_remote_visits": true,
 	}
 	var node_state = record.get("node_state", {})
 	if node_state is Dictionary:
@@ -2500,6 +2480,11 @@ func _request_live_social_seek(
 		return false
 	var machine := npc.get_node_or_null("NpcStateMachine")
 	if machine == null or not machine.has_method("request_state"):
+		return false
+	if machine.has_method("is_socially_engaged") and bool(machine.call("is_socially_engaged")):
+		_log_social_plan_result(
+			npc_id, target_npc_id, session_id, false, "already_socially_engaged"
+		)
 		return false
 	if session_id.is_empty():
 		session_id = NpcActionSessionModel.make_session_id(
@@ -2950,15 +2935,8 @@ func _commit_pending_travel_offscreen(
 			)
 		return
 	if String(pending_travel.get("mode", "start")) == "social":
-		if locations.has_method("move_simulated_npc_for_social_visit"):
-			_call_move_simulated_social_visit(
-				locations,
-				String(npc_id),
-				target_scene_path,
-				target_position,
-				String(pending_travel.get("social_target_id", "")),
-				String(pending_travel.get("social_session_id", ""))
-			)
+		if locations.has_method("cancel_pending_scheduled_travel"):
+			locations.call("cancel_pending_scheduled_travel", String(npc_id))
 		return
 
 	var activity = pending_travel.get("activity", {})
@@ -3924,6 +3902,8 @@ func _get_saved_stat(record: Dictionary, value_name: String) -> float:
 
 
 func _set_saved_stat(record: Dictionary, value_name: String, value: float) -> void:
+	if STORED_ONLY_VALUE_KEYS.has(value_name):
+		return
 	var node_state = record.get("node_state", {})
 	if not (node_state is Dictionary):
 		node_state = {}

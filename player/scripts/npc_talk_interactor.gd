@@ -46,22 +46,17 @@ const MENU_NPC_PROMPT := &"npc_prompt"
 	},
 	{
 		"boredom": -20.0,
-		"curiosity": 5.0,
 		"trust": 1.0
 	},
 	{
-		"sadness": -15.0,
 		"lonely": -10.0,
 		"trust": 4.0
 	},
 	{
-		"curiosity": 10.0,
-		"suspicion": 5.0,
 		"talk_need": -20.0
 	},
 	{
 		"trust": -3.0,
-		"suspicion": 7.0,
 		"boredom": -5.0
 	}
 ]

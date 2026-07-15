@@ -94,7 +94,7 @@ func physics_process(delta: float) -> NpcState:
 		_finish_successful_sleep()
 		return get_state(&"Idle")
 
-	if _sleep_need_is_sated():
+	if _sleep_need_is_sated() and not _scheduled_sleep_controls_wake_time():
 		_finish_successful_sleep()
 		return get_state(&"Idle")
 
@@ -207,6 +207,17 @@ func _sleep_need_is_sated() -> bool:
 		return sleep_timer <= 0.0
 
 	return machine.get_value(sleep_value_name) <= 0.0
+
+
+func _scheduled_sleep_controls_wake_time() -> bool:
+	if machine == null or action_session_id.is_empty():
+		return false
+	var descriptor := machine.get_active_action_descriptor()
+	return (
+		String(descriptor.get("session_id", "")) == action_session_id
+		and String(descriptor.get("action_kind", "")) == "Sleep"
+		and String(descriptor.get("source", "")) == "schedule"
+	)
 
 
 func _finish_successful_sleep() -> void:

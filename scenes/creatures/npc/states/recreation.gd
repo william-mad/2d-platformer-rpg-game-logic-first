@@ -144,11 +144,10 @@ func _resolve_recreation_target() -> Node2D:
 func _target_can_be_used(recreation_spot: Node2D) -> bool:
 	if recreation_spot == null or not is_instance_valid(recreation_spot):
 		return false
-	if recreation_spot.has_method("can_serve_npc_casual_activity"):
-		return bool(recreation_spot.call(
-			"can_serve_npc_casual_activity",
-			npc,
-			&"Recreation"
-		))
-
-	return true
+	if not recreation_spot.has_method("can_serve_npc_casual_activity"):
+		return false
+	return bool(recreation_spot.call(
+		"can_serve_npc_casual_activity",
+		npc,
+		&"Recreation"
+	))

@@ -52,7 +52,18 @@ func physics_process(delta: float) -> NpcState:
 	var approach_distance := _get_talk_approach_distance()
 	if is_close_to(talk_target.global_position, approach_distance):
 		var talk_priority := machine.get_effective_task_priority() if machine != null else -1
-		if machine != null and machine.request_talk(talk_target, talk_priority):
+		var search_session_id := action_session_id
+		var initiating_source := &"social_ai"
+		if machine != null:
+			var search_descriptor := machine.get_active_action_descriptor()
+			initiating_source = StringName(String(search_descriptor.get("source", "social_ai")))
+		if machine != null and machine.request_talk(
+			talk_target, talk_priority, true, initiating_source
+		):
+			if not machine.complete_social_search_handoff(search_session_id):
+				push_warning("Accepted Talk did not complete social-search handoff: npc=%s session=%s" % [
+					_npc_label(), search_session_id,
+				])
 			_breadcrumb("npc_talk_search:talk_start", "%s target=%s" % [_npc_label(), _target_label(talk_target)])
 			return next_state
 
