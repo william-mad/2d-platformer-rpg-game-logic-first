@@ -333,7 +333,7 @@ active_time_windows = Array[Dictionary]([{
 }])
 
 [node name="TalkPartnerNpc" parent="." unique_id=1577191316 instance=ExtResource("18_talk_npc")]
-position = Vector2(2063, 114)
+position = Vector2(1712, 365)
 patrol_range = 0.0
 starts_moving_right = false
 social_stats = {

@@ -1,68 +1,63 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene format=3 uid="uid://bl78xaa1o32uu"]
 
-[ext_resource type="Script" path="res://scripts/instances/npc_shower_spot.gd" id="1_shower_spot"]
+[ext_resource type="Script" uid="uid://b8edtce6y7p1g" path="res://scripts/instances/npc_shower_spot.gd" id="1_shower_spot"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_shower_spot"]
 size = Vector2(128, 88)
 
-[node name="NpcShowerSpot" type="Area2D"]
+[node name="NpcShowerSpot" type="Area2D" unique_id=1974211400]
 collision_layer = 0
 collision_mask = 6
 monitorable = false
 script = ExtResource("1_shower_spot")
 value_name = &""
 restrict_to_target_npc = false
-request_state_name = &"RoutineTask"
 require_target_need_threshold = false
+request_state_name = &"RoutineTask"
 request_priority = 85
 target_assignment_method = &"assign_routine_task_target"
 routine_animation_name = &"shower"
-routine_game_minutes = 30.0
 routine_finish_when_value_sated = false
 label_prefix = "Shower"
 low_need_color = Color(0.16, 0.62, 0.75, 0.46)
 high_need_color = Color(0.3, 0.82, 1, 0.62)
 
-[node name="ZoneVisual" type="Polygon2D" parent="."]
+[node name="ZoneVisual" type="Polygon2D" parent="." unique_id=1400214576]
 unique_name_in_owner = true
+visible = false
 color = Color(0.16, 0.62, 0.75, 0.46)
 polygon = PackedVector2Array(-64, -44, 64, -44, 64, 44, -64, 44)
 
-[node name="ShowerBack" type="Polygon2D" parent="."]
+[node name="ShowerBack" type="Polygon2D" parent="." unique_id=510238322]
+visible = false
 position = Vector2(0, -44)
 color = Color(0.12, 0.2, 0.22, 0.92)
 polygon = PackedVector2Array(-42, -50, 42, -50, 42, 36, -42, 36)
 
-[node name="ShowerCurtain" type="Polygon2D" parent="."]
+[node name="ShowerCurtain" type="Polygon2D" parent="." unique_id=1850334264]
+visible = false
 position = Vector2(21, -42)
 color = Color(0.7, 0.9, 0.95, 0.38)
-polygon = PackedVector2Array(-12, -48, 31, -48, 31, 38, -12, 38)
+polygon = PackedVector2Array(-12, -48, 31, -48, 31, 38, -12, 38, -12, -15.517441)
 
-[node name="Pipe" type="Line2D" parent="."]
+[node name="Pipe" type="Line2D" parent="." unique_id=1072475597]
+visible = false
 position = Vector2(-18, -92)
 points = PackedVector2Array(0, 0, 30, 0, 30, 16)
 width = 5.0
 default_color = Color(0.72, 0.76, 0.75, 1)
 
-[node name="ShowerHead" type="Polygon2D" parent="."]
+[node name="ShowerHead" type="Polygon2D" parent="." unique_id=1009391249]
+visible = false
 position = Vector2(12, -74)
 color = Color(0.78, 0.82, 0.8, 1)
 polygon = PackedVector2Array(-13, -4, 14, -4, 18, 8, -15, 8)
 
-[node name="WaterVisual" type="Line2D" parent="."]
+[node name="WaterParticles" type="CPUParticles2D" parent="." unique_id=631091355]
 unique_name_in_owner = true
-position = Vector2(12, -63)
-points = PackedVector2Array(-16, 0, -24, 56, 0, 0, 0, 62, 16, 0, 22, 54)
-width = 3.0
-default_color = Color(0.4, 0.8, 1, 0.74)
-
-[node name="WaterParticles" type="CPUParticles2D" parent="."]
-unique_name_in_owner = true
-position = Vector2(12, -60)
-emitting = true
+position = Vector2(2, -163)
 amount = 24
 lifetime = 0.8
-local_coords = false
 direction = Vector2(0, 1)
 spread = 12.0
 gravity = Vector2(0, 520)
@@ -72,13 +67,11 @@ scale_amount_min = 1.4
 scale_amount_max = 3.2
 color = Color(0.42, 0.82, 1, 0.82)
 
-[node name="SteamParticles" type="CPUParticles2D" parent="."]
+[node name="SteamParticles" type="CPUParticles2D" parent="." unique_id=532578967]
 unique_name_in_owner = true
-position = Vector2(2, -38)
-emitting = true
+position = Vector2(0, 48)
 amount = 10
 lifetime = 1.4
-local_coords = false
 direction = Vector2(0, -1)
 spread = 34.0
 gravity = Vector2(0, -28)
@@ -88,25 +81,27 @@ scale_amount_min = 4.0
 scale_amount_max = 8.0
 color = Color(0.9, 0.96, 1, 0.42)
 
-[node name="BathMat" type="Polygon2D" parent="."]
+[node name="BathMat" type="Polygon2D" parent="." unique_id=319228562]
+visible = false
 position = Vector2(0, 16)
 color = Color(0.05, 0.35, 0.42, 0.86)
 polygon = PackedVector2Array(-46, -8, 46, -8, 46, 12, -46, 12)
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=131162017]
 shape = SubResource("RectangleShape2D_shower_spot")
 debug_color = Color(0.16, 0.62, 0.75, 0.25)
 
-[node name="Label" type="Label" parent="."]
+[node name="Label" type="Label" parent="." unique_id=1152475000]
 unique_name_in_owner = true
+visible = false
 offset_left = -78.0
 offset_top = -124.0
 offset_right = 78.0
 offset_bottom = -82.0
-text = "Shower"
-horizontal_alignment = 1
-vertical_alignment = 1
 theme_override_colors/font_color = Color(1, 1, 1, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
 theme_override_constants/shadow_offset_x = 1
 theme_override_constants/shadow_offset_y = 1
+text = "Shower"
+horizontal_alignment = 1
+vertical_alignment = 1

@@ -1,6 +1,6 @@
-[gd_resource type="Resource" script_class="NpcSpotDefinition" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="NpcSpotDefinition" format=3 uid="uid://cm4k0hn1nugkn"]
 
-[ext_resource type="Script" path="res://scripts/resources/npc_spot_definition.gd" id="1_spot_definition"]
+[ext_resource type="Script" uid="uid://diuxbt87xbkkc" path="res://scripts/resources/npc_spot_definition.gd" id="1_spot_definition"]
 
 [resource]
 script = ExtResource("1_spot_definition")

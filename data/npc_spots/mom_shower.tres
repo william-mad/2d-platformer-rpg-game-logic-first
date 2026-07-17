@@ -6,7 +6,7 @@
 script = ExtResource("1_spot_definition")
 spot_id = &"mom_shower"
 scene_path = "res://scenes/testscenes/realhometest.tscn"
-position = Vector2(440, 368)
+position = Vector2(875, 368)
 state_name = &"RoutineTask"
 value_name = &""
 need_threshold = 0.0

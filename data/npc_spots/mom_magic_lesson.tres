@@ -6,7 +6,7 @@
 script = ExtResource("1_spot_definition")
 spot_id = &"mom_magic_lesson"
 scene_path = "res://scenes/testscenes/realhometest.tscn"
-position = Vector2(-860, 368)
+position = Vector2(-301, 368)
 state_name = &"InvitePlayer"
 value_name = &""
 need_threshold = 0.0

@@ -146,6 +146,8 @@ func _initialize() -> void:
 		_test_stored_only_values_do_not_change_or_drive_behavior()
 	elif OS.get_cmdline_user_args().has("--scheduled-sleep-only"):
 		_test_scheduled_sleep_does_not_wake_when_need_is_sated()
+	elif OS.get_cmdline_user_args().has("--collapse-recovery-only"):
+		_test_collapse_recovers_in_place_until_sleep_need_seventy()
 	else:
 		_run_tests()
 	if _failures.is_empty():
@@ -163,6 +165,7 @@ func _run_tests() -> void:
 	_test_talk_duration_and_progress_ring()
 	_test_stored_only_values_do_not_change_or_drive_behavior()
 	_test_scheduled_sleep_does_not_wake_when_need_is_sated()
+	_test_collapse_recovers_in_place_until_sleep_need_seventy()
 	_test_rejected_state_request_preserves_targets()
 	_test_rejected_player_social_choice_applies_no_effects()
 	_test_player_interaction_gate_blocks_emergency_states()
@@ -368,6 +371,35 @@ func _test_scheduled_sleep_does_not_wake_when_need_is_sated() -> void:
 	_free_setup(setup)
 
 
+func _test_collapse_recovers_in_place_until_sleep_need_seventy() -> void:
+	var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var machine: NpcStateMachine = setup["machine"]
+	var collapse_state := machine.get_state(&"Collapse") as NpcStateCollapse
+	collapse_state.collapse_duration = 10.0
+	machine.values["sleep_need"] = 100.0
+
+	_expect_true(
+		machine.request_state(&"Collapse", null, "focused_exhaustion", 1000),
+		"exhaustion starts Collapse"
+	)
+	_expect_primary_state(machine, "Collapse", "Collapse is the forced-sleep state")
+	_expect_equal(machine.get_sleep_target(), null, "Collapse claims no bed")
+	machine._physics_process(2.0)
+	_expect_primary_state(machine, "Collapse", "Collapse remains active above the wake threshold")
+	_expect_approx(
+		machine.get_value(&"sleep_need"),
+		94.0,
+		0.01,
+		"Collapse lowers sleep_need gradually"
+	)
+	machine._physics_process(7.9)
+	_expect_primary_state(machine, "Collapse", "Collapse does not wake before sleep_need reaches 70")
+	machine._physics_process(0.1)
+	_expect_primary_state(machine, "Idle", "Collapse wakes at sleep_need 70")
+	_expect_approx(machine.get_value(&"sleep_need"), 70.0, 0.01, "Collapse stops recovery at 70")
+	_free_setup(setup)
+
+
 func _test_rejected_state_request_preserves_targets() -> void:
 	var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
 	var machine: NpcStateMachine = setup["machine"]
@@ -508,6 +540,7 @@ func _test_emergency_state_invalidates_open_menu_and_resumes_processing() -> voi
 	_expect_equal(String(interactor.active_menu), "interaction", "interaction menu opens for an idle NPC")
 	_expect_true(machine.player_interaction_hold_timer > 0.0, "open menu enables the NPC interaction hold")
 
+	machine.values["sleep_need"] = 100.0
 	_expect_true(machine.request_state(&"Collapse", null, "emergency_during_menu", 1000), "emergency starts while menu is open")
 	_expect_equal(String(interactor.active_menu), "", "emergency immediately closes the interaction menu")
 	_expect_equal(machine.player_interaction_hold_timer, 0.0, "emergency immediately clears interaction hold")
@@ -729,6 +762,35 @@ func _test_social_search_handoff_completes_primary_action() -> void:
 
 
 func _test_passive_casual_activities_ignore_social_actor() -> void:
+	var eat_setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var eat_machine: NpcStateMachine = eat_setup["machine"]
+	var eat_partner: CharacterBody2D = eat_setup["partner"]
+	eat_partner.add_to_group("npc")
+	_expect_false(
+		eat_machine.assign_eat_target(eat_partner, 20),
+		"an NPC cannot be assigned as an Eat spot"
+	)
+	_expect_primary_state(eat_machine, "Idle", "rejected Eat person target has no state side effect")
+	var eat_spot := _create_eat_spot(&"FocusedEatSpot", [])
+	eat_spot.global_position = Vector2(20.0, 0.0)
+	eat_setup["spot"] = eat_spot
+	eat_machine.values["hunger"] = 80.0
+	eat_machine.value_reactions_enabled = true
+	_expect_true(
+		eat_machine.evaluate_value_reactions(eat_partner, {}),
+		"passive hunger starts Eat"
+	)
+	_expect_primary_state(eat_machine, "Eat", "passive Eat starts normally")
+	_expect_true(
+		eat_machine.get_active_action_target() == eat_spot,
+		"passive Eat selects the authored food spot"
+	)
+	_expect_false(
+		eat_machine.get_active_action_target() == eat_partner,
+		"passive Eat does not inherit the recent social NPC"
+	)
+	_free_setup(eat_setup)
+
 	var recreation_setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
 	var recreation_machine: NpcStateMachine = recreation_setup["machine"]
 	var recreation_partner: CharacterBody2D = recreation_setup["partner"]

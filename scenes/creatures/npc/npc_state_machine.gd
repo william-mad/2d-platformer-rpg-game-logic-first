@@ -78,7 +78,7 @@ enum MonsterSightReaction {
 @export var default_flee_time: float = 4.0
 @export var default_sleep_time: float = 4.0
 @export_range(0.0, 24.0, 0.05, "suffix:h") var default_sleep_game_hours: float = 8.0
-@export var default_collapse_time: float = 3.0
+@export var default_collapse_time: float = 30.0
 
 @export_group("Passive Needs")
 @export var passive_needs_enabled: bool = true
@@ -2365,8 +2365,8 @@ func assign_work_target(new_target: Node2D, request_priority: int = 20) -> bool:
 
 func assign_eat_target(new_target: Node2D, request_priority: int = 20) -> bool:
 	# Stores an eat spot so Eat can walk there before lowering hunger.
-	if new_target == null or not is_instance_valid(new_target):
-		return false
+	if not _can_assign_eat_target(new_target):
+		return _reject_state_request(&"Eat", "invalid_eat_target")
 
 	return _request_state_direct(
 		&"Eat",
@@ -2374,6 +2374,25 @@ func assign_eat_target(new_target: Node2D, request_priority: int = 20) -> bool:
 		"eat_target",
 		request_priority,
 		{}
+	)
+
+
+func _can_assign_eat_target(candidate: Node2D) -> bool:
+	if candidate == null or not is_instance_valid(candidate):
+		return false
+	# Self is used only by Eat's inventory-food path. All other assignments must
+	# prove that they are authored Eat spots before an action session is created.
+	if candidate == npc:
+		return true
+	var requested_value_name := &"hunger"
+	var eat_state := get_state(&"Eat") as NpcStateEat
+	if eat_state != null:
+		requested_value_name = eat_state.eat_value_name
+	return (
+		candidate.has_method("can_serve_npc_need")
+		and bool(candidate.call(
+			"can_serve_npc_need", npc, &"Eat", requested_value_name
+		))
 	)
 
 
@@ -4304,7 +4323,7 @@ func _get_rule_request_actor(actor: Node2D, rule: Dictionary) -> Node2D:
 	# Passive location activities resolve their own authored spot and must not turn the
 	# most recent social actor into a destination.
 	var requested_state := StringName(String(rule.get("state", "")))
-	if requested_state in [&"Rest", &"Recreation"]:
+	if requested_state in [&"Eat", &"Rest", &"Recreation"]:
 		return null
 	if _rule_allows_target(rule, actor):
 		return actor

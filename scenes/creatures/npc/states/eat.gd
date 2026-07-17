@@ -229,14 +229,18 @@ func _resolve_eat_target() -> Node2D:
 func _target_can_be_eaten_at(eat_target: Node2D) -> bool:
 	if eat_target == null or not is_instance_valid(eat_target):
 		return false
+	# The NPC itself is the deliberate inventory-food target. Every other target
+	# must be an authored need spot; people must never become moving Eat spots.
+	if eat_target == npc:
+		return true
+	if not eat_target.has_method("can_serve_npc_need"):
+		_breadcrumb("npc_eat:spot_reject", "%s %s" % [_npc_label(), eat_target.name])
+		return false
 
-	if eat_target.has_method("can_serve_npc_need"):
-		var accepted := bool(eat_target.call("can_serve_npc_need", npc, &"Eat", eat_value_name))
-		if not accepted:
-			_breadcrumb("npc_eat:spot_reject", "%s %s" % [_npc_label(), eat_target.name])
-		return accepted
-
-	return true
+	var accepted := bool(eat_target.call("can_serve_npc_need", npc, &"Eat", eat_value_name))
+	if not accepted:
+		_breadcrumb("npc_eat:spot_reject", "%s %s" % [_npc_label(), eat_target.name])
+	return accepted
 
 
 func _target_uses_spot_food(eat_target: Node2D) -> bool:
