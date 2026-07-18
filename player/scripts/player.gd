@@ -4,8 +4,11 @@ class_name Player extends CharacterBody2D
 signal player_defeated
 signal hunger_changed(current_hunger: float, changed_by: float)
 
+const MOVEMENT_ANIMATIONS: Array[StringName] = [&"walk", &"run"]
+
 #region //onready variables:
 @onready var sprite_2d: Sprite2D = $Sprite2D
+@onready var movement_sprite: Sprite2D = $MovementSprite
 @onready var colider_stand: CollisionShape2D = $colider_stand
 @onready var colider_crouch: CollisionShape2D = $colider_crouch
 @onready var ongrounddetection: RayCast2D = $ongrounddetection
@@ -102,6 +105,10 @@ var knockback_timer: float = 0.0
 
 func _ready() -> void:
 	add_to_group(&"saveable")
+	var animation_callback := Callable(self, "_on_player_animation_started")
+	if not animation_player.animation_started.is_connected(animation_callback):
+		animation_player.animation_started.connect(animation_callback)
+	_sync_player_animation_visual(animation_player.current_animation)
 	rope_detector.body_entered.connect(_on_rope_detector_body_entered)
 	rope_detector.body_exited.connect(_on_rope_detector_body_exited)
 	PlayerHud.visible = true
@@ -407,9 +414,30 @@ func apply_facing_left(is_facing_left: bool) -> void:
 	var direction_x := -1.0 if is_facing_left else 1.0
 
 	sprite_2d.flip_h = is_facing_left
+	movement_sprite.flip_h = is_facing_left
 	ledgedetec.position.x = abs(ledgedetec.position.x) * direction_x
 	ledgedetec.target_position.x = abs(ledgedetec.target_position.x) * direction_x
 	ledgegrabcolider.scale.x = direction_x
+
+
+func get_active_visual_sprite() -> Sprite2D:
+	if movement_sprite != null and movement_sprite.visible:
+		return movement_sprite
+	return sprite_2d
+
+
+func _on_player_animation_started(animation_name: StringName) -> void:
+	_sync_player_animation_visual(animation_name)
+
+
+func _sync_player_animation_visual(animation_name: StringName) -> void:
+	var uses_movement_sprite := MOVEMENT_ANIMATIONS.has(animation_name)
+	movement_sprite.visible = uses_movement_sprite
+	sprite_2d.visible = not uses_movement_sprite and not _player_visual_is_hidden()
+
+
+func _player_visual_is_hidden() -> bool:
+	return not states.is_empty() and current_state is PlayerStateHidden
 
 
 func toggle_rope() -> void:
@@ -611,6 +639,8 @@ func sync_knockout_bar() -> void:
 
 
 func update_player_needs(delta: float) -> void:
+	if _is_world_progression_locked():
+		return
 	if not player_needs_enabled:
 		return
 
@@ -625,6 +655,8 @@ func update_player_needs(delta: float) -> void:
 
 
 func update_passive_healing(delta: float) -> void:
+	if _is_world_progression_locked():
+		return
 	if passive_healing_per_game_day <= 0.0 or hp <= 0.0 or hp >= max_hp:
 		return
 
@@ -737,6 +769,17 @@ func _get_game_hours_for_real_seconds(real_seconds: float) -> float:
 		return 0.0
 
 	return (maxf(real_seconds, 0.0) / real_seconds_per_day) * 24.0
+
+
+func _is_world_progression_locked() -> bool:
+	if not is_inside_tree() or get_tree() == null:
+		return false
+	var gameplay_flow := get_tree().root.get_node_or_null("GameplayFlow")
+	return (
+		gameplay_flow != null
+		and gameplay_flow.has_method("is_world_progression_locked")
+		and bool(gameplay_flow.call("is_world_progression_locked"))
+	)
 
 
 func update_mana_charge(delta: float) -> void:

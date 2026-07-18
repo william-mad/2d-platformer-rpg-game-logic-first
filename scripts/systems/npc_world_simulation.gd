@@ -40,6 +40,7 @@ var spot_claim_counts: Dictionary = {}
 var spot_runtime_states: Dictionary = {}
 var simulation_timer: float = 0.0
 var simulation_queued: bool = false
+var simulation_dirty_while_locked: bool = false
 var social_rng := RandomNumberGenerator.new()
 var _social_planner := NpcSocialPlanner.new()
 var _social_planning_suppressed: bool = false
@@ -85,7 +86,14 @@ func _ready() -> void:
 		if not world_time.is_connected(&"hour_changed", hour_callback):
 			world_time.connect(&"hour_changed", hour_callback)
 	if world_time != null and world_time.has_method("get_snapshot"):
-		_process_meal_cycle_schedule_until_snapshot(world_time.call("get_snapshot"))
+		if not _defer_simulation_while_world_progression_locked():
+			_process_meal_cycle_schedule_until_snapshot(world_time.call("get_snapshot"))
+
+	var gameplay_flow := get_node_or_null("/root/GameplayFlow")
+	if gameplay_flow != null and gameplay_flow.has_signal(&"world_progression_unlocked"):
+		var unlock_callback := Callable(self, "_on_world_progression_unlocked")
+		if not gameplay_flow.is_connected(&"world_progression_unlocked", unlock_callback):
+			gameplay_flow.connect(&"world_progression_unlocked", unlock_callback)
 
 	var locations := get_node_or_null("/root/NpcLocations")
 	if locations != null and locations.has_signal(&"npc_registered"):
@@ -249,6 +257,8 @@ func _notify_live_spot_value(spot_id: StringName, value: float) -> void:
 
 
 func _on_world_day_changed(_day: int, _snapshot: Dictionary) -> void:
+	if _defer_simulation_while_world_progression_locked():
+		return
 	for spot_id_key in spot_runtime_states.keys():
 		var state = spot_runtime_states[spot_id_key]
 		if not (state is Dictionary):
@@ -268,6 +278,8 @@ func _on_world_day_changed(_day: int, _snapshot: Dictionary) -> void:
 
 func _on_world_hour_changed(_hour: int, snapshot: Dictionary) -> void:
 	# Scheduled windows commonly open on the hour, so dispatch eligible owners immediately.
+	if _defer_simulation_while_world_progression_locked():
+		return
 	if _world_simulation_debug_disabled():
 		_log_world_simulation_disabled("hour_changed")
 		return
@@ -292,7 +304,28 @@ func _on_npc_state_changed(state_name: StringName, _previous_state_name: StringN
 		_queue_simulation()
 
 
+func _on_world_progression_unlocked() -> void:
+	if not simulation_dirty_while_locked:
+		return
+	simulation_dirty_while_locked = false
+	_queue_simulation()
+
+
+func _defer_simulation_while_world_progression_locked(mark_dirty: bool = true) -> bool:
+	var gameplay_flow := get_node_or_null("/root/GameplayFlow")
+	var locked := (
+		gameplay_flow != null
+		and gameplay_flow.has_method("is_world_progression_locked")
+		and bool(gameplay_flow.call("is_world_progression_locked"))
+	)
+	if locked and mark_dirty:
+		simulation_dirty_while_locked = true
+	return locked
+
+
 func _queue_simulation() -> void:
+	if _defer_simulation_while_world_progression_locked():
+		return
 	if _world_simulation_debug_disabled():
 		_log_world_simulation_disabled("queue")
 		return
@@ -304,6 +337,9 @@ func _queue_simulation() -> void:
 
 
 func _run_queued_simulation() -> void:
+	if _defer_simulation_while_world_progression_locked():
+		simulation_queued = false
+		return
 	if _world_simulation_debug_disabled():
 		_log_world_simulation_disabled("queued")
 		simulation_queued = false
@@ -313,6 +349,8 @@ func _run_queued_simulation() -> void:
 
 
 func _process(delta: float) -> void:
+	if _defer_simulation_while_world_progression_locked(false):
+		return
 	if _world_simulation_debug_disabled():
 		_log_world_simulation_disabled("process")
 		return
@@ -327,6 +365,8 @@ func _process(delta: float) -> void:
 
 func simulate_now() -> void:
 	# Only saved records are simulated; unloaded NPC scenes never need a running state machine.
+	if _defer_simulation_while_world_progression_locked():
+		return
 	if _world_simulation_debug_disabled():
 		_log_world_simulation_disabled("simulate_now")
 		return

@@ -40,6 +40,15 @@ const PLAYER_INTERACTION_BLOCKED_STATE_REASONS := {
 	"ReactToEvent": "npc_emergency_reaction",
 }
 
+const SCRIPTED_CONTROL_EMERGENCY_STATES := {
+	"Fight": true,
+	"Flee": true,
+	"Downed": true,
+	"DisabledDead": true,
+	"Collapse": true,
+	"ReactToEvent": true,
+}
+
 enum MonsterSightReaction {
 	NONE,
 	FIGHT,
@@ -345,6 +354,14 @@ var player_interaction_hold_actor: Node2D
 var player_interaction_cooldown_timer: float = 0.0
 var player_interaction_cooldown_actor: Node2D
 var passive_need_skip_logged: bool = false
+var scripted_control_claim_token: int = 0
+var scripted_control_owner: WeakRef
+var scripted_control_reason: StringName = &""
+var scripted_control_allows_emergencies: bool = false
+var _scripted_hold_animation: StringName = &"idle"
+var _scripted_facing_target: WeakRef
+var _logged_scripted_control_stale_commands: Dictionary = {}
+var _logged_scripted_control_autonomous_rejections: Dictionary = {}
 
 var primary_state: NpcState:
 	get:
@@ -394,6 +411,7 @@ func _ready() -> void:
 
 	_cache_optional_nodes()
 	initialize_states()
+	_bind_npc_control_claim_notifications()
 
 	if active and current_state == null:
 		request_state(initial_state_name, null, "initial")
@@ -449,7 +467,9 @@ func _physics_process(delta: float) -> void:
 	var requested_state := state_at_start.physics_process(delta)
 
 	if requested_state != null and state_at_start == current_state:
-		if _pending_stale_reconciliation_matches(state_at_start, requested_state):
+		if _has_scripted_control_claim():
+			_handle_scripted_control_state_return(state_at_start, requested_state)
+		elif _pending_stale_reconciliation_matches(state_at_start, requested_state):
 			_commit_stale_state_reconciliation(state_at_start, requested_state)
 		else:
 			change_state(requested_state, "state_tick")
@@ -535,6 +555,327 @@ func get_state(state_name: StringName) -> NpcState:
 	return _state_lookup.get(key, null) as NpcState
 
 
+func request_scripted_state(
+	claim_token: int,
+	state_name: StringName,
+	target_node: Node = null,
+	arrival_state: StringName = &"ScriptedHold",
+	reason: StringName = &"scripted_event"
+) -> bool:
+	if not _scripted_control_claim_token_is_current(claim_token):
+		_warn_stale_scripted_control_command(&"request_scripted_state", claim_token)
+		return false
+	if state_name == &"":
+		return _reject_state_request(state_name, "empty_scripted_state")
+
+	var requested_state_name := state_name
+	if requested_state_name == &"Idle":
+		requested_state_name = &"ScriptedHold"
+	if requested_state_name == &"ScriptedHold":
+		return _reconcile_to_scripted_hold("scripted_event_hold")
+
+	var target_2d := target_node as Node2D
+	if target_node != null and (target_2d == null or not is_instance_valid(target_2d)):
+		return _reject_state_request(requested_state_name, "invalid_scripted_target")
+	if requested_state_name == &"MoveToTarget" and target_2d == null:
+		return _reject_state_request(requested_state_name, "missing_scripted_move_target")
+
+	var scripted_arrival := arrival_state
+	if scripted_arrival in [&"", &"Idle", &"MoveToTarget"]:
+		scripted_arrival = &"ScriptedHold"
+	var destination_action_kind := requested_state_name
+	if requested_state_name == &"MoveToTarget" and scripted_arrival != &"ScriptedHold":
+		destination_action_kind = scripted_arrival
+	return _request_state_direct(
+		requested_state_name,
+		target_2d,
+		String(reason),
+		maxi(current_state_priority, 1000),
+		{
+			"request_source": &"scripted_event",
+			"scripted_claim_token": claim_token,
+			"destination_action_kind": destination_action_kind,
+			"arrival_state": scripted_arrival,
+		}
+	)
+
+
+func set_scripted_hold_animation(claim_token: int, animation_name: StringName) -> bool:
+	if not _scripted_control_claim_token_is_current(claim_token):
+		_warn_stale_scripted_control_command(&"set_scripted_hold_animation", claim_token)
+		return false
+	_scripted_hold_animation = animation_name
+	if _current_state_is(&"ScriptedHold") and animation_name != &"":
+		play_animation(animation_name)
+	return true
+
+
+func set_scripted_facing_target(claim_token: int, target_node: Node) -> bool:
+	if not _scripted_control_claim_token_is_current(claim_token):
+		_warn_stale_scripted_control_command(&"set_scripted_facing_target", claim_token)
+		return false
+	if target_node != null and not is_instance_valid(target_node):
+		return false
+	_scripted_facing_target = weakref(target_node) if target_node != null else null
+	return true
+
+
+func get_scripted_hold_animation() -> StringName:
+	return _scripted_hold_animation
+
+
+func get_scripted_facing_target() -> Node:
+	if _scripted_facing_target == null:
+		return null
+	return _scripted_facing_target.get_ref() as Node
+
+
+func _bind_npc_control_claim_notifications() -> void:
+	var gameplay_flow := get_node_or_null("/root/GameplayFlow")
+	if gameplay_flow == null or not gameplay_flow.has_signal(&"npc_control_claim_changed"):
+		return
+	var callback := Callable(self, "_on_npc_control_claim_changed")
+	if not gameplay_flow.is_connected(&"npc_control_claim_changed", callback):
+		gameplay_flow.connect(&"npc_control_claim_changed", callback)
+	if npc != null and gameplay_flow.has_method("is_npc_control_claimed"):
+		if bool(gameplay_flow.call("is_npc_control_claimed", npc)):
+			var claim: Dictionary = gameplay_flow.call("get_npc_control_claim", npc)
+			_apply_scripted_control_claim(claim)
+
+
+func _on_npc_control_claim_changed(claimed_npc: Node, claimed: bool, token_id: int) -> void:
+	if claimed_npc != npc:
+		return
+	if claimed:
+		var gameplay_flow := get_node_or_null("/root/GameplayFlow")
+		if gameplay_flow == null or not gameplay_flow.has_method("get_npc_control_claim"):
+			return
+		var claim: Dictionary = gameplay_flow.call("get_npc_control_claim", npc)
+		if int(claim.get("token_id", 0)) != token_id:
+			return
+		_apply_scripted_control_claim(claim)
+		return
+	_release_scripted_control_claim(token_id)
+
+
+func _apply_scripted_control_claim(claim: Dictionary) -> void:
+	if npc == null or claim.is_empty():
+		return
+	var npc_ref := claim.get("npc") as WeakRef
+	if npc_ref == null or npc_ref.get_ref() != npc:
+		return
+	var token_id := int(claim.get("token_id", 0))
+	if token_id == 0:
+		return
+
+	scripted_control_claim_token = token_id
+	scripted_control_owner = claim.get("owner") as WeakRef
+	scripted_control_reason = StringName(claim.get("reason", &""))
+	scripted_control_allows_emergencies = bool(
+		claim.get("allow_emergency_interrupts", false)
+	)
+	_scripted_hold_animation = &"idle"
+	_scripted_facing_target = null
+	_logged_scripted_control_stale_commands.clear()
+	_logged_scripted_control_autonomous_rejections.clear()
+
+	if _player_interaction_hold_is_active():
+		_invalidate_player_interaction_hold("scripted_control_claimed")
+	if interaction_overlay != null:
+		_cancel_interaction_overlay("scripted_control_claimed")
+	_cancel_and_clear_active_action("scripted_control_claimed")
+	_proposed_action = null
+	_action_state_reconciliation_requested = false
+	_action_state_reconciliation_force_reentry = false
+	_pending_stale_state_reconciliation.clear()
+	_reconcile_to_scripted_hold("scripted_control_claimed", false)
+
+
+func _release_scripted_control_claim(token_id: int) -> void:
+	if token_id == 0 or token_id != scripted_control_claim_token:
+		_warn_stale_scripted_control_command(&"release_notification", token_id)
+		return
+
+	if interaction_overlay != null:
+		_cancel_interaction_overlay("scripted_control_released")
+	_cancel_and_clear_active_action("scripted_control_released")
+	_proposed_action = null
+	_action_state_reconciliation_requested = false
+	_action_state_reconciliation_force_reentry = false
+	_pending_stale_state_reconciliation.clear()
+
+	scripted_control_claim_token = 0
+	scripted_control_owner = null
+	scripted_control_reason = &""
+	scripted_control_allows_emergencies = false
+	_scripted_hold_animation = &"idle"
+	_scripted_facing_target = null
+	_logged_scripted_control_stale_commands.clear()
+	_logged_scripted_control_autonomous_rejections.clear()
+
+	var idle_state := get_state(&"Idle")
+	if idle_state != null:
+		_commit_state_change(idle_state, "scripted_control_released", 1000)
+	_queue_idle_value_reaction_check()
+
+
+func _cancel_and_clear_active_action(reason: String) -> void:
+	if active_action == null:
+		return
+	var session_id := active_action.session_id
+	if active_action.status not in [
+		NpcActionSession.Status.COMPLETED,
+		NpcActionSession.Status.FAILED,
+	]:
+		cancel_active_action(session_id, reason)
+	if (
+		active_action != null
+		and active_action.session_id == session_id
+		and active_action.status in [
+			NpcActionSession.Status.COMPLETED,
+			NpcActionSession.Status.FAILED,
+		]
+	):
+		clear_terminal_action(session_id)
+
+
+func _reconcile_to_scripted_hold(reason: String, cancel_action: bool = true) -> bool:
+	if not _has_scripted_control_claim():
+		return false
+	if cancel_action:
+		_cancel_and_clear_active_action(reason)
+	var hold_state := get_state(&"ScriptedHold")
+	if hold_state == null:
+		return _reject_state_request(&"ScriptedHold", "missing_scripted_hold")
+	if current_state == hold_state:
+		if npc != null:
+			npc.velocity.x = 0.0
+		return true
+	_action_state_reconciliation_requested = false
+	_action_state_reconciliation_force_reentry = false
+	_pending_stale_state_reconciliation.clear()
+	return _commit_state_change(hold_state, reason, 1000)
+
+
+func _handle_scripted_control_state_return(
+	state_at_start: NpcState,
+	requested_state: NpcState
+) -> void:
+	if state_at_start == null or requested_state == null or state_at_start != current_state:
+		return
+	var requested_name := StringName(requested_state.name)
+	if requested_name == &"ScriptedHold":
+		_reconcile_to_scripted_hold("scripted_event_arrived")
+		return
+	if (
+		scripted_control_allows_emergencies
+		and _is_scripted_control_emergency_state(requested_name)
+	):
+		_commit_state_change(requested_state, "scripted_control_emergency", current_state_priority)
+		return
+	if _is_current_scripted_action_arrival(requested_name):
+		_commit_state_change(requested_state, "scripted_event_arrived", current_state_priority)
+		return
+	_reconcile_to_scripted_hold("scripted_control_state_return")
+
+
+func _is_current_scripted_action_arrival(state_name: StringName) -> bool:
+	if active_action == null or active_action.source != &"scripted_event":
+		return false
+	if int(active_action.metadata.get("scripted_claim_token", 0)) != scripted_control_claim_token:
+		return false
+	return active_action.arrival_state == state_name
+
+
+func _has_scripted_control_claim() -> bool:
+	return scripted_control_claim_token != 0
+
+
+func _scripted_control_claim_token_is_current(claim_token: int) -> bool:
+	if claim_token == 0 or claim_token != scripted_control_claim_token or npc == null:
+		return false
+	var gameplay_flow := get_node_or_null("/root/GameplayFlow")
+	if gameplay_flow == null or not gameplay_flow.has_method("get_npc_control_claim"):
+		return false
+	var claim: Dictionary = gameplay_flow.call("get_npc_control_claim", npc)
+	if int(claim.get("token_id", 0)) != claim_token:
+		return false
+	var npc_ref := claim.get("npc") as WeakRef
+	return npc_ref != null and npc_ref.get_ref() == npc
+
+
+func _scripted_control_request_is_allowed(
+	state_name: StringName,
+	request_context: Dictionary
+) -> bool:
+	if not _has_scripted_control_claim():
+		return true
+	var claim_token := int(request_context.get("scripted_claim_token", 0))
+	if (
+		StringName(request_context.get("request_source", &"")) == &"scripted_event"
+		and _scripted_control_claim_token_is_current(claim_token)
+	):
+		return true
+	return (
+		scripted_control_allows_emergencies
+		and _is_scripted_control_emergency_state(state_name)
+	)
+
+
+func _is_scripted_control_emergency_state(state_name: StringName) -> bool:
+	return SCRIPTED_CONTROL_EMERGENCY_STATES.has(String(state_name))
+
+
+func _get_scripted_control_request_source(
+	request_context: Dictionary,
+	reason: String,
+	state_name: StringName
+) -> StringName:
+	if request_context.has("request_source"):
+		return StringName(request_context["request_source"])
+	if _proposed_action != null:
+		return _proposed_action.source
+	return _get_action_source(reason, null, state_name)
+
+
+func _reject_claimed_autonomous_request(
+	state_name: StringName,
+	request_source: StringName
+) -> bool:
+	var source := request_source if request_source != &"" else &"unknown"
+	last_state_request_failure_reason = "scripted_control_claimed"
+	_breadcrumb(
+		"npc_state:scripted_control_reject",
+		"%s state=%s source=%s" % [_get_npc_label(), String(state_name), String(source)]
+	)
+	var log_key := "%s|%s" % [String(source), String(state_name)]
+	if OS.is_debug_build() and not _logged_scripted_control_autonomous_rejections.has(log_key):
+		_logged_scripted_control_autonomous_rejections[log_key] = true
+		push_warning(
+			"NPC autonomous request rejected while claimed: npc=%s state=%s source=%s"
+			% [_get_npc_label(), String(state_name), String(source)]
+		)
+	state_request_failed.emit(state_name, last_state_request_failure_reason)
+	return false
+
+
+func _warn_stale_scripted_control_command(command: StringName, claim_token: int) -> void:
+	if not OS.is_debug_build():
+		return
+	var log_key := "%s|%d|%d" % [
+		String(command), claim_token, scripted_control_claim_token
+	]
+	if _logged_scripted_control_stale_commands.has(log_key):
+		return
+	_logged_scripted_control_stale_commands[log_key] = true
+	push_warning(
+		"Stale NPC scripted-control command rejected: npc=%s command=%s token=%d current=%d"
+		% [
+			_get_npc_label(), String(command), claim_token, scripted_control_claim_token
+		]
+	)
+
+
 func change_state(
 	new_state: NpcState,
 	reason: String = "",
@@ -543,6 +884,14 @@ func change_state(
 	# Switches the active child state and gives the old state a clean exit.
 	if new_state == null:
 		return false
+	if _has_scripted_control_claim() and String(new_state.name) != "ScriptedHold":
+		if not (
+			scripted_control_allows_emergencies
+			and _is_scripted_control_emergency_state(StringName(new_state.name))
+		):
+			return _reject_claimed_autonomous_request(
+				StringName(new_state.name), StringName(reason if not reason.is_empty() else "change_state")
+			)
 	if String(new_state.name) == "Talk":
 		var requested_partner := get_talk_target()
 		var overlay_priority := maxi(request_priority, get_effective_task_priority())
@@ -676,6 +1025,10 @@ func request_state(
 	request_priority: int = 0
 ) -> bool:
 	# External code can call this to force a state without waiting for value rules.
+	if not _scripted_control_request_is_allowed(state_name, {}):
+		return _reject_claimed_autonomous_request(
+			state_name, _get_scripted_control_request_source({}, reason, state_name)
+		)
 	if state_name == &"":
 		return _reject_state_request(state_name, "empty_state")
 	if String(state_name) == "Talk":
@@ -707,6 +1060,11 @@ func _request_state_direct(
 	request_context: Dictionary = {}
 ) -> bool:
 	# Resolve and validate first. Request-owned targets are committed only once change_state accepts.
+	if not _scripted_control_request_is_allowed(state_name, request_context):
+		return _reject_claimed_autonomous_request(
+			state_name,
+			_get_scripted_control_request_source(request_context, reason, state_name)
+		)
 	var requested_state := get_state(state_name)
 	if requested_state == null:
 		return _reject_state_request(state_name, "Missing state: %s" % String(state_name))
@@ -867,6 +1225,8 @@ func request_action_from_descriptor(descriptor: Dictionary, live_target: Node2D 
 	if action_kind == &"":
 		return _reject_state_request(action_kind, "action_kind_missing")
 	var action_source := StringName(String(descriptor.get("source", "schedule")))
+	if not _scripted_control_request_is_allowed(action_kind, {}):
+		return _reject_claimed_autonomous_request(action_kind, action_source)
 	var session := NpcActionSessionModel.create(
 		_get_action_owner_id(),
 		action_kind,
@@ -913,6 +1273,9 @@ func request_action_movement_from_descriptor(
 	movement_target: Node2D,
 	destination_action_kind: StringName = &"Idle"
 ) -> bool:
+	var movement_source := StringName(String(descriptor.get("source", "schedule")))
+	if not _scripted_control_request_is_allowed(&"MoveToTarget", {}):
+		return _reject_claimed_autonomous_request(&"MoveToTarget", movement_source)
 	if movement_target == null or not is_instance_valid(movement_target):
 		return _reject_state_request(&"MoveToTarget", "movement_target_invalid")
 	var logical_kind := StringName(String(descriptor.get(
@@ -1107,6 +1470,13 @@ func clear_terminal_action(session_id: String) -> bool:
 
 
 func restore_action_descriptor(descriptor: Dictionary) -> bool:
+	var restored_kind := StringName(String(descriptor.get(
+		"action_kind", descriptor.get("state_name", "")
+	)))
+	if not _scripted_control_request_is_allowed(restored_kind, {}):
+		return _reject_claimed_autonomous_request(
+			restored_kind, StringName(String(descriptor.get("source", "world_simulation")))
+		)
 	if descriptor.is_empty():
 		return false
 	var session := NpcActionSessionModel.create(
@@ -1334,6 +1704,12 @@ func _commit_action_state_reconciliation(
 ) -> bool:
 	if state_to_replace == null or destination == null or state_to_replace != current_state:
 		return false
+	if _has_scripted_control_claim() and String(destination.name) != "ScriptedHold":
+		if not (
+			scripted_control_allows_emergencies
+			and _is_scripted_control_emergency_state(StringName(destination.name))
+		):
+			return _reconcile_to_scripted_hold("scripted_control_action_reconcile")
 	var priority := active_action.priority if active_action != null else 0
 	if destination == state_to_replace:
 		return _commit_current_state_reentry(reason, priority)
@@ -1672,9 +2048,15 @@ func _consume_or_build_action_session(
 		)))
 	var descriptor := {
 		"priority": request_priority,
-		"source": String(_get_action_source(reason, actor, logical_kind)),
+		"source": String(request_context.get(
+			"request_source", _get_action_source(reason, actor, logical_kind)
+		)),
 		"start_world_time": _get_world_total_hours(),
 	}
+	if request_context.has("scripted_claim_token"):
+		descriptor["metadata"] = {
+			"scripted_claim_token": int(request_context["scripted_claim_token"]),
+		}
 	if String(action_kind) == "MoveToTarget":
 		descriptor["phase"] = "moving_to_target"
 		var arrival_state := StringName(String(request_context.get(
@@ -2519,6 +2901,8 @@ func can_begin_player_interaction(actor: Node2D = null) -> Dictionary:
 		return {"accepted": false, "reason": "invalid_player"}
 	if not active or npc == null or not is_instance_valid(npc):
 		return {"accepted": false, "reason": "npc_inactive"}
+	if _has_scripted_control_claim():
+		return {"accepted": false, "reason": "npc_scripted_controlled"}
 	if actor != null and is_ignoring_player_interaction(actor):
 		return {"accepted": false, "reason": "npc_ignoring_player"}
 	if get_value(&"hp", 1.0) <= 0.0:
@@ -2632,6 +3016,8 @@ func is_ignoring_player_interaction(actor: Node2D = null) -> bool:
 
 
 func can_accept_talk_request(candidate: Node2D, request_priority: int = -1) -> bool:
+	if _has_scripted_control_claim():
+		return false
 	var priority := request_priority
 	if priority < 0:
 		priority = npc_talk_handshake_priority
@@ -2704,6 +3090,8 @@ func _request_talk_state(
 	require_mutual_handshake: bool,
 	initiating_source: StringName
 ) -> bool:
+	if _has_scripted_control_claim():
+		return _reject_claimed_autonomous_request(&"Talk", initiating_source)
 	if new_target == null or not is_instance_valid(new_target) or new_target == npc:
 		return _reject_state_request(&"Talk", "invalid_talk_target")
 	if _current_state_is(&"LookForTalkTarget"):
@@ -2801,6 +3189,8 @@ func _accept_talk_request(
 	requested_session_id: String = "",
 	initiating_source: StringName = &""
 ) -> bool:
+	if _has_scripted_control_claim():
+		return _reject_claimed_autonomous_request(&"Talk", initiating_source)
 	if _talk_request_is_already_being_handled(new_target):
 		return true
 
@@ -3614,6 +4004,10 @@ func get_game_hours_for_real_seconds(real_seconds: float, fallback_game_hours: f
 
 func _update_passive_needs(delta: float) -> void:
 	# Raises background needs in game-time chunks instead of every physics frame.
+	if _has_scripted_control_claim():
+		return
+	if _is_world_progression_locked():
+		return
 	if (
 		DebugToolsConfig.TROUBLESHOOTING_MODE
 		and DebugToolsConfig.DEBUG_DISABLE_PASSIVE_NEEDS
@@ -3991,6 +4385,8 @@ func _get_real_seconds_per_day() -> float:
 
 func _queue_idle_value_reaction_check() -> void:
 	# Defers the idle rule check so the state stack finishes changing first.
+	if _has_scripted_control_claim():
+		return
 	if idle_value_reaction_queued:
 		return
 
@@ -4001,10 +4397,14 @@ func _queue_idle_value_reaction_check() -> void:
 func _run_idle_value_reaction_check() -> void:
 	# Runs need reactions that were waiting for the NPC to become idle again.
 	idle_value_reaction_queued = false
+	if _has_scripted_control_claim():
+		return
 	if suppress_next_idle_value_reaction_check:
 		suppress_next_idle_value_reaction_check = false
 		if is_inside_tree() and active and _value_reactions_enabled():
 			evaluate_persistent_combat_reactions(last_event_actor)
+		return
+	if _is_world_progression_locked():
 		return
 
 	if not is_inside_tree() or not active or not _value_reactions_enabled() or current_state == null:
@@ -4014,6 +4414,17 @@ func _run_idle_value_reaction_check() -> void:
 		return
 
 	evaluate_value_reactions(last_event_actor, {})
+
+
+func _is_world_progression_locked() -> bool:
+	if not is_inside_tree() or get_tree() == null:
+		return false
+	var gameplay_flow := get_tree().root.get_node_or_null("GameplayFlow")
+	return (
+		gameplay_flow != null
+		and gameplay_flow.has_method("is_world_progression_locked")
+		and bool(gameplay_flow.call("is_world_progression_locked"))
+	)
 
 
 func _resolve_npc() -> void:

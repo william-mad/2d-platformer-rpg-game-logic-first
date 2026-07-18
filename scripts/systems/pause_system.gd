@@ -4,8 +4,7 @@ extends Node
 @export var stats_overlay_scene: PackedScene = preload("res://scenes/ui/character_stats_overlay.tscn")
 
 var stats_overlay: CharacterStatsOverlay
-var saved_world_time_auto_advance: bool = true
-var has_saved_world_time_auto_advance: bool = false
+var world_progression_lock_token: int = 0
 
 
 func _ready() -> void:
@@ -29,7 +28,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func set_paused(should_pause: bool, show_stats_overlay: bool = true) -> void:
-	_set_world_time_paused(should_pause)
+	_set_world_progression_paused(should_pause)
 	get_tree().paused = should_pause
 	_ensure_stats_overlay()
 
@@ -61,29 +60,23 @@ func _ensure_stats_overlay() -> void:
 	get_tree().root.add_child(stats_overlay)
 
 
-func _set_world_time_paused(should_pause: bool) -> void:
-	var world_time := get_node_or_null("/root/WorldTime")
-	if world_time == null or not _has_property(world_time, &"auto_advance"):
+func _set_world_progression_paused(should_pause: bool) -> void:
+	var gameplay_flow := get_node_or_null("/root/GameplayFlow")
+	if gameplay_flow == null:
 		return
 
 	if should_pause:
-		if not has_saved_world_time_auto_advance:
-			saved_world_time_auto_advance = bool(world_time.get(&"auto_advance"))
-			has_saved_world_time_auto_advance = true
-		world_time.set(&"auto_advance", false)
+		if world_progression_lock_token == 0:
+			world_progression_lock_token = int(gameplay_flow.call(
+				"acquire_world_progression_lock", self, &"pause_system"
+			))
 		return
 
-	if has_saved_world_time_auto_advance:
-		world_time.set(&"auto_advance", saved_world_time_auto_advance)
-		has_saved_world_time_auto_advance = false
-
-
-func _has_property(object: Object, property_name: StringName) -> bool:
-	for property in object.get_property_list():
-		if String(property.get("name", "")) == String(property_name):
-			return true
-
-	return false
+	if world_progression_lock_token != 0:
+		gameplay_flow.call(
+			"release_world_progression_lock", world_progression_lock_token, self
+		)
+		world_progression_lock_token = 0
 
 
 func _is_game_over_active() -> bool:

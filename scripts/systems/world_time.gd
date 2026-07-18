@@ -44,7 +44,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if auto_advance:
+	if auto_advance and not _is_world_progression_locked():
 		advance_real_seconds(delta)
 
 
@@ -240,3 +240,12 @@ func _daylight_length_hours() -> float:
 
 func _safe_real_seconds_per_day() -> float:
 	return maxf(real_seconds_per_day, 0.001)
+
+
+func _is_world_progression_locked() -> bool:
+	var gameplay_flow := get_node_or_null("/root/GameplayFlow")
+	return (
+		gameplay_flow != null
+		and gameplay_flow.has_method("is_world_progression_locked")
+		and bool(gameplay_flow.call("is_world_progression_locked"))
+	)

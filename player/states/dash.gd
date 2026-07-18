@@ -156,7 +156,7 @@ func _spawn_afterimage() -> void:
 	if not afterimage_enabled:
 		return
 
-	var source := player.sprite_2d
+	var source := player.get_active_visual_sprite()
 	if source == null or source.texture == null:
 		return
 
@@ -193,7 +193,8 @@ func _spawn_dash_streak() -> void:
 	streak.z_index = 30
 	streak.top_level = true
 
-	var center := player.sprite_2d.global_position if player.sprite_2d != null else player.global_position
+	var active_sprite := player.get_active_visual_sprite()
+	var center := active_sprite.global_position if active_sprite != null else player.global_position
 	var start := center - Vector2(dash_direction * absf(streak_length), 0.0)
 	var end := center + Vector2(dash_direction * 12.0, 0.0)
 	streak.add_point(start)

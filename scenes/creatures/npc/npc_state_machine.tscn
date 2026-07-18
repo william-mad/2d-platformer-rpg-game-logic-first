@@ -20,6 +20,7 @@
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/invite_player.gd" id="18_invite_player"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/look_for_monster.gd" id="19_look_monster"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/states/travel_follow.gd" id="20_travel_follow"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/scripted_hold.gd" id="21_scripted_hold"]
 
 [node name="NpcStateMachine" type="Node"]
 script = ExtResource("1_machine")
@@ -27,6 +28,12 @@ script = ExtResource("1_machine")
 [node name="Idle" type="Node" parent="."]
 unique_name_in_owner = true
 script = ExtResource("2_idle")
+animation_name = &"idle"
+stop_horizontal_on_enter = true
+
+[node name="ScriptedHold" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("21_scripted_hold")
 animation_name = &"idle"
 stop_horizontal_on_enter = true
 
