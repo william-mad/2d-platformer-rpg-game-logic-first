@@ -9,6 +9,7 @@ const MENU_INTERACTION := &"interaction"
 const MENU_TALK := &"talk"
 const MENU_GOSSIP := &"gossip"
 const MENU_NPC_PROMPT := &"npc_prompt"
+const DEFAULT_DIALOGUE_METADATA := &"default_dialogue_definition"
 
 @export_group("Interaction")
 @export var interaction_action: StringName = &"up"
@@ -122,6 +123,10 @@ func _exit_tree() -> void:
 
 func _process(delta: float) -> void:
 	cooldown = maxf(cooldown - delta, 0.0)
+	if _player_gameplay_control_is_claimed():
+		if _menu_is_open():
+			close_for_scripted_handoff()
+		return
 
 	if _menu_is_open():
 		_tick_menu_timer(delta)
@@ -249,7 +254,8 @@ func _show_interaction_menu(feedback: String = "") -> void:
 		and menu_target_npc.has_method("can_trade_with_player")
 		and bool(menu_target_npc.call("can_trade_with_player", player))
 	)
-	var options := PackedStringArray(["Talk"])
+	var has_modal_dialogue := _get_dialogue_definition(menu_target_npc) != null
+	var options := PackedStringArray(["Dialogue" if has_modal_dialogue else "Talk"])
 	interaction_menu_actions = [&"talk"]
 	if menu_target_can_trade:
 		options.append("Trade")
@@ -388,6 +394,10 @@ func _handle_interaction_option(selected_index: int) -> void:
 		return
 	var selected_action := interaction_menu_actions[selected_index]
 	if selected_action == &"talk":
+		var definition := _get_dialogue_definition(menu_target_npc)
+		if definition != null:
+			_try_begin_modal_dialogue(definition)
+			return
 		active_menu = MENU_TALK
 		_show_talk_menu("")
 		return
@@ -826,6 +836,73 @@ func _close_menu(release_target_hold: bool = true) -> void:
 	if menu_panel != null and is_instance_valid(menu_panel):
 		menu_panel.visible = false
 	_unwatch_target_interaction_gate()
+
+
+func close_for_scripted_handoff() -> bool:
+	if not _menu_is_open():
+		return false
+	if menu_target_npc != null and is_instance_valid(menu_target_npc):
+		_end_target_menu_hold(menu_target_npc)
+	elif menu_hold_machine != null and is_instance_valid(menu_hold_machine):
+		menu_hold_machine.end_player_interaction_hold(player)
+	_close_menu(false)
+	cooldown = 0.0
+	return true
+
+
+func _try_begin_modal_dialogue(definition: DialogueDefinition) -> void:
+	var target_npc := menu_target_npc
+	if target_npc == null or not is_instance_valid(target_npc):
+		_close_menu()
+		return
+	var controller := get_node_or_null("/root/DialogueController")
+	if controller == null or not controller.has_method("begin_dialogue"):
+		interaction_blocked.emit(player, target_npc, &"dialogue", "dialogue_controller_missing")
+		_show_interaction_menu("Dialogue is unavailable.")
+		return
+
+	# The interaction menu owns a temporary NPC hold. End that hold without effects or
+	# cooldown before the modal controller acquires its stronger tokenized ownership.
+	close_for_scripted_handoff()
+	var result: Dictionary = controller.call("begin_dialogue", player, target_npc, definition)
+	if bool(result.get("accepted", false)):
+		interaction_started.emit(player, target_npc, &"dialogue")
+		return
+
+	var reason := String(result.get("reason", "dialogue_rejected"))
+	interaction_blocked.emit(player, target_npc, &"dialogue", reason)
+	if (
+		player != null
+		and is_instance_valid(player)
+		and target_npc != null
+		and is_instance_valid(target_npc)
+		and _is_valid_npc_candidate(target_npc)
+		and player.global_position.distance_to(target_npc.global_position) <= max_distance
+	):
+		menu_target_npc = target_npc
+		active_menu = MENU_INTERACTION
+		_show_interaction_menu("Dialogue unavailable: %s" % reason.replace("_", " "))
+	cooldown = 0.0
+
+
+func _get_dialogue_definition(target_npc: Node) -> DialogueDefinition:
+	if target_npc == null or not is_instance_valid(target_npc):
+		return null
+	if not target_npc.has_meta(DEFAULT_DIALOGUE_METADATA):
+		return null
+	var definition := target_npc.get_meta(DEFAULT_DIALOGUE_METADATA) as DialogueDefinition
+	if definition == null or not definition.get_validation_error().is_empty():
+		return null
+	return definition
+
+
+func _player_gameplay_control_is_claimed() -> bool:
+	return (
+		player != null
+		and is_instance_valid(player)
+		and player.has_method("is_gameplay_control_claimed")
+		and bool(player.call("is_gameplay_control_claimed"))
+	)
 
 
 func _clear_prompt_state() -> void:

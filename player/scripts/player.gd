@@ -5,6 +5,13 @@ signal player_defeated
 signal hunger_changed(current_hunger: float, changed_by: float)
 
 const MOVEMENT_ANIMATIONS: Array[StringName] = [&"walk", &"run"]
+const GAMEPLAY_CONTROL_UI_ONLY: StringName = &"ui_only"
+const CLAIM_SUPPRESSED_ACTIONS: Array[StringName] = [
+	&"attack",
+	&"jump",
+	&"crouch",
+	&"attach_rope",
+]
 
 #region //onready variables:
 @onready var sprite_2d: Sprite2D = $Sprite2D
@@ -102,6 +109,12 @@ var gravity_multiplier : float = 1.0
 var nearby_attachables: Array[Node2D] = []
 var current_rope_target: Node2D = null
 var knockback_timer: float = 0.0
+var gameplay_control_claim_token: int = 0
+var gameplay_control_claim_owner: WeakRef
+var gameplay_control_claim_reason: StringName = &""
+var gameplay_control_mode: StringName = &""
+var _gameplay_input_resume_frame: int = 0
+var _claim_suppressed_actions: Dictionary = {}
 
 func _ready() -> void:
 	add_to_group(&"saveable")
@@ -122,6 +135,7 @@ func _ready() -> void:
 	#initialize states
 	initialize_states()
 	_apply_pending_runtime_state()
+	_bind_gameplay_control_claim_notifications()
 	if PlayerHud.has_method("bind_player_inventory"):
 		PlayerHud.call("bind_player_inventory", get_inventory(), self)
 	pass
@@ -300,6 +314,10 @@ func _has_player_property(property_name: StringName) -> bool:
 	return false
 	
 func _unhandled_input( event: InputEvent) -> void:
+	if is_gameplay_control_claimed() or _gameplay_input_release_is_pending():
+		return
+	if _consume_claim_suppressed_action(event):
+		return
 	if is_downed or is_movement_locked():
 		return
 
@@ -313,6 +331,16 @@ func _unhandled_input( event: InputEvent) -> void:
 
 
 func _process(_delta: float) -> void:
+	if is_gameplay_control_claimed() or _gameplay_input_release_is_pending():
+		direction = Vector2.ZERO
+		velocity.x = 0.0
+		update_knockout(_delta)
+		update_mana_2_charge(_delta)
+		update_player_needs(_delta)
+		update_passive_healing(_delta)
+		return
+
+	_refresh_claim_suppressed_actions()
 	if is_movement_locked():
 		direction = Vector2.ZERO
 		velocity.x = 0.0
@@ -325,7 +353,8 @@ func _process(_delta: float) -> void:
 	update_direction()
 	update_knockout(_delta)
 	update_mana_2_charge(_delta)
-	update_mana_charge(_delta)
+	if not _claim_suppressed_actions.has(&"attack"):
+		update_mana_charge(_delta)
 	update_player_needs(_delta)
 	update_passive_healing(_delta)
 	change_state(current_state.process(_delta))
@@ -333,6 +362,13 @@ func _process(_delta: float) -> void:
 	
 func _physics_process(_delta: float) -> void:
 	velocity.y += gravity * _delta * gravity_multiplier
+
+	if is_gameplay_control_claimed() or _gameplay_input_release_is_pending():
+		velocity.x = 0.0
+		if knockback_timer > 0.0:
+			knockback_timer = maxf(knockback_timer - _delta, 0.0)
+		move_and_slide()
+		return
 
 	if is_movement_locked():
 		velocity.x = 0.0
@@ -747,6 +783,152 @@ func is_movement_locked() -> bool:
 			active_spot_action = &""
 
 	return movement_lock_source != null
+
+
+func can_accept_player_control_claim(control_mode: StringName) -> Dictionary:
+	if control_mode != GAMEPLAY_CONTROL_UI_ONLY:
+		return {"accepted": false, "reason": "unknown_control_mode"}
+	if is_gameplay_control_claimed():
+		return {"accepted": false, "reason": "already_control_claimed"}
+	if is_downed or (not states.is_empty() and current_state is PlayerStateDowned):
+		return {"accepted": false, "reason": "player_downed"}
+	if dead or _is_game_over_handling_active():
+		return {"accepted": false, "reason": "player_dead_or_game_over"}
+	if is_movement_locked():
+		return {"accepted": false, "reason": "player_movement_locked"}
+	if active_spot_action != &"" or active_spot != null:
+		return {"accepted": false, "reason": "player_spot_action_active"}
+	if _is_scene_transition_in_progress():
+		return {"accepted": false, "reason": "scene_transition_in_progress"}
+	if not is_on_floor():
+		return {"accepted": false, "reason": "player_not_grounded"}
+	return {"accepted": true, "reason": ""}
+
+
+func is_gameplay_control_claimed() -> bool:
+	return gameplay_control_claim_token != 0
+
+
+func get_gameplay_control_mode() -> StringName:
+	return gameplay_control_mode if is_gameplay_control_claimed() else &""
+
+
+func _bind_gameplay_control_claim_notifications() -> void:
+	var gameplay_flow := get_node_or_null("/root/GameplayFlow")
+	if gameplay_flow == null or not gameplay_flow.has_signal(&"player_control_claim_changed"):
+		return
+	var callback := Callable(self, "_on_player_control_claim_changed")
+	if not gameplay_flow.is_connected(&"player_control_claim_changed", callback):
+		gameplay_flow.connect(&"player_control_claim_changed", callback)
+	if gameplay_flow.has_method("get_player_control_claim"):
+		var claim: Dictionary = gameplay_flow.call("get_player_control_claim", self)
+		if not claim.is_empty():
+			_apply_gameplay_control_claim(claim)
+
+
+func _on_player_control_claim_changed(
+	claimed_player: Node,
+	claimed: bool,
+	token_id: int
+) -> void:
+	if claimed_player != self:
+		return
+	if claimed:
+		var gameplay_flow := get_node_or_null("/root/GameplayFlow")
+		if gameplay_flow == null or not gameplay_flow.has_method("get_player_control_claim"):
+			return
+		var claim: Dictionary = gameplay_flow.call("get_player_control_claim", self)
+		if int(claim.get("token_id", 0)) == token_id:
+			_apply_gameplay_control_claim(claim)
+		return
+	_release_gameplay_control_claim(token_id)
+
+
+func _apply_gameplay_control_claim(claim: Dictionary) -> void:
+	var player_ref := claim.get("player") as WeakRef
+	if player_ref == null or player_ref.get_ref() != self:
+		return
+	var token_id := int(claim.get("token_id", 0))
+	var control_mode := StringName(claim.get("control_mode", &""))
+	if token_id == 0 or control_mode != GAMEPLAY_CONTROL_UI_ONLY:
+		return
+
+	gameplay_control_claim_token = token_id
+	gameplay_control_claim_owner = claim.get("owner") as WeakRef
+	gameplay_control_claim_reason = StringName(claim.get("reason", &""))
+	gameplay_control_mode = control_mode
+	_gameplay_input_resume_frame = 0
+	_claim_suppressed_actions.clear()
+	direction = Vector2.ZERO
+	velocity.x = 0.0
+	_enter_idle_for_gameplay_control_claim()
+	var talk_interactor := get_node_or_null("NpcTalkInteractor")
+	if talk_interactor != null and talk_interactor.has_method("close_for_scripted_handoff"):
+		talk_interactor.call("close_for_scripted_handoff")
+
+
+func _release_gameplay_control_claim(token_id: int) -> void:
+	if token_id == 0 or token_id != gameplay_control_claim_token:
+		return
+	_capture_claim_suppressed_actions()
+	gameplay_control_claim_token = 0
+	gameplay_control_claim_owner = null
+	gameplay_control_claim_reason = &""
+	gameplay_control_mode = &""
+	_gameplay_input_resume_frame = Engine.get_process_frames() + 1
+	direction = Vector2.ZERO
+	velocity.x = 0.0
+	_enter_idle_for_gameplay_control_claim()
+
+
+func _enter_idle_for_gameplay_control_claim() -> void:
+	if dead or is_downed or not is_on_floor() or states.is_empty():
+		return
+	var idle_state := $States.get_node_or_null("Idle") as PlayerState
+	if idle_state != null and current_state != idle_state:
+		change_state(idle_state)
+
+
+func _gameplay_input_release_is_pending() -> bool:
+	return Engine.get_process_frames() < _gameplay_input_resume_frame
+
+
+func _capture_claim_suppressed_actions() -> void:
+	_claim_suppressed_actions.clear()
+	for action in CLAIM_SUPPRESSED_ACTIONS:
+		if InputMap.has_action(action) and Input.is_action_pressed(action):
+			_claim_suppressed_actions[action] = true
+
+
+func _refresh_claim_suppressed_actions() -> void:
+	for action in _claim_suppressed_actions.keys():
+		if not Input.is_action_pressed(StringName(action)):
+			_claim_suppressed_actions.erase(action)
+
+
+func _consume_claim_suppressed_action(event: InputEvent) -> bool:
+	for action in _claim_suppressed_actions.keys():
+		var action_name := StringName(action)
+		if event.is_action_released(action_name):
+			_claim_suppressed_actions.erase(action)
+			return true
+		if event.is_action_pressed(action_name):
+			return true
+	return false
+
+
+func _is_scene_transition_in_progress() -> bool:
+	var scene_loader := get_node_or_null("/root/SceneLoader")
+	return scene_loader != null and bool(scene_loader.get("loading_in_progress"))
+
+
+func _is_game_over_handling_active() -> bool:
+	var game_over_screen := get_node_or_null("/root/GameOverScreen")
+	return (
+		game_over_screen != null
+		and game_over_screen.has_method("is_game_over_active")
+		and bool(game_over_screen.call("is_game_over_active"))
+	)
 
 
 func _on_spot_action_started(_spot: Node, _action_name: StringName) -> void:

@@ -15,6 +15,7 @@
 [ext_resource type="Texture2D" uid="uid://4gp1piwttkar" path="res://images/sprites/characters/mom/mom_actions_1.png" id="12_wgv2s"]
 [ext_resource type="Texture2D" uid="uid://eixnph1trhyh" path="res://images/sprites/characters/mom/walk_1_mom.png" id="13_svwi8"]
 [ext_resource type="Script" path="res://scenes/creatures/npc/npc_animation_controller.gd" id="14_animation"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_sleep_checkin.tres" id="15_dialogue"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_agoec"]
 radius = 15.0
@@ -561,6 +562,7 @@ display_name = "Mom"
 npc_tags = Array[StringName]([&"mom", &"family"])
 location_id = &"mom"
 npc_scene_path = "res://scenes/creatures/mom_npc.tscn"
+metadata/default_dialogue_definition = ExtResource("15_dialogue")
 
 [node name="NpcInventory" type="Node" parent="." unique_id=721636258]
 script = ExtResource("6_inventory")

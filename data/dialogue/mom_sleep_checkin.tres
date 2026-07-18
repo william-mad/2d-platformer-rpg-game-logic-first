@@ -1,0 +1,30 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="DialogueChoice_ready"]
+script = ExtResource("3_choice")
+choice_id = &"ready_for_day"
+text = "Yes. I'm ready for the day."
+favor_delta = 2.0
+terminal = true
+
+[sub_resource type="Resource" id="DialogueChoice_tired"]
+script = ExtResource("3_choice")
+choice_id = &"still_tired"
+text = "Not really. I'm still tired."
+terminal = true
+
+[sub_resource type="Resource" id="DialogueNode_morning"]
+script = ExtResource("2_node")
+node_id = &"morning_checkin"
+speaker_text = "Morning, sweetheart. Did you get enough rest?"
+choices = Array[ExtResource("3_choice")]([SubResource("DialogueChoice_ready"), SubResource("DialogueChoice_tired")])
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"mom_sleep_checkin"
+entry_node_id = &"morning_checkin"
+nodes = Array[ExtResource("2_node")]([SubResource("DialogueNode_morning")])

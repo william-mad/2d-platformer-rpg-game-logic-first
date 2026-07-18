@@ -18,6 +18,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 GameplayFlow="*res://scripts/systems/gameplay_flow.gd"
+DialogueController="*res://scripts/systems/dialogue_controller.gd"
 SaveSystem="*res://scripts/systems/save_system.gd"
 DamageEvents="*res://scripts/systems/damage_events.gd"
 EventBus="*res://scripts/systems/event_bus.gd"
