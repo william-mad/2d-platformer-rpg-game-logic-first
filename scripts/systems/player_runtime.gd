@@ -225,12 +225,18 @@ func has_pending_player_data() -> bool:
 	return not pending_player_data.is_empty()
 
 
+func clear_pending_player_transfer() -> void:
+	pending_player_data.clear()
+	pending_target_spawn_id = &""
+
+
 func _move_player_to_spawn(player: Node, target_spawn_id: StringName) -> void:
 	if target_spawn_id == &"" or not (player is Node2D):
 		return
 
 	var spawn := _find_spawn(target_spawn_id)
 	if spawn == null:
+		push_warning("PlayerRuntime could not find target spawn: %s" % String(target_spawn_id))
 		return
 
 	(player as Node2D).global_position = spawn.global_position

@@ -1401,7 +1401,7 @@ func complete_active_action(session_id: String, reason: String = "completed") ->
 		return false
 	active_action.status = NpcActionSession.Status.COMPLETED
 	active_action.reason = reason
-	_release_active_action_reservations_once(reason)
+	_release_active_action_reservations_once(reason, true)
 	last_terminal_action_session_id = active_action.session_id
 	_publish_active_action()
 	_action_state_reconciliation_requested = true
@@ -2138,12 +2138,22 @@ func _active_action_id_matches(session_id: String) -> bool:
 	return active_action != null and not session_id.is_empty() and active_action.session_id == session_id
 
 
-func _release_active_action_reservations_once(reason: String) -> void:
+func _release_active_action_reservations_once(
+	reason: String,
+	preserve_persistent_activity_reservations: bool = false
+) -> void:
 	if active_action == null:
 		return
 	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	var persistent_activity_reservation_ids := PackedStringArray()
+	if preserve_persistent_activity_reservations:
+		# A scheduled activity outlives individual live execution cycles and remains
+		# responsible for releasing its own spot when the persistent record finishes.
+		persistent_activity_reservation_ids = _get_persistent_activity_reservation_ids()
 	for reservation_id in active_action.reservation_ids:
 		var reservation_text := String(reservation_id)
+		if persistent_activity_reservation_ids.has(reservation_text):
+			continue
 		if active_action.released_reservation_ids.has(reservation_text):
 			continue
 		var released := false
@@ -2164,12 +2174,46 @@ func _release_active_action_reservations_once(reason: String) -> void:
 			))
 		if released:
 			active_action.claim_reservation_release(reservation_text)
-	if simulator != null and simulator.has_method("release_session_spot_reservations"):
+	if (
+		persistent_activity_reservation_ids.is_empty()
+		and simulator != null
+		and simulator.has_method("release_session_spot_reservations")
+	):
 		simulator.call(
 			"release_session_spot_reservations",
 			StringName(_get_action_owner_id()),
 			active_action.session_id
 		)
+
+
+func _get_persistent_activity_reservation_ids() -> PackedStringArray:
+	var retained := PackedStringArray()
+	if active_action == null or active_action.session_id.is_empty():
+		return retained
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations == null or not locations.has_method("get_record_snapshot"):
+		return retained
+	var record: Dictionary = locations.call(
+		"get_record_snapshot", _get_action_owner_id()
+	)
+	var activity_value = record.get("activity", {})
+	if not (activity_value is Dictionary) or activity_value.is_empty():
+		return retained
+	var activity: Dictionary = activity_value
+	if NpcActionSessionModel._descriptor_session_id(activity) != active_action.session_id:
+		return retained
+	if String(activity.get("status", "active")) in [
+		"completed", "failed", "cancelled", "cancelling",
+	]:
+		return retained
+	var reservation_values = activity.get("reservation_ids", [])
+	if not (reservation_values is Array or reservation_values is PackedStringArray):
+		return retained
+	for reservation_value in reservation_values:
+		var reservation_id := String(reservation_value).strip_edges()
+		if not reservation_id.is_empty() and active_action.reservation_ids.has(reservation_id):
+			retained.append(reservation_id)
+	return retained
 
 
 func _get_action_source(reason: String, actor: Node2D, action_kind: StringName) -> StringName:

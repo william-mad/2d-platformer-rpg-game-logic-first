@@ -14,6 +14,7 @@ var pending_preload_paths: Dictionary = {}
 var loading_scene_path: String = ""
 var loading_in_progress: bool = false
 var preload_poll_timer: float = 0.0
+var active_player_transition: Dictionary = {}
 
 var overlay: ColorRect
 var loading_label: Label
@@ -24,6 +25,10 @@ func _ready() -> void:
 	_build_overlay()
 	visible = false
 	set_process(false)
+
+
+func _exit_tree() -> void:
+	_cleanup_player_scene_transition(true, &"scene_loader_exit")
 
 
 func preload_scene(scene_path: String) -> bool:
@@ -90,6 +95,60 @@ func change_scene(scene_path: String) -> bool:
 	return true
 
 
+func request_player_scene_transition(
+	player: Node,
+	target_scene_path: String,
+	target_spawn_id: StringName,
+	reason: StringName = &"door"
+) -> Dictionary:
+	var normalized_path := target_scene_path.strip_edges()
+	var validation_reason := _validate_player_scene_transition(player, normalized_path)
+	if validation_reason != &"":
+		_log_player_transition("rejected", normalized_path, target_spawn_id, validation_reason)
+		return {"accepted": false, "reason": validation_reason}
+
+	var runtime := get_node_or_null("/root/PlayerRuntime")
+	var gameplay_flow := get_node_or_null("/root/GameplayFlow")
+	var world_lock_token := int(gameplay_flow.call(
+		"acquire_world_progression_lock", self, reason
+	))
+	if world_lock_token == 0:
+		_log_player_transition("rejected", normalized_path, target_spawn_id, &"world_lock_rejected")
+		return {"accepted": false, "reason": &"world_lock_rejected"}
+
+	var player_claim_token := int(gameplay_flow.call(
+		"acquire_player_control_claim", self, player, reason, &"ui_only"
+	))
+	if player_claim_token == 0:
+		gameplay_flow.call("release_world_progression_lock", world_lock_token, self)
+		_log_player_transition("rejected", normalized_path, target_spawn_id, &"player_claim_rejected")
+		return {"accepted": false, "reason": &"player_claim_rejected"}
+
+	active_player_transition = {
+		"target_scene": normalized_path,
+		"target_spawn": target_spawn_id,
+		"reason": reason,
+		"world_lock_token": world_lock_token,
+		"player_claim_token": player_claim_token,
+	}
+	runtime.call("capture_player", player, target_spawn_id, normalized_path)
+	if not bool(runtime.call("has_pending_player_data")):
+		_cleanup_player_scene_transition(true, &"player_capture_failed")
+		_log_player_transition("rejected", normalized_path, target_spawn_id, &"player_capture_failed")
+		return {"accepted": false, "reason": &"player_capture_failed"}
+
+	if not change_scene(normalized_path):
+		_cleanup_player_scene_transition(true, &"scene_load_rejected")
+		_log_player_transition("rejected", normalized_path, target_spawn_id, &"scene_load_rejected")
+		return {"accepted": false, "reason": &"scene_load_rejected"}
+
+	_log_player_transition(
+		"accepted", normalized_path, target_spawn_id, &"accepted",
+		world_lock_token, player_claim_token
+	)
+	return {"accepted": true, "reason": &"accepted"}
+
+
 func _process(delta: float) -> void:
 	if not loading_in_progress:
 		_poll_preloads(delta)
@@ -133,10 +192,25 @@ func get_debug_status() -> Dictionary:
 			int(round(clampf(progress_value, 0.0, 1.0) * 100.0)),
 		])
 
+	var transition_status := {
+		"target_scene": "",
+		"target_spawn": &"",
+		"world_lock_token": 0,
+		"player_claim_token": 0,
+	}
+	if not active_player_transition.is_empty():
+		transition_status = {
+			"target_scene": String(active_player_transition.get("target_scene", "")),
+			"target_spawn": StringName(active_player_transition.get("target_spawn", &"")),
+			"world_lock_token": int(active_player_transition.get("world_lock_token", 0)),
+			"player_claim_token": int(active_player_transition.get("player_claim_token", 0)),
+		}
+
 	return {
 		"loading": loading_scene_path if loading_in_progress else "",
 		"preloads": preloads,
 		"cache_size": cached_scenes.size(),
+		"player_transition": transition_status,
 	}
 
 
@@ -232,7 +306,114 @@ func _finish_scene_load(success: bool, scene_path: String) -> void:
 	loading_scene_path = ""
 	visible = false
 	set_process(not pending_preload_paths.is_empty())
+	if not active_player_transition.is_empty():
+		var target_spawn := StringName(active_player_transition.get("target_spawn", &""))
+		_log_player_transition(
+			"load_success" if success else "load_failure",
+			scene_path,
+			target_spawn,
+			&"success" if success else &"failure"
+		)
+		_cleanup_player_scene_transition(not success, &"load_success" if success else &"load_failure")
 	scene_load_finished.emit(success, scene_path)
+
+
+func _validate_player_scene_transition(player: Node, target_scene_path: String) -> StringName:
+	if player == null or not is_instance_valid(player):
+		return &"player_invalid"
+	if target_scene_path.is_empty():
+		return &"target_scene_empty"
+	if not active_player_transition.is_empty():
+		return &"player_transition_active"
+	if loading_in_progress:
+		return &"scene_load_active"
+	var runtime := get_node_or_null("/root/PlayerRuntime")
+	if (
+		runtime == null
+		or not runtime.has_method("capture_player")
+		or not runtime.has_method("clear_pending_player_transfer")
+		or not runtime.has_method("has_pending_player_data")
+	):
+		return &"player_runtime_unavailable"
+	var gameplay_flow := get_node_or_null("/root/GameplayFlow")
+	if (
+		gameplay_flow == null
+		or not gameplay_flow.has_method("acquire_world_progression_lock")
+		or not gameplay_flow.has_method("release_world_progression_lock")
+		or not gameplay_flow.has_method("acquire_player_control_claim")
+		or not gameplay_flow.has_method("release_player_control_claim")
+	):
+		return &"gameplay_flow_unavailable"
+	if not player.has_method("can_accept_player_control_claim"):
+		return &"player_claim_eligibility_unavailable"
+	var eligibility = player.call("can_accept_player_control_claim", &"ui_only")
+	if not (eligibility is Dictionary) or not bool(eligibility.get("accepted", false)):
+		return StringName(String(
+			eligibility.get("reason", "player_claim_rejected")
+			if eligibility is Dictionary
+			else "player_claim_rejected"
+		))
+	if not cached_scenes.has(target_scene_path) and not ResourceLoader.exists(
+		target_scene_path, "PackedScene"
+	):
+		return &"target_scene_unavailable"
+	return &""
+
+
+func _cleanup_player_scene_transition(clear_pending_transfer: bool, outcome: StringName) -> void:
+	if active_player_transition.is_empty():
+		return
+	var transaction := active_player_transition
+	active_player_transition = {}
+	var runtime := get_node_or_null("/root/PlayerRuntime")
+	if clear_pending_transfer and runtime != null and runtime.has_method("clear_pending_player_transfer"):
+		runtime.call("clear_pending_player_transfer")
+	var gameplay_flow := get_node_or_null("/root/GameplayFlow")
+	var player_claim_token := int(transaction.get("player_claim_token", 0))
+	var world_lock_token := int(transaction.get("world_lock_token", 0))
+	var player_released := false
+	var world_released := false
+	if (
+		player_claim_token != 0
+		and gameplay_flow != null
+		and gameplay_flow.has_method("release_player_control_claim")
+	):
+		player_released = bool(gameplay_flow.call(
+			"release_player_control_claim", player_claim_token, self
+		))
+	if (
+		world_lock_token != 0
+		and gameplay_flow != null
+		and gameplay_flow.has_method("release_world_progression_lock")
+	):
+		world_released = bool(gameplay_flow.call(
+			"release_world_progression_lock", world_lock_token, self
+		))
+	if OS.is_debug_build():
+		print("Player scene transition cleanup: outcome=%s player_claim=%d:%s world_lock=%d:%s" % [
+			String(outcome), player_claim_token, str(player_released),
+			world_lock_token, str(world_released),
+		])
+
+
+func _log_player_transition(
+	event: String,
+	target_scene_path: String,
+	target_spawn_id: StringName,
+	result: StringName,
+	world_lock_token: int = 0,
+	player_claim_token: int = 0
+) -> void:
+	if not OS.is_debug_build():
+		return
+	print("Player scene transition %s: target=%s spawn=%s result=%s world_lock=%d player_claim=%d" % [
+		event,
+		target_scene_path,
+		String(target_spawn_id),
+		String(result),
+		world_lock_token,
+		player_claim_token,
+	])
 
 
 func _cache_threaded_scene(scene_path: String) -> bool:

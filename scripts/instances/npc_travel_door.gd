@@ -22,6 +22,7 @@ class_name NpcTravelDoor extends Area2D
 var cooldowns: Dictionary = {}
 var player_inside: bool = false
 var active_player: Node2D
+var player_transition_accepted: bool = false
 
 
 func _ready() -> void:
@@ -42,15 +43,45 @@ func _process(delta: float) -> void:
 
 
 func load_target_scene() -> void:
+	if player_transition_accepted:
+		return
 	if target_scene_path.is_empty():
 		push_warning("NpcTravelDoor has no target scene.")
 		return
 
-	_capture_player_runtime_state()
-	if _change_scene_with_loader():
+	var player := _get_active_player()
+	var scene_loader := get_node_or_null("/root/SceneLoader")
+	if scene_loader != null:
+		if not scene_loader.has_method("request_player_scene_transition"):
+			_log_player_transition_result(false, &"transaction_api_unavailable")
+			return
+		var result: Dictionary = scene_loader.call(
+			"request_player_scene_transition",
+			player,
+			target_scene_path,
+			target_spawn_id,
+			&"npc_travel_door"
+		)
+		player_transition_accepted = bool(result.get("accepted", false))
+		if (
+			player_transition_accepted
+			and scene_loader.has_signal(&"scene_load_finished")
+		):
+			scene_loader.connect(
+				&"scene_load_finished", _on_player_scene_load_finished, CONNECT_ONE_SHOT
+			)
+		_log_player_transition_result(
+			player_transition_accepted,
+			StringName(result.get("reason", &"transition_rejected"))
+		)
 		return
 
-	get_tree().change_scene_to_file(target_scene_path)
+	_load_player_scene_direct_fallback(player)
+
+
+func _on_player_scene_load_finished(success: bool, scene_path: String) -> void:
+	if scene_path == target_scene_path and not success:
+		player_transition_accepted = false
 
 
 func _on_body_entered(body: Node2D) -> void:
@@ -186,16 +217,22 @@ func _get_traveller_id(body: Node) -> String:
 	return str(body.get_instance_id())
 
 
-func _capture_player_runtime_state() -> void:
+func _load_player_scene_direct_fallback(player: Node) -> void:
 	var runtime := get_node_or_null("/root/PlayerRuntime")
-	if runtime == null or not runtime.has_method("capture_player"):
-		return
-
-	var player := _get_active_player()
-	if player == null:
-		return
-
-	runtime.call("capture_player", player, target_spawn_id, target_scene_path)
+	if runtime != null and runtime.has_method("capture_player"):
+		runtime.call("capture_player", player, target_spawn_id, target_scene_path)
+	var error := get_tree().change_scene_to_file(target_scene_path)
+	player_transition_accepted = error == OK
+	if (
+		error != OK
+		and runtime != null
+		and runtime.has_method("clear_pending_player_transfer")
+	):
+		runtime.call("clear_pending_player_transfer")
+	_log_player_transition_result(
+		player_transition_accepted,
+		&"direct_fallback" if error == OK else &"direct_fallback_failed"
+	)
 
 
 func _get_active_player() -> Node2D:
@@ -216,9 +253,9 @@ func _preload_target_scene() -> void:
 		scene_loader.call("preload_scene", target_scene_path)
 
 
-func _change_scene_with_loader() -> bool:
-	var scene_loader := get_node_or_null("/root/SceneLoader")
-	if scene_loader == null or not scene_loader.has_method("change_scene"):
-		return false
-
-	return bool(scene_loader.call("change_scene", target_scene_path))
+func _log_player_transition_result(accepted: bool, result: StringName) -> void:
+	if not OS.is_debug_build():
+		return
+	print("NPC travel door player transition: source=%s target=%s spawn=%s accepted=%s result=%s" % [
+		name, target_scene_path, String(target_spawn_id), str(accepted), String(result),
+	])

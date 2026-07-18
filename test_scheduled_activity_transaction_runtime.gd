@@ -65,10 +65,13 @@ func _initialize() -> void:
 	rejecting_state.allows_scheduled_activity_interrupt = true
 	var work_state := NpcState.new()
 	work_state.name = "Work"
+	var idle_state := NpcState.new()
+	idle_state.name = "Idle"
 	var move_state := NpcState.new()
 	move_state.name = "MoveToTarget"
 	machine.add_child(rejecting_state)
 	machine.add_child(work_state)
+	machine.add_child(idle_state)
 	machine.add_child(move_state)
 	npc.add_child(machine)
 	test_scene.add_child(npc)
@@ -205,6 +208,33 @@ func _initialize() -> void:
 	_expect(
 		int(simulator.spot_claim_counts.get(TEST_SPOT_ID, 0)) == 1,
 		"multi-phase activity updates retain one reservation"
+	)
+	_expect(
+		machine.request_state(
+			&"Idle", null, "scheduled_execution_cycle_complete", definition.priority
+		),
+		"live scheduled execution can complete into Idle"
+	)
+	_expect(
+		int(simulator.spot_claim_counts.get(TEST_SPOT_ID, 0)) == 1,
+		"live execution completion preserves the matching persistent activity reservation"
+	)
+	for repair_pass in range(3):
+		simulator.call(
+			"repair_orphan_spot_reservations", locations.get_records_snapshot()
+		)
+		_expect(
+			int(simulator.spot_claim_counts.get(TEST_SPOT_ID, 0)) == 1,
+			"repair pass %d finds the persistent activity reservation intact" % repair_pass
+		)
+	simulator.call("resume_live_activity", StringName(TEST_NPC_ID), npc)
+	_expect(
+		machine.get_active_action_session_id() == accepted_session_id,
+		"persistent activity resumes the same live action session"
+	)
+	_expect(
+		int(simulator.spot_claim_counts.get(TEST_SPOT_ID, 0)) == 1,
+		"same-session live resume retains exactly one reservation"
 	)
 
 	var stale_finished := bool(locations.call(
