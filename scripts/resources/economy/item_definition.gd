@@ -25,12 +25,16 @@ extends Resource
 @export_range(-100.0, 100.0, 0.1) var health_change: float = 0.0
 @export_range(-100.0, 100.0, 0.1) var tired_change: float = 0.0
 
+@export_group("Equipment")
+@export var equipment_profile: EquipmentProfile
+
 
 func is_valid_definition() -> bool:
 	return not String(id).strip_edges().is_empty() \
 		and maximum_stack >= 1 \
 		and base_value >= 0 \
-		and unit_weight >= 0.0
+		and unit_weight >= 0.0 \
+		and (equipment_profile == null or equipment_profile.is_valid_profile())
 
 
 func has_tag(tag: StringName) -> bool:

@@ -26,6 +26,7 @@
 [ext_resource type="PackedScene" path="res://scenes/things/slime_spawner.tscn" id="30_slime_spawner"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_travel_door.tscn" id="31_route_door"]
 [ext_resource type="Script" path="res://scripts/instances/scripted_event_smoke_test.gd" id="32_scripted_event_smoke"]
+[ext_resource type="PackedScene" path="res://scenes/items/world_loot_container.tscn" id="33_debug_sword_pickup"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_q8s1k"]
 texture = ExtResource("9_fddca")
@@ -265,6 +266,24 @@ owner_ids = Array[StringName]([&"mom", &"player"])
 position = Vector2(-274, 367)
 script = ExtResource("27_player_spawn")
 spawn_id = &"from_realhometest"
+
+[node name="DebugWoodenSwordPickup" parent="." instance=ExtResource("33_debug_sword_pickup")]
+position = Vector2(-50, 368)
+authored_item_id = &"wooden_sword"
+authored_quantity = 1
+development_only = true
+
+[node name="DebugLabel" type="Label" parent="DebugWoodenSwordPickup"]
+offset_left = -82.0
+offset_top = -104.0
+offset_right = 82.0
+offset_bottom = -80.0
+theme_override_colors/font_color = Color(1, 0.82, 0.2, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+text = "DEBUG: Wooden Sword"
+horizontal_alignment = 1
 
 [node name="PlayerSpawnFromCompanionRoute" type="Marker2D" parent="." unique_id=1041478710]
 position = Vector2(-4353, 364)

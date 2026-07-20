@@ -13,16 +13,19 @@
 [ext_resource type="Resource" path="res://data/npc_spots/mom_magic_lesson.tres" id="13_mom_magic_lesson"]
 [ext_resource type="PackedScene" path="res://scenes/things/player_cooking_station.tscn" id="14_cooking_station"]
 [ext_resource type="Texture2D" uid="uid://cln1vred4ex8i" path="res://images/backgrounds/layout house1.png" id="15_house_layout"]
+[ext_resource type="Script" uid="uid://dtgbx4hm4n2e2" path="res://scripts/testscenes/realhome_character_silhouettes.gd" id="16_character_silhouettes"]
+[ext_resource type="PackedScene" path="res://scenes/things/interior_door.tscn" id="16_interior_door"]
 
-[sub_resource type="Gradient" id="Gradient_horizontal_visibility"]
-offsets = PackedFloat32Array(0, 0.1, 0.16, 0.25, 0.75, 0.84, 0.9, 1)
-colors = PackedColorArray(0, 0, 0, 1, 0, 0, 0, 1, 0.15, 0.15, 0.15, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0.15, 0.15, 0.15, 1, 0, 0, 0, 1, 0, 0, 0, 1)
+[sub_resource type="Gradient" id="Gradient_second_floor_window_light"]
+offsets = PackedFloat32Array(0, 0.52, 0.76, 1)
+colors = PackedColorArray(1, 1, 1, 1, 1, 1, 1, 1, 0.32, 0.32, 0.32, 1, 0, 0, 0, 1)
 
-[sub_resource type="GradientTexture2D" id="GradientTexture2D_horizontal_visibility"]
-gradient = SubResource("Gradient_horizontal_visibility")
-width = 1100
-height = 4096
-fill_from = Vector2(0, 0.5)
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_second_floor_window_light"]
+gradient = SubResource("Gradient_second_floor_window_light")
+width = 520
+height = 520
+fill = 1
+fill_from = Vector2(0.5, 0.5)
 fill_to = Vector2(1, 0.5)
 
 [sub_resource type="Animation" id="Animation_bathroom_visible"]
@@ -112,6 +115,42 @@ tracks/6/keys = {
 "update": 1,
 "values": [false]
 }
+tracks/7/type = "value"
+tracks/7/imported = false
+tracks/7/enabled = true
+tracks/7/path = NodePath("RoomBlackouts/SecondFloorBlackout:visible")
+tracks/7/interp = 1
+tracks/7/loop_wrap = true
+tracks/7/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+tracks/8/type = "value"
+tracks/8/imported = false
+tracks/8/enabled = true
+tracks/8/path = NodePath("SecondFloorWindowLight:visible")
+tracks/8/interp = 1
+tracks/8/loop_wrap = true
+tracks/8/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+tracks/9/type = "value"
+tracks/9/imported = false
+tracks/9/enabled = true
+tracks/9/path = NodePath("CentralGradientDarkness:color")
+tracks/9/interp = 1
+tracks/9/loop_wrap = true
+tracks/9/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [Color(0, 0, 0, 1)]
+}
 
 [sub_resource type="Animation" id="Animation_bedroom_visible"]
 resource_name = "bedroom"
@@ -199,6 +238,42 @@ tracks/6/keys = {
 "transitions": PackedFloat32Array(1),
 "update": 1,
 "values": [false]
+}
+tracks/7/type = "value"
+tracks/7/imported = false
+tracks/7/enabled = true
+tracks/7/path = NodePath("RoomBlackouts/SecondFloorBlackout:visible")
+tracks/7/interp = 1
+tracks/7/loop_wrap = true
+tracks/7/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+tracks/8/type = "value"
+tracks/8/imported = false
+tracks/8/enabled = true
+tracks/8/path = NodePath("SecondFloorWindowLight:visible")
+tracks/8/interp = 1
+tracks/8/loop_wrap = true
+tracks/8/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+tracks/9/type = "value"
+tracks/9/imported = false
+tracks/9/enabled = true
+tracks/9/path = NodePath("CentralGradientDarkness:color")
+tracks/9/interp = 1
+tracks/9/loop_wrap = true
+tracks/9/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [Color(0, 0, 0, 1)]
 }
 
 [sub_resource type="Animation" id="Animation_classroom_visible"]
@@ -288,6 +363,42 @@ tracks/6/keys = {
 "update": 1,
 "values": [true]
 }
+tracks/7/type = "value"
+tracks/7/imported = false
+tracks/7/enabled = true
+tracks/7/path = NodePath("RoomBlackouts/SecondFloorBlackout:visible")
+tracks/7/interp = 1
+tracks/7/loop_wrap = true
+tracks/7/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+tracks/8/type = "value"
+tracks/8/imported = false
+tracks/8/enabled = true
+tracks/8/path = NodePath("SecondFloorWindowLight:visible")
+tracks/8/interp = 1
+tracks/8/loop_wrap = true
+tracks/8/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+tracks/9/type = "value"
+tracks/9/imported = false
+tracks/9/enabled = true
+tracks/9/path = NodePath("CentralGradientDarkness:color")
+tracks/9/interp = 1
+tracks/9/loop_wrap = true
+tracks/9/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [Color(0, 0, 0, 1)]
+}
 
 [sub_resource type="Animation" id="Animation_hall_visible"]
 resource_name = "hall"
@@ -375,6 +486,42 @@ tracks/6/keys = {
 "transitions": PackedFloat32Array(1),
 "update": 1,
 "values": [true]
+}
+tracks/7/type = "value"
+tracks/7/imported = false
+tracks/7/enabled = true
+tracks/7/path = NodePath("RoomBlackouts/SecondFloorBlackout:visible")
+tracks/7/interp = 1
+tracks/7/loop_wrap = true
+tracks/7/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+tracks/8/type = "value"
+tracks/8/imported = false
+tracks/8/enabled = true
+tracks/8/path = NodePath("SecondFloorWindowLight:visible")
+tracks/8/interp = 1
+tracks/8/loop_wrap = true
+tracks/8/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+tracks/9/type = "value"
+tracks/9/imported = false
+tracks/9/enabled = true
+tracks/9/path = NodePath("CentralGradientDarkness:color")
+tracks/9/interp = 1
+tracks/9/loop_wrap = true
+tracks/9/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [Color(0, 0, 0, 1)]
 }
 
 [sub_resource type="Animation" id="Animation_kitchen_visible"]
@@ -464,6 +611,166 @@ tracks/6/keys = {
 "update": 1,
 "values": [true]
 }
+tracks/7/type = "value"
+tracks/7/imported = false
+tracks/7/enabled = true
+tracks/7/path = NodePath("RoomBlackouts/SecondFloorBlackout:visible")
+tracks/7/interp = 1
+tracks/7/loop_wrap = true
+tracks/7/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+tracks/8/type = "value"
+tracks/8/imported = false
+tracks/8/enabled = true
+tracks/8/path = NodePath("SecondFloorWindowLight:visible")
+tracks/8/interp = 1
+tracks/8/loop_wrap = true
+tracks/8/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+tracks/9/type = "value"
+tracks/9/imported = false
+tracks/9/enabled = true
+tracks/9/path = NodePath("CentralGradientDarkness:color")
+tracks/9/interp = 1
+tracks/9/loop_wrap = true
+tracks/9/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [Color(0, 0, 0, 1)]
+}
+
+[sub_resource type="Animation" id="Animation_second_floor_visible"]
+resource_name = "second_floor"
+length = 0.001
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("RoomBlackouts/BedroomBlackout:visible")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+tracks/1/type = "value"
+tracks/1/imported = false
+tracks/1/enabled = true
+tracks/1/path = NodePath("RoomBlackouts/ClassroomBlackout:visible")
+tracks/1/interp = 1
+tracks/1/loop_wrap = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+tracks/2/type = "value"
+tracks/2/imported = false
+tracks/2/enabled = true
+tracks/2/path = NodePath("RoomBlackouts/KitchenBlackout:visible")
+tracks/2/interp = 1
+tracks/2/loop_wrap = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+tracks/3/type = "value"
+tracks/3/imported = false
+tracks/3/enabled = true
+tracks/3/path = NodePath("RoomBlackouts/HallBlackout:visible")
+tracks/3/interp = 1
+tracks/3/loop_wrap = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+tracks/4/type = "value"
+tracks/4/imported = false
+tracks/4/enabled = true
+tracks/4/path = NodePath("RoomBlackouts/BathroomBlackout:visible")
+tracks/4/interp = 1
+tracks/4/loop_wrap = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+tracks/5/type = "value"
+tracks/5/imported = false
+tracks/5/enabled = true
+tracks/5/path = NodePath("RoomBlackouts/SecondFloorBlackout:visible")
+tracks/5/interp = 1
+tracks/5/loop_wrap = true
+tracks/5/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+tracks/6/type = "value"
+tracks/6/imported = false
+tracks/6/enabled = true
+tracks/6/path = NodePath("CentralGradientDarkness:visible")
+tracks/6/interp = 1
+tracks/6/loop_wrap = true
+tracks/6/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+tracks/7/type = "value"
+tracks/7/imported = false
+tracks/7/enabled = true
+tracks/7/path = NodePath("Player/HorizontalVisibilityLight:visible")
+tracks/7/interp = 1
+tracks/7/loop_wrap = true
+tracks/7/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+tracks/8/type = "value"
+tracks/8/imported = false
+tracks/8/enabled = true
+tracks/8/path = NodePath("SecondFloorWindowLight:visible")
+tracks/8/interp = 1
+tracks/8/loop_wrap = true
+tracks/8/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+tracks/9/type = "value"
+tracks/9/imported = false
+tracks/9/enabled = true
+tracks/9/path = NodePath("CentralGradientDarkness:color")
+tracks/9/interp = 1
+tracks/9/loop_wrap = true
+tracks/9/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [Color(0.3, 0.3, 0.3, 1)]
+}
 
 [sub_resource type="AnimationLibrary" id="AnimationLibrary_room_visibility"]
 _data = {
@@ -471,26 +778,27 @@ _data = {
 &"bedroom": SubResource("Animation_bedroom_visible"),
 &"classroom": SubResource("Animation_classroom_visible"),
 &"hall": SubResource("Animation_hall_visible"),
-&"kitchen": SubResource("Animation_kitchen_visible")
+&"kitchen": SubResource("Animation_kitchen_visible"),
+&"second_floor": SubResource("Animation_second_floor_visible")
 }
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_bedroom_visibility"]
-size = Vector2(404, 8192)
+size = Vector2(404, 3836)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_classroom_visibility"]
-size = Vector2(556, 8192)
+size = Vector2(556, 3836)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_kitchen_visibility"]
-size = Vector2(476, 8192)
+size = Vector2(476, 3836)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_hall_visibility"]
-size = Vector2(257, 8192)
+size = Vector2(257, 3836)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_bathroom_visibility"]
-size = Vector2(307, 8192)
+size = Vector2(307, 3836)
 
-[sub_resource type="CircleShape2D" id="CircleShape2D_room_visibility_probe"]
-radius = 0.25
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_second_floor_visibility"]
+size = Vector2(1926, 249)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_floor"]
 size = Vector2(1914, 64)
@@ -499,16 +807,41 @@ size = Vector2(1914, 64)
 size = Vector2(48, 720)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_right_wall"]
-size = Vector2(48, 720)
+size = Vector2(101, 888)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_first_floor_ceiling_left"]
+size = Vector2(528, 7.875)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_couch_one_way_platform"]
+size = Vector2(47, 8)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_first_floor_ceiling_right"]
+size = Vector2(1338, 7.75)
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_room_visibility_probe"]
+radius = 0.25
+
+[sub_resource type="Gradient" id="Gradient_horizontal_visibility"]
+offsets = PackedFloat32Array(0, 0.1, 0.16, 0.25, 0.75, 0.84, 0.9, 1)
+colors = PackedColorArray(0, 0, 0, 1, 0, 0, 0, 1, 0.15, 0.15, 0.15, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0.15, 0.15, 0.15, 1, 0, 0, 0, 1, 0, 0, 0, 1)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_horizontal_visibility"]
+gradient = SubResource("Gradient_horizontal_visibility")
+width = 1100
+height = 4096
+fill_from = Vector2(0, 0.5)
+fill_to = Vector2(1, 0.5)
 
 [node name="RealHomeTest" type="Node2D" unique_id=1113784681]
 
 [node name="BlackSurroundings" type="Polygon2D" parent="." unique_id=154140447]
+visible = false
 z_index = -20
 color = Color(0, 0, 0, 1)
 polygon = PackedVector2Array(-4096, -4096, 4096, -4096, 4096, 4096, -4096, 4096)
 
-[node name="CentralGradientDarkness" type="CanvasModulate" parent="."]
+[node name="CentralGradientDarkness" type="CanvasModulate" parent="." unique_id=1216130390]
+visible = false
 color = Color(0, 0, 0, 1)
 
 [node name="HouseLayout" type="Sprite2D" parent="." unique_id=1699547220]
@@ -516,47 +849,90 @@ z_index = -10
 position = Vector2(0, 55)
 texture = ExtResource("15_house_layout")
 
+[node name="PermanentSkyDarkness" type="Node2D" parent="." unique_id=2106315619]
+
+[node name="UpperSky" type="Polygon2D" parent="PermanentSkyDarkness" unique_id=1043346753]
+z_index = 90
+color = Color(0, 0, 0, 0.7)
+polygon = PackedVector2Array(-1024, -457, 1024, -457, 1024, -53, -13, -53, -37, -53, -1024, -53)
+
+[node name="LeftSky" type="Polygon2D" parent="PermanentSkyDarkness" unique_id=1206401567]
+z_index = 90
+position = Vector2(-91.35224, -0.12353517)
+scale = Vector2(0.9117654, 0.9976691)
+color = Color(0, 0, 0, 0.7)
+polygon = PackedVector2Array(-1024, -53, -990, -52.999996, -990, 376, -1024, 376)
+
+[node name="RightSky" type="Polygon2D" parent="PermanentSkyDarkness" unique_id=1250882829]
+z_index = 90
+position = Vector2(0.0012979507, 5.806527)
+scale = Vector2(0.99999833, 1.109557)
+color = Color(0, 0, 0, 0.7)
+polygon = PackedVector2Array(922.00006, -53, 1024, -53, 1024, 376, 922, 376)
+
 [node name="RoomBlackouts" type="Node2D" parent="." unique_id=860750854]
 
 [node name="BedroomBlackout" type="Polygon2D" parent="RoomBlackouts" unique_id=807737489]
 z_index = 100
-color = Color(0, 0, 0, 1)
-polygon = PackedVector2Array(-1024, -4096, -582, -4096, -582, 4096, -1024, 4096)
+position = Vector2(-40.81897, 0)
+scale = Vector2(0.9298642, 1)
+color = Color(0, 0, 0, 0.7)
+polygon = PackedVector2Array(-1024, 200, -582, 200, -582, 4096, -1024, 4096)
 
 [node name="ClassroomBlackout" type="Polygon2D" parent="RoomBlackouts" unique_id=2100001301]
 z_index = 100
-color = Color(0, 0, 0, 1)
-polygon = PackedVector2Array(-582, -4096, -20, -4096, -20, 4096, -582, 4096)
+color = Color(0, 0, 0, 0.7)
+polygon = PackedVector2Array(-582, 200, -20, 200, -20, 4096, -582, 4096)
 
 [node name="KitchenBlackout" type="Polygon2D" parent="RoomBlackouts" unique_id=803300780]
 z_index = 100
-color = Color(0, 0, 0, 1)
-polygon = PackedVector2Array(-20, -4096, 456, -4096, 456, 4096, -20, 4096)
+color = Color(0, 0, 0, 0.7)
+polygon = PackedVector2Array(-20, 200, 456, 200, 456, 4096, -20, 4096)
 
 [node name="HallBlackout" type="Polygon2D" parent="RoomBlackouts" unique_id=407008236]
 z_index = 100
-color = Color(0, 0, 0, 1)
-polygon = PackedVector2Array(456, -4096, 715, -4096, 715, 4096, 456, 4096)
+color = Color(0, 0, 0, 0.7)
+polygon = PackedVector2Array(456, 200, 715, 200, 715, 4096, 456, 4096)
 
 [node name="BathroomBlackout" type="Polygon2D" parent="RoomBlackouts" unique_id=313609679]
 z_index = 100
-color = Color(0, 0, 0, 1)
-polygon = PackedVector2Array(715, -4096, 1024, -4096, 1024, 4096, 715, 4096)
+position = Vector2(236.01929, 0)
+scale = Vector2(0.669903, 1)
+color = Color(0, 0, 0, 0.7)
+polygon = PackedVector2Array(715, 200, 1024, 200, 1024, 4096, 715, 4096)
+
+[node name="SecondFloorBlackout" type="Polygon2D" parent="RoomBlackouts" unique_id=53785240]
+z_index = 100
+position = Vector2(-1.8340728, 7.6457114)
+scale = Vector2(0.9901758, 0.9617714)
+color = Color(0, 0, 0, 0.7)
+polygon = PackedVector2Array(-1002.0098, -62.008293, -30.98761, -64.09601, 932.9998, -62.000004, 932.9999, 67.284195, 932.9998, 200, -1002.0098, 199.99998)
+
+[node name="SecondFloorWindowLight" type="PointLight2D" parent="." unique_id=312622396]
+position = Vector2(-24, 83)
+texture = SubResource("GradientTexture2D_second_floor_window_light")
+
+[node name="CharacterSilhouetteController" type="Node" parent="." unique_id=1703690259]
+process_priority = 100
+script = ExtResource("16_character_silhouettes")
 
 [node name="RoomVisibilityAnimation" type="AnimationPlayer" parent="." unique_id=850958437]
 libraries/ = SubResource("AnimationLibrary_room_visibility")
 autoplay = &"hall"
 
 [node name="RoomVisibilityTriggers" type="Node2D" parent="." unique_id=1272385056]
+visible = false
 
 [node name="Bedroom" type="Area2D" parent="RoomVisibilityTriggers" unique_id=137889298]
+visible = false
 position = Vector2(-787, 0)
 collision_layer = 0
 collision_mask = 4096
 monitorable = false
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="RoomVisibilityTriggers/Bedroom" unique_id=553414291]
-position = Vector2(-3, 0)
+visible = false
+position = Vector2(-3, 2166)
 shape = SubResource("RectangleShape2D_bedroom_visibility")
 
 [node name="Classroom" type="Area2D" parent="RoomVisibilityTriggers" unique_id=170902294]
@@ -566,7 +942,7 @@ collision_mask = 4096
 monitorable = false
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="RoomVisibilityTriggers/Classroom" unique_id=1544465134]
-position = Vector2(3, 0)
+position = Vector2(3, 2166)
 shape = SubResource("RectangleShape2D_classroom_visibility")
 
 [node name="Kitchen" type="Area2D" parent="RoomVisibilityTriggers" unique_id=164762900]
@@ -576,6 +952,7 @@ collision_mask = 4096
 monitorable = false
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="RoomVisibilityTriggers/Kitchen" unique_id=1717143954]
+position = Vector2(0, 2166)
 shape = SubResource("RectangleShape2D_kitchen_visibility")
 
 [node name="Hall" type="Area2D" parent="RoomVisibilityTriggers" unique_id=273671681]
@@ -585,6 +962,7 @@ collision_mask = 4096
 monitorable = false
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="RoomVisibilityTriggers/Hall" unique_id=1503368822]
+position = Vector2(0, 2166)
 shape = SubResource("RectangleShape2D_hall_visibility")
 
 [node name="Bathroom" type="Area2D" parent="RoomVisibilityTriggers" unique_id=136241545]
@@ -594,66 +972,121 @@ collision_mask = 4096
 monitorable = false
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="RoomVisibilityTriggers/Bathroom" unique_id=769490294]
+position = Vector2(0, 2166)
 shape = SubResource("RectangleShape2D_bathroom_visibility")
 
+[node name="SecondFloor" type="Area2D" parent="RoomVisibilityTriggers" unique_id=1605761239]
+position = Vector2(-34, -1940)
+collision_layer = 0
+collision_mask = 4096
+monitorable = false
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="RoomVisibilityTriggers/SecondFloor" unique_id=116530701]
+position = Vector2(5, 2012.5)
+shape = SubResource("RectangleShape2D_second_floor_visibility")
+
 [node name="Floor" type="StaticBody2D" parent="." unique_id=806082404]
-position = Vector2(-35, 400)
+visible = false
+position = Vector2(-35, 408)
 collision_mask = 6
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Floor" unique_id=1162402761]
 shape = SubResource("RectangleShape2D_floor")
 
 [node name="LeftWall" type="StaticBody2D" parent="." unique_id=1359547808]
+visible = false
 position = Vector2(-1016, 72)
 collision_mask = 6
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="LeftWall" unique_id=1803288995]
+position = Vector2(-1, -7)
 shape = SubResource("RectangleShape2D_left_wall")
 
 [node name="RightWall" type="StaticBody2D" parent="." unique_id=690333840]
+visible = false
 position = Vector2(947, 72)
 collision_mask = 6
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="RightWall" unique_id=1826432330]
+visible = false
+position = Vector2(26, -93)
 shape = SubResource("RectangleShape2D_right_wall")
+
+[node name="FirstFloorCeilingLeft" type="StaticBody2D" parent="." unique_id=1288867051]
+position = Vector2(-772, 204)
+collision_mask = 6
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="FirstFloorCeilingLeft" unique_id=389308647]
+position = Vector2(44, -2)
+shape = SubResource("RectangleShape2D_first_floor_ceiling_left")
+
+[node name="CouchOneWayPlatform" type="StaticBody2D" parent="." unique_id=1662127178]
+position = Vector2(-459, 201)
+collision_mask = 6
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="CouchOneWayPlatform" unique_id=1099619776]
+position = Vector2(18.5, 1)
+shape = SubResource("RectangleShape2D_couch_one_way_platform")
+one_way_collision = true
+
+[node name="FirstFloorCeilingRight" type="StaticBody2D" parent="." unique_id=1611947785]
+position = Vector2(279, 204)
+collision_mask = 6
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="FirstFloorCeilingRight" unique_id=1338784971]
+position = Vector2(-27, -2)
+shape = SubResource("RectangleShape2D_first_floor_ceiling_right")
+
+[node name="HallBathroomInteriorDoor" parent="." unique_id=1303409552 instance=ExtResource("16_interior_door")]
+position = Vector2(715, 368)
+door_id = &"hall_bathroom"
+allowed_npc_ids = Array[StringName]([&"mom"])
+
+[node name="BedroomClassroomInteriorDoor" parent="." unique_id=1911439747 instance=ExtResource("16_interior_door")]
+position = Vector2(-582, 368)
+door_id = &"bedroom_classroom"
+allowed_npc_ids = Array[StringName]([&"mom"])
 
 [node name="NpcLocationScene" type="Node" parent="." unique_id=738533555]
 script = ExtResource("2_location_scene")
 scene_path = "res://scenes/testscenes/realhometest.tscn"
+ground_y = 376.0
 spawn_x_min = -950.0
 spawn_x_max = 880.0
 
 [node name="Player" parent="." unique_id=1227827088 instance=ExtResource("1_player")]
-position = Vector2(530, 365)
+position = Vector2(680, 376)
 
-[node name="RoomVisibilityProbe" type="Area2D" parent="Player"]
+[node name="RoomVisibilityProbe" type="Area2D" parent="Player" unique_id=117725206]
+visible = false
 collision_layer = 4096
 collision_mask = 0
 monitoring = false
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="Player/RoomVisibilityProbe"]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Player/RoomVisibilityProbe" unique_id=1792418538]
 shape = SubResource("CircleShape2D_room_visibility_probe")
 
-[node name="HorizontalVisibilityLight" type="PointLight2D" parent="Player"]
+[node name="HorizontalVisibilityLight" type="PointLight2D" parent="Player" unique_id=92011051]
+visible = false
 position = Vector2(0, -365)
 texture = SubResource("GradientTexture2D_horizontal_visibility")
-energy = 1.0
 
 [node name="Camera2D" type="Camera2D" parent="Player" unique_id=1962546624]
-position = Vector2(0, -110)
+position = Vector2(0, -180)
 limit_left = -1024
-limit_top = -457
+limit_top = -74
 limit_right = 1024
 limit_bottom = 567
 
 [node name="OutsideDoor" parent="." unique_id=1318597514 instance=ExtResource("3_door")]
+visible = false
 position = Vector2(530, 368)
 target_scene_path = "res://scenes/testscenes/realtest1.tscn"
 target_spawn_id = &"from_realhometest"
 owner_ids = Array[StringName]([&"mom", &"player"])
 
 [node name="PlayerSpawnFromYard" type="Marker2D" parent="." unique_id=334133969]
-position = Vector2(530, 367)
+position = Vector2(530, 376)
 script = ExtResource("9_player_spawn")
 spawn_id = &"from_realtest1"
 
@@ -666,9 +1099,11 @@ world_definition = ExtResource("10_mom_shower")
 called_npc_ids = Array[StringName]([&"mom"])
 
 [node name="PlayerSleepSpot" parent="." unique_id=1428672319 instance=ExtResource("8_player_sleep_spot")]
+visible = false
 position = Vector2(-916, 368)
 
 [node name="HomeRestSpot" parent="." unique_id=2057314550 instance=ExtResource("7_rest_spot")]
+visible = false
 position = Vector2(105, 368)
 owner_npc_ids = Array[StringName]([&"mom"])
 npc_preference_weights = {
@@ -680,6 +1115,7 @@ visible = false
 position = Vector2(420, 368)
 
 [node name="MomMagicLessonSpot" type="Node2D" parent="." unique_id=668963211]
+visible = false
 position = Vector2(-301, 368)
 script = ExtResource("12_magic_lesson")
 world_definition = ExtResource("13_mom_magic_lesson")
@@ -697,3 +1133,4 @@ position = Vector2(96, 0)
 [connection signal="area_entered" from="RoomVisibilityTriggers/Kitchen" to="RoomVisibilityAnimation" method="play" unbinds=1 binds= [&"kitchen"]]
 [connection signal="area_entered" from="RoomVisibilityTriggers/Hall" to="RoomVisibilityAnimation" method="play" unbinds=1 binds= [&"hall"]]
 [connection signal="area_entered" from="RoomVisibilityTriggers/Bathroom" to="RoomVisibilityAnimation" method="play" unbinds=1 binds= [&"bathroom"]]
+[connection signal="area_entered" from="RoomVisibilityTriggers/SecondFloor" to="RoomVisibilityAnimation" method="play" unbinds=1 binds= [&"second_floor"]]

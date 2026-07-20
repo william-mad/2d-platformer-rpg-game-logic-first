@@ -1,0 +1,117 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/instances/interior_door.gd" id="1_interior_door"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_barrier"]
+size = Vector2(16, 116)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_request"]
+size = Vector2(144, 140)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_clearance"]
+size = Vector2(192, 160)
+
+[sub_resource type="Animation" id="Animation_reset"]
+length = 0.001
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("VisualRoot/DoorPanel:scale")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(1, 1)]
+}
+
+[sub_resource type="Animation" id="Animation_open"]
+resource_name = "open"
+length = 0.18
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("VisualRoot/DoorPanel:scale")
+tracks/0/interp = 2
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 0.18),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Vector2(1, 1), Vector2(0.12, 1)]
+}
+
+[sub_resource type="Animation" id="Animation_close"]
+resource_name = "close"
+length = 0.18
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("VisualRoot/DoorPanel:scale")
+tracks/0/interp = 2
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 0.18),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Vector2(0.12, 1), Vector2(1, 1)]
+}
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_door"]
+_data = {
+&"RESET": SubResource("Animation_reset"),
+&"close": SubResource("Animation_close"),
+&"open": SubResource("Animation_open")
+}
+
+[node name="InteriorDoor" type="Node2D" groups=["interior_door"]]
+script = ExtResource("1_interior_door")
+
+[node name="DoorBarrier" type="StaticBody2D" parent="."]
+collision_layer = 1
+collision_mask = 6
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="DoorBarrier"]
+position = Vector2(0, -58)
+shape = SubResource("RectangleShape2D_barrier")
+debug_color = Color(0.9, 0.2, 0.2, 0.35)
+
+[node name="RequestArea" type="Area2D" parent="."]
+collision_layer = 0
+collision_mask = 6
+monitorable = false
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="RequestArea"]
+position = Vector2(0, -58)
+shape = SubResource("RectangleShape2D_request")
+debug_color = Color(0.2, 0.8, 1, 0.22)
+
+[node name="ClearanceArea" type="Area2D" parent="."]
+collision_layer = 0
+collision_mask = 6
+monitorable = false
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="ClearanceArea"]
+position = Vector2(0, -58)
+shape = SubResource("RectangleShape2D_clearance")
+debug_color = Color(0.3, 1, 0.4, 0.16)
+
+[node name="VisualRoot" type="Node2D" parent="."]
+position = Vector2(0, -58)
+
+[node name="DoorFrame" type="Polygon2D" parent="VisualRoot"]
+color = Color(0.18, 0.08, 0.03, 1)
+polygon = PackedVector2Array(-12, -60, 12, -60, 12, 60, 7, 60, 7, -54, -7, -54, -7, 60, -12, 60)
+
+[node name="DoorPanel" type="Polygon2D" parent="VisualRoot"]
+color = Color(0.46, 0.22, 0.08, 1)
+polygon = PackedVector2Array(-7, -54, 7, -54, 7, 58, -7, 58)
+
+[node name="DoorKnob" type="Polygon2D" parent="VisualRoot/DoorPanel"]
+position = Vector2(4, 2)
+color = Color(0.95, 0.73, 0.2, 1)
+polygon = PackedVector2Array(-2, -2, 2, -2, 2, 2, -2, 2)
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+libraries/ = SubResource("AnimationLibrary_door")

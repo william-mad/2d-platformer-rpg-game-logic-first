@@ -52,6 +52,7 @@ func add_development_sample_items() -> bool:
 		&"raw_slime_meat": 5,
 		&"slime_gel": 8,
 		&"cooked_slime_meat": 3,
+		&"wooden_sword": 1,
 	}
 	for item_id: StringName in samples:
 		if not catalog.has_item(item_id):

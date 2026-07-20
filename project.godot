@@ -162,6 +162,7 @@ debug_scripted_event_smoke={
 2d_physics/layer_9="rope attachable objects"
 2d_physics/layer_10="one way platform - if necessary"
 2d_physics/layer_11="attack spell detection"
+2d_physics/layer_12="player roll"
 
 [physics]
 

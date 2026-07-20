@@ -111,6 +111,12 @@ visible = false
 layout_mode = 2
 text = "Consume"
 
+[node name="EquipmentButton" type="Button" parent="Center/Panel/Margin/Root/Content/Details"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+text = "Equip"
+
 [node name="DumpTitle" type="Label" parent="Center/Panel/Margin/Root/Content/Details"]
 layout_mode = 2
 text = "Dump into world"

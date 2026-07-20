@@ -3,6 +3,11 @@ extends Area2D
 
 signal loot_collected(source_id: StringName)
 
+@export_group("Authored Pickup")
+@export var authored_item_id: StringName = &""
+@export_range(1, 9999, 1) var authored_quantity: int = 1
+@export var development_only: bool = false
+
 @export_group("Magnet")
 @export var attraction_radius: float = 160.0
 @export var collection_radius: float = 18.0
@@ -26,6 +31,9 @@ var _excluded_receiver_until_msec: Dictionary = {}
 
 
 func _ready() -> void:
+	if development_only and not OS.is_debug_build():
+		queue_free()
+		return
 	process_mode = Node.PROCESS_MODE_PAUSABLE
 	body_entered.connect(_on_body_entered)
 	body_exited.connect(_on_body_exited)
@@ -34,6 +42,24 @@ func _ready() -> void:
 	_configure_attraction_shape()
 	set_physics_process(false)
 	_update_visuals()
+	_initialize_authored_pickup()
+
+
+func _initialize_authored_pickup() -> void:
+	if authored_item_id == &"" or _initialized:
+		return
+	var authored_inventory := InventoryModel.new()
+	var add_result := authored_inventory.add(authored_item_id, authored_quantity)
+	if not add_result.success:
+		push_warning("Authored world pickup could not add '%s': %s" % [String(authored_item_id), add_result.message])
+		queue_free()
+		return
+	if development_only:
+		source_type = &"debug_pickup"
+	var initialization := initialize_from_inventory(authored_inventory, &"authored_pickup")
+	if not initialization.success:
+		push_warning("Authored world pickup initialization failed: %s" % initialization.message)
+		queue_free()
 
 
 func initialize_loot(inventory_data: Dictionary, loot_source_id: StringName = &"") -> InventoryResult:

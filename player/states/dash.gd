@@ -11,6 +11,7 @@ class_name PlayerStateDash extends PlayerState
 @export_group("Input")
 @export var double_tap_window: float = 0.25
 @export var cooldown_time: float = 0.28
+@export_range(0.0, 0.5, 0.01, "suffix:s") var roll_input_grace_time: float = 0.14
 
 @export_group("Visuals")
 @export var afterimage_enabled: bool = true
@@ -31,6 +32,10 @@ var last_tap_time_msec: int = -100000
 var cooldown_end_msec: int = 0
 var previous_gravity_multiplier: float = 1.0
 var afterimage_timer: float = 0.0
+var roll_grace_timer: float = 0.0
+var dash_motion_active: bool = false
+
+@onready var roll_state: PlayerStateRoll = %Roll
 
 
 func init() -> void:
@@ -42,6 +47,8 @@ func enter() -> void:
 	dash_timer = dash_duration
 	dash_elapsed = 0.0
 	afterimage_timer = 0.0
+	roll_grace_timer = roll_input_grace_time
+	dash_motion_active = true
 	previous_gravity_multiplier = player.gravity_multiplier
 	player.gravity_multiplier = dash_gravity_multiplier
 	cooldown_end_msec = Time.get_ticks_msec() + int(cooldown_time * 1000.0)
@@ -58,6 +65,14 @@ func enter() -> void:
 
 
 func exit() -> void:
+	_finish_dash_motion()
+
+
+func _finish_dash_motion() -> void:
+	if not dash_motion_active:
+		return
+
+	dash_motion_active = false
 	player.gravity_multiplier = previous_gravity_multiplier
 	if player.direction.x == 0.0:
 		player.velocity.x = dash_direction * player.move_speed * dash_exit_speed_multiplier
@@ -66,6 +81,10 @@ func exit() -> void:
 
 
 func handle_input(_event: InputEvent) -> PlayerState:
+	if _event.is_action_pressed("crouch"):
+		roll_state.prepare_from_dash(dash_direction, player.velocity.x)
+		return roll_state
+
 	if _event.is_action_released("attack"):
 		clear_attack_charge()
 
@@ -73,11 +92,21 @@ func handle_input(_event: InputEvent) -> PlayerState:
 
 
 func process(delta: float) -> PlayerState:
-	dash_timer -= delta
-	dash_elapsed += delta
-	update_dash_visuals(delta)
+	var grace_delta := delta
+	if dash_motion_active:
+		var active_delta := minf(delta, maxf(dash_timer, 0.0))
+		dash_timer -= delta
+		dash_elapsed += active_delta
+		update_dash_visuals(active_delta)
 
-	if dash_timer > 0.0:
+		if dash_timer > 0.0:
+			return null
+
+		grace_delta = maxf(-dash_timer, 0.0)
+		_finish_dash_motion()
+
+	roll_grace_timer = maxf(roll_grace_timer - grace_delta, 0.0)
+	if roll_grace_timer > 0.0:
 		return null
 
 	if player.is_on_floor():
@@ -90,7 +119,13 @@ func process(delta: float) -> PlayerState:
 
 
 func physics_process(_delta: float) -> PlayerState:
-	player.velocity.x = dash_direction * get_current_dash_speed()
+	if dash_motion_active:
+		player.velocity.x = dash_direction * get_current_dash_speed()
+	elif player.direction.x != 0.0:
+		player.velocity.x = player.direction.x * player.move_speed
+	else:
+		var recovery_time := maxf(roll_input_grace_time, 0.001)
+		player.velocity.x = move_toward(player.velocity.x, 0.0, player.move_speed * _delta / recovery_time)
 
 	return null
 

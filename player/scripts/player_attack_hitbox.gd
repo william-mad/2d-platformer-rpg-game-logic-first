@@ -30,8 +30,19 @@ func activate(definition: AttackDefinition, attack_source: Node, facing_x: float
 	var current_serial := activation_serial
 	active_definition = definition
 	source_player = attack_source
-	damage = definition.damage
-	knockout_damage = maxf(definition.knockout_damage, 0.0)
+	var equipment_modifiers: Dictionary = {}
+	if attack_source != null and attack_source.has_method("get_attack_equipment_modifiers"):
+		var returned_modifiers = attack_source.call("get_attack_equipment_modifiers", definition)
+		if returned_modifiers is Dictionary:
+			equipment_modifiers = returned_modifiers
+	var damage_multiplier := _validated_multiplier(
+		equipment_modifiers.get("damage_multiplier", 1.0)
+	)
+	var knockout_multiplier := _validated_multiplier(
+		equipment_modifiers.get("knockout_multiplier", 1.0)
+	)
+	damage = definition.damage * damage_multiplier
+	knockout_damage = maxf(definition.knockout_damage, 0.0) * knockout_multiplier
 	collision_mask = definition.collision_mask
 	damaged_victims.clear()
 	_apply_definition_shape(definition, facing_x)
@@ -152,3 +163,10 @@ func _ensure_collision_shape() -> CollisionShape2D:
 	var new_collision_shape := CollisionShape2D.new()
 	add_child(new_collision_shape)
 	return new_collision_shape
+
+
+func _validated_multiplier(value: Variant) -> float:
+	if typeof(value) != TYPE_FLOAT and typeof(value) != TYPE_INT:
+		return 1.0
+	var multiplier := float(value)
+	return multiplier if is_finite(multiplier) and multiplier >= 0.0 else 1.0

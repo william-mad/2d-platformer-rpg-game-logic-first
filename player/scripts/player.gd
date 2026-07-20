@@ -25,6 +25,7 @@ const CLAIM_SUPPRESSED_ACTIONS: Array[StringName] = [
 @onready var attack_hitbox: PlayerAttackHitbox = %AttackHitbox
 @onready var ledgedetec: RayCast2D = %ledgedetec
 @onready var player_inventory: PlayerInventoryComponent = get_node_or_null("PlayerInventory") as PlayerInventoryComponent
+@onready var player_equipment: PlayerEquipmentComponent = get_node_or_null("PlayerEquipment") as PlayerEquipmentComponent
 
 #endregion
 
@@ -134,6 +135,8 @@ func _ready() -> void:
 	sync_stats_to_hud()
 	#initialize states
 	initialize_states()
+	if player_equipment != null:
+		player_equipment.bind_inventory(get_inventory())
 	_apply_pending_runtime_state()
 	_bind_gameplay_control_claim_notifications()
 	if PlayerHud.has_method("bind_player_inventory"):
@@ -170,6 +173,7 @@ func get_save_data() -> Dictionary:
 		"extra_values": _collect_extra_save_values(),
 	}
 	data["inventory"] = get_inventory_save_data()
+	data["equipment"] = player_equipment.get_save_data() if player_equipment != null else {}
 	return data
 
 
@@ -214,6 +218,14 @@ func apply_save_data(data: Dictionary) -> void:
 	else:
 		# Inventory was optional in older player save blocks.
 		reset_inventory()
+
+	if player_equipment != null:
+		var equipment_data = data.get("equipment", {})
+		var equipment_result := player_equipment.apply_save_data(
+			equipment_data if equipment_data is Dictionary else {}
+		)
+		if not bool(equipment_result.get("success", false)):
+			push_warning("Player equipment restore failed: %s" % String(equipment_result.get("message", "Unknown error.")))
 
 	var extra_values = data.get("extra_values", {})
 	if extra_values is Dictionary:
@@ -260,6 +272,27 @@ func reset_inventory() -> void:
 		push_error("Player cannot reset inventory: PlayerInventory component is missing.")
 		return
 	player_inventory.reset_inventory()
+
+
+func get_equipped_item_id(slot_id: StringName) -> StringName:
+	return player_equipment.get_equipped_item_id(slot_id) if player_equipment != null else &""
+
+
+func get_attack_equipment_modifiers(attack_definition: AttackDefinition) -> Dictionary:
+	var modifiers := {
+		"damage_multiplier": 1.0,
+		"knockout_multiplier": 1.0,
+	}
+	if attack_definition == null or player_equipment == null:
+		return modifiers
+	var profile := player_equipment.get_equipped_profile(&"weapon")
+	if profile == null or not profile.is_valid_profile():
+		return modifiers
+	if not profile.applies_to_attack(attack_definition.tags):
+		return modifiers
+	modifiers["damage_multiplier"] = profile.damage_multiplier
+	modifiers["knockout_multiplier"] = profile.knockout_multiplier
+	return modifiers
 
 
 func _apply_pending_runtime_state() -> void:
