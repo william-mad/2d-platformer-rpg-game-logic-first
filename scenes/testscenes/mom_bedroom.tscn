@@ -1,0 +1,142 @@
+[gd_scene load_steps=12 format=3]
+
+[ext_resource type="PackedScene" uid="uid://by1aphre1t601" path="res://player/player.tscn" id="1_player"]
+[ext_resource type="Script" uid="uid://ctcqm70yhr0sv" path="res://scripts/systems/npc_location_scene.gd" id="2_location_scene"]
+[ext_resource type="PackedScene" path="res://scenes/things/npc_travel_door.tscn" id="3_travel_door"]
+[ext_resource type="Script" uid="uid://bamkt5f56h1bc" path="res://scripts/instances/player_spawn.gd" id="4_player_spawn"]
+[ext_resource type="PackedScene" path="res://scenes/things/npc_need_spot.tscn" id="5_need_spot"]
+[ext_resource type="Resource" uid="uid://cm4k0hn1nugkn" path="res://data/npc_spots/mom_bed.tres" id="6_mom_bed"]
+[ext_resource type="PackedScene" path="res://scenes/ui/character_stats_overlay.tscn" id="7_stats_overlay"]
+[ext_resource type="Resource" path="res://data/npc_routes/edges/mom_bedroom_to_realhometest.tres" id="8_bedroom_home_route"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_floor"]
+size = Vector2(960, 64)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_wall"]
+size = Vector2(32, 540)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_ceiling"]
+size = Vector2(960, 32)
+
+[node name="MomBedroom" type="Node2D"]
+
+[node name="Wall" type="Polygon2D" parent="."]
+z_index = -20
+color = Color(0.235, 0.16, 0.18, 1)
+polygon = PackedVector2Array(-480, -120, 480, -120, 480, 420, -480, 420)
+
+[node name="LowerWall" type="Polygon2D" parent="."]
+z_index = -19
+color = Color(0.36, 0.225, 0.205, 1)
+polygon = PackedVector2Array(-480, 214, 480, 214, 480, 420, -480, 420)
+
+[node name="WallTrim" type="Polygon2D" parent="."]
+z_index = -18
+color = Color(0.66, 0.47, 0.34, 1)
+polygon = PackedVector2Array(-480, 204, 480, 204, 480, 220, -480, 220)
+
+[node name="FloorVisual" type="Polygon2D" parent="."]
+z_index = -10
+color = Color(0.25, 0.145, 0.105, 1)
+polygon = PackedVector2Array(-480, 368, 480, 368, 480, 452, -480, 452)
+
+[node name="Rug" type="Polygon2D" parent="."]
+z_index = -5
+color = Color(0.36, 0.14, 0.18, 1)
+polygon = PackedVector2Array(-92, 350, 342, 350, 382, 420, -132, 420)
+
+[node name="WindowFrame" type="Polygon2D" parent="."]
+z_index = -15
+color = Color(0.58, 0.39, 0.28, 1)
+polygon = PackedVector2Array(-110, -76, 110, -76, 110, 112, -110, 112)
+
+[node name="WindowGlass" type="Polygon2D" parent="."]
+z_index = -14
+color = Color(0.16, 0.25, 0.34, 1)
+polygon = PackedVector2Array(-92, -58, 92, -58, 92, 94, -92, 94)
+
+[node name="WindowCross" type="Polygon2D" parent="."]
+z_index = -13
+color = Color(0.58, 0.39, 0.28, 1)
+polygon = PackedVector2Array(-7, -58, 7, -58, 7, 94, -7, 94)
+
+[node name="Bed" type="Node2D" parent="."]
+position = Vector2(236, 420)
+
+[node name="Headboard" type="Polygon2D" parent="Bed"]
+z_index = 1
+color = Color(0.31, 0.17, 0.105, 1)
+polygon = PackedVector2Array(-126, -180, -94, -204, 94, -204, 126, -180, 126, 0, -126, 0)
+
+[node name="Mattress" type="Polygon2D" parent="Bed"]
+z_index = 2
+color = Color(0.82, 0.75, 0.62, 1)
+polygon = PackedVector2Array(-118, -132, 118, -132, 118, -20, -118, -20)
+
+[node name="Blanket" type="Polygon2D" parent="Bed"]
+z_index = 3
+color = Color(0.48, 0.19, 0.23, 1)
+polygon = PackedVector2Array(-118, -84, 118, -84, 118, -20, -118, -20)
+
+[node name="Pillow" type="Polygon2D" parent="Bed"]
+z_index = 4
+color = Color(0.92, 0.86, 0.72, 1)
+polygon = PackedVector2Array(-84, -126, 62, -126, 76, -92, -72, -92)
+
+[node name="WorldCollision" type="StaticBody2D" parent="."]
+collision_mask = 6
+
+[node name="Floor" type="CollisionShape2D" parent="WorldCollision"]
+position = Vector2(0, 452)
+shape = SubResource("RectangleShape2D_floor")
+
+[node name="LeftWall" type="CollisionShape2D" parent="WorldCollision"]
+position = Vector2(-496, 150)
+shape = SubResource("RectangleShape2D_wall")
+
+[node name="RightWall" type="CollisionShape2D" parent="WorldCollision"]
+position = Vector2(496, 150)
+shape = SubResource("RectangleShape2D_wall")
+
+[node name="Ceiling" type="CollisionShape2D" parent="WorldCollision"]
+position = Vector2(0, -136)
+shape = SubResource("RectangleShape2D_ceiling")
+
+[node name="NpcLocationScene" type="Node" parent="."]
+script = ExtResource("2_location_scene")
+scene_path = "res://scenes/testscenes/mom_bedroom.tscn"
+ground_y = 420.0
+spawn_x_min = -400.0
+spawn_x_max = 400.0
+
+[node name="DoorToRealHome" parent="." instance=ExtResource("3_travel_door")]
+position = Vector2(-400, 420)
+target_scene_path = "res://scenes/testscenes/realhometest.tscn"
+target_spawn_id = &"from_mom_bedroom"
+route_edge = ExtResource("8_bedroom_home_route")
+owner_ids = Array[StringName]([&"mom", &"player"])
+
+[node name="PlayerSpawnFromRealHome" type="Marker2D" parent="."]
+position = Vector2(-320, 420)
+script = ExtResource("4_player_spawn")
+spawn_id = &"from_realhometest"
+
+[node name="Player" parent="." instance=ExtResource("1_player")]
+position = Vector2(-320, 420)
+
+[node name="Camera2D" type="Camera2D" parent="Player"]
+position = Vector2(320, -270)
+limit_left = -480
+limit_top = -120
+limit_right = 480
+limit_bottom = 420
+
+[node name="MomSleepSpot" parent="." instance=ExtResource("5_need_spot")]
+visible = false
+position = Vector2(220, 420)
+save_id = "mom_bedroom_mom_bed"
+spot_id = &"mom_bed"
+world_definition = ExtResource("6_mom_bed")
+owner_ids = Array[StringName]([&"mom"])
+
+[node name="CharacterStatsOverlay" parent="." instance=ExtResource("7_stats_overlay")]

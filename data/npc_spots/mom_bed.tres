@@ -5,8 +5,8 @@
 [resource]
 script = ExtResource("1_spot_definition")
 spot_id = &"mom_bed"
-scene_path = "res://scenes/testscenes/realhometest.tscn"
-position = Vector2(220, 368)
+scene_path = "res://scenes/testscenes/mom_bedroom.tscn"
+position = Vector2(220, 420)
 state_name = &"Sleep"
 value_name = &"sleep_need"
 need_threshold = 71.0
@@ -16,7 +16,7 @@ priority = 70
 require_npc_value_threshold = false
 finish_when_npc_value_sated = false
 wake_at_home_position = false
-owner_npc_ids = Array[StringName]([&"mom"])
+owner_ids = Array[StringName]([&"mom"])
 active_time_windows = Array[Dictionary]([{
 "end_hour": 6.0,
 "start_hour": 22.0

@@ -64,7 +64,43 @@ class_name NpcSpotDefinition extends Resource
 
 
 func is_valid_definition() -> bool:
-	return spot_id != &"" and not scene_path.is_empty() and state_name != &""
+	return get_validation_errors().is_empty()
+
+
+func get_validation_errors() -> Array[String]:
+	var errors: Array[String] = []
+	if spot_id == &"":
+		errors.append("spot_id is empty")
+	if state_name == &"":
+		errors.append("state_name is empty")
+	if scene_path.is_empty():
+		errors.append("scene_path is empty")
+	elif (
+		not scene_path.begins_with("res://")
+		or scene_path.get_extension().to_lower() != "tscn"
+	):
+		errors.append("scene_path is not a res:// .tscn path")
+	elif not ResourceLoader.exists(scene_path):
+		errors.append("scene_path does not exist: %s" % scene_path)
+	if not is_finite(position.x) or not is_finite(position.y):
+		errors.append("position must be finite")
+	for index in active_time_windows.size():
+		var window = active_time_windows[index]
+		if not (window is Dictionary):
+			errors.append("active_time_windows[%d] is not a dictionary" % index)
+			continue
+		for field_name in ["start_hour", "end_hour"]:
+			if not window.has(field_name):
+				errors.append("active_time_windows[%d] has no %s" % [index, field_name])
+				continue
+			var hour := float(window[field_name])
+			if not is_finite(hour) or hour < 0.0 or hour > 24.0:
+				errors.append(
+					"active_time_windows[%d].%s must be between 0 and 24" % [
+						index, field_name,
+					]
+				)
+	return errors
 
 
 func allows_npc_id(npc_id: StringName) -> bool:

@@ -1,6 +1,9 @@
 extends Node
 
 const NpcActionSessionModel = preload("res://scripts/systems/npc_action_session.gd")
+const NpcRouteLocationCoordinator = preload(
+	"res://scripts/systems/npc_route_location_coordinator.gd"
+)
 
 signal npc_registered(npc_id: String, npc: Node, scene_path: String)
 signal npc_travelled(npc_id: String, from_scene_path: String, to_scene_path: String)
@@ -273,35 +276,32 @@ func prepare_scheduled_travel(
 	if npc == null or departure_door == null or not is_instance_valid(departure_door):
 		_breadcrumb("npc_locations:prepare_travel_missing_live_target", npc_id)
 		return false
-	var original_record: Dictionary = (npc_records[npc_id] as Dictionary).duplicate(true)
-	var record: Dictionary = original_record.duplicate(true)
+	var record: Dictionary = (npc_records[npc_id] as Dictionary).duplicate(true)
 	if not _capture_live_npc_into_record(npc_id, npc, record):
 		_breadcrumb("npc_locations:prepare_travel_capture_reject", npc_id)
 		return false
 
-	var accepted := false
+	var machine := npc.get_node_or_null("NpcStateMachine")
+	if machine == null or not machine.has_method("assign_move_target"):
+		_breadcrumb("npc_locations:prepare_travel_no_machine", npc_id)
+		return false
 	var already_at_door := (
 		departure_door is Area2D
 		and (departure_door as Area2D).overlaps_body(npc)
 		and departure_door.has_method("try_travel_npc")
 	)
-	if already_at_door:
-		# Reaching an eligible travel door is itself acceptance; completion is checked
-		# synchronously after the pending record is installed below.
-		accepted = true
-	else:
-		var machine := npc.get_node_or_null("NpcStateMachine")
-		if machine == null or not machine.has_method("assign_move_target"):
-			_breadcrumb("npc_locations:prepare_travel_no_machine", npc_id)
-			return false
-		accepted = _request_pending_travel_movement(
-			machine, npc_id, pending_travel, departure_door, record
-		)
+	# Bind the action session even when the body already overlaps the door. The
+	# synchronous callback below applies the same session guard as a later entry.
+	var accepted := _request_pending_travel_movement(
+		machine, npc_id, pending_travel, departure_door, record
+	)
 
 	if not accepted:
 		_breadcrumb("npc_locations:prepare_travel_assignment_reject", npc_id)
 		return false
 
+	if String(pending_travel.get("mode", "start")) == "finish":
+		record[NpcRouteLocationCoordinator.FINISH_REPLAN_RECORD_KEY] = {}
 	record["pending_travel"] = pending_travel.duplicate(true)
 	var accepted_machine := npc.get_node_or_null("NpcStateMachine")
 	if accepted_machine != null and accepted_machine.has_method("get_active_action_descriptor"):
@@ -310,7 +310,20 @@ func prepare_scheduled_travel(
 	if already_at_door:
 		var travelled := bool(departure_door.call("try_travel_npc", npc))
 		if not travelled:
-			npc_records[npc_id] = original_record
+			var rejected_session_id := NpcActionSessionModel.pending_travel_session_id(
+				pending_travel
+			)
+			var rejected_record: Dictionary = get_record_snapshot(npc_id)
+			var rejected_pending = rejected_record.get("pending_travel", {})
+			if rejected_pending is Dictionary and rejected_pending == pending_travel:
+				if String(pending_travel.get("mode", "start")) == "finish":
+					discard_pending_finish_route_for_replan(
+						npc_id, "immediate_door_rejected", rejected_session_id
+					)
+				else:
+					cancel_pending_scheduled_travel(
+						npc_id, "immediate_door_rejected", true, rejected_session_id
+					)
 			_breadcrumb("npc_locations:prepare_travel_door_reject", npc_id)
 			return false
 	_breadcrumb("npc_locations:prepare_travel_accept", npc_id)
@@ -322,11 +335,6 @@ func resume_pending_scheduled_travel(npc_id: String, departure_door: Node2D) -> 
 	if npc == null or departure_door == null or not is_instance_valid(departure_door):
 		_breadcrumb("npc_locations:resume_pending_reject", npc_id)
 		return false
-
-	if departure_door is Area2D and (departure_door as Area2D).overlaps_body(npc):
-		if departure_door.has_method("try_travel_npc"):
-			_breadcrumb("npc_locations:resume_pending_door", npc_id)
-			return bool(departure_door.call("try_travel_npc", npc))
 
 	var machine := npc.get_node_or_null("NpcStateMachine")
 	if machine == null or not machine.has_method("assign_move_target"):
@@ -342,6 +350,14 @@ func resume_pending_scheduled_travel(npc_id: String, departure_door: Node2D) -> 
 		departure_door,
 		record
 	)
+	if (
+		accepted
+		and departure_door is Area2D
+		and (departure_door as Area2D).overlaps_body(npc)
+		and departure_door.has_method("try_travel_npc")
+	):
+		_breadcrumb("npc_locations:resume_pending_door", npc_id)
+		return bool(departure_door.call("try_travel_npc", npc))
 	_breadcrumb("npc_locations:resume_pending_move", "%s %s" % [npc_id, "accept" if accepted else "reject"])
 	return accepted
 
@@ -367,9 +383,24 @@ func _request_pending_travel_movement(
 			descriptor["source"] = String(nested_activity.get("source", "schedule"))
 			descriptor["target_persistent_id"] = String(nested_activity.get("spot_id", ""))
 		else:
-			var existing_action = record.get("action", {})
-			if existing_action is Dictionary:
-				descriptor = existing_action.duplicate(true)
+			# A finish route belongs to the committed activity. It remains the
+			# executable source even if an interrupted movement action became terminal.
+			var committed_activity = record.get("activity", {})
+			if (
+				String(pending_travel.get("mode", "start")) == "finish"
+				and committed_activity is Dictionary
+				and not committed_activity.is_empty()
+			):
+				descriptor = committed_activity.duplicate(true)
+				descriptor["action_kind"] = String(committed_activity.get(
+					"state_name", committed_activity.get("action_kind", destination_kind)
+				))
+				descriptor["source"] = String(committed_activity.get("source", "schedule"))
+				descriptor["target_persistent_id"] = String(committed_activity.get("spot_id", ""))
+			else:
+				var existing_action = record.get("action", {})
+				if existing_action is Dictionary:
+					descriptor = existing_action.duplicate(true)
 			if descriptor.is_empty():
 				descriptor = {
 					"action_kind": String(
@@ -396,14 +427,25 @@ func complete_pending_scheduled_travel(npc: Node, door_target_scene_path: String
 	var npc_id := get_npc_id(npc)
 	if npc_id.is_empty() or not npc_records.has(npc_id):
 		return false
+	if get_live_npc(npc_id) != npc:
+		return false
 
-	_refresh_live_record(npc_id)
 	var record: Dictionary = npc_records[npc_id]
 	var pending = record.get("pending_travel", {})
 	if not (pending is Dictionary) or pending.is_empty():
 		return false
+	if not NpcActionSessionModel.live_npc_matches_pending_travel_session(
+		npc, pending, &"MoveToTarget"
+	):
+		return false
 	if String(pending.get("target_scene_path", "")) != door_target_scene_path:
 		return false
+	_refresh_live_record(npc_id)
+	record = npc_records[npc_id]
+	var refreshed_pending = record.get("pending_travel", {})
+	if not (refreshed_pending is Dictionary) or refreshed_pending != pending:
+		return false
+	pending = refreshed_pending
 
 	var mode := String(pending.get("mode", "start"))
 	var target_position = pending.get("target_position", Vector2.ZERO)
@@ -432,23 +474,287 @@ func complete_pending_scheduled_travel(npc: Node, door_target_scene_path: String
 	return begin_scheduled_activity(npc_id, activity, door_target_scene_path, target_position)
 
 
-func cancel_pending_scheduled_travel(npc_id: String) -> void:
-	if not npc_records.has(npc_id):
-		return
+func complete_pending_route_hop(
+	npc: Node,
+	route_edge_id: StringName,
+	door_target_scene_path: String
+) -> bool:
+	return NpcRouteLocationCoordinator.complete_pending_hop(
+		self, npc, route_edge_id, door_target_scene_path
+	)
 
-	var record: Dictionary = npc_records[npc_id]
-	var pending = record.get("pending_travel", {})
-	if pending is Dictionary:
-		var pending_activity = pending.get("activity", {})
-		if pending_activity is Dictionary and not pending_activity.is_empty():
-			_notify_activity_claim_release(
-				StringName(String(pending_activity.get("spot_id", ""))),
-				"pending_travel_cancelled",
-				NpcActionSessionModel._descriptor_session_id(pending_activity),
-				StringName(npc_id)
-			)
-	record["pending_travel"] = {}
+
+func _commit_pending_route_advance(
+	npc_id: String,
+	npc: Node,
+	expected_pending: Dictionary,
+	updated_pending: Dictionary,
+	expected_source_scene_path: String,
+	target_scene_path: String,
+	arrival_position: Vector2
+) -> bool:
+	if not npc_records.has(npc_id) or get_live_npc(npc_id) != npc:
+		return false
+	return _commit_pending_route_record_advance(
+		npc_id,
+		npc,
+		expected_pending,
+		updated_pending,
+		expected_source_scene_path,
+		target_scene_path,
+		arrival_position
+	)
+
+
+func _commit_pending_route_advance_offscreen(
+	npc_id: String,
+	expected_pending: Dictionary,
+	updated_pending: Dictionary,
+	expected_source_scene_path: String,
+	target_scene_path: String,
+	arrival_position: Vector2
+) -> bool:
+	if not npc_records.has(npc_id) or is_npc_live(npc_id):
+		return false
+	return _commit_pending_route_record_advance(
+		npc_id,
+		null,
+		expected_pending,
+		updated_pending,
+		expected_source_scene_path,
+		target_scene_path,
+		arrival_position
+	)
+
+
+func _commit_pending_route_record_advance(
+	npc_id: String,
+	live_npc: Node,
+	expected_pending: Dictionary,
+	updated_pending: Dictionary,
+	expected_source_scene_path: String,
+	target_scene_path: String,
+	arrival_position: Vector2
+) -> bool:
+	var stored_record: Dictionary = npc_records[npc_id]
+	if String(stored_record.get("scene_path", "")) != expected_source_scene_path:
+		return false
+	var current_pending = stored_record.get("pending_travel", {})
+	if not (current_pending is Dictionary) or current_pending != expected_pending:
+		return false
+	var record: Dictionary = stored_record.duplicate(true)
+	if live_npc != null and not _capture_live_npc_into_record(npc_id, live_npc, record):
+		return false
+	record["pending_travel"] = updated_pending.duplicate(true)
+	var from_scene_path := String(record.get("scene_path", ""))
+	record["previous_scene_path"] = from_scene_path
+	record["scene_path"] = target_scene_path
+	record["last_position"] = arrival_position
+	record["spawn_random"] = false
+	record["last_travel_msec"] = Time.get_ticks_msec()
 	npc_records[npc_id] = record
+	if live_npc != null:
+		live_npcs.erase(npc_id)
+		live_npc.queue_free()
+	if from_scene_path != target_scene_path:
+		npc_travelled.emit(npc_id, from_scene_path, target_scene_path)
+		_emit_location_event(npc_id, from_scene_path, target_scene_path)
+	if target_scene_path == active_scene_path:
+		call_deferred("_spawn_missing_npcs_for_active_scene")
+	_breadcrumb(
+		"npc_locations:route_hop_accept",
+		"%s %s -> %s" % [npc_id, from_scene_path.get_file(), target_scene_path.get_file()]
+	)
+	return true
+
+
+func _commit_pending_route_destination(
+	npc_id: String,
+	npc: Node,
+	expected_pending: Dictionary,
+	updated_pending: Dictionary,
+	expected_source_scene_path: String,
+	target_scene_path: String,
+	arrival_position: Vector2
+) -> bool:
+	if not npc_records.has(npc_id) or get_live_npc(npc_id) != npc:
+		return false
+	var record: Dictionary = npc_records[npc_id]
+	if String(record.get("scene_path", "")) != expected_source_scene_path:
+		return false
+	var current_pending = record.get("pending_travel", {})
+	if not (current_pending is Dictionary) or current_pending != expected_pending:
+		return false
+	# Do not persist the final advanced hop before the destination transaction.
+	# A rejected begin/finish therefore leaves the original hop retryable.
+	return NpcRouteLocationCoordinator.commit_route_destination(
+		self,
+		npc_id,
+		updated_pending,
+		target_scene_path,
+		arrival_position
+	)
+
+
+func cancel_pending_scheduled_travel(
+	npc_id: String,
+	reason: String = "pending_travel_cancelled",
+	cancel_matching_action: bool = true,
+	expected_session_id: String = "",
+	retain_finish_route_for_retry: bool = true
+) -> bool:
+	if not npc_records.has(npc_id):
+		return false
+
+	var record: Dictionary = (npc_records[npc_id] as Dictionary).duplicate(true)
+	var pending = record.get("pending_travel", {})
+	if not (pending is Dictionary) or pending.is_empty():
+		return false
+
+	var pending_activity = pending.get("activity", {})
+	var pending_session_id := NpcActionSessionModel.pending_travel_session_id(pending)
+	if not expected_session_id.is_empty() and pending_session_id != expected_session_id:
+		_breadcrumb(
+			"npc_locations:pending_travel_cancel_stale",
+			"%s callback=%s pending=%s" % [npc_id, expected_session_id, pending_session_id]
+		)
+		return false
+	var pending_spot_id := StringName(String(pending.get("spot_id", "")))
+	# A finish route reuses the already-committed activity session. Clearing that
+	# session because a route leg failed would discard the activity and its claim.
+	var finish_mode := String(pending.get("mode", "start")) == "finish"
+	var should_cancel_action := (
+		cancel_matching_action
+		and not finish_mode
+	)
+	if finish_mode and not expected_session_id.is_empty():
+		var candidate_npc := get_live_npc(npc_id)
+		var candidate_machine := (
+			candidate_npc.get_node_or_null("NpcStateMachine")
+			if candidate_npc != null
+			else null
+		)
+		var live_session_matches := (
+			candidate_npc != null
+			and NpcActionSessionModel.live_npc_matches_pending_travel_session(
+				candidate_npc, pending
+			)
+		)
+		var retry_paused := (
+			live_session_matches
+			and candidate_machine.has_method("pause_active_action_movement_for_retry")
+			and bool(candidate_machine.call(
+				"pause_active_action_movement_for_retry",
+				pending_session_id,
+				reason,
+				retain_finish_route_for_retry
+			))
+		)
+		if live_session_matches and not retry_paused:
+			return false
+		if retain_finish_route_for_retry and not retry_paused:
+			return false
+		var retry_record: Dictionary = (npc_records[npc_id] as Dictionary).duplicate(true)
+		var retry_pending = retry_record.get("pending_travel", {})
+		if not (retry_pending is Dictionary) or retry_pending != pending:
+			return false
+		if retain_finish_route_for_retry:
+			retry_pending = retry_pending.duplicate(true)
+			retry_pending["movement_retry_count"] = int(
+				retry_pending.get("movement_retry_count", 0)
+			) + 1
+			retry_pending["last_movement_retry_reason"] = reason
+			retry_record["pending_travel"] = retry_pending
+			npc_records[npc_id] = retry_record
+			_breadcrumb(
+				"npc_locations:pending_travel_retry",
+				"%s %s retry=%d" % [
+					npc_id, reason, int(retry_pending.get("movement_retry_count", 0)),
+				]
+			)
+			return true
+		record = retry_record
+		pending = retry_pending
+		pending_activity = pending.get("activity", {})
+	if pending_activity is Dictionary and not pending_activity.is_empty():
+		pending_spot_id = StringName(String(pending_activity.get("spot_id", pending_spot_id)))
+
+	if finish_mode:
+		var finish_replan_marker := (
+			NpcRouteLocationCoordinator.make_finish_replan_marker(
+				pending,
+				String(record.get("scene_path", "")),
+				reason
+			)
+		)
+		record["pending_travel"] = {}
+		record[NpcRouteLocationCoordinator.FINISH_REPLAN_RECORD_KEY] = finish_replan_marker
+		var committed_activity = record.get("activity", {})
+		if (
+			not (committed_activity is Dictionary)
+			or not NpcRouteLocationCoordinator.record_has_finish_replan_marker(
+				record, committed_activity
+			)
+		):
+			record[NpcRouteLocationCoordinator.FINISH_REPLAN_RECORD_KEY] = {}
+	else:
+		record[NpcRouteLocationCoordinator.FINISH_REPLAN_RECORD_KEY] = {}
+		record["pending_travel"] = {}
+	var released_by_live_action := false
+	if should_cancel_action and not pending_session_id.is_empty():
+		var record_action = record.get("action", {})
+		if (
+			record_action is Dictionary
+			and NpcActionSessionModel._descriptor_session_id(record_action) == pending_session_id
+		):
+			record["action"] = {}
+		var record_activity = record.get("activity", {})
+		if (
+			record_activity is Dictionary
+			and NpcActionSessionModel._descriptor_session_id(record_activity) == pending_session_id
+		):
+			record["activity"] = {}
+			NpcRouteLocationCoordinator.clear_finish_replan_marker(record)
+
+		var live_npc := get_live_npc(npc_id)
+		if live_npc != null:
+			var machine := live_npc.get_node_or_null("NpcStateMachine")
+			if (
+				machine != null
+				and machine.has_method("get_active_action_session_id")
+				and String(machine.call("get_active_action_session_id")) == pending_session_id
+				and machine.has_method("cancel_active_action")
+			):
+				released_by_live_action = bool(machine.call(
+					"cancel_active_action", pending_session_id, reason
+				))
+				if released_by_live_action and machine.has_method("clear_terminal_action"):
+					machine.call("clear_terminal_action", pending_session_id)
+
+	npc_records[npc_id] = record
+	if should_cancel_action and not released_by_live_action and not pending_session_id.is_empty():
+		_notify_activity_claim_release(
+			pending_spot_id,
+			reason,
+			pending_session_id,
+			StringName(npc_id)
+		)
+	_breadcrumb("npc_locations:pending_travel_cancel", "%s %s" % [npc_id, reason])
+	return true
+
+
+func discard_pending_finish_route_for_replan(
+	npc_id: String,
+	reason: String,
+	expected_session_id: String
+) -> bool:
+	return cancel_pending_scheduled_travel(
+		npc_id,
+		reason,
+		false,
+		expected_session_id,
+		false
+	)
 
 
 func rollback_scheduled_activity(
@@ -476,6 +782,7 @@ func rollback_scheduled_activity(
 			)
 			return false
 	record["activity"] = {}
+	NpcRouteLocationCoordinator.clear_finish_replan_marker(record)
 	if current_action is Dictionary:
 		var current_action_id := NpcActionSessionModel._descriptor_session_id(current_action)
 		if expected_session_id.is_empty() or current_action_id == expected_session_id:
@@ -550,6 +857,7 @@ func move_simulated_npc_for_social_visit(
 		return false
 	record["pending_travel"] = {}
 	record["activity"] = {}
+	NpcRouteLocationCoordinator.clear_finish_replan_marker(record)
 	var social_action := NpcActionSessionModel.create(npc_id, &"LookForTalkTarget", &"social_ai", null, {
 		"session_id": session_id,
 		"action_kind": "LookForTalkTarget",
@@ -573,7 +881,8 @@ func begin_scheduled_activity(
 	npc_id: String,
 	activity: Dictionary,
 	target_scene_path: String,
-	target_position: Vector2
+	target_position: Vector2,
+	explicit_arrival_position = null
 ) -> bool:
 	if not npc_records.has(npc_id) or target_scene_path.is_empty() or activity.is_empty():
 		_breadcrumb("npc_locations:begin_activity_reject", npc_id)
@@ -613,6 +922,12 @@ func begin_scheduled_activity(
 		target_scene_path,
 		target_position
 	)
+	if (
+		explicit_arrival_position is Vector2
+		and target_scene_path == active_scene_path
+		and from_scene_path != target_scene_path
+	):
+		spawn_position = explicit_arrival_position
 	# A live NPC starting an activity in the current scene must walk to its spot.
 	# The target position is only a spawn/simulation endpoint for unloaded travel.
 	if (
@@ -668,6 +983,7 @@ func begin_scheduled_activity(
 	record["activity"] = committed_activity
 	record["action"] = action_descriptor
 	record["pending_travel"] = {}
+	record[NpcRouteLocationCoordinator.FINISH_REPLAN_RECORD_KEY] = {}
 	record["previous_scene_path"] = ""
 	record["scene_path"] = target_scene_path
 	record["last_position"] = spawn_position
@@ -724,6 +1040,14 @@ func sync_live_action_descriptor(npc_id: String, npc: Node, descriptor: Dictiona
 			and action_session_id != activity_session_id
 		):
 			record["activity"] = {}
+			NpcRouteLocationCoordinator.clear_finish_replan_marker(record)
+			var pending = record.get("pending_travel", {})
+			if (
+				pending is Dictionary
+				and NpcActionSessionModel.pending_travel_session_id(pending)
+					== activity_session_id
+			):
+				record["pending_travel"] = {}
 	record["action"] = descriptor.duplicate(true)
 	npc_records[npc_id] = record
 	return true
@@ -926,6 +1250,7 @@ func transition_scheduled_activity(
 		updated_record["last_position"] = target_position
 		updated_record["spawn_random"] = false
 		updated_record["pending_travel"] = {}
+		NpcRouteLocationCoordinator.clear_finish_replan_marker(updated_record)
 		updated_record["last_travel_msec"] = Time.get_ticks_msec()
 
 	var live_npc := get_live_npc(npc_key)
@@ -1030,7 +1355,8 @@ func finish_scheduled_activity(
 	npc_id: String,
 	return_scene_path: String,
 	return_position: Vector2,
-	expected_session_id: String = ""
+	expected_session_id: String = "",
+	explicit_arrival_position = null
 ) -> bool:
 	if not npc_records.has(npc_id):
 		_breadcrumb("npc_locations:finish_activity_reject", npc_id)
@@ -1078,6 +1404,12 @@ func finish_scheduled_activity(
 		destination_scene_path,
 		return_position
 	)
+	if (
+		explicit_arrival_position is Vector2
+		and destination_scene_path == active_scene_path
+		and from_scene_path != destination_scene_path
+	):
+		spawn_position = explicit_arrival_position
 	# Finishing an activity in the same loaded scene should not snap the NPC back
 	# to the position where the activity originally began.
 	if (
@@ -1089,6 +1421,7 @@ func finish_scheduled_activity(
 	record["activity"] = {}
 	record["action"] = {}
 	record["pending_travel"] = {}
+	record[NpcRouteLocationCoordinator.FINISH_REPLAN_RECORD_KEY] = {}
 	record["previous_scene_path"] = ""
 	record["scene_path"] = destination_scene_path
 	record["last_position"] = spawn_position
@@ -1180,10 +1513,9 @@ func get_npc_id(npc: Node) -> String:
 
 func get_current_scene_path() -> String:
 	var current_scene := get_tree().current_scene
-	if current_scene == null:
-		return ""
-
-	return current_scene.scene_file_path
+	if current_scene != null and not current_scene.scene_file_path.is_empty():
+		return current_scene.scene_file_path
+	return active_scene_path
 
 
 func _build_initial_record(
@@ -1205,6 +1537,7 @@ func _build_initial_record(
 		"activity": {},
 		"action": {},
 		"pending_travel": {},
+		NpcRouteLocationCoordinator.FINISH_REPLAN_RECORD_KEY: {},
 		"social_visit_target_id": "",
 		"social_session_id": "",
 		"social_session_partner_id": "",
@@ -1238,14 +1571,46 @@ func _refresh_live_records_for_save() -> void:
 			record = npc_records[npc_id]
 		else:
 			record = _build_initial_record(npc_id, live_npc, current_scene_path, npc_scene_path)
+		var repaired_session_id := ""
+		var pre_repair_activity = record.get("activity", {})
+		if pre_repair_activity is Dictionary:
+			repaired_session_id = NpcActionSessionModel._descriptor_session_id(
+				pre_repair_activity
+			)
+		if repaired_session_id.is_empty():
+			var pre_repair_action = record.get("action", {})
+			if pre_repair_action is Dictionary:
+				repaired_session_id = NpcActionSessionModel._descriptor_session_id(
+					pre_repair_action
+				)
 		var repaired_activity := _repair_mismatched_activity_record(record)
 		if repaired_activity:
 			var repaired_position = record.get("last_position", null)
 			if repaired_position is Vector2:
 				_place_npc(live_npc, repaired_position)
-			var machine := live_npc.get_node_or_null("NpcStateMachine")
-			if machine != null and machine.has_method("request_state"):
-				machine.call_deferred("request_state", &"Idle", null, "repair_activity_location", 100)
+		else:
+			var marker_activity = record.get("activity", {})
+			if (
+				marker_activity is Dictionary
+				and NpcRouteLocationCoordinator.record_has_finish_replan_marker(
+					record, marker_activity
+				)
+			):
+				var machine := live_npc.get_node_or_null("NpcStateMachine")
+				var marker_session := NpcActionSessionModel._descriptor_session_id(
+					marker_activity
+				)
+				if (
+					machine != null
+					and not marker_session.is_empty()
+					and machine.has_method("pause_active_action_movement_for_retry")
+				):
+					machine.call(
+						"pause_active_action_movement_for_retry",
+						marker_session,
+						"save_finish_route_replan",
+						false
+					)
 
 		var recorded_scene_path := String(record.get("scene_path", ""))
 		current_scene_path = _get_live_npc_scene_path(
@@ -1256,7 +1621,59 @@ func _refresh_live_records_for_save() -> void:
 		_refresh_record_from_node(record, live_npc, npc_scene_path)
 		record["scene_path"] = current_scene_path
 		_capture_live_npc_into_record(npc_id, live_npc, record)
+		if repaired_activity and not repaired_session_id.is_empty():
+			var captured_action = record.get("action", {})
+			if (
+				captured_action is Dictionary
+				and NpcActionSessionModel._descriptor_session_id(captured_action)
+					== repaired_session_id
+			):
+				# Capture must not resurrect the exact action that repair just rejected.
+				record["action"] = {}
 		npc_records[npc_id] = record
+		if repaired_activity and not repaired_session_id.is_empty():
+			call_deferred(
+				"_cancel_repaired_live_action",
+				npc_id,
+				weakref(live_npc),
+				repaired_session_id
+			)
+
+
+func _cancel_repaired_live_action(
+	npc_id: String,
+	npc_reference: WeakRef,
+	expected_session_id: String
+) -> void:
+	if expected_session_id.is_empty() or npc_reference == null:
+		return
+	var live_npc = npc_reference.get_ref() as Node
+	if (
+		live_npc == null
+		or not is_instance_valid(live_npc)
+		or live_npc.is_queued_for_deletion()
+		or live_npcs.get(npc_id, null) != live_npc
+	):
+		return
+	var machine := live_npc.get_node_or_null("NpcStateMachine")
+	if (
+		machine == null
+		or not machine.has_method("get_active_action_session_id")
+		or String(machine.call("get_active_action_session_id")) != expected_session_id
+		or not machine.has_method("cancel_active_action")
+	):
+		return
+	if not bool(machine.call(
+		"cancel_active_action", expected_session_id, "repair_activity_location"
+	)):
+		return
+	# Cancellation can synchronously publish signals that install a newer action.
+	# Clear only the same terminal session and let the state machine reconcile it.
+	if (
+		String(machine.call("get_active_action_session_id")) == expected_session_id
+		and machine.has_method("clear_terminal_action")
+	):
+		machine.call("clear_terminal_action", expected_session_id)
 
 
 func _get_live_npc_scene_path(npc: Node, fallback: String) -> String:
@@ -1427,6 +1844,11 @@ func _normalize_loaded_record(npc_id: String, saved_record: Dictionary) -> Dicti
 			record["action"] = normalized_action.to_descriptor()
 	if not (record.get("pending_travel", null) is Dictionary):
 		record["pending_travel"] = {}
+	if not (
+		record.get(NpcRouteLocationCoordinator.FINISH_REPLAN_RECORD_KEY, null)
+		is Dictionary
+	):
+		record[NpcRouteLocationCoordinator.FINISH_REPLAN_RECORD_KEY] = {}
 	_normalize_record_spot_reservations(npc_id, record)
 	_normalize_lesson_action_metadata(record)
 	if not record.has("inventory"):
@@ -1453,24 +1875,117 @@ func _repair_mismatched_activity_record(record: Dictionary) -> bool:
 	# the target coordinates under the source scene, making the NPC appear to disappear.
 	var activity = record.get("activity", {})
 	if not (activity is Dictionary) or activity.is_empty():
+		NpcRouteLocationCoordinator.clear_finish_replan_marker(record)
 		return false
 
 	var target_scene_path := String(activity.get("target_scene_path", ""))
 	if target_scene_path.is_empty():
 		var endpoint := _get_activity_endpoint(activity)
 		target_scene_path = String(endpoint.get("scene_path", ""))
+	if NpcRouteLocationCoordinator.record_has_finish_replan_marker(record, activity):
+		return false
 	if target_scene_path.is_empty() or target_scene_path == String(record.get("scene_path", "")):
+		record[NpcRouteLocationCoordinator.FINISH_REPLAN_RECORD_KEY] = {}
+		return false
+	if _record_has_valid_intermediate_route(record, activity):
+		record[NpcRouteLocationCoordinator.FINISH_REPLAN_RECORD_KEY] = {}
+		return false
+	if NpcRouteLocationCoordinator.record_can_migrate_finish_route_to_replan(
+		record, activity
+	):
+		var pending: Dictionary = record.get("pending_travel", {})
+		var finish_replan_marker := (
+			NpcRouteLocationCoordinator.make_finish_replan_marker(
+				pending,
+				String(record.get("scene_path", "")),
+				"save_repair_route_replan"
+			)
+		)
+		record["pending_travel"] = {}
+		record[NpcRouteLocationCoordinator.FINISH_REPLAN_RECORD_KEY] = finish_replan_marker
+		if NpcRouteLocationCoordinator.record_has_finish_replan_marker(record, activity):
+			return false
+
+	var activity_session := NpcActionSessionModel._descriptor_session_id(activity)
+	var record_action = record.get("action", {})
+	var action_session := (
+		NpcActionSessionModel._descriptor_session_id(record_action)
+		if record_action is Dictionary
+		else ""
+	)
+	var preserve_newer_action := (
+		not activity_session.is_empty()
+		and not action_session.is_empty()
+		and action_session != activity_session
+	)
+	var record_pending = record.get("pending_travel", {})
+	var pending_session := (
+		NpcActionSessionModel.pending_travel_session_id(record_pending)
+		if record_pending is Dictionary
+		else ""
+	)
+	var preserve_newer_pending := (
+		preserve_newer_action
+		and not pending_session.is_empty()
+		and pending_session == action_session
+	)
+	if not preserve_newer_action:
+		var return_scene_path := String(activity.get("return_scene_path", ""))
+		var return_position = activity.get("return_position", null)
+		if return_scene_path == String(record.get("scene_path", "")) and return_position is Vector2:
+			record["last_position"] = return_position
+	record["activity"] = {}
+	if not preserve_newer_action:
+		record["action"] = {}
+	if not preserve_newer_pending:
+		record["pending_travel"] = {}
+	record[NpcRouteLocationCoordinator.FINISH_REPLAN_RECORD_KEY] = {}
+	return not preserve_newer_action
+
+
+func _record_has_valid_intermediate_route(
+	record: Dictionary,
+	activity: Dictionary
+) -> bool:
+	var pending = record.get("pending_travel", {})
+	if not (pending is Dictionary) or pending.is_empty():
+		return false
+	var route = pending.get("scene_route", {})
+	if not (route is Dictionary) or route.is_empty():
+		return false
+	var activity_session := NpcActionSessionModel._descriptor_session_id(activity)
+	if (
+		activity_session.is_empty()
+		or NpcActionSessionModel.pending_travel_session_id(pending) != activity_session
+	):
+		return false
+	var action = record.get("action", {})
+	if not (action is Dictionary):
+		return false
+	var action_session := NpcActionSessionModel._descriptor_session_id(action)
+	if not action.is_empty() and action_session != activity_session:
 		return false
 
-	var return_scene_path := String(activity.get("return_scene_path", ""))
-	var return_position = activity.get("return_position", null)
-	if return_scene_path == String(record.get("scene_path", "")) and return_position is Vector2:
-		record["last_position"] = return_position
+	var route_manager := get_node_or_null("/root/NpcSceneRoutes")
+	if route_manager != null and route_manager.has_method("validate_pending_route"):
+		var validation = route_manager.call(
+			"validate_pending_route",
+			pending,
+			String(record.get("scene_path", "")),
+			StringName(String(record.get("npc_id", "")))
+		)
+		return validation is Dictionary and bool(validation.get("accepted", false))
 
-	record["activity"] = {}
-	record["action"] = {}
-	record["pending_travel"] = {}
-	return true
+	# Structural fallback is only for old saves loaded without the optional route
+	# service. An explicit integrity or permission rejection above fails closed.
+	var scene_paths = route.get("scene_paths", [])
+	var hop_index := int(route.get("hop_index", -1))
+	return (
+		(scene_paths is Array or scene_paths is PackedStringArray)
+		and hop_index >= 0
+		and hop_index < scene_paths.size()
+		and String(scene_paths[hop_index]) == String(record.get("scene_path", ""))
+	)
 
 
 func _normalize_record_spot_reservations(npc_id: String, record: Dictionary) -> void:
@@ -1657,10 +2172,17 @@ func _apply_record_to_npc(npc: Node, record: Dictionary, use_random_position: bo
 		npc.call("apply_npc_location_save_data", record.get("node_state", {}))
 	var machine := npc.get_node_or_null("NpcStateMachine")
 	var action_descriptor = record.get("action", {})
+	var pending_travel = record.get("pending_travel", {})
+	var has_pending_scene_route := (
+		pending_travel is Dictionary
+		and pending_travel.get("scene_route", {}) is Dictionary
+		and not (pending_travel.get("scene_route", {}) as Dictionary).is_empty()
+	)
 	if (
 		machine != null
 		and action_descriptor is Dictionary
 		and not action_descriptor.is_empty()
+		and not has_pending_scene_route
 		and machine.has_method("restore_action_descriptor")
 	):
 		machine.call("restore_action_descriptor", action_descriptor)

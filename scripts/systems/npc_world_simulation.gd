@@ -23,6 +23,10 @@ const INVITE_PLAYER_STATE := &"InvitePlayer"
 const MagicLessonRemoteInvitationScene := preload("res://scripts/instances/magic_lesson_remote_invitation.gd")
 const NpcActivityIdentity = preload("res://scripts/systems/npc_activity_identity.gd")
 const NpcActionSessionModel = preload("res://scripts/systems/npc_action_session.gd")
+const NpcRouteBridge = preload("res://scripts/systems/npc_scene_route_bridge.gd")
+const NpcRouteLocationCoordinator = preload(
+	"res://scripts/systems/npc_route_location_coordinator.gd"
+)
 
 @export var simulation_interval_seconds: float = 10.0
 @export var simulated_talk_need_drop: float = 40.0
@@ -1144,6 +1148,15 @@ func resume_live_activity(npc_id: StringName, npc: Node) -> void:
 	if locations == null or not locations.has_method("get_npc_location"):
 		_breadcrumb("npc_world:resume_live_no_locations", String(npc_id))
 		return
+	if (
+		npc == null
+		or not is_instance_valid(npc)
+		or npc.is_queued_for_deletion()
+		or not locations.has_method("get_live_npc")
+		or locations.call("get_live_npc", String(npc_id)) != npc
+	):
+		_breadcrumb("npc_world:resume_live_stale_body", String(npc_id))
+		return
 
 	var record: Dictionary = locations.call("get_npc_location", String(npc_id))
 	var pending_travel = record.get("pending_travel", {})
@@ -1154,6 +1167,16 @@ func resume_live_activity(npc_id: StringName, npc: Node) -> void:
 	var activity = record.get("activity", {})
 	if not (activity is Dictionary) or activity.is_empty():
 		_breadcrumb("npc_world:resume_live_no_activity", String(npc_id))
+		return
+	if NpcRouteLocationCoordinator.record_has_finish_replan_marker(record, activity):
+		_breadcrumb("npc_world:resume_live_finish_replan", String(npc_id))
+		_finish_activity(
+			npc_id,
+			record,
+			activity,
+			StringName(String(activity.get("spot_id", ""))),
+			locations
+		)
 		return
 
 	var spot_id := StringName(String(activity.get("spot_id", "")))
@@ -1919,6 +1942,13 @@ func _load_spot_definitions() -> void:
 					push_warning("Duplicate simulated NPC spot id '%s'; keeping the first definition." % String(definition.spot_id))
 				else:
 					spot_definitions[definition.spot_id] = definition
+			elif definition != null:
+				push_warning(
+					"Invalid NPC spot definition '%s': %s" % [
+						resource_path,
+						"; ".join(definition.get_validation_errors()),
+					]
+				)
 		file_name = directory.get_next()
 	directory.list_dir_end()
 
@@ -2749,11 +2779,15 @@ func _try_start_activity(
 	var live_npc: Node2D
 	if locations.has_method("get_live_npc"):
 		live_npc = locations.call("get_live_npc", String(npc_id)) as Node2D
-	if live_npc != null and String(record.get("scene_path", "")) != target_scene_path:
-		var departure_door := _find_departure_door(target_scene_path, live_npc)
-		if departure_door == null or not locations.has_method("prepare_scheduled_travel"):
-			return
-
+	if (
+		String(record.get("scene_path", "")) != target_scene_path
+		and (
+			live_npc != null
+			or NpcRouteLocationCoordinator.supports_offscreen_route_transactions(
+				locations
+			)
+		)
+	):
 		var pending_travel := {
 			"mode": "start",
 			"target_scene_path": target_scene_path,
@@ -2762,6 +2796,55 @@ func _try_start_activity(
 			"requested_priority": definition.priority,
 			"activity": activity,
 		}
+		var expected_route_edge_id := &""
+		var departure_door: Node2D = null
+		if live_npc != null:
+			departure_door = _find_departure_door(target_scene_path, live_npc)
+			if departure_door != null:
+				var direct_validation := NpcSceneRouteBridge.validate_direct_route_wired_door(
+					get_node_or_null("/root/NpcSceneRoutes"),
+					departure_door,
+					String(record.get("scene_path", "")),
+					target_scene_path,
+					npc_id
+				)
+				if not bool(direct_validation.get("accepted", false)):
+					_breadcrumb(
+						"npc_world:start_activity_direct_route_reject",
+						"%s %s" % [
+							String(npc_id),
+							String(direct_validation.get("reason", "route_unavailable")),
+						]
+					)
+					return
+		if departure_door == null:
+			var route_setup := _prepare_pending_scene_route(
+				pending_travel,
+				String(record.get("scene_path", "")),
+				target_scene_path,
+				npc_id
+			)
+			if not bool(route_setup.get("accepted", false)):
+				_breadcrumb(
+					"npc_world:start_activity_route_reject",
+					"%s %s" % [String(npc_id), String(route_setup.get("reason", "route_unavailable"))]
+				)
+				return
+			pending_travel = route_setup.get("pending_travel", pending_travel)
+			expected_route_edge_id = StringName(String(route_setup.get("edge_id", "")))
+			if live_npc != null:
+				departure_door = _find_departure_door(
+					String(route_setup.get("target_scene_path", "")),
+					live_npc,
+					expected_route_edge_id
+				)
+		if (
+			live_npc != null
+			and (departure_door == null or not locations.has_method("prepare_scheduled_travel"))
+		):
+			_breadcrumb("npc_world:start_activity_departure_missing", String(npc_id))
+			return
+
 		var claim_result := try_claim_spot(
 			npc_id, action_session_id, definition.spot_id, &"activity"
 		)
@@ -2777,6 +2860,7 @@ func _try_start_activity(
 		var reservation_id := String(claim_result.get("reservation_id", ""))
 		var claimed_new := String(claim_result.get("status", "")) == "claimed"
 		_add_descriptor_reservation_id(activity, reservation_id)
+		pending_travel["activity"] = activity.duplicate(true)
 		_log_activity_transaction(
 			npc_id,
 			activity,
@@ -2784,18 +2868,37 @@ func _try_start_activity(
 			"reserved",
 			String(claim_result.get("status", "scheduled_travel"))
 		)
-		var travel_accepted := bool(locations.call(
-			"prepare_scheduled_travel",
-			String(npc_id),
-			pending_travel,
-			departure_door
-		))
+		var travel_accepted := false
+		if live_npc != null:
+			travel_accepted = bool(locations.call(
+				"prepare_scheduled_travel",
+				String(npc_id),
+				pending_travel,
+				departure_door
+			))
+		else:
+			travel_accepted = NpcRouteLocationCoordinator.install_offscreen_start_route(
+				locations,
+				get_node_or_null("/root/NpcSceneRoutes"),
+				npc_id,
+				record,
+				pending_travel
+			)
 		if travel_accepted:
 			_log_activity_transaction(
 				npc_id, activity, definition.spot_id, "accepted", "scheduled_travel"
 			)
 			_breadcrumb("npc_world:start_activity_travel", "%s %s" % [String(npc_id), String(definition.spot_id)])
 			activity_started.emit(npc_id, definition.spot_id)
+			if live_npc == null:
+				var routed_record: Dictionary = locations.call(
+					"get_record_snapshot", String(npc_id)
+				)
+				var routed_pending = routed_record.get("pending_travel", {})
+				if routed_pending is Dictionary and not routed_pending.is_empty():
+					_update_pending_travel(
+						npc_id, routed_record, routed_pending, hour, locations
+					)
 		else:
 			if claimed_new:
 				release_spot_reservation(reservation_id, npc_id, action_session_id)
@@ -2865,7 +2968,7 @@ func _get_live_player_destination(locations: Node) -> Dictionary:
 
 func _update_pending_travel(
 	npc_id: StringName,
-	_record: Dictionary,
+	record: Dictionary,
 	pending_travel: Dictionary,
 	hour: float,
 	locations: Node
@@ -2893,25 +2996,145 @@ func _update_pending_travel(
 	if locations.has_method("get_live_npc"):
 		live_npc = locations.call("get_live_npc", String(npc_id)) as Node2D
 	if live_npc == null:
-		_commit_pending_travel_offscreen(npc_id, pending_travel, locations)
+		var offscreen_leg := _get_pending_scene_route_leg(
+			pending_travel,
+			String(record.get("scene_path", "")),
+			npc_id
+		)
+		if not bool(offscreen_leg.get("accepted", false)):
+			_rollback_pending_travel(
+				npc_id,
+				pending_travel,
+				locations,
+				String(offscreen_leg.get("reason", "route_validation_failed"))
+			)
+			return
+		var explicit_arrival_position = null
+		var final_scene_path := String(pending_travel.get("target_scene_path", ""))
+		var loaded_scene_path := (
+			String(locations.call("get_current_scene_path"))
+			if locations.has_method("get_current_scene_path")
+			else ""
+		)
+		var enters_loaded_intermediate := (
+			String(offscreen_leg.get("target_scene_path", "")) == loaded_scene_path
+			and int(offscreen_leg.get("hop_index", -1)) + 1
+				< int(offscreen_leg.get("hop_count", 0))
+		)
+		if enters_loaded_intermediate:
+			var advance_result := NpcSceneRouteBridge.advance_resolved_leg(
+				get_node_or_null("/root/NpcSceneRoutes"),
+				pending_travel,
+				offscreen_leg,
+				npc_id,
+				String(record.get("scene_path", ""))
+			)
+			var advanced_pending = advance_result.get("pending_travel", {})
+			var intermediate_committed := (
+				bool(advance_result.get("accepted", false))
+				and not bool(advance_result.get("complete", true))
+				and advanced_pending is Dictionary
+				and locations.has_method("_commit_pending_route_advance_offscreen")
+				and bool(locations.call(
+					"_commit_pending_route_advance_offscreen",
+					String(npc_id),
+					pending_travel,
+					advanced_pending,
+					String(record.get("scene_path", "")),
+					String(offscreen_leg.get("target_scene_path", "")),
+					advance_result.get("arrival_position", Vector2.ZERO)
+				))
+			)
+			if not intermediate_committed:
+				var rejection_reason := (
+					"offscreen_route_commit_cas_rejected"
+					if bool(advance_result.get("accepted", false))
+					else String(advance_result.get(
+						"reason", "offscreen_route_hop_rejected"
+					))
+				)
+				_rollback_pending_travel(
+					npc_id,
+					pending_travel,
+					locations,
+					rejection_reason
+				)
+			return
+		if final_scene_path == loaded_scene_path:
+			var final_arrival := NpcSceneRouteBridge.resolve_final_arrival(
+				get_node_or_null("/root/NpcSceneRoutes"), pending_travel, npc_id
+			)
+			if bool(final_arrival.get("accepted", false)):
+				explicit_arrival_position = final_arrival.get(
+					"target_arrival_position", null
+				)
+		_commit_pending_travel_offscreen(
+			npc_id, pending_travel, locations, explicit_arrival_position
+		)
 		return
 
-	_resume_pending_travel(npc_id, live_npc, pending_travel, locations)
+	_resume_pending_travel(
+		npc_id,
+		live_npc,
+		pending_travel,
+		locations,
+		String(record.get("scene_path", ""))
+	)
 
 
 func _resume_pending_travel(
 	npc_id: StringName,
 	npc: Node2D,
 	pending_travel: Dictionary,
-	locations: Node
+	locations: Node,
+	current_scene_path: String = ""
 ) -> void:
-	var target_scene_path := String(pending_travel.get("target_scene_path", ""))
-	var departure_door := _find_departure_door(target_scene_path, npc)
+	if current_scene_path.is_empty() and locations.has_method("get_npc_location"):
+		var current_record: Dictionary = locations.call("get_npc_location", String(npc_id))
+		current_scene_path = String(current_record.get("scene_path", ""))
+	var route_leg := _get_pending_scene_route_leg(
+		pending_travel, current_scene_path, npc_id
+	)
+	if not bool(route_leg.get("accepted", false)):
+		_rollback_pending_travel(
+			npc_id,
+			pending_travel,
+			locations,
+			String(route_leg.get("reason", "route_validation_failed"))
+		)
+		return
+	var target_scene_path := String(route_leg.get("target_scene_path", ""))
+	var expected_route_edge_id := StringName(String(route_leg.get("edge_id", "")))
+	var active_departure := _get_active_departure_door(
+		npc,
+		target_scene_path,
+		expected_route_edge_id,
+		NpcActionSessionModel.pending_travel_session_id(pending_travel)
+	)
+	if active_departure != null:
+		return
+	var departure_door := _find_departure_door(
+		target_scene_path, npc, expected_route_edge_id
+	)
 	if departure_door == null:
 		_rollback_pending_travel(npc_id, pending_travel, locations, "departure_door_missing")
 		return
-	if _npc_is_moving_to_door(npc, departure_door):
-		return
+	if expected_route_edge_id == &"":
+		var direct_validation := NpcSceneRouteBridge.validate_direct_route_wired_door(
+			get_node_or_null("/root/NpcSceneRoutes"),
+			departure_door,
+			current_scene_path,
+			target_scene_path,
+			npc_id
+		)
+		if not bool(direct_validation.get("accepted", false)):
+			_rollback_pending_travel(
+				npc_id,
+				pending_travel,
+				locations,
+				String(direct_validation.get("reason", "route_execution_rejected"))
+			)
+			return
 
 	var requested_state_name := StringName(String(pending_travel.get("requested_state_name", "")))
 	var requested_priority := int(pending_travel.get("requested_priority", 0))
@@ -2944,6 +3167,16 @@ func _rollback_pending_travel(
 	locations: Node,
 	reason: String
 ) -> void:
+	if locations != null and locations.has_method("get_record_snapshot"):
+		var latest_record = locations.call("get_record_snapshot", String(npc_id))
+		if latest_record is Dictionary and not latest_record.is_empty():
+			var latest_pending = latest_record.get("pending_travel", {})
+			if not (latest_pending is Dictionary) or latest_pending != pending_travel:
+				_breadcrumb(
+					"npc_world:pending_travel_rollback_stale",
+					"%s %s" % [String(npc_id), reason]
+				)
+				return
 	var activity = pending_travel.get("activity", {})
 	if activity is Dictionary and not activity.is_empty():
 		_log_activity_transaction(
@@ -2954,13 +3187,56 @@ func _rollback_pending_travel(
 			reason
 		)
 	if locations != null and locations.has_method("cancel_pending_scheduled_travel"):
-		locations.call("cancel_pending_scheduled_travel", String(npc_id))
+		var finish_mode := String(pending_travel.get("mode", "start")) == "finish"
+		var pending_session_id := NpcActionSessionModel.pending_travel_session_id(
+			pending_travel
+		)
+		# Structural route failures must discard the invalid route so the next
+		# simulation pass can replan. Only MoveToTarget's exact-session watchdog
+		# requests an in-place movement retry.
+		if (
+			finish_mode
+			and locations.has_method("discard_pending_finish_route_for_replan")
+		):
+			locations.call(
+				"discard_pending_finish_route_for_replan",
+				String(npc_id),
+				reason,
+				pending_session_id
+			)
+			return
+		var terminal_cancel := not finish_mode
+		if (
+			not pending_session_id.is_empty()
+			and _method_accepts_argument_count(
+				locations, &"cancel_pending_scheduled_travel", 4
+			)
+		):
+			locations.call(
+				"cancel_pending_scheduled_travel",
+				String(npc_id),
+				reason,
+				terminal_cancel,
+				pending_session_id
+			)
+		elif _method_accepts_argument_count(locations, &"cancel_pending_scheduled_travel", 3):
+			locations.call(
+				"cancel_pending_scheduled_travel",
+				String(npc_id),
+				reason,
+				terminal_cancel
+			)
+		elif _method_accepts_argument_count(locations, &"cancel_pending_scheduled_travel", 2):
+			locations.call("cancel_pending_scheduled_travel", String(npc_id), reason)
+		else:
+			locations.call("cancel_pending_scheduled_travel", String(npc_id))
 
 
 func _commit_pending_travel_offscreen(
 	npc_id: StringName,
 	pending_travel: Dictionary,
-	locations: Node
+	locations: Node,
+	explicit_arrival_position = null
 ) -> void:
 	var target_scene_path := String(pending_travel.get("target_scene_path", ""))
 	var target_position = pending_travel.get("target_position", Vector2.ZERO)
@@ -2970,9 +3246,21 @@ func _commit_pending_travel_offscreen(
 	if String(pending_travel.get("mode", "start")) == "finish":
 		if locations.has_method("finish_scheduled_activity"):
 			var finish_session_id := String(pending_travel.get("action_session_id", ""))
-			_call_finish_scheduled_activity(
-				locations, String(npc_id), target_scene_path, target_position, finish_session_id
+			var finished := _call_finish_scheduled_activity(
+				locations,
+				String(npc_id),
+				target_scene_path,
+				target_position,
+				finish_session_id,
+				explicit_arrival_position
 			)
+			if not finished:
+				_rollback_pending_travel(
+					npc_id,
+					pending_travel,
+					locations,
+					"offscreen_finish_commit_rejected"
+				)
 		return
 	if String(pending_travel.get("mode", "start")) == "social":
 		if locations.has_method("cancel_pending_scheduled_travel"):
@@ -2994,7 +3282,23 @@ func _commit_pending_travel_offscreen(
 				npc_id, pending_travel, locations, "begin_activity_method_missing"
 			)
 			return
-		var committed := bool(locations.call(
+		var committed := false
+		if (
+			explicit_arrival_position is Vector2
+			and _method_accepts_argument_count(
+				locations, &"begin_scheduled_activity", 5
+			)
+		):
+			committed = bool(locations.call(
+				"begin_scheduled_activity",
+				String(npc_id),
+				activity,
+				target_scene_path,
+				target_position,
+				explicit_arrival_position
+			))
+		else:
+			committed = bool(locations.call(
 				"begin_scheduled_activity",
 				String(npc_id),
 				activity,
@@ -3017,6 +3321,10 @@ func _update_activity(
 ) -> void:
 	var spot_id := StringName(String(activity.get("spot_id", "")))
 	_breadcrumb("npc_world:update_activity", "%s %s" % [String(npc_id), String(spot_id)])
+	if NpcRouteLocationCoordinator.record_has_finish_replan_marker(record, activity):
+		_breadcrumb("npc_world:update_activity_finish_replan", String(npc_id))
+		_finish_activity(npc_id, record, activity, spot_id, locations)
+		return
 	var definition := spot_definitions.get(spot_id, null) as NpcSpotDefinition
 	if _debug_definition_disabled(definition):
 		_breadcrumb("npc_world:update_disabled_definition", "%s %s" % [String(npc_id), String(spot_id)])
@@ -3210,11 +3518,74 @@ func _finish_activity(
 	var live_npc: Node2D
 	if locations.has_method("get_live_npc"):
 		live_npc = locations.call("get_live_npc", String(npc_id)) as Node2D
-	if live_npc != null and return_scene_path != String(record.get("scene_path", "")):
-		var departure_door := _find_departure_door(return_scene_path, live_npc)
-		if departure_door == null or not locations.has_method("prepare_scheduled_travel"):
+	var finish_replan_required := (
+		NpcRouteLocationCoordinator.record_has_finish_replan_marker(record, activity)
+	)
+	if (
+		live_npc == null
+		and return_scene_path != String(record.get("scene_path", ""))
+		and NpcRouteLocationCoordinator.supports_offscreen_route_transactions(
+			locations
+		)
+	):
+		var offscreen_pending := {
+			"mode": "finish",
+			"target_scene_path": return_scene_path,
+			"target_position": return_position,
+			"requested_state_name": "",
+			"requested_priority": 100,
+			"spot_id": String(spot_id),
+			"action_session_id": NpcActionSessionModel._descriptor_session_id(activity),
+		}
+		var offscreen_route_setup := _prepare_pending_scene_route(
+			offscreen_pending,
+			String(record.get("scene_path", "")),
+			return_scene_path,
+			npc_id
+		)
+		if not bool(offscreen_route_setup.get("accepted", false)):
+			_breadcrumb(
+				"npc_world:finish_activity_offscreen_replan_reject",
+				"%s %s" % [
+					String(npc_id),
+					String(offscreen_route_setup.get("reason", "route_unavailable")),
+				]
+			)
 			return
-
+		offscreen_pending = offscreen_route_setup.get(
+			"pending_travel", offscreen_pending
+		)
+		if not NpcRouteLocationCoordinator.install_offscreen_finish_route(
+			locations,
+			get_node_or_null("/root/NpcSceneRoutes"),
+			npc_id,
+			record,
+			activity,
+			offscreen_pending,
+			finish_replan_required
+		):
+			_breadcrumb(
+				"npc_world:finish_activity_offscreen_replan_cas_reject", String(npc_id)
+			)
+			return
+		var installed_record: Dictionary = locations.call(
+			"get_record_snapshot", String(npc_id)
+		)
+		var installed_pending = installed_record.get("pending_travel", {})
+		if not (installed_pending is Dictionary) or installed_pending.is_empty():
+			_breadcrumb(
+				"npc_world:finish_activity_offscreen_replan_install_missing", String(npc_id)
+			)
+			return
+		_update_pending_travel(
+			npc_id,
+			installed_record,
+			installed_pending,
+			_get_current_time_of_day_hours(),
+			locations
+		)
+		return
+	if live_npc != null and return_scene_path != String(record.get("scene_path", "")):
 		var pending_travel := {
 			"mode": "finish",
 			"target_scene_path": return_scene_path,
@@ -3224,6 +3595,48 @@ func _finish_activity(
 			"spot_id": String(spot_id),
 			"action_session_id": NpcActionSessionModel._descriptor_session_id(activity),
 		}
+		var expected_route_edge_id := &""
+		var departure_door := _find_departure_door(return_scene_path, live_npc)
+		if departure_door != null:
+			var direct_validation := NpcSceneRouteBridge.validate_direct_route_wired_door(
+				get_node_or_null("/root/NpcSceneRoutes"),
+				departure_door,
+				String(record.get("scene_path", "")),
+				return_scene_path,
+				npc_id
+			)
+			if not bool(direct_validation.get("accepted", false)):
+				_breadcrumb(
+					"npc_world:finish_activity_direct_route_reject",
+					"%s %s" % [
+						String(npc_id),
+						String(direct_validation.get("reason", "route_unavailable")),
+					]
+				)
+				return
+		if departure_door == null:
+			var route_setup := _prepare_pending_scene_route(
+				pending_travel,
+				String(record.get("scene_path", "")),
+				return_scene_path,
+				npc_id
+			)
+			if not bool(route_setup.get("accepted", false)):
+				_breadcrumb(
+					"npc_world:finish_activity_route_reject",
+					"%s %s" % [String(npc_id), String(route_setup.get("reason", "route_unavailable"))]
+				)
+				return
+			pending_travel = route_setup.get("pending_travel", pending_travel)
+			expected_route_edge_id = StringName(String(route_setup.get("edge_id", "")))
+			departure_door = _find_departure_door(
+				String(route_setup.get("target_scene_path", "")),
+				live_npc,
+				expected_route_edge_id
+			)
+		if departure_door == null or not locations.has_method("prepare_scheduled_travel"):
+			_breadcrumb("npc_world:finish_activity_departure_missing", String(npc_id))
+			return
 		var finish_travel_accepted := bool(locations.call(
 			"prepare_scheduled_travel",
 			String(npc_id),
@@ -3256,9 +3669,22 @@ func _call_finish_scheduled_activity(
 	npc_id: String,
 	return_scene_path: String,
 	return_position: Vector2,
-	session_id: String
+	session_id: String,
+	explicit_arrival_position = null
 ) -> bool:
 	# Older/simple location adapters expose the original three-argument method.
+	if (
+		explicit_arrival_position is Vector2
+		and _method_accepts_argument_count(locations, &"finish_scheduled_activity", 5)
+	):
+		return bool(locations.call(
+			"finish_scheduled_activity",
+			npc_id,
+			return_scene_path,
+			return_position,
+			session_id,
+			explicit_arrival_position
+		))
 	if _method_accepts_argument_count(locations, &"finish_scheduled_activity", 4):
 		return bool(locations.call(
 			"finish_scheduled_activity",
@@ -3351,7 +3777,11 @@ func _detach_live_npc_from_finished_activity(
 		)
 
 
-func _find_departure_door(target_scene_path: String, npc: Node2D) -> Node2D:
+func _find_departure_door(
+	target_scene_path: String,
+	npc: Node2D,
+	expected_route_edge_id: StringName = &""
+) -> Node2D:
 	if target_scene_path.is_empty() or npc == null or not is_instance_valid(npc):
 		return null
 
@@ -3361,9 +3791,9 @@ func _find_departure_door(target_scene_path: String, npc: Node2D) -> Node2D:
 		var door := door_node as Node2D
 		if door == null or not is_instance_valid(door):
 			continue
-		if String(door.get("target_scene_path")) != target_scene_path:
-			continue
-		if door.has_method("can_npc_use") and not bool(door.call("can_npc_use", npc)):
+		if not _door_matches_departure(
+			door, target_scene_path, expected_route_edge_id, npc
+		):
 			continue
 
 		var distance := npc.global_position.distance_squared_to(door.global_position)
@@ -3374,15 +3804,88 @@ func _find_departure_door(target_scene_path: String, npc: Node2D) -> Node2D:
 	return closest_door
 
 
-func _npc_is_moving_to_door(npc: Node2D, door: Node2D) -> bool:
+func _get_active_departure_door(
+	npc: Node2D,
+	target_scene_path: String,
+	expected_route_edge_id: StringName,
+	expected_session_id: String = ""
+) -> Node2D:
 	var machine := npc.get_node_or_null("NpcStateMachine")
 	if machine == null:
-		return false
+		return null
 	var current_state = machine.get("current_state")
 	if current_state == null or String(current_state.name) != "MoveToTarget":
-		return false
+		return null
+	if not expected_session_id.is_empty():
+		if machine.has_method("is_action_session_current_for_execution"):
+			if not bool(machine.call(
+				"is_action_session_current_for_execution",
+				expected_session_id,
+				&"MoveToTarget"
+			)):
+				return null
+		elif (
+			not machine.has_method("get_active_action_session_id")
+			or String(machine.call("get_active_action_session_id")).strip_edges()
+				!= expected_session_id
+		):
+			return null
+	var move_target := machine.get("move_target") as Node2D
+	if not _door_matches_departure(
+		move_target, target_scene_path, expected_route_edge_id, npc
+	):
+		return null
+	return move_target
 
-	return machine.get("move_target") == door
+
+func _door_matches_departure(
+	door: Node2D,
+	target_scene_path: String,
+	expected_route_edge_id: StringName,
+	npc: Node2D
+) -> bool:
+	if door == null or not is_instance_valid(door):
+		return false
+	if not door.is_in_group(&"npc_travel_door"):
+		return false
+	if String(door.get("target_scene_path")) != target_scene_path:
+		return false
+	if expected_route_edge_id != &"":
+		if not door.has_method("get_route_edge_id"):
+			return false
+		if StringName(String(door.call("get_route_edge_id"))) != expected_route_edge_id:
+			return false
+	if door.has_method("can_npc_use") and not bool(door.call("can_npc_use", npc)):
+		return false
+	return true
+
+
+func _prepare_pending_scene_route(
+	pending_travel: Dictionary,
+	source_scene_path: String,
+	target_scene_path: String,
+	npc_id: StringName
+) -> Dictionary:
+	return NpcRouteBridge.prepare_pending_route(
+		get_node_or_null("/root/NpcSceneRoutes"),
+		pending_travel,
+		source_scene_path,
+		target_scene_path,
+		npc_id
+	)
+
+
+func _get_pending_scene_route_leg(
+	pending_travel: Dictionary,
+	current_scene_path: String,
+	npc_id: StringName
+) -> Dictionary:
+	return NpcRouteBridge.resolve_pending_leg(
+		get_node_or_null("/root/NpcSceneRoutes"),
+		pending_travel,
+		current_scene_path,
+		npc_id
+	)
 
 
 func _find_best_definition(

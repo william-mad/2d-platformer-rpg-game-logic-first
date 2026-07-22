@@ -1,9 +1,38 @@
 extends Node
 
+const NpcRouteLocationCoordinator = preload(
+	"res://scripts/systems/npc_route_location_coordinator.gd"
+)
+const COMPANION_RESTORE_RETRY_SECONDS: float = 0.05
+const COMPANION_RESTORE_MAX_ATTEMPTS: int = 20
+const FOLLOW_INTERRUPT_STATE_NAMES := [
+	"LookForMonster",
+	"Fight",
+	"Flee",
+	"Collapse",
+	"Downed",
+	"DisabledDead",
+]
+
 var pending_player_data: Dictionary = {}
 var pending_target_spawn_id: StringName = &""
 var travel_session: Dictionary = _empty_travel_session()
 var _pending_companion_restore: bool = false
+var _companion_restore_player_ref: WeakRef
+var _companion_restore_generation: int = 0
+var _companion_restore_attempts: int = 0
+var _companion_restore_retry_scheduled: bool = false
+var _companion_restore_exhaustion_warned: bool = false
+
+
+func _ready() -> void:
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations == null:
+		return
+	var callback := Callable(self, "_on_npc_available_for_companion_restore")
+	for signal_name in [&"npc_registered", &"npc_spawned"]:
+		if locations.has_signal(signal_name) and not locations.is_connected(signal_name, callback):
+			locations.connect(signal_name, callback)
 
 
 func capture_player(
@@ -28,7 +57,7 @@ func capture_player(
 	if is_travel_active() and not destination_scene_path.is_empty():
 		_capture_companion_for_scene(destination_scene_path)
 		travel_session["destination_scene_path"] = destination_scene_path
-		_pending_companion_restore = true
+		_prepare_pending_companion_restore()
 
 
 func apply_to_player(player: Node) -> bool:
@@ -61,8 +90,9 @@ func start_travel(npc: Node, player: Node, policy: TravelPolicy) -> Dictionary:
 		return {"success": false, "reason": "Traveler has no persistent identity."}
 	if is_travel_active():
 		if String(travel_session.get("companion_npc_id", "")) == npc_id:
-			_enable_live_companion_follow(npc)
-			return {"success": true, "reason": "Already traveling together."}
+			if _enable_live_companion_follow(npc):
+				return {"success": true, "reason": "Already traveling together."}
+			return {"success": false, "reason": "Traveler cannot start following yet."}
 		return {"success": false, "reason": "Another companion is already traveling."}
 	var current_scene := get_tree().current_scene
 	var scene_path := current_scene.scene_file_path if current_scene != null else ""
@@ -78,10 +108,12 @@ func start_travel(npc: Node, player: Node, policy: TravelPolicy) -> Dictionary:
 		"travel_policy_id": String(policy.policy_id if policy != null else &"default_companion"),
 		"ending": false,
 	}
+	if not _enable_live_companion_follow(npc):
+		travel_session = _empty_travel_session()
+		return {"success": false, "reason": "Traveler cannot start following yet."}
 	var locations := get_node_or_null("/root/NpcLocations")
 	if locations != null and locations.has_method("synchronize_live_records"):
 		locations.call("synchronize_live_records")
-	_enable_live_companion_follow(npc)
 	return {"success": true, "reason": "Travel started."}
 
 
@@ -127,7 +159,7 @@ func apply_save_data(data: Dictionary) -> void:
 	if not is_travel_active():
 		travel_session = _empty_travel_session()
 	else:
-		_pending_companion_restore = true
+		_prepare_pending_companion_restore()
 
 
 func return_to_origin(target_total_hours: float) -> bool:
@@ -169,40 +201,162 @@ func _capture_companion_for_scene(destination_scene_path: String) -> void:
 	if record.is_empty():
 		return
 	record["scene_path"] = destination_scene_path
+	record["action"] = {}
 	record["activity"] = {}
 	record["pending_travel"] = {}
+	NpcRouteLocationCoordinator.clear_finish_replan_marker(record)
 	locations.call("apply_simulated_record", npc_id, record, false)
 
 
 func _restore_companion_after_scene_change(player: Node) -> void:
-	await get_tree().process_frame
-	await get_tree().process_frame
+	if not is_travel_active() or not (player is Node2D):
+		return
+	_prepare_pending_companion_restore()
+	_companion_restore_player_ref = weakref(player)
+	_attempt_companion_restore(_companion_restore_generation)
+
+
+func _attempt_companion_restore(generation: int) -> void:
+	if generation != _companion_restore_generation or not _pending_companion_restore:
+		return
+	_companion_restore_retry_scheduled = false
+	if not is_travel_active():
+		_cancel_pending_companion_restore()
+		return
+	var player := _get_pending_restore_player()
+	if not _restore_context_is_current(player):
+		_schedule_companion_restore_retry(generation)
+		return
 	var locations := get_node_or_null("/root/NpcLocations")
 	if locations == null:
+		_schedule_companion_restore_retry(generation)
 		return
-	var npc := locations.call("get_live_npc", String(travel_session.get("companion_npc_id", ""))) as Node2D
-	if npc == null:
-		await get_tree().process_frame
-		npc = locations.call("get_live_npc", String(travel_session.get("companion_npc_id", ""))) as Node2D
-	if npc == null or not (player is Node2D):
+	var npc_id := String(travel_session.get("companion_npc_id", ""))
+	var npc := locations.call("get_live_npc", npc_id) as Node2D
+	if (
+		npc == null
+		or not is_instance_valid(npc)
+		or npc.is_queued_for_deletion()
+		or not npc.is_node_ready()
+		or locations.call("get_live_npc", npc_id) != npc
+	):
+		_schedule_companion_restore_retry(generation)
+		return
+	if not _enable_live_companion_follow(npc):
+		_schedule_companion_restore_retry(generation)
 		return
 	var companion_spawn := get_tree().get_first_node_in_group(&"companion_spawn") as Node2D
 	npc.global_position = companion_spawn.global_position if companion_spawn != null else (player as Node2D).global_position + Vector2(-72.0, -8.0)
-	_enable_live_companion_follow(npc)
+	if npc is CharacterBody2D:
+		(npc as CharacterBody2D).velocity = Vector2.ZERO
 	_pending_companion_restore = false
+	_companion_restore_player_ref = null
+	_companion_restore_attempts = 0
+	_companion_restore_retry_scheduled = false
 	if bool(travel_session.get("ending", false)):
 		_end_travel(npc)
 
 
-func _enable_live_companion_follow(npc: Node) -> void:
+func _schedule_companion_restore_retry(generation: int) -> void:
+	if generation != _companion_restore_generation or not _pending_companion_restore:
+		return
+	if _companion_restore_retry_scheduled:
+		return
+	if _companion_restore_attempts >= COMPANION_RESTORE_MAX_ATTEMPTS:
+		if not _companion_restore_exhaustion_warned and OS.is_debug_build():
+			_companion_restore_exhaustion_warned = true
+			push_warning(
+				"Companion restore is waiting for NPC registration: %s"
+				% String(travel_session.get("companion_npc_id", ""))
+			)
+		return
+	_companion_restore_attempts += 1
+	_companion_restore_retry_scheduled = true
+	var timer := get_tree().create_timer(COMPANION_RESTORE_RETRY_SECONDS)
+	timer.timeout.connect(
+		Callable(self, "_attempt_companion_restore").bind(generation),
+		CONNECT_ONE_SHOT
+	)
+
+
+func _on_npc_available_for_companion_restore(
+	npc_id: String,
+	_npc: Node,
+	scene_path: String
+) -> void:
+	if not _pending_companion_restore or not is_travel_active():
+		return
+	if npc_id != String(travel_session.get("companion_npc_id", "")):
+		return
+	var expected_scene := String(travel_session.get("destination_scene_path", ""))
+	if not expected_scene.is_empty() and scene_path != expected_scene:
+		return
+	# Registration can be emitted from inside the NPC's own _ready path. Let that
+	# stack finish before binding its state machine and presentation.
+	_companion_restore_attempts = 0
+	_companion_restore_exhaustion_warned = false
+	call_deferred("_attempt_companion_restore", _companion_restore_generation)
+
+
+func _restore_context_is_current(player: Node) -> bool:
+	if (
+		player == null
+		or not is_instance_valid(player)
+		or player.is_queued_for_deletion()
+		or not player.is_inside_tree()
+		or not (player is Node2D)
+	):
+		return false
+	var current := get_tree().current_scene
+	if current == null or (current != player and not current.is_ancestor_of(player)):
+		return false
+	var expected_scene := String(travel_session.get("destination_scene_path", ""))
+	return expected_scene.is_empty() or current.scene_file_path == expected_scene
+
+
+func _get_pending_restore_player() -> Node:
+	if _companion_restore_player_ref == null:
+		return null
+	return _companion_restore_player_ref.get_ref() as Node
+
+
+func _prepare_pending_companion_restore() -> void:
+	_companion_restore_generation += 1
+	_pending_companion_restore = true
+	_companion_restore_player_ref = null
+	_companion_restore_attempts = 0
+	_companion_restore_retry_scheduled = false
+	_companion_restore_exhaustion_warned = false
+
+
+func _cancel_pending_companion_restore() -> void:
+	_companion_restore_generation += 1
+	_pending_companion_restore = false
+	_companion_restore_player_ref = null
+	_companion_restore_attempts = 0
+	_companion_restore_retry_scheduled = false
+	_companion_restore_exhaustion_warned = false
+
+
+func _enable_live_companion_follow(npc: Node) -> bool:
+	if npc == null or not is_instance_valid(npc):
+		return false
 	var machine := npc.get_node_or_null("NpcStateMachine") as NpcStateMachine
-	if machine != null:
-		machine.request_state(&"TravelFollow", null, "travel_companion", 90)
+	if machine == null or machine.current_state == null:
+		return false
+	var current_state_name := String(machine.current_state.name)
+	if current_state_name == "TravelFollow":
+		machine.cancel_and_clear_active_action_for_override("travel_follow_restore")
+		machine.current_state.resume_presentation_after_talk_overlay()
+		return true
+	if current_state_name in FOLLOW_INTERRUPT_STATE_NAMES:
+		return true
+	return machine.request_state(&"TravelFollow", null, "travel_companion", 90)
 
 
 func _end_travel(npc: Node) -> void:
 	travel_session = _empty_travel_session()
-	_pending_companion_restore = false
+	_cancel_pending_companion_restore()
 	var machine := npc.get_node_or_null("NpcStateMachine") as NpcStateMachine if npc != null else null
 	if machine != null and machine.current_state != null and String(machine.current_state.name) == "TravelFollow":
 		machine.request_state(&"Idle", null, "travel_ended", 100)
@@ -228,6 +382,15 @@ func has_pending_player_data() -> bool:
 func clear_pending_player_transfer() -> void:
 	pending_player_data.clear()
 	pending_target_spawn_id = &""
+	if is_travel_active() and _pending_companion_restore:
+		# SceneLoader calls this on a rejected/failed transfer. Put the persistent
+		# companion record back in the still-active scene before cancelling retries.
+		var current := get_tree().current_scene
+		var current_scene_path := current.scene_file_path if current != null else ""
+		if not current_scene_path.is_empty():
+			_capture_companion_for_scene(current_scene_path)
+			travel_session["destination_scene_path"] = current_scene_path
+		_cancel_pending_companion_restore()
 
 
 func _move_player_to_spawn(player: Node, target_spawn_id: StringName) -> void:

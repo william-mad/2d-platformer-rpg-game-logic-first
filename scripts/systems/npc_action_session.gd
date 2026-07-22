@@ -252,3 +252,41 @@ static func _descriptor_session_id(descriptor: Dictionary) -> String:
 		if not value.is_empty():
 			return value
 	return ""
+
+
+static func pending_travel_session_id(pending_travel: Dictionary) -> String:
+	var activity = pending_travel.get("activity", {})
+	if activity is Dictionary and not activity.is_empty():
+		var activity_session := _descriptor_session_id(activity)
+		if not activity_session.is_empty():
+			return activity_session
+	return String(pending_travel.get(
+		"action_session_id",
+		pending_travel.get("session_id", "")
+	)).strip_edges()
+
+
+static func live_npc_matches_pending_travel_session(
+	npc: Node,
+	pending_travel: Dictionary,
+	required_state: StringName = &""
+) -> bool:
+	var expected_session_id := pending_travel_session_id(pending_travel)
+	if expected_session_id.is_empty():
+		return true
+	if npc == null or not is_instance_valid(npc):
+		return false
+	var machine := npc.get_node_or_null("NpcStateMachine")
+	if machine == null:
+		return false
+	if machine.has_method("is_action_session_current_for_execution"):
+		return bool(machine.call(
+			"is_action_session_current_for_execution",
+			expected_session_id,
+			required_state
+		))
+	return (
+		machine.has_method("get_active_action_session_id")
+		and String(machine.call("get_active_action_session_id")).strip_edges()
+			== expected_session_id
+	)

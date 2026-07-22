@@ -739,6 +739,17 @@ func _cancel_and_clear_active_action(reason: String) -> void:
 		clear_terminal_action(session_id)
 
 
+func cancel_and_clear_active_action_for_override(reason: String) -> bool:
+	# External runtime states call this only after the previous state's exit hook
+	# has had a chance to release its state-owned reservation.
+	_cancel_and_clear_active_action(reason)
+	_proposed_action = null
+	_action_state_reconciliation_requested = false
+	_action_state_reconciliation_force_reentry = false
+	_pending_stale_state_reconciliation.clear()
+	return active_action == null
+
+
 func _reconcile_to_scripted_hold(reason: String, cancel_action: bool = true) -> bool:
 	if not _has_scripted_control_claim():
 		return false
@@ -1451,6 +1462,39 @@ func fail_active_action(session_id: String, reason: String) -> bool:
 	return cancel_active_action(session_id, reason)
 
 
+func pause_active_action_movement_for_retry(
+	session_id: String,
+	reason: String = "movement_retry",
+	require_movement_phase: bool = true
+) -> bool:
+	if not is_action_session_current_for_execution(session_id):
+		_log_stale_action_callback("pause_movement_retry", session_id)
+		return false
+	if active_action.phase == &"route_retry_wait":
+		return true
+	if require_movement_phase and active_action.phase != &"moving_to_target":
+		_log_stale_action_callback("pause_movement_retry_phase", session_id)
+		return false
+	var cleared_target := active_action.get_live_target()
+	active_action.phase = &"route_retry_wait"
+	active_action.reason = reason
+	active_action.set_live_target(null)
+	_set_legacy_action_target(active_action.action_kind, null)
+	if move_target == cleared_target:
+		move_target = null
+	if target == cleared_target:
+		target = null
+	state_after_move = &"Idle"
+	state_after_move_priority = 0
+	_publish_active_action()
+	# MoveToTarget returns Idle in the same physics tick. The caller either retains
+	# this exact route for a physical retry or discards it for a clean replan.
+	_action_state_reconciliation_requested = false
+	_action_state_reconciliation_force_reentry = false
+	_log_action_session("movement_retry_wait", reason)
+	return true
+
+
 func clear_terminal_action(session_id: String) -> bool:
 	if not _active_action_id_matches(session_id):
 		return false
@@ -1574,6 +1618,8 @@ func reconcile_invalid_action_state_session(
 
 func _get_active_action_execution_state_name() -> StringName:
 	if active_action == null or active_action.status != NpcActionSession.Status.ACTIVE:
+		return &"Idle"
+	if active_action.phase == &"route_retry_wait":
 		return &"Idle"
 	if active_action.phase == &"moving_to_target":
 		return &"MoveToTarget"
@@ -2027,7 +2073,10 @@ func _consume_or_build_action_session(
 	request_priority: int,
 	request_context: Dictionary
 ) -> NpcActionSession:
-	if action_kind == &"" or String(action_kind) == "Idle":
+	# TravelFollow belongs to PlayerRuntime, not the activity transaction lane.
+	# Keeping the previous action alive until its state exits lets that state
+	# release state-owned reservations before TravelFollow clears the session.
+	if action_kind == &"" or String(action_kind) in ["Idle", "TravelFollow"]:
 		return null
 	if (
 		String(action_kind) == "MoveToTarget"

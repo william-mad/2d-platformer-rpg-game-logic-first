@@ -27,6 +27,7 @@
 [ext_resource type="PackedScene" path="res://scenes/things/npc_travel_door.tscn" id="31_route_door"]
 [ext_resource type="Script" path="res://scripts/instances/scripted_event_smoke_test.gd" id="32_scripted_event_smoke"]
 [ext_resource type="PackedScene" path="res://scenes/items/world_loot_container.tscn" id="33_debug_sword_pickup"]
+[ext_resource type="Resource" path="res://data/npc_routes/edges/realtest1_to_realhometest.tres" id="34_yard_home_route"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_q8s1k"]
 texture = ExtResource("9_fddca")
@@ -242,7 +243,7 @@ layer_0/tile_data = PackedInt32Array(1507328, 65536, 0, 1507329, 65536, 0, 15073
 position = Vector2(-1471, 344)
 
 [node name="Player" parent="." unique_id=500096349 instance=ExtResource("12_aas6m")]
-position = Vector2(-318, 365)
+position = Vector2(-240, 365)
 
 [node name="Camera2D" type="Camera2D" parent="Player" unique_id=1030625809]
 position = Vector2(-1, -50)
@@ -260,10 +261,11 @@ position = Vector2(300, 367)
 position = Vector2(-320, 368)
 target_scene_path = "res://scenes/testscenes/realhometest.tscn"
 target_spawn_id = &"from_realtest1"
+route_edge = ExtResource("34_yard_home_route")
 owner_ids = Array[StringName]([&"mom", &"player"])
 
 [node name="PlayerSpawnFromHome" type="Marker2D" parent="." unique_id=1165842368]
-position = Vector2(-274, 367)
+position = Vector2(-240, 367)
 script = ExtResource("27_player_spawn")
 spawn_id = &"from_realhometest"
 

@@ -8,6 +8,7 @@ class_name NpcTravelDoor extends Area2D
 @export var cooldown_seconds: float = 1.5
 @export var npc_arrival_offset: Vector2 = Vector2(80.0, 0.0)
 @export var allow_unscheduled_npc_travel: bool = false
+@export var route_edge: NpcSceneRouteEdge
 
 @export_group("Owners")
 @export var owner_ids: Array[StringName] = []
@@ -23,9 +24,11 @@ var cooldowns: Dictionary = {}
 var player_inside: bool = false
 var active_player: Node2D
 var player_transition_accepted: bool = false
+var _route_configuration_valid: bool = true
 
 
 func _ready() -> void:
+	_validate_route_configuration()
 	body_entered.connect(_on_body_entered)
 	body_exited.connect(_on_body_exited)
 
@@ -119,7 +122,15 @@ func try_travel_npc(body: Node2D) -> bool:
 		return false
 
 	cooldowns[traveller_id] = cooldown_seconds
-	if tracker.has_method("complete_pending_scheduled_travel"):
+	if route_edge != null and tracker.has_method("complete_pending_route_hop"):
+		if bool(tracker.call(
+			"complete_pending_route_hop",
+			body,
+			route_edge.edge_id,
+			target_scene_path
+		)):
+			return true
+	elif tracker.has_method("complete_pending_scheduled_travel"):
 		if bool(tracker.call("complete_pending_scheduled_travel", body, target_scene_path)):
 			return true
 
@@ -140,6 +151,11 @@ func can_npc_use(npc: Node) -> bool:
 	if npc == null or not is_instance_valid(npc):
 		return false
 	var npc_id := StringName(_get_traveller_id(npc))
+	# Route-wired doors use the edge as the single NPC authorization source so
+	# live traversal and unloaded simulation cannot disagree. Owner and legacy
+	# gates remain available for players and for doors without a route edge.
+	if route_edge != null:
+		return _route_edge_allows_npc_id(npc_id)
 	if not _owner_id_is_allowed(npc_id):
 		return false
 	if not _npc_id_is_allowed(npc_id):
@@ -149,7 +165,17 @@ func can_npc_use(npc: Node) -> bool:
 
 func can_npc_id_use(npc_id: StringName) -> bool:
 	# ID-only gate is available to unloaded simulation; tag gates require a live NPC.
-	return _owner_id_is_allowed(npc_id) and _npc_id_is_allowed(npc_id) and required_npc_tags.is_empty()
+	if route_edge != null:
+		return _route_edge_allows_npc_id(npc_id)
+	return (
+		_owner_id_is_allowed(npc_id)
+		and _npc_id_is_allowed(npc_id)
+		and required_npc_tags.is_empty()
+	)
+
+
+func get_route_edge_id() -> StringName:
+	return route_edge.edge_id if route_edge != null and _route_configuration_valid else &""
 
 
 func _on_body_exited(body: Node2D) -> void:
@@ -181,6 +207,83 @@ func _npc_id_is_allowed(npc_id: StringName) -> bool:
 		if String(allowed_id) == String(npc_id):
 			return true
 	return false
+
+
+func _route_edge_allows_npc_id(npc_id: StringName) -> bool:
+	if route_edge == null:
+		return true
+	return (
+		_route_configuration_valid
+		and route_edge.enabled
+		and route_edge.target_scene_path == target_scene_path
+		and route_edge.allows_npc(npc_id)
+	)
+
+
+func _validate_route_configuration() -> void:
+	_route_configuration_valid = true
+	if route_edge == null:
+		return
+	if (
+		not allowed_npc_ids.is_empty()
+		or not blocked_npc_ids.is_empty()
+		or not required_npc_tags.is_empty()
+	):
+		push_warning(
+			"NpcTravelDoor '%s' ignores legacy NPC gates because route edge '%s' is authoritative." % [
+				name, String(route_edge.edge_id),
+			]
+		)
+	var errors := route_edge.get_validation_errors()
+	if not errors.is_empty():
+		_route_configuration_valid = false
+		push_warning(
+			"NpcTravelDoor '%s' has invalid route edge '%s': %s" % [
+				name, String(route_edge.edge_id), "; ".join(errors),
+			]
+		)
+		return
+	if route_edge.target_scene_path != target_scene_path:
+		_route_configuration_valid = false
+		push_warning(
+			"NpcTravelDoor '%s' target does not match route edge '%s'." % [
+				name, String(route_edge.edge_id),
+			]
+		)
+		return
+	var route_manager := get_node_or_null("/root/NpcSceneRoutes")
+	if route_manager != null and route_manager.has_method("get_edge_resource"):
+		var canonical_edge = route_manager.call("get_edge_resource", route_edge.edge_id)
+		if canonical_edge != route_edge:
+			_route_configuration_valid = false
+			push_warning(
+				"NpcTravelDoor '%s' does not reference the canonical route edge '%s'." % [
+					name, String(route_edge.edge_id),
+				]
+			)
+			return
+	var host_scene_path := _get_host_scene_path()
+	if not host_scene_path.is_empty() and route_edge.source_scene_path != host_scene_path:
+		_route_configuration_valid = false
+		push_warning(
+			"NpcTravelDoor '%s' is in '%s', but route edge '%s' starts in '%s'." % [
+				name,
+				host_scene_path,
+				String(route_edge.edge_id),
+				route_edge.source_scene_path,
+			]
+		)
+
+
+func _get_host_scene_path() -> String:
+	if is_inside_tree():
+		var current_scene := get_tree().current_scene
+		if current_scene != null and (current_scene == self or current_scene.is_ancestor_of(self)):
+			return current_scene.scene_file_path
+	var scene_owner := owner
+	if scene_owner != null:
+		return scene_owner.scene_file_path
+	return ""
 
 
 func _owner_id_is_allowed(owner_id: StringName) -> bool:

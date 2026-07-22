@@ -282,6 +282,13 @@ func _initialize() -> void:
 	var pending_after: Dictionary = locations.get_record_snapshot(TEST_NPC_ID).get("pending_travel", {})
 	_expect(pending_before == pending_after, "rejected movement does not commit pending travel")
 
+	await _test_save_repair_is_session_safe(
+		locations, machine, npc, spot, idle_state, work_state
+	)
+	_test_stale_resume_rejects_replaced_live_body(
+		locations, simulator, machine, npc, spot, idle_state
+	)
+
 	locations.npc_records = original_records
 	locations.live_npcs = original_live_npcs
 	locations.active_scene_path = original_active_scene_path
@@ -302,6 +309,195 @@ func _initialize() -> void:
 	for failure in _failures:
 		push_error(failure)
 	quit(1)
+
+
+func _test_save_repair_is_session_safe(
+	locations: Node,
+	machine: NpcStateMachine,
+	npc: TestNpc,
+	spot: TestSpot,
+	idle_state: NpcState,
+	work_state: NpcState
+) -> void:
+	_clear_active_action(machine, "save_repair_fixture_reset")
+	machine.state_history = [idle_state]
+	locations.live_npcs[TEST_NPC_ID] = npc
+
+	var repaired_session := "save-repair-old-session"
+	var repaired_action := _make_work_action(repaired_session)
+	# This fixture exercises location repair, not reservation ownership.
+	repaired_action["spot_id"] = ""
+	repaired_action["target_persistent_id"] = ""
+	_expect(
+		machine.restore_action_descriptor(repaired_action),
+		"save-repair fixture restores its old live action"
+	)
+	var repaired_activity := _make_work_activity(repaired_session)
+	repaired_activity["target_scene_path"] = "res://save_repair_mismatched_scene.tscn"
+	repaired_activity["return_scene_path"] = TEST_SCENE_PATH
+	repaired_activity["return_position"] = Vector2(12.0, 34.0)
+	var broken_record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	broken_record["scene_path"] = TEST_SCENE_PATH
+	broken_record["activity"] = repaired_activity
+	broken_record["action"] = repaired_action
+	broken_record["pending_travel"] = {}
+	locations.npc_records[TEST_NPC_ID] = broken_record
+
+	locations.synchronize_live_records()
+	var repaired_snapshot: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	_expect(
+		(repaired_snapshot.get("activity", {}) as Dictionary).is_empty(),
+		"save repair clears the mismatched activity immediately"
+	)
+	_expect(
+		(repaired_snapshot.get("action", {}) as Dictionary).is_empty(),
+		"save repair does not recapture the old live action into the save snapshot"
+	)
+	_expect(
+		(repaired_snapshot.get("pending_travel", {}) as Dictionary).is_empty(),
+		"save repair leaves no stale pending travel"
+	)
+
+	var replacement_session := "save-repair-new-session"
+	var observed_states: Array[String] = []
+	var state_callback := func(state_name: StringName, _previous_state_name: StringName) -> void:
+		observed_states.append(String(state_name))
+	machine.state_changed.connect(state_callback)
+	_expect(
+		machine.request_action_from_descriptor(
+			_make_work_action(replacement_session), spot
+		),
+		"a newer action can start before deferred save repair runs"
+	)
+	_expect(machine.current_state == work_state, "the newer action enters Work")
+	observed_states.clear()
+	await process_frame
+	_expect(
+		machine.get_active_action_session_id() == replacement_session,
+		"deferred save repair preserves the newer action session"
+	)
+	_expect(
+		machine.current_state == work_state and not observed_states.has("Idle"),
+		"deferred save repair cannot force a newer action through Idle"
+	)
+	if machine.state_changed.is_connected(state_callback):
+		machine.state_changed.disconnect(state_callback)
+	_clear_active_action(machine, "save_repair_fixture_cleanup")
+	machine.state_history = [idle_state]
+	var cleaned_record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	cleaned_record["activity"] = {}
+	cleaned_record["action"] = {}
+	cleaned_record["pending_travel"] = {}
+	locations.npc_records[TEST_NPC_ID] = cleaned_record
+
+
+func _test_stale_resume_rejects_replaced_live_body(
+	locations: Node,
+	simulator: Node,
+	machine: NpcStateMachine,
+	stale_npc: TestNpc,
+	spot: TestSpot,
+	idle_state: NpcState
+) -> void:
+	_clear_active_action(machine, "stale_resume_fixture_reset")
+	machine.state_history = [idle_state]
+	var session_id := "stale-resume-live-body"
+	var claim: Dictionary = simulator.call(
+		"try_claim_spot",
+		StringName(TEST_NPC_ID),
+		session_id,
+		TEST_SPOT_ID,
+		&"activity"
+	)
+	_expect(bool(claim.get("accepted", false)), "stale-resume fixture owns its spot")
+	var reservation_id := String(claim.get("reservation_id", ""))
+	var activity := _make_work_activity(session_id)
+	activity["reservation_ids"] = [reservation_id]
+	var action := _make_work_action(session_id)
+	action["reservation_ids"] = [reservation_id]
+	var routed_record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	routed_record["scene_path"] = TEST_SCENE_PATH
+	routed_record["activity"] = activity
+	routed_record["action"] = action
+	routed_record["pending_travel"] = {}
+	locations.npc_records[TEST_NPC_ID] = routed_record
+
+	var replacement_npc := TestNpc.new()
+	replacement_npc.name = "ReplacementTransactionalNpc"
+	current_scene.add_child(replacement_npc)
+	locations.live_npcs[TEST_NPC_ID] = replacement_npc
+	var pristine_record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	simulator.call("resume_live_activity", StringName(TEST_NPC_ID), stale_npc)
+	_expect(
+		machine.current_state == idle_state
+		and machine.get_active_action_session_id().is_empty(),
+		"a stale deferred resume cannot assign activity to a replaced live body"
+	)
+	_expect(
+		locations.get_record_snapshot(TEST_NPC_ID) == pristine_record,
+		"a stale deferred resume leaves the canonical replacement record unchanged"
+	)
+
+	locations.live_npcs[TEST_NPC_ID] = stale_npc
+	if not reservation_id.is_empty():
+		simulator.call(
+			"release_spot_reservation",
+			reservation_id,
+			StringName(TEST_NPC_ID),
+			session_id
+		)
+	_clear_active_action(machine, "stale_resume_fixture_cleanup")
+	var cleaned_record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	cleaned_record["activity"] = {}
+	cleaned_record["action"] = {}
+	cleaned_record["pending_travel"] = {}
+	locations.npc_records[TEST_NPC_ID] = cleaned_record
+	replacement_npc.queue_free()
+
+
+func _make_work_activity(session_id: String) -> Dictionary:
+	return {
+		"session_id": session_id,
+		"action_session_id": session_id,
+		"activity_id": session_id,
+		"spot_id": String(TEST_SPOT_ID),
+		"state_name": "Work",
+		"value_name": "",
+		"source": "schedule",
+		"priority": 20,
+		"status": "active",
+		"target_scene_path": TEST_SCENE_PATH,
+		"target_position": Vector2.ZERO,
+		"return_scene_path": TEST_SCENE_PATH,
+		"return_position": Vector2.ZERO,
+		"reservation_ids": [],
+	}
+
+
+func _make_work_action(session_id: String) -> Dictionary:
+	return {
+		"session_id": session_id,
+		"action_session_id": session_id,
+		"activity_id": session_id,
+		"action_kind": "Work",
+		"state_name": "Work",
+		"source": "schedule",
+		"spot_id": String(TEST_SPOT_ID),
+		"target_persistent_id": String(TEST_SPOT_ID),
+		"scene_path": TEST_SCENE_PATH,
+		"priority": 20,
+		"phase": "executing",
+		"status": "active",
+		"reservation_ids": [],
+	}
+
+
+func _clear_active_action(machine: NpcStateMachine, reason: String) -> void:
+	var session_id := machine.get_active_action_session_id()
+	if session_id.is_empty():
+		return
+	if machine.cancel_active_action(session_id, reason):
+		machine.clear_terminal_action(session_id)
 
 
 func _expect(condition: bool, message: String) -> void:

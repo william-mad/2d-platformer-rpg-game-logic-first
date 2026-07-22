@@ -36,6 +36,7 @@ func _initialize() -> void:
 	_test_work_entry_plays_only_resolved_clip()
 	_test_placeholder_rejection_is_latched()
 	_test_complex_scene_wiring_and_mom_tracks()
+	await _test_mom_follow_animation_after_scene_recreation()
 	await process_frame
 
 	if _failures.is_empty():
@@ -160,6 +161,91 @@ func _test_complex_scene_wiring_and_mom_tracks() -> void:
 					enabled_flip_tracks += 1
 	_expect(enabled_flip_tracks == 0, "Mom has no enabled animation track writing Sprite2D.flip_h")
 	mom.free()
+
+
+func _test_mom_follow_animation_after_scene_recreation() -> void:
+	var runtime := root.get_node_or_null("PlayerRuntime")
+	_expect(runtime != null, "PlayerRuntime is available for companion animation validation")
+	if runtime == null:
+		return
+	var original_travel_session: Dictionary = runtime.get("travel_session").duplicate(true)
+	runtime.set("travel_session", {
+		"active": true,
+		"companion_npc_id": "mom",
+		"origin_scene_path": "res://scene_transition_animation_source.tscn",
+		"origin_spawn_id": "from_companion_route",
+		"destination_scene_path": "res://scene_transition_animation_destination.tscn",
+		"departure_total_hours": 0.0,
+		"travel_policy_id": "default_companion",
+		"ending": false,
+	})
+
+	var mom_scene := load("res://scenes/creatures/mom_npc.tscn") as PackedScene
+	var mom := mom_scene.instantiate()
+	var authored_follow := mom.get_node_or_null("NpcStateMachine/TravelFollow")
+	if authored_follow != null:
+		authored_follow.set("show_follow_debug_paths", true)
+	root.add_child(mom)
+	await process_frame
+
+	var machine := mom.get_node_or_null("NpcStateMachine") as NpcStateMachine
+	var player := mom.get_node_or_null("AnimationPlayer") as AnimationPlayer
+	_expect(
+		machine != null and machine.current_state != null and String(machine.current_state.name) == "TravelFollow",
+		"a recreated active companion enters TravelFollow immediately"
+	)
+	_expect(
+		player != null and player.current_animation == &"run" and player.is_playing(),
+		"a recreated active companion keeps the TravelFollow run animation"
+	)
+
+	# PlayerRuntime repeats this request after the destination player and NPC registry settle.
+	# It must not leave the already-active follow state displaying an autoplayed idle clip.
+	var request_failure_count := 0
+	if machine != null:
+		machine.state_request_failed.connect(func(_state_name: StringName, _reason: String) -> void:
+			request_failure_count += 1
+		)
+	var history_size := machine.state_history.size() if machine != null else -1
+	runtime.call("_enable_live_companion_follow", mom)
+	runtime.call("_enable_live_companion_follow", mom)
+	await process_frame
+	_expect(
+		player != null and player.current_animation == &"run" and player.is_playing(),
+		"the deferred companion restore preserves the TravelFollow run animation"
+	)
+	_expect(request_failure_count == 0, "repeated follow activation emits no state rejection")
+	_expect(
+		machine != null and machine.state_history.size() == history_size,
+		"repeated follow activation does not re-enter or duplicate TravelFollow"
+	)
+	var overlays := mom.find_children(
+		"TravelFollowDebugOverlay", "NpcFollowDebugOverlay", false, false
+	)
+	_expect(overlays.size() == 1, "initial TravelFollow can attach one opt-in debug overlay after ready")
+
+	mom.queue_free()
+	await process_frame
+	runtime.set("travel_session", original_travel_session)
+
+	var idle_mom := mom_scene.instantiate()
+	idle_mom.set("location_id", &"")
+	root.add_child(idle_mom)
+	await process_frame
+	var idle_machine := idle_mom.get_node_or_null("NpcStateMachine") as NpcStateMachine
+	var idle_player := idle_mom.get_node_or_null("AnimationPlayer") as AnimationPlayer
+	_expect(
+		idle_machine != null
+		and idle_machine.current_state != null
+		and String(idle_machine.current_state.name) == "Idle",
+		"a normal recreated Mom still enters Idle"
+	)
+	_expect(
+		idle_player != null and idle_player.current_animation == &"idle" and idle_player.is_playing(),
+		"the state machine still starts Mom's idle animation without scene autoplay"
+	)
+	idle_mom.queue_free()
+	await process_frame
 
 
 func _make_animated_npc() -> Dictionary:

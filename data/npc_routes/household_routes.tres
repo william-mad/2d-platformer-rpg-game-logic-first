@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="NpcSceneRouteMap" load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/npc_scene_route_map.gd" id="1_map"]
+[ext_resource type="Resource" path="res://data/npc_routes/edges/realtest1_to_realhometest.tres" id="2_yard_home"]
+[ext_resource type="Resource" path="res://data/npc_routes/edges/realhometest_to_realtest1.tres" id="3_home_yard"]
+[ext_resource type="Resource" path="res://data/npc_routes/edges/realhometest_to_mom_bedroom.tres" id="4_home_bedroom"]
+[ext_resource type="Resource" path="res://data/npc_routes/edges/mom_bedroom_to_realhometest.tres" id="5_bedroom_home"]
+
+[resource]
+resource_name = "Household NPC Routes"
+script = ExtResource("1_map")
+map_id = &"household_routes"
+schema_version = 1
+edges = Array[ExtResource("2_yard_home")]([ExtResource("2_yard_home"), ExtResource("3_home_yard"), ExtResource("4_home_bedroom"), ExtResource("5_bedroom_home")])

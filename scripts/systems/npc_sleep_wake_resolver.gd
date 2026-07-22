@@ -1,6 +1,10 @@
 class_name NpcSleepWakeResolver
 extends RefCounted
 
+const NpcRouteLocationCoordinator = preload(
+	"res://scripts/systems/npc_route_location_coordinator.gd"
+)
+
 
 static func finalize_sleep_skip_record(
 	npc_id: String,
@@ -34,6 +38,7 @@ static func clear_sleep_activity_after_skip(record: Dictionary, runtime) -> bool
 			runtime
 		)
 		record["activity"] = {}
+		NpcRouteLocationCoordinator.clear_finish_replan_marker(record)
 
 	var pending = record.get("pending_travel", {})
 	if not (pending is Dictionary) or pending.is_empty():
@@ -87,6 +92,7 @@ static func move_record_to_destination(record: Dictionary, destination: Dictiona
 
 	record["activity"] = {}
 	record["pending_travel"] = {}
+	NpcRouteLocationCoordinator.clear_finish_replan_marker(record)
 	record["scene_path"] = scene_path
 	record["previous_scene_path"] = ""
 	record["last_position"] = position

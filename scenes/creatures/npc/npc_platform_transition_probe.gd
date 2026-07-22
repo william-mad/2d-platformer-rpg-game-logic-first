@@ -16,6 +16,10 @@ var landing_search_below: float = 240.0
 var landing_margin: float = 10.0
 var maximum_supported_floor_difference: float = 18.0
 var arc_samples: int = 10
+var _ray_query := PhysicsRayQueryParameters2D.new()
+var _shape_query := PhysicsShapeQueryParameters2D.new()
+var _motion_parameters := PhysicsTestMotionParameters2D.new()
+var _motion_result := PhysicsTestMotionResult2D.new()
 
 
 func configure(character: CharacterBody2D, mask: int) -> bool:
@@ -68,6 +72,49 @@ func inspect_local(direction: float) -> Dictionary:
 		"tall_wall": feet_blocked and torso_blocked and head_blocked,
 		"ceiling_blocked": ceiling_blocked,
 		"near_floor": near_floor,
+		"far_floor": far_floor,
+	}
+
+
+func inspect_forward_floor(direction: float, maximum_forward_distance: float = INF) -> Dictionary:
+	# This is the cheap, high-frequency half of the transition probe. The full
+	# obstacle/ceiling inspection and ballistic solver remain cooldown-bound.
+	if npc == null or body_shape == null or is_zero_approx(direction):
+		return {}
+	var facing := signf(direction)
+	var feet := npc.global_position
+	var leading_x := feet.x + facing * (body_half_size.x + near_foot_distance)
+	var middle_distance := lerpf(near_foot_distance, far_floor_distance, 0.5)
+	var middle_x := feet.x + facing * (body_half_size.x + middle_distance)
+	var far_x := feet.x + facing * (body_half_size.x + far_floor_distance)
+	var ray_start_y := feet.y - 8.0
+	var ray_end_y := feet.y + floor_probe_depth
+	var clamped_forward_distance := maxf(maximum_forward_distance, 0.0)
+	var inspect_near := clamped_forward_distance >= body_half_size.x + near_foot_distance
+	var inspect_middle := clamped_forward_distance >= body_half_size.x + middle_distance
+	var inspect_far := clamped_forward_distance >= body_half_size.x + far_floor_distance
+	var near_floor := _ray(
+		Vector2(leading_x, ray_start_y),
+		Vector2(leading_x, ray_end_y)
+	) if inspect_near else {}
+	var middle_floor := _ray(
+		Vector2(middle_x, ray_start_y),
+		Vector2(middle_x, ray_end_y)
+	) if inspect_middle else {}
+	var far_floor := _ray(
+		Vector2(far_x, ray_start_y),
+		Vector2(far_x, ray_end_y)
+	) if inspect_far else {}
+	var has_near_floor := not inspect_near or not near_floor.is_empty()
+	var has_middle_floor := not inspect_middle or not middle_floor.is_empty()
+	var has_far_floor := not inspect_far or not far_floor.is_empty()
+	return {
+		"normal_ground": has_near_floor and has_middle_floor and has_far_floor,
+		"chasm": inspect_near and not has_near_floor,
+		"approaching_ledge": has_near_floor and (not has_middle_floor or not has_far_floor),
+		"floor_hazard": not has_near_floor or not has_middle_floor or not has_far_floor,
+		"near_floor": near_floor,
+		"middle_floor": middle_floor,
 		"far_floor": far_floor,
 	}
 
@@ -335,15 +382,13 @@ func _shape_motion_is_clear(from_feet: Vector2, to_feet: Vector2) -> bool:
 func _body_motion_collides(from_feet: Vector2, to_feet: Vector2) -> bool:
 	if npc == null:
 		return true
-	var parameters := PhysicsTestMotionParameters2D.new()
 	# The RID already contains Mom's collision-shape offset, so this transform is
 	# the CharacterBody2D origin/feet position rather than the shape center.
-	parameters.from = Transform2D(npc.global_rotation, from_feet)
-	parameters.motion = to_feet - from_feet
-	parameters.margin = 0.06
-	parameters.recovery_as_collision = false
-	var result := PhysicsTestMotionResult2D.new()
-	return PhysicsServer2D.body_test_motion(npc.get_rid(), parameters, result)
+	_motion_parameters.from = Transform2D(npc.global_rotation, from_feet)
+	_motion_parameters.motion = to_feet - from_feet
+	_motion_parameters.margin = 0.06
+	_motion_parameters.recovery_as_collision = false
+	return PhysicsServer2D.body_test_motion(npc.get_rid(), _motion_parameters, _motion_result)
 
 
 func _find_landing(proposed_position: Vector2) -> Dictionary:
@@ -380,14 +425,13 @@ func _find_landing(proposed_position: Vector2) -> Dictionary:
 
 
 func _body_space_is_empty(feet_position: Vector2) -> bool:
-	var query := PhysicsShapeQueryParameters2D.new()
-	query.shape = body_shape
-	query.transform = Transform2D(0.0, feet_position + shape_offset)
-	query.collision_mask = collision_mask
-	query.exclude = [npc.get_rid()]
-	query.collide_with_areas = false
-	query.collide_with_bodies = true
-	return npc.get_world_2d().direct_space_state.intersect_shape(query, 1).is_empty()
+	_shape_query.shape = body_shape
+	_shape_query.transform = Transform2D(0.0, feet_position + shape_offset)
+	_shape_query.collision_mask = collision_mask
+	_shape_query.exclude = [npc.get_rid()]
+	_shape_query.collide_with_areas = false
+	_shape_query.collide_with_bodies = true
+	return npc.get_world_2d().direct_space_state.intersect_shape(_shape_query, 1).is_empty()
 
 
 func _get_flight_time(jump_velocity: float, landing_offset_y: float, gravity_strength: float) -> float:
@@ -399,10 +443,13 @@ func _get_flight_time(jump_velocity: float, landing_offset_y: float, gravity_str
 
 
 func _ray(from: Vector2, to: Vector2) -> Dictionary:
-	var query := PhysicsRayQueryParameters2D.create(from, to, collision_mask, [npc.get_rid()])
-	query.collide_with_areas = false
-	query.collide_with_bodies = true
-	return npc.get_world_2d().direct_space_state.intersect_ray(query)
+	_ray_query.from = from
+	_ray_query.to = to
+	_ray_query.collision_mask = collision_mask
+	_ray_query.exclude = [npc.get_rid()]
+	_ray_query.collide_with_areas = false
+	_ray_query.collide_with_bodies = true
+	return npc.get_world_2d().direct_space_state.intersect_ray(_ray_query)
 
 
 func _get_shape_half_size(shape: Shape2D) -> Vector2:

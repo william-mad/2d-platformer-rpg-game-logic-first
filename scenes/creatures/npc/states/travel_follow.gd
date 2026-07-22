@@ -59,12 +59,13 @@ enum TransitionPhase {
 @export var committed_jump_timeout_margin: float = 0.8
 @export var landing_horizontal_tolerance: float = 84.0
 @export var landing_vertical_tolerance: float = 56.0
-@export var development_jump_diagnostics: bool = true
+@export var development_jump_diagnostics: bool = false
 @export var diagnostic_repeat_seconds: float = 1.5
 
 @export_group("Visual Debug")
-@export var show_follow_debug_paths: bool = true
+@export var show_follow_debug_paths: bool = false
 @export_range(2, 8, 1) var debug_breadcrumb_count: int = 2
+@export_range(0.05, 0.5, 0.01) var debug_overlay_refresh_seconds: float = 0.1
 
 @export_group("Failed Jump Reposition")
 @export var failure_reposition_step: float = 120.0
@@ -78,10 +79,15 @@ enum TransitionPhase {
 @export var extreme_recovery_distance: float = 1500.0
 @export var stuck_retry_seconds: float = 3.0
 @export var stuck_recovery_seconds: float = 5.0
+@export_range(0.1, 1.0, 0.05) var recorder_reacquire_seconds: float = 0.25
+@export_range(0.1, 1.0, 0.05) var stuck_progress_sample_seconds: float = 0.4
+@export_range(1.0, 64.0, 1.0) var stuck_minimum_progress_distance: float = 8.0
 
 var _recorder: PlayerBreadcrumbRecorder
+var _recorder_reacquire_timer: float = 0.0
 var _last_distance: float = INF
 var _stuck_seconds: float = 0.0
+var _stuck_progress_elapsed: float = 0.0
 var _jump_cooldown: float = 0.0
 var _height_jump_cooldown: float = 0.0
 var _last_jump_breadcrumb_msec: int = -1
@@ -91,7 +97,6 @@ var _transition_plan: Dictionary = {}
 var _transition_recalculation_timer: float = 0.0
 var _committed_jump_elapsed: float = 0.0
 var _committed_jump_was_airborne: bool = false
-var _traversal_sequence_initialized: bool = false
 var _last_completed_traversal_sequence: int = 0
 var _active_traversal: Dictionary = {}
 var _failure_reposition_plan: Dictionary = {}
@@ -103,15 +108,24 @@ var _abandoned_traversal_sequence: int = -1
 var _last_diagnostic_text: String = ""
 var _last_diagnostic_msec: int = -100000
 var _debug_overlay: NpcFollowDebugOverlay
+var _debug_overlay_refresh_timer: float = 0.0
 var _air_ledge_assist_cast: ShapeCast2D
 var _air_ledge_assist_used: bool = false
+var _forward_floor_hazard_was_detected: bool = false
+var _last_forward_probe_direction: float = 0.0
+var _hold_for_forward_hazard: bool = false
 
 
 func enter() -> void:
 	super.enter()
-	_recorder = machine.get_tree().get_first_node_in_group(&"player_breadcrumb_recorder") as PlayerBreadcrumbRecorder
-	_last_distance = INF
-	_stuck_seconds = 0.0
+	# TravelFollow is runtime-owned. The prior state's exit hook has already run,
+	# so it is now safe to clear only that state's action/session reservations.
+	machine.cancel_and_clear_active_action_for_override("travel_follow_override")
+	_recorder_reacquire_timer = 0.0
+	_bind_breadcrumb_recorder(
+		machine.get_tree().get_first_node_in_group(&"player_breadcrumb_recorder") as PlayerBreadcrumbRecorder
+	)
+	_reset_stuck_tracking()
 	_jump_cooldown = 0.0
 	_height_jump_cooldown = 0.0
 	_last_jump_breadcrumb_msec = -1
@@ -135,10 +149,14 @@ func enter() -> void:
 	_committed_jump_was_airborne = false
 	_failure_reposition_plan.clear()
 	_failure_reposition_elapsed = 0.0
-	if not _traversal_sequence_initialized and _recorder != null:
-		_last_completed_traversal_sequence = _recorder.get_latest_completed_traversal_sequence()
-		_traversal_sequence_initialized = true
-	_setup_debug_overlay()
+	_forward_floor_hazard_was_detected = false
+	_last_forward_probe_direction = 0.0
+	_hold_for_forward_hazard = false
+	_debug_overlay_refresh_timer = 0.0
+	if show_follow_debug_paths:
+		_setup_debug_overlay()
+	elif _debug_overlay != null and is_instance_valid(_debug_overlay):
+		_debug_overlay.visible = false
 
 
 func exit() -> void:
@@ -153,6 +171,47 @@ func exit() -> void:
 		_air_ledge_assist_cast.enabled = false
 
 
+func _ensure_breadcrumb_recorder() -> bool:
+	if _recorder != null and is_instance_valid(_recorder):
+		return true
+	if _recorder != null:
+		_bind_breadcrumb_recorder(null)
+	if _recorder_reacquire_timer > 0.0:
+		return false
+	_recorder_reacquire_timer = maxf(recorder_reacquire_seconds, 0.1)
+	var found := machine.get_tree().get_first_node_in_group(
+		&"player_breadcrumb_recorder"
+	) as PlayerBreadcrumbRecorder
+	if found == null:
+		return false
+	_bind_breadcrumb_recorder(found)
+	return true
+
+
+func _bind_breadcrumb_recorder(new_recorder: PlayerBreadcrumbRecorder) -> void:
+	if (
+		new_recorder != null
+		and _recorder != null
+		and is_instance_valid(_recorder)
+		and _recorder == new_recorder
+	):
+		return
+	if new_recorder == null and _recorder == null:
+		return
+	_recorder = new_recorder
+	_active_traversal.clear()
+	_transition_plan.clear()
+	_failure_reposition_plan.clear()
+	_transition_phase = TransitionPhase.FOLLOWING
+	_reset_stuck_tracking()
+	if _recorder != null:
+		_last_completed_traversal_sequence = _recorder.get_latest_completed_traversal_sequence()
+	else:
+		_last_completed_traversal_sequence = 0
+	if _debug_overlay != null and is_instance_valid(_debug_overlay):
+		_debug_overlay.configure(npc, _recorder)
+
+
 func get_player_interaction_block_reason(_actor: Node2D = null) -> String:
 	if _transition_phase != TransitionPhase.FOLLOWING:
 		return "npc_travel_transition"
@@ -164,16 +223,21 @@ func physics_process(delta: float) -> NpcState:
 	_jump_cooldown = maxf(_jump_cooldown - delta, 0.0)
 	_height_jump_cooldown = maxf(_height_jump_cooldown - delta, 0.0)
 	_transition_recalculation_timer = maxf(_transition_recalculation_timer - delta, 0.0)
-	if _recorder == null or not is_instance_valid(_recorder):
+	_recorder_reacquire_timer = maxf(_recorder_reacquire_timer - delta, 0.0)
+	_debug_overlay_refresh_timer = maxf(_debug_overlay_refresh_timer - delta, 0.0)
+	if not _ensure_breadcrumb_recorder():
+		npc.velocity.x = move_toward(npc.velocity.x, 0.0, horizontal_deceleration * delta)
 		return next_state
 	_update_air_ledge_assist_cast()
-	_update_debug_overlay()
 	if _transition_phase == TransitionPhase.EXECUTING_JUMP:
+		_update_debug_overlay()
 		_process_committed_jump(delta)
 		return next_state
 	_refresh_active_traversal()
+	_update_debug_overlay()
 	var breadcrumb := _get_current_route_breadcrumb()
 	if breadcrumb.is_empty():
+		npc.velocity.x = move_toward(npc.velocity.x, 0.0, horizontal_deceleration * delta)
 		return next_state
 	var target_position: Vector2 = breadcrumb.get("position", npc.global_position)
 	if _try_air_ledge_assist(target_position):
@@ -187,6 +251,9 @@ func physics_process(delta: float) -> NpcState:
 		_process_failure_reposition(delta, distance)
 		return next_state
 	_update_transition_plan(breadcrumb, target_position, offset)
+	if _transition_phase == TransitionPhase.REPOSITIONING_AFTER_FAILURE:
+		_process_failure_reposition(delta, distance)
+		return next_state
 	if _transition_phase == TransitionPhase.APPROACHING_TRANSITION:
 		var takeoff_position: Vector2 = _transition_plan.get("takeoff_position", npc.global_position)
 		var plan_age_seconds := (
@@ -201,6 +268,10 @@ func physics_process(delta: float) -> NpcState:
 			_execute_transition_jump()
 			return next_state
 		_move_toward_x(takeoff_position.x, delta, takeoff_position_tolerance)
+		return next_state
+	if _hold_for_forward_hazard:
+		npc.velocity.x = move_toward(npc.velocity.x, 0.0, horizontal_deceleration * delta)
+		_process_extreme_recovery(distance)
 		return next_state
 	var horizontal_distance := absf(offset.x)
 	var braking_distance := _get_braking_distance()
@@ -228,24 +299,41 @@ func _update_transition_plan(
 	target_position: Vector2,
 	offset: Vector2
 ) -> void:
+	_hold_for_forward_hazard = false
+	var direction := signf(offset.x)
+	if is_zero_approx(direction):
+		direction = 1.0
+	if (
+		not is_zero_approx(_last_forward_probe_direction)
+		and direction != _last_forward_probe_direction
+	):
+		_forward_floor_hazard_was_detected = false
+	_last_forward_probe_direction = direction
+	var forward_floor := (
+		_transition_probe.inspect_forward_floor(direction, absf(offset.x))
+		if npc.is_on_floor()
+		else {}
+	)
+	var floor_hazard := bool(forward_floor.get("floor_hazard", false))
+	var hazard_became_urgent := floor_hazard and not _forward_floor_hazard_was_detected
+	_forward_floor_hazard_was_detected = floor_hazard
+	if _jump_is_temporarily_abandoned(target_position):
+		_transition_phase = TransitionPhase.FOLLOWING
+		_transition_plan.clear()
+		_hold_for_forward_hazard = floor_hazard
+		return
 	# While the player is airborne, the newest published breadcrumb is the
 	# grounded takeoff. Wait for the completed landing segment instead of
 	# inventing a weak same-height jump toward that intentionally stale point.
 	if _active_traversal.is_empty() and _recorder.has_pending_traversal():
 		_transition_plan.clear()
 		_transition_phase = TransitionPhase.FOLLOWING
+		_hold_for_forward_hazard = floor_hazard
 		return
-	if _transition_recalculation_timer > 0.0:
+	if _transition_recalculation_timer > 0.0 and not hazard_became_urgent:
 		return
 	_transition_recalculation_timer = transition_recalculation_seconds
-	var direction := signf(offset.x)
-	if is_zero_approx(direction):
-		direction = 1.0
 	var local_probes := _transition_probe.inspect_local(direction)
-	if _jump_is_temporarily_abandoned(target_position):
-		_transition_phase = TransitionPhase.FOLLOWING
-		_transition_plan.clear()
-		return
 	var breadcrumb_msec := int(breadcrumb.get("recorded_msec", -1))
 	var is_active_completed_jump := (
 		not _active_traversal.is_empty()
@@ -267,7 +355,8 @@ func _update_transition_plan(
 		_transition_plan.clear()
 		return
 	var local_transition_detected := (
-		bool(local_probes.get("chasm", false))
+		floor_hazard
+		or bool(local_probes.get("chasm", false))
 		or bool(local_probes.get("approaching_ledge", false))
 		or bool(local_probes.get("short_obstacle", false))
 		or bool(local_probes.get("raised_platform", false))
@@ -286,6 +375,7 @@ func _update_transition_plan(
 	var target_is_nearly_overhead := absf(offset.x) <= _transition_probe.body_half_size.x + landing_width_margin
 	if bool(local_probes.get("ceiling_blocked", false)) and target_is_above and target_is_nearly_overhead:
 		_jump_diagnostic("jump aborted", "solid ceiling blocks target; giving up")
+		_hold_for_forward_hazard = floor_hazard
 		_begin_failure_reposition(target_position)
 		return
 	var height_difference := maxf(-offset.y, 0.0)
@@ -315,6 +405,7 @@ func _update_transition_plan(
 		)
 	if _transition_plan.is_empty():
 		_jump_diagnostic("jump aborted", "no direct arc to %s; giving up" % target_position)
+		_hold_for_forward_hazard = floor_hazard
 		_begin_failure_reposition(target_position)
 		return
 	_transition_plan["route_jump"] = player_started_jump
@@ -343,7 +434,7 @@ func _execute_transition_jump() -> void:
 	npc.velocity = planned_velocity
 	_jump_cooldown = jump_cooldown_seconds
 	_height_jump_cooldown = height_jump_retry_seconds
-	_stuck_seconds = 0.0
+	_reset_stuck_tracking()
 	_committed_jump_elapsed = 0.0
 	_committed_jump_was_airborne = false
 	_transition_phase = TransitionPhase.EXECUTING_JUMP
@@ -393,6 +484,7 @@ func _finish_committed_jump_landing() -> void:
 	_transition_recalculation_timer = transition_recalculation_seconds
 	_mark_active_traversal_complete()
 	_transition_phase = TransitionPhase.FOLLOWING
+	_forward_floor_hazard_was_detected = false
 
 
 func _abort_committed_jump(reason: String) -> void:
@@ -426,11 +518,14 @@ func _refresh_active_traversal() -> void:
 	if not _active_traversal.is_empty() and newest_sequence <= active_sequence:
 		return
 	_active_traversal = newest_traversal
+	if newest_sequence != _abandoned_traversal_sequence:
+		_clear_jump_abandonment()
 	# A newer player landing supersedes an older uncommitted route target.
 	_transition_plan.clear()
 	_failure_reposition_plan.clear()
 	_transition_phase = TransitionPhase.FOLLOWING
 	_transition_recalculation_timer = 0.0
+	_forward_floor_hazard_was_detected = false
 
 
 func _get_current_route_breadcrumb() -> Dictionary:
@@ -468,12 +563,14 @@ func _complete_drop_traversal_if_reached(target_position: Vector2) -> bool:
 	_mark_active_traversal_complete()
 	_transition_phase = TransitionPhase.FOLLOWING
 	_transition_recalculation_timer = 0.0
+	_forward_floor_hazard_was_detected = false
 	return true
 
 
 func _begin_failure_reposition(failed_target: Vector2) -> void:
 	_jump_give_up_until_msec = Time.get_ticks_msec() + int(maxf(jump_give_up_seconds, 0.0) * 1000.0)
 	_jump_give_up_target = failed_target
+	_abandoned_traversal_sequence = -1
 	if not _active_traversal.is_empty():
 		_abandoned_traversal_sequence = int(_active_traversal.get("sequence", -1))
 		_jump_diagnostic("jump abandoned", "completed traversal will not be retried")
@@ -521,15 +618,26 @@ func _process_failure_reposition(delta: float, player_distance: float) -> void:
 
 
 func _jump_is_temporarily_abandoned(target_position: Vector2) -> bool:
+	if _jump_give_up_until_msec < 0 or _jump_give_up_target == Vector2.INF:
+		return false
 	if not _active_traversal.is_empty():
 		var active_sequence := int(_active_traversal.get("sequence", -1))
 		if active_sequence != _abandoned_traversal_sequence:
+			_clear_jump_abandonment()
 			return false
-	if target_position.distance_to(_jump_give_up_target) <= jump_give_up_target_change_distance:
-		return true
+	if target_position.distance_to(_jump_give_up_target) > jump_give_up_target_change_distance:
+		_clear_jump_abandonment()
+		return false
 	if Time.get_ticks_msec() >= _jump_give_up_until_msec:
+		_clear_jump_abandonment()
 		return false
 	return true
+
+
+func _clear_jump_abandonment() -> void:
+	_jump_give_up_until_msec = -1
+	_jump_give_up_target = Vector2.INF
+	_abandoned_traversal_sequence = -1
 
 
 func _move_toward_x(target_x: float, delta: float, tolerance: float) -> void:
@@ -600,7 +708,15 @@ func _try_air_ledge_assist(target_position: Vector2) -> bool:
 
 
 func _setup_debug_overlay() -> void:
-	if npc == null:
+	if not show_follow_debug_paths or npc == null:
+		return
+	# TravelFollow can become the initial state while a freshly recreated NPC is
+	# still entering the tree. Wait until its authored children finish setup
+	# before attaching the runtime-only overlay.
+	if not npc.is_node_ready():
+		call_deferred("_setup_debug_overlay")
+		return
+	if machine == null or machine.current_state != self:
 		return
 	_debug_overlay = npc.get_node_or_null("TravelFollowDebugOverlay") as NpcFollowDebugOverlay
 	if _debug_overlay == null:
@@ -613,11 +729,18 @@ func _setup_debug_overlay() -> void:
 
 
 func _update_debug_overlay() -> void:
+	if not show_follow_debug_paths:
+		if _debug_overlay != null and is_instance_valid(_debug_overlay):
+			_debug_overlay.visible = false
+		return
+	if _debug_overlay == null or not is_instance_valid(_debug_overlay):
+		_setup_debug_overlay()
 	if _debug_overlay == null or not is_instance_valid(_debug_overlay):
 		return
-	_debug_overlay.visible = show_follow_debug_paths
-	if not show_follow_debug_paths:
+	_debug_overlay.visible = true
+	if _debug_overlay_refresh_timer > 0.0:
 		return
+	_debug_overlay_refresh_timer = maxf(debug_overlay_refresh_seconds, 0.05)
 	var debug_target := Vector2.ZERO
 	var target_valid := false
 	if not _active_traversal.is_empty():
@@ -650,7 +773,7 @@ func _process_extreme_recovery(distance: float) -> void:
 		if not safe.is_empty():
 			npc.global_position = safe.get("position", npc.global_position)
 			npc.velocity = Vector2.ZERO
-			_stuck_seconds = 0.0
+			_reset_stuck_tracking()
 			_transition_phase = TransitionPhase.FOLLOWING
 			_transition_plan.clear()
 			if OS.is_debug_build():
@@ -658,11 +781,30 @@ func _process_extreme_recovery(distance: float) -> void:
 
 
 func _update_stuck(distance: float, delta: float) -> void:
-	if distance + 8.0 < _last_distance:
+	if distance <= stop_distance:
+		_reset_stuck_tracking(distance)
+		return
+	if is_inf(_last_distance):
+		_last_distance = distance
+		_stuck_progress_elapsed = 0.0
+		return
+	_stuck_progress_elapsed += delta
+	if _stuck_progress_elapsed < maxf(stuck_progress_sample_seconds, 0.1):
+		return
+	var sample_elapsed := _stuck_progress_elapsed
+	var progress := _last_distance - distance
+	_last_distance = distance
+	_stuck_progress_elapsed = 0.0
+	if progress >= stuck_minimum_progress_distance:
 		_stuck_seconds = 0.0
 	else:
-		_stuck_seconds += delta
+		_stuck_seconds += sample_elapsed
+
+
+func _reset_stuck_tracking(distance: float = INF) -> void:
 	_last_distance = distance
+	_stuck_seconds = 0.0
+	_stuck_progress_elapsed = 0.0
 
 
 func _get_speed_multiplier(horizontal_distance: float) -> float:

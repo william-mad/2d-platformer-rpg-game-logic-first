@@ -21,14 +21,9 @@ class TestPlayer:
 		var gameplay_flow := get_node_or_null("/root/GameplayFlow")
 		if gameplay_flow != null:
 			gameplay_flow.player_control_claim_changed.connect(_on_player_control_claim_changed)
-		call_deferred("_apply_pending_runtime")
+		_apply_pending_runtime()
 
 	func _apply_pending_runtime() -> void:
-		var scene_root := get_parent()
-		if scene_root != null:
-			for sibling in scene_root.get_children():
-				if sibling.has_method("get_spawn_id"):
-					sibling.add_to_group(&"player_spawn")
 		var runtime := get_node_or_null("/root/PlayerRuntime")
 		if runtime != null:
 			runtime.call("apply_to_player", self)
@@ -254,18 +249,19 @@ func _make_destination(
 ) -> PackedScene:
 	var scene_root := Node2D.new()
 	scene_root.name = scene_name
-	var spawn := PlayerSpawn.new()
-	spawn.name = "PlayerSpawn"
-	spawn.spawn_id = spawn_id
-	spawn.position = spawn_position
-	spawn.add_to_group(&"player_spawn", true)
-	scene_root.add_child(spawn)
-	spawn.owner = scene_root
+	# Reproduce production ordering: the player can become ready before the
+	# marker, but PlayerSpawn's _enter_tree registration must already be visible.
 	var player := TestPlayer.new()
 	player.name = "Player"
 	player.position = player_position
 	scene_root.add_child(player)
 	player.owner = scene_root
+	var spawn := PlayerSpawn.new()
+	spawn.name = "PlayerSpawn"
+	spawn.spawn_id = spawn_id
+	spawn.position = spawn_position
+	scene_root.add_child(spawn)
+	spawn.owner = scene_root
 	var packed := PackedScene.new()
 	_expect(packed.pack(scene_root) == OK, "%s packs for transition validation" % scene_name)
 	scene_root.free()
