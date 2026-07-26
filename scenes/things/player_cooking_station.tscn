@@ -1,40 +1,42 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene format=3 uid="uid://e8g7bxu670if"]
 
-[ext_resource type="Script" path="res://scripts/instances/player_cooking_station.gd" id="1_station"]
+[ext_resource type="Script" uid="uid://bid6v05xvf26i" path="res://scripts/instances/player_cooking_station.gd" id="1_station"]
 
 [sub_resource type="RectangleShape2D" id="StationShape"]
 size = Vector2(120, 100)
 
-[node name="PlayerCookingStation" type="Area2D"]
+[node name="PlayerCookingStation" type="Area2D" unique_id=1326992960]
 collision_layer = 0
 collision_mask = 2
 monitorable = false
 script = ExtResource("1_station")
 
-[node name="StoveVisual" type="Polygon2D" parent="."]
+[node name="StoveVisual" type="Polygon2D" parent="." unique_id=1954338629]
+visible = false
 position = Vector2(0, -38)
 color = Color(0.22, 0.2, 0.18, 1)
 polygon = PackedVector2Array(-48, -42, 48, -42, 48, 42, -48, 42)
 
-[node name="HotPlate" type="Polygon2D" parent="."]
+[node name="HotPlate" type="Polygon2D" parent="." unique_id=1156781438]
+visible = false
 position = Vector2(0, -79)
 color = Color(0.86, 0.3, 0.12, 1)
 polygon = PackedVector2Array(-30, -5, 30, -5, 38, 5, -38, 5)
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=543563255]
 position = Vector2(0, -42)
 shape = SubResource("StationShape")
 
-[node name="PromptLabel" type="Label" parent="."]
+[node name="PromptLabel" type="Label" parent="." unique_id=24082684]
 unique_name_in_owner = true
 visible = false
 offset_left = -72.0
 offset_top = -132.0
 offset_right = 72.0
 offset_bottom = -104.0
-text = "UP: Cook"
-horizontal_alignment = 1
 theme_override_colors/font_color = Color(1, 0.86, 0.52, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
 theme_override_constants/shadow_offset_x = 1
 theme_override_constants/shadow_offset_y = 1
+text = "UP: Cook"
+horizontal_alignment = 1

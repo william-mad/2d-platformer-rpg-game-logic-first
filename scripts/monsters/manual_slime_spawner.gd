@@ -8,6 +8,7 @@ extends Area2D
 @export var spawn_offset: Vector2 = Vector2(0.0, 0.0)
 @export_range(0.0, 3.0, 0.05, "suffix:s") var spawn_cooldown_seconds: float = 0.35
 @export var spawn_parent_path: NodePath
+@export var interaction_priority: int = 20
 
 @onready var label: Label = get_node_or_null("%Label") as Label
 @onready var zone_visual: Polygon2D = get_node_or_null("%ZoneVisual") as Polygon2D
@@ -17,6 +18,8 @@ extends Area2D
 var player_inside: bool = false
 var cooldown_timer: float = 0.0
 var feedback_timer: float = 0.0
+var active_player: Node2D
+var interaction_focused: bool = false
 
 
 func _ready() -> void:
@@ -35,11 +38,29 @@ func _process(delta: float) -> void:
 		if feedback_timer <= 0.0:
 			_update_label(ready_text)
 
-	if player_inside and cooldown_timer <= 0.0 and Input.is_action_just_pressed(spawn_action):
-		_spawn_slime()
-
-	if not player_inside and cooldown_timer <= 0.0 and feedback_timer <= 0.0:
+	if cooldown_timer <= 0.0 and feedback_timer <= 0.0:
 		set_process(false)
+
+
+func can_interact(actor: Node) -> bool:
+	return actor == active_player and player_inside and cooldown_timer <= 0.0 and slime_scene != null
+
+
+func interact(actor: Node) -> bool:
+	return can_interact(actor) and _spawn_slime() != null
+
+
+func get_interaction_priority(_actor: Node) -> int:
+	return interaction_priority
+
+
+func get_interaction_prompt(_actor: Node) -> String:
+	return ready_text
+
+
+func set_interaction_focused(_actor: Node, focused: bool) -> void:
+	interaction_focused = focused
+	_update_label_visibility()
 
 
 func _spawn_slime() -> Slime:
@@ -60,6 +81,7 @@ func _spawn_slime() -> Slime:
 
 func _show_feedback(message: String) -> void:
 	feedback_timer = 0.6
+	set_process(true)
 	_update_label(message)
 	if zone_visual != null:
 		zone_visual.color = Color(0.38, 0.9, 0.42, 0.45)
@@ -71,27 +93,45 @@ func _update_label(message: String) -> void:
 
 	if zone_visual != null and message == ready_text:
 		zone_visual.color = Color(0.35, 0.72, 0.36, 0.36)
+	_update_label_visibility()
+
+
+func _update_label_visibility() -> void:
+	if label != null:
+		label.visible = interaction_focused or feedback_timer > 0.0
 
 
 func _on_body_entered(body: Node2D) -> void:
 	if body.is_in_group("player"):
 		player_inside = true
-		set_process(true)
+		active_player = body
+		if body.has_method("register_interaction_candidate"):
+			body.call("register_interaction_candidate", self)
 
 
 func _on_body_exited(body: Node2D) -> void:
 	if body.is_in_group("player"):
+		if body.has_method("unregister_interaction_candidate"):
+			body.call("unregister_interaction_candidate", self)
 		player_inside = false
+		if body == active_player:
+			active_player = null
 
 
 func _refresh_player_inside() -> void:
+	if active_player != null and is_instance_valid(active_player) and active_player.has_method("unregister_interaction_candidate"):
+		active_player.call("unregister_interaction_candidate", self)
 	player_inside = false
+	active_player = null
 	for body in get_overlapping_bodies():
 		if body.is_in_group("player"):
 			player_inside = true
+			active_player = body
+			if body.has_method("register_interaction_candidate"):
+				body.call("register_interaction_candidate", self)
 			break
 
-	set_process(player_inside or cooldown_timer > 0.0 or feedback_timer > 0.0)
+	set_process(cooldown_timer > 0.0 or feedback_timer > 0.0)
 
 
 func _get_spawn_position() -> Vector2:

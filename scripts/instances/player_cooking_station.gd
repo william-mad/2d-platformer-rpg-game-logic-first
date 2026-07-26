@@ -5,6 +5,7 @@ extends Area2D
 @export var interaction_action: StringName = &"up"
 @export var close_action: StringName = &"inventory"
 @export var player_group: StringName = &"player"
+@export var interaction_priority: int = 90
 
 @onready var prompt_label: Label = %PromptLabel
 
@@ -19,6 +20,7 @@ var _process_button: Button
 var _feedback: Label
 var _processing_service := InventoryProcessingService.new()
 var _catalog := ItemCatalog.new()
+var _interaction_focused: bool = false
 
 
 func _ready() -> void:
@@ -35,19 +37,31 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.is_action_pressed(&"ui_cancel") or (close_action != &"" and event.is_action_pressed(close_action)):
 			get_viewport().set_input_as_handled()
 			close_panel()
-		return
-	if interaction_action == &"" or not event.is_action_pressed(interaction_action):
-		return
-	var key_event := event as InputEventKey
-	if key_event != null and key_event.echo:
-		return
-	if get_tree().paused:
-		return
-	var player := _get_closest_player()
-	if player == null:
-		return
-	get_viewport().set_input_as_handled()
-	open_panel(player)
+
+
+func can_interact(actor: Node) -> bool:
+	var player := actor as Node2D
+	return (
+		player != null
+		and _nearby_players.has(player)
+		and _panel_layer == null
+		and recipe != null
+		and player.has_method("get_inventory")
+	)
+
+
+func interact(actor: Node) -> bool:
+	if not can_interact(actor):
+		return false
+	return open_panel(actor as Node2D)
+
+
+func get_interaction_priority(_actor: Node) -> int:
+	return interaction_priority
+
+
+func get_interaction_prompt(_actor: Node) -> String:
+	return "Cook"
 
 
 func open_panel(player: Node2D) -> bool:
@@ -220,34 +234,30 @@ func _on_inventory_reset() -> void:
 
 
 func _on_body_entered(body: Node2D) -> void:
-	if body.is_in_group(String(player_group)) and not _nearby_players.has(body):
-		_nearby_players.append(body)
+	if body.is_in_group(String(player_group)):
+		if not _nearby_players.has(body):
+			_nearby_players.append(body)
+		if body.has_method("register_interaction_candidate"):
+			body.call("register_interaction_candidate", self)
 	_update_prompt()
 
 
 func _on_body_exited(body: Node2D) -> void:
 	_nearby_players.erase(body)
+	if body.has_method("unregister_interaction_candidate"):
+		body.call("unregister_interaction_candidate", self)
 	_update_prompt()
-
-
-func _get_closest_player() -> Node2D:
-	var closest: Node2D
-	var closest_distance := INF
-	for player: Node2D in _nearby_players.duplicate():
-		if player == null or not is_instance_valid(player):
-			_nearby_players.erase(player)
-			continue
-		var distance := global_position.distance_squared_to(player.global_position)
-		if distance < closest_distance:
-			closest = player
-			closest_distance = distance
-	return closest
 
 
 func _update_prompt() -> void:
 	if prompt_label != null:
-		prompt_label.visible = not _nearby_players.is_empty() and _panel_layer == null
+		prompt_label.visible = _interaction_focused and _panel_layer == null
 		prompt_label.text = "UP: Cook"
+
+
+func set_interaction_focused(_actor: Node, focused: bool) -> void:
+	_interaction_focused = focused
+	_update_prompt()
 
 
 func _set_paused(paused: bool) -> void:

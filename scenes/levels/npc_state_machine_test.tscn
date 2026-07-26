@@ -133,7 +133,6 @@ social_stats = {
 "disabled": 0.0,
 "energy": 100.0,
 "favor": 50.0,
-"fear": 0.0,
 "hp": 100.0,
 "hunger": 25.0,
 "lonely": 0.0,
@@ -168,7 +167,6 @@ extra_target_npc_paths = [NodePath("../BlueprintNpc")]
 set_values = {
 "disabled": 0.0,
 "favor": 50.0,
-"fear": 0.0,
 "hp": 100.0,
 "hunger": 25.0,
 "sleep_need": 0.0,
@@ -177,6 +175,7 @@ set_values = {
 }
 state_request = &"Idle"
 request_priority = 1000
+set_player_relationship_fear = 0.0
 pad_label = "Reset"
 pad_color = Color(0.78, 0.78, 0.78, 0.42)
 
@@ -194,9 +193,7 @@ pad_color = Color(0.9, 0.78, 0.25, 0.42)
 position = Vector2(-620, 368)
 target_npc_path = NodePath("../TestNpc")
 extra_target_npc_paths = [NodePath("../BlueprintNpc")]
-stat_delta = {
-"fear": 80.0
-}
+set_player_relationship_fear = 80.0
 pad_label = "Flee"
 pad_color = Color(0.95, 0.12, 0.1, 0.42)
 

@@ -44,9 +44,7 @@ enum State {
 @onready var hp_bar: CreatureHpBar = get_node_or_null("HPBar") as CreatureHpBar
 @onready var knockout_bar: ProgressBar = get_node_or_null("KnockoutBar") as ProgressBar
 
-#rope stuff
-@export var friction: float = 900.0
-@export var rope_anchor_strength: float = 1.0
+@export_group("Rope")
 @export var rope_weight: float = 0.1
 @onready var rope_attach_point: Marker2D = %RopeAttachPoint
 
@@ -85,7 +83,7 @@ func _physics_process(delta: float) -> void:
 
 	if state == State.DOWNED:
 		velocity.x = 0.0
-		move_and_slide()
+		_move_and_slide_with_rope(delta)
 		return
 
 	match state:
@@ -102,6 +100,11 @@ func _physics_process(delta: float) -> void:
 		State.DOWNED:
 			velocity.x = 0.0
 
+	_move_and_slide_with_rope(delta)
+
+
+func _move_and_slide_with_rope(delta: float) -> void:
+	velocity = Rope.constrain_attached_velocity(self, velocity, delta)
 	move_and_slide()
 
 

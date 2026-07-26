@@ -11,10 +11,10 @@
 [ext_resource type="PackedScene" uid="uid://bl78xaa1o32uu" path="res://scenes/things/npc_shower_spot.tscn" id="11_shower_spot"]
 [ext_resource type="Script" uid="uid://dc4b4o2l8t4ql" path="res://scripts/instances/magic_lesson_spot.gd" id="12_magic_lesson"]
 [ext_resource type="Resource" path="res://data/npc_spots/mom_magic_lesson.tres" id="13_mom_magic_lesson"]
-[ext_resource type="PackedScene" path="res://scenes/things/player_cooking_station.tscn" id="14_cooking_station"]
+[ext_resource type="PackedScene" uid="uid://e8g7bxu670if" path="res://scenes/things/player_cooking_station.tscn" id="14_cooking_station"]
 [ext_resource type="Texture2D" uid="uid://cln1vred4ex8i" path="res://images/backgrounds/layout house1.png" id="15_house_layout"]
 [ext_resource type="Script" uid="uid://dtgbx4hm4n2e2" path="res://scripts/testscenes/realhome_character_silhouettes.gd" id="16_character_silhouettes"]
-[ext_resource type="PackedScene" path="res://scenes/things/interior_door.tscn" id="16_interior_door"]
+[ext_resource type="PackedScene" uid="uid://dcecq2euo3we1" path="res://scenes/things/interior_door.tscn" id="16_interior_door"]
 [ext_resource type="Resource" path="res://data/npc_routes/edges/realhometest_to_realtest1.tres" id="17_home_yard_route"]
 [ext_resource type="Resource" path="res://data/npc_routes/edges/realhometest_to_mom_bedroom.tres" id="18_home_bedroom_route"]
 
@@ -1081,27 +1081,26 @@ limit_right = 1024
 limit_bottom = 567
 
 [node name="OutsideDoor" parent="." unique_id=1318597514 instance=ExtResource("3_door")]
-visible = false
-position = Vector2(530, 368)
+position = Vector2(533, 366)
 target_scene_path = "res://scenes/testscenes/realtest1.tscn"
 target_spawn_id = &"from_realhometest"
 route_edge = ExtResource("17_home_yard_route")
 owner_ids = Array[StringName]([&"mom", &"player"])
 
-[node name="MomBedroomDoor" parent="." instance=ExtResource("3_door")]
-position = Vector2(-760, 368)
+[node name="MomBedroomDoor" parent="." unique_id=1876449603 instance=ExtResource("3_door")]
+position = Vector2(-271, 367)
 target_scene_path = "res://scenes/testscenes/mom_bedroom.tscn"
 target_spawn_id = &"from_realhometest"
 route_edge = ExtResource("18_home_bedroom_route")
 owner_ids = Array[StringName]([&"mom", &"player"])
 
 [node name="PlayerSpawnFromYard" type="Marker2D" parent="." unique_id=334133969]
-position = Vector2(610, 376)
+position = Vector2(534, 363)
 script = ExtResource("9_player_spawn")
 spawn_id = &"from_realtest1"
 
-[node name="PlayerSpawnFromMomBedroom" type="Marker2D" parent="."]
-position = Vector2(-600, 376)
+[node name="PlayerSpawnFromMomBedroom" type="Marker2D" parent="." unique_id=287808404]
+position = Vector2(-269, 371)
 script = ExtResource("9_player_spawn")
 spawn_id = &"from_mom_bedroom"
 
@@ -1126,8 +1125,7 @@ npc_preference_weights = {
 }
 
 [node name="KitchenStove" parent="." unique_id=766221443 instance=ExtResource("14_cooking_station")]
-visible = false
-position = Vector2(420, 368)
+position = Vector2(394, 363)
 
 [node name="MomMagicLessonSpot" type="Node2D" parent="." unique_id=668963211]
 visible = false

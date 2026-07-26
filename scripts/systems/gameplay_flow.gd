@@ -64,6 +64,38 @@ func is_world_progression_locked() -> bool:
 	return not _world_progression_locks.is_empty()
 
 
+func can_player_accept_world_interaction(player: Node) -> bool:
+	return get_player_world_interaction_block_reason(player).is_empty()
+
+
+func get_player_world_interaction_block_reason(player: Node) -> StringName:
+	if player == null or not is_instance_valid(player) or not player.is_inside_tree():
+		return &"invalid_player"
+	if get_tree().paused:
+		return &"full_pause"
+	var scene_loader := get_node_or_null("/root/SceneLoader")
+	if (
+		scene_loader != null
+		and (
+			bool(scene_loader.call("is_scene_transition_in_progress"))
+			if scene_loader.has_method("is_scene_transition_in_progress")
+			else bool(scene_loader.get("loading_in_progress"))
+		)
+	):
+		return &"scene_transition_in_progress"
+	if is_player_control_claimed(player):
+		return &"player_control_claimed"
+	if is_world_progression_locked():
+		return &"world_progression_locked"
+	if player.has_method("get_world_interaction_block_reason"):
+		return StringName(player.call("get_world_interaction_block_reason"))
+	if player.has_method("can_accept_player_control_claim"):
+		var eligibility = player.call("can_accept_player_control_claim", &"ui_only")
+		if eligibility is Dictionary and not bool(eligibility.get("accepted", false)):
+			return StringName(eligibility.get("reason", &"player_unavailable"))
+	return &""
+
+
 func get_world_progression_locks() -> Array:
 	var locks: Array = []
 	var token_ids := _world_progression_locks.keys()

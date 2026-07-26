@@ -24,6 +24,7 @@
 [ext_resource type="Script" uid="uid://2au6xrnc1ab6" path="res://player/scripts/player_breadcrumb_recorder.gd" id="23_breadcrumbs"]
 [ext_resource type="Script" path="res://player/scripts/player_equipment_component.gd" id="24_equipment"]
 [ext_resource type="Script" path="res://player/states/roll.gd" id="25_roll"]
+[ext_resource type="Script" path="res://player/scripts/interaction_router.gd" id="26_interaction_router"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_wodsf"]
 radius = 35.0
@@ -231,6 +232,9 @@ script = ExtResource("23_breadcrumbs")
 
 [node name="InventoryPickupReceiver" type="Node" parent="." unique_id=1227846094]
 script = ExtResource("22_pickup_receiver")
+
+[node name="InteractionRouter" type="Node" parent="."]
+script = ExtResource("26_interaction_router")
 
 [node name="rope" parent="." unique_id=163704369 instance=ExtResource("2_kb6p2")]
 

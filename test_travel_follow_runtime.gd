@@ -21,43 +21,43 @@ func _initialize() -> void:
 
 
 func _test_jump_abandonment_expires() -> void:
-	var follow = _new_follow_state()
-	follow.jump_give_up_target_change_distance = 50.0
-	follow.set("_jump_give_up_target", Vector2(100.0, 0.0))
-	follow.set("_jump_give_up_until_msec", Time.get_ticks_msec() + 1000)
+	var traversal = _new_traversal()
+	traversal.jump_give_up_target_change_distance = 50.0
+	traversal.set("_jump_give_up_target", Vector2(100.0, 0.0))
+	traversal.set("_jump_give_up_until_msec", Time.get_ticks_msec() + 1000)
 	_expect(
-		bool(follow.call("_jump_is_temporarily_abandoned", Vector2(120.0, 0.0))),
+		bool(traversal.call("_jump_is_temporarily_abandoned", Vector2(120.0, 0.0))),
 		"a failed target is suppressed during its retry window"
 	)
-	follow.set("_jump_give_up_until_msec", Time.get_ticks_msec() - 1)
+	traversal.set("_jump_give_up_until_msec", Time.get_ticks_msec() - 1)
 	_expect(
-		not bool(follow.call("_jump_is_temporarily_abandoned", Vector2(120.0, 0.0))),
+		not bool(traversal.call("_jump_is_temporarily_abandoned", Vector2(120.0, 0.0))),
 		"the same failed target becomes retryable after the retry window"
 	)
 	_expect(
-		follow.get("_jump_give_up_target") == Vector2.INF,
+		traversal.get("_jump_give_up_target") == Vector2.INF,
 		"expired jump suppression clears its cached target"
 	)
 
-	follow.set("_jump_give_up_target", Vector2(100.0, 0.0))
-	follow.set("_jump_give_up_until_msec", Time.get_ticks_msec() + 1000)
-	follow.set("_abandoned_traversal_sequence", 4)
-	follow.set("_active_traversal", {"sequence": 5})
+	traversal.set("_jump_give_up_target", Vector2(100.0, 0.0))
+	traversal.set("_jump_give_up_until_msec", Time.get_ticks_msec() + 1000)
+	traversal.set("_abandoned_traversal_sequence", 4)
+	traversal.set("_active_traversal", {"sequence": 5})
 	_expect(
-		not bool(follow.call("_jump_is_temporarily_abandoned", Vector2(100.0, 0.0))),
+		not bool(traversal.call("_jump_is_temporarily_abandoned", Vector2(100.0, 0.0))),
 		"a newer player traversal immediately releases old jump suppression"
 	)
-	follow.free()
+	traversal.free()
 
 
 func _test_stuck_sampling_is_frame_rate_independent() -> void:
-	var fine_step = _new_follow_state()
-	var coarse_step = _new_follow_state()
-	for follow in [fine_step, coarse_step]:
-		follow.stop_distance = 0.0
-		follow.stuck_progress_sample_seconds = 0.4
-		follow.stuck_minimum_progress_distance = 8.0
-		follow.call("_reset_stuck_tracking", 100.0)
+	var fine_step = _new_traversal()
+	var coarse_step = _new_traversal()
+	for traversal in [fine_step, coarse_step]:
+		traversal.stop_distance = 0.0
+		traversal.stuck_progress_sample_seconds = 0.4
+		traversal.stuck_minimum_progress_distance = 8.0
+		traversal.call("_reset_stuck_tracking", 100.0)
 	for _index in range(4):
 		fine_step.call("_update_stuck", 99.0, 0.1)
 	for _index in range(2):
@@ -133,21 +133,26 @@ func _test_recorder_reacquisition() -> void:
 	var machine := NpcStateMachine.new()
 	machine.name = "RecorderTestMachine"
 	machine.active = false
-	var follow = _new_follow_state()
-	follow.name = "TravelFollow"
-	machine.add_child(follow)
-	root.add_child(machine)
+	var npc := CharacterBody2D.new()
+	var traversal = _new_traversal()
+	traversal.name = "NpcPlatformTraversal"
+	npc.add_child(machine)
+	npc.add_child(traversal)
+	root.add_child(npc)
 	await process_frame
-	_expect(not bool(follow.call("_ensure_breadcrumb_recorder")), "missing recorder is handled without leaving the state")
+	traversal.bind_character(npc, machine)
+	var traversal_session: int = traversal.acquire(machine, &"recorder_provider_test")
+	_expect(traversal_session > 0, "recorder test acquires traversal ownership")
+	_expect(not bool(traversal.call("_ensure_breadcrumb_recorder")), "missing optional recorder is handled")
 
 	var first_player := CharacterBody2D.new()
 	var first_recorder = (load("res://player/scripts/player_breadcrumb_recorder.gd") as Script).new()
 	first_player.add_child(first_recorder)
 	root.add_child(first_player)
 	await process_frame
-	follow.set("_recorder_reacquire_timer", 0.0)
-	_expect(bool(follow.call("_ensure_breadcrumb_recorder")), "a recorder appearing late is acquired")
-	_expect(follow.get("_recorder") == first_recorder, "the acquired recorder is cached")
+	traversal.set_breadcrumb_provider(machine, traversal_session, first_recorder)
+	_expect(bool(traversal.call("_ensure_breadcrumb_recorder")), "an explicitly supplied recorder is acquired")
+	_expect(traversal.get("_recorder") == first_recorder, "the supplied recorder is cached")
 
 	first_player.queue_free()
 	await process_frame
@@ -156,12 +161,15 @@ func _test_recorder_reacquisition() -> void:
 	second_player.add_child(second_recorder)
 	root.add_child(second_player)
 	await process_frame
-	follow.set("_recorder_reacquire_timer", 0.0)
-	_expect(bool(follow.call("_ensure_breadcrumb_recorder")), "a scene-recreated recorder is reacquired")
-	_expect(follow.get("_recorder") == second_recorder, "the stale recorder reference is replaced")
+	_expect(
+		not bool(traversal.call("_ensure_breadcrumb_recorder")),
+		"a stale provider is cleared without hard-coded player reacquisition"
+	)
+	traversal.set_breadcrumb_provider(machine, traversal_session, second_recorder)
+	_expect(traversal.get("_recorder") == second_recorder, "a replacement provider can be supplied")
 
 	second_player.queue_free()
-	machine.queue_free()
+	npc.queue_free()
 	await process_frame
 
 
@@ -202,10 +210,19 @@ func _test_late_companion_registration_restore() -> void:
 	var machine := NpcStateMachine.new()
 	machine.name = "NpcStateMachine"
 	machine.active = false
-	var follow = _new_follow_state()
+	var idle := NpcStateIdle.new()
+	idle.name = "Idle"
+	var follow := NpcStateTravelFollow.new()
 	follow.name = "TravelFollow"
+	machine.add_child(idle)
 	machine.add_child(follow)
 	companion.add_child(machine)
+	var travel_component := TravelCompanionComponent.new()
+	travel_component.name = "TravelCompanion"
+	companion.add_child(travel_component)
+	var traversal := NpcPlatformTraversal.new()
+	traversal.name = "NpcPlatformTraversal"
+	companion.add_child(traversal)
 	scene.add_child(companion)
 	await process_frame
 	machine.state_history.push_front(follow)
@@ -219,6 +236,10 @@ func _test_late_companion_registration_restore() -> void:
 	_expect(
 		companion.global_position.is_equal_approx(Vector2(28.0, 92.0)),
 		"late-registered companion is positioned relative to the destination player"
+	)
+	_expect(
+		machine.current_state != null and String(machine.current_state.name) == "Idle",
+		"a restored nearby companion selects Idle instead of permanent Follow"
 	)
 
 	locations.set("live_npcs", original_live_npcs)
@@ -234,5 +255,5 @@ func _expect(condition: bool, message: String) -> void:
 		_failures.append(message)
 
 
-func _new_follow_state():
-	return (load("res://scenes/creatures/npc/states/travel_follow.gd") as Script).new()
+func _new_traversal():
+	return (load("res://scripts/creatures/npc_platform_traversal.gd") as Script).new()

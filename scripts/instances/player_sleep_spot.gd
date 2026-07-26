@@ -2,6 +2,8 @@ class_name PlayerSleepSpot extends Area2D
 
 @export var player_group: StringName = &"player"
 @export var interaction_action: StringName = &"up"
+@export var interaction_priority: int = 100
+@export var interaction_prompt: String = "Sleep"
 @export_range(0.05, 30.0, 0.05, "suffix:s") var sleep_duration_seconds: float = 4.0
 @export_range(0.0, 100.0, 0.1) var sleep_need_drop: float = 100.0
 @export var owner_debug_text: String = "owners:player"
@@ -43,20 +45,28 @@ func _process(delta: float) -> void:
 			_stop_player_horizontal(active_player)
 			return
 		_update_sleep_action(delta)
-		return
 
-	if interaction_action == &"" or not InputMap.has_action(interaction_action):
-		return
-	if not Input.is_action_just_pressed(interaction_action):
-		return
 
-	var player := _get_closest_player()
-	if player == null:
-		return
-	if player.has_method("can_sleep") and not bool(player.call("can_sleep")):
-		return
+func can_interact(actor: Node) -> bool:
+	var player := actor as Node2D
+	if player == null or not nearby_players.has(player) or active_player != null:
+		return false
+	return not player.has_method("can_sleep") or bool(player.call("can_sleep"))
 
-	_start_sleep(player)
+
+func interact(actor: Node) -> bool:
+	if not can_interact(actor):
+		return false
+	_start_sleep(actor as Node2D)
+	return true
+
+
+func get_interaction_priority(_actor: Node) -> int:
+	return interaction_priority
+
+
+func get_interaction_prompt(_actor: Node) -> String:
+	return interaction_prompt
 
 
 func _start_sleep(player: Node2D) -> void:
@@ -118,28 +128,16 @@ func _on_body_entered(body: Node2D) -> void:
 		return
 	if not nearby_players.has(body):
 		nearby_players.append(body)
+	if body.has_method("register_interaction_candidate"):
+		body.call("register_interaction_candidate", self)
 
 
 func _on_body_exited(body: Node2D) -> void:
 	nearby_players.erase(body)
+	if body.has_method("unregister_interaction_candidate"):
+		body.call("unregister_interaction_candidate", self)
 	if body == active_player and not sleep_transition_running:
 		_cancel_sleep()
-
-
-func _get_closest_player() -> Node2D:
-	var closest_player: Node2D
-	var closest_distance := INF
-	for player in nearby_players.duplicate():
-		if player == null or not is_instance_valid(player):
-			nearby_players.erase(player)
-			continue
-		var distance := global_position.distance_squared_to(player.global_position)
-		if distance >= closest_distance:
-			continue
-		closest_distance = distance
-		closest_player = player
-
-	return closest_player
 
 
 func _stop_player_horizontal(player: Node2D) -> void:

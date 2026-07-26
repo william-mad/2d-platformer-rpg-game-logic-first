@@ -2,8 +2,6 @@ class_name Zenith extends CharacterBody2D
 
 
 @export var gravity: float = 1200.0
-@export var friction: float = 900.0
-@export var rope_anchor_strength: float = 1.0
 @export var rope_weight: float = 0.1
 @export var move_speed: float = 400
 @export var max_hp: float = 3.0
@@ -49,16 +47,21 @@ func _physics_process(delta: float) -> void:
 
 	if is_downed:
 		velocity.x = 0.0
-		move_and_slide()
+		_move_and_slide_with_rope(delta)
 		return
 
 	if knockback_timer > 0.0:
 		knockback_timer -= delta
-		move_and_slide()
+		_move_and_slide_with_rope(delta)
 		return
 
 	velocity.x = dir * move_speed
 
+	_move_and_slide_with_rope(delta)
+
+
+func _move_and_slide_with_rope(delta: float) -> void:
+	velocity = Rope.constrain_attached_velocity(self, velocity, delta)
 	move_and_slide()
 	
 	

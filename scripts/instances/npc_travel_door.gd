@@ -9,6 +9,8 @@ class_name NpcTravelDoor extends Area2D
 @export var npc_arrival_offset: Vector2 = Vector2(80.0, 0.0)
 @export var allow_unscheduled_npc_travel: bool = false
 @export var route_edge: NpcSceneRouteEdge
+@export var interaction_priority: int = 35
+@export var interaction_prompt: String = "Travel"
 
 @export_group("Owners")
 @export var owner_ids: Array[StringName] = []
@@ -41,23 +43,21 @@ func _process(delta: float) -> void:
 		else:
 			cooldowns[traveller_id] = next_time
 
-	if player_inside and Input.is_action_just_pressed(interaction_action):
-		call_deferred("load_target_scene")
 
 
-func load_target_scene() -> void:
+func load_target_scene() -> bool:
 	if player_transition_accepted:
-		return
+		return false
 	if target_scene_path.is_empty():
 		push_warning("NpcTravelDoor has no target scene.")
-		return
+		return false
 
 	var player := _get_active_player()
 	var scene_loader := get_node_or_null("/root/SceneLoader")
 	if scene_loader != null:
 		if not scene_loader.has_method("request_player_scene_transition"):
 			_log_player_transition_result(false, &"transaction_api_unavailable")
-			return
+			return false
 		var result: Dictionary = scene_loader.call(
 			"request_player_scene_transition",
 			player,
@@ -77,9 +77,37 @@ func load_target_scene() -> void:
 			player_transition_accepted,
 			StringName(result.get("reason", &"transition_rejected"))
 		)
-		return
+		return player_transition_accepted
 
 	_load_player_scene_direct_fallback(player)
+	return player_transition_accepted
+
+
+func can_interact(actor: Node) -> bool:
+	return (
+		actor != null
+		and is_instance_valid(actor)
+		and actor == _get_active_player()
+		and actor.is_in_group(String(player_group))
+		and player_inside
+		and not player_transition_accepted
+		and not target_scene_path.is_empty()
+		and _owner_id_is_allowed(player_owner_id)
+	)
+
+
+func interact(actor: Node) -> bool:
+	if not can_interact(actor):
+		return false
+	return load_target_scene()
+
+
+func get_interaction_priority(_actor: Node) -> int:
+	return interaction_priority
+
+
+func get_interaction_prompt(_actor: Node) -> String:
+	return interaction_prompt
 
 
 func _on_player_scene_load_finished(success: bool, scene_path: String) -> void:
@@ -97,6 +125,8 @@ func _on_body_entered(body: Node2D) -> void:
 			return
 		player_inside = true
 		active_player = body
+		if body.has_method("register_interaction_candidate"):
+			body.call("register_interaction_candidate", self)
 		_preload_target_scene()
 		return
 
@@ -180,6 +210,8 @@ func get_route_edge_id() -> StringName:
 
 func _on_body_exited(body: Node2D) -> void:
 	if body.is_in_group(String(player_group)):
+		if body.has_method("unregister_interaction_candidate"):
+			body.call("unregister_interaction_candidate", self)
 		player_inside = false
 		if body == active_player:
 			active_player = null

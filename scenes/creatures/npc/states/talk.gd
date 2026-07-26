@@ -86,7 +86,7 @@ const ROUTINE_INTERRUPT_STATES: Array[StringName] = [
 @export_range(0.0, 1.0, 0.01) var spread_player_topic_chance: float = 0.5
 @export_range(0.0, 100.0, 0.1) var spread_emotion_threshold: float = 70.0
 @export var spread_emotion_delta: float = 8.0
-@export var spread_emotion_value_names: Array[StringName] = [&"fear", &"anger"]
+@export var spread_emotion_value_names: Array[StringName] = [&"anger"]
 @export_range(0.0, 1.0, 0.01) var spread_high_emotion_priority_chance: float = 0.7
 @export_range(0.0, 100.0, 0.1) var spread_favor_low_threshold: float = 20.0
 @export_range(0.0, 100.0, 0.1) var spread_favor_high_threshold: float = 70.0
@@ -135,7 +135,9 @@ func init() -> void:
 
 func enter() -> void:
 	# Starts a timed talk with the assigned partner or the machine's active target.
-	super.enter()
+	# The state machine selects overlay-versus-primary presentation after Talk has
+	# established whether a compatible activity remains active underneath it.
+	begin_enter_without_animation()
 	talk_partner = machine.get_talk_target()
 	# The state machine owns the primary/overlay relationship. Talk never reads state
 	# history and never exits or re-enters the activity underneath it.
@@ -265,6 +267,8 @@ func complete_talk_with(candidate: Node2D, reason: String = "completed") -> void
 
 
 func refresh_overlay_presentation() -> void:
+	if static_task_talk:
+		return
 	if (following_partner or approaching_partner) and not static_task_talk and follow_animation_name != &"":
 		play_animation(follow_animation_name)
 	elif animation_name != &"":
@@ -508,7 +512,8 @@ func _apply_talk_spillover(changed_values: Dictionary) -> void:
 
 
 func _build_player_topic_spillover_candidates() -> Array[Dictionary]:
-	# Player-related emotional talk spreads strong traits such as fear or anger.
+	# Only undirected emotion values belong here. Fear is relationship-specific
+	# and must not be copied without its actual relationship target.
 	var candidates: Array[Dictionary] = []
 	if machine == null:
 		return candidates
@@ -963,8 +968,7 @@ func _update_talk_approach(delta: float) -> bool:
 		stop_horizontal()
 		approaching_partner = false
 		maximum_distance_cancel_timer = maximum_talk_distance_cancel_seconds
-		if animation_name != &"":
-			play_animation(animation_name)
+		refresh_overlay_presentation()
 		return true
 
 	if static_task_talk:

@@ -1,6 +1,13 @@
 class_name PlayerStateJump extends PlayerState
 
-@export var jump_velocity : float = 900
+@export_group("Jump Profiles")
+@export var walk_jump_velocity: float = 700.0
+@export var run_jump_velocity: float = 850.0
+@export var ledge_jump_velocity: float = 600.0
+
+var active_jump_velocity: float = 700.0
+var air_movement_speed: float = 260.0
+var using_running_profile: bool = false
 
 func init() -> void:
 	
@@ -9,13 +16,15 @@ func init() -> void:
 
 
 func enter() -> void:
+	_capture_jump_profile()
 	player.ledgedetec.enabled = true
 	player.animation_player.play("jump")
 	player.animation_player.pause()
 	if player.previous_state == ledge_grab:
-		player.velocity.y = -jump_velocity/1.5
+		active_jump_velocity = ledge_jump_velocity
+		player.velocity.y = -ledge_jump_velocity
 	else:
-		player.velocity.y = -jump_velocity
+		player.velocity.y = -active_jump_velocity
 	pass
 
 
@@ -54,7 +63,7 @@ func process(_delta: float) -> PlayerState:
 	return next_state
 
 func physics_update_before_move(_delta: float) -> void:
-	player.velocity.x = player.direction.x * player.move_speed
+	player.velocity.x = player.direction.x * air_movement_speed
 
 
 func physics_update_after_move(_delta: float) -> PlayerState:
@@ -75,6 +84,29 @@ func physics_update_after_move(_delta: float) -> PlayerState:
 
 func set_jump_frame() -> void:
 	#this is mapped to the timelino in the frames of the jump/fall anim
-	var frame : float = remap(player.velocity.y, -jump_velocity, 0.0, 0.0, 0.5)
+	var frame : float = remap(player.velocity.y, -active_jump_velocity, 0.0, 0.0, 0.5)
 	player.animation_player.seek(frame, true)
 	pass
+
+
+func get_air_movement_speed() -> float:
+	return air_movement_speed
+
+
+func is_using_running_profile() -> bool:
+	return using_running_profile
+
+
+func _capture_jump_profile() -> void:
+	if player.previous_state == fall:
+		using_running_profile = fall.is_using_running_profile()
+	else:
+		using_running_profile = (
+			run.is_running
+			and player.previous_state != ledge_grab
+		)
+
+	active_jump_velocity = (
+		run_jump_velocity if using_running_profile else walk_jump_velocity
+	)
+	air_movement_speed = run.get_movement_speed_for_mode(using_running_profile)

@@ -37,6 +37,11 @@ enum State {
 
 @export_group("Prototype Dialog")
 @export_enum("follow", "kiss", "none") var prototype_dialog_choice: String = "follow"
+@export var interaction_priority: int = 60
+@export var interaction_prompt: String = "Talk"
+
+@export_group("Rope")
+@export var rope_weight: float = 0.1
 
 @onready var sprite_2d: Sprite2D = %Sprite2D
 @onready var animation_player: AnimationPlayer = $AnimationPlayer
@@ -80,11 +85,31 @@ func _unhandled_input(event: InputEvent) -> void:
 	if player == null or not is_instance_valid(player):
 		return
 
-	if event.is_action_pressed("up"):
-		request_dialog()
-
 	if event.is_action_pressed("attack"):
 		_change_state(State.DEFEND)
+
+
+func can_interact(actor: Node) -> bool:
+	return (
+		state == State.HOME_IDLE
+		and actor == player
+		and actor is Node2D
+	)
+
+
+func interact(actor: Node) -> bool:
+	if not can_interact(actor):
+		return false
+	request_dialog()
+	return true
+
+
+func get_interaction_priority(_actor: Node) -> int:
+	return interaction_priority
+
+
+func get_interaction_prompt(_actor: Node) -> String:
+	return interaction_prompt
 
 
 func _physics_process(delta: float) -> void:
@@ -94,12 +119,12 @@ func _physics_process(delta: float) -> void:
 
 	if state == State.DOWNED:
 		velocity.x = 0.0
-		move_and_slide()
+		_move_and_slide_with_rope(delta)
 		return
 
 	if knockback_timer > 0.0:
 		knockback_timer -= delta
-		move_and_slide()
+		_move_and_slide_with_rope(delta)
 		return
 
 	if state in [State.FOLLOW, State.DEFEND]:
@@ -118,6 +143,11 @@ func _physics_process(delta: float) -> void:
 		State.FIGHT:
 			_process_fight()
 
+	_move_and_slide_with_rope(delta)
+
+
+func _move_and_slide_with_rope(delta: float) -> void:
+	velocity = Rope.constrain_attached_velocity(self, velocity, delta)
 	move_and_slide()
 
 
@@ -420,9 +450,13 @@ func _play_animation(animation_name: StringName) -> void:
 func _on_interaction_area_body_entered(body: Node2D) -> void:
 	if body.is_in_group("player"):
 		player = body
+		if body.has_method("register_interaction_candidate"):
+			body.call("register_interaction_candidate", self)
 
 
 func _on_interaction_area_body_exited(body: Node2D) -> void:
+	if body.has_method("unregister_interaction_candidate"):
+		body.call("unregister_interaction_candidate", self)
 	if body == player and state == State.HOME_IDLE:
 		player = null
 

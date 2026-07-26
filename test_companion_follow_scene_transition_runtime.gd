@@ -47,7 +47,7 @@ func _initialize() -> void:
 	var source_machine := source_mom.get_node_or_null("NpcStateMachine") as NpcStateMachine
 	_expect(
 		source_machine != null and source_machine.active_action == null,
-		"entering follow clears the prior activity only after its state exits"
+		"travel context activation clears the prior activity before follow coordination"
 	)
 	var source_record: Dictionary = locations.call("get_record_snapshot", "mom")
 	_expect(
@@ -55,7 +55,7 @@ func _initialize() -> void:
 		and (source_record.get("activity", {}) as Dictionary).is_empty(),
 		"the traveling record contains no stale scheduled action"
 	)
-	_expect_follow_presentation(source_mom, "source")
+	_expect_distance_selected_presentation(source_mom, player, "source")
 
 	loader.cached_scenes[FAILED_DESTINATION] = null
 	loader.use_threaded_loading = true
@@ -83,7 +83,7 @@ func _initialize() -> void:
 		"failed load rolls the persistent companion record back to the source scene"
 	)
 	_expect(not bool(runtime.get("_pending_companion_restore")), "failed load cancels companion restore retries")
-	_expect_follow_presentation(source_mom, "source after failed load")
+	_expect_distance_selected_presentation(source_mom, player, "source after failed load")
 
 	var transition_result: Dictionary = loader.call(
 		"request_player_scene_transition",
@@ -101,50 +101,145 @@ func _initialize() -> void:
 	_expect(destination_player != null, "destination recreates the player")
 	_expect(player_spawn != null, "destination has its requested player spawn")
 	if destination_player != null and player_spawn != null:
+		var spawn_settle_offset := destination_player.global_position - player_spawn.global_position
 		_expect(
-			destination_player.global_position.is_equal_approx(player_spawn.global_position),
-			"destination player is placed at PlayerSpawnFromYard regardless of sibling ready order"
+			is_zero_approx(spawn_settle_offset.x)
+			and spawn_settle_offset.y >= 0.0
+			and spawn_settle_offset.y <= 16.0,
+			"destination player uses PlayerSpawnFromYard and only settles vertically onto its floor: player=%s spawn=%s"
+			% [destination_player.global_position, player_spawn.global_position]
 		)
 	var destination_mom := locations.call("get_live_npc", "mom") as Node2D
 	_expect(destination_mom != null, "destination recreates Mom")
 	_expect(destination_mom != source_mom, "destination uses a fresh Mom instance")
 	if destination_mom != null:
-		_expect_follow_presentation(destination_mom, "destination")
+		var destination_machine := destination_mom.get_node_or_null("NpcStateMachine") as NpcStateMachine
+		var destination_traversal := destination_mom.get_node_or_null(
+			"NpcPlatformTraversal"
+		) as NpcPlatformTraversal
+		_expect(
+			destination_machine != null
+			and destination_machine.current_state != null
+			and String(destination_machine.current_state.name) == "Idle",
+			"destination Mom settles into Idle near the companion spawn"
+		)
+		_expect(
+			destination_traversal != null
+			and not destination_traversal.has_owner()
+			and int(destination_traversal.get_debug_snapshot()["session_serial"]) > 0,
+			"scene restoration starts with a fresh unowned traversal context"
+		)
 		var overlays := destination_mom.find_children(
-			"TravelFollowDebugOverlay", "NpcFollowDebugOverlay", false, false
+			"NpcPlatformTraversalDebugOverlay",
+			"NpcPlatformTraversalDebugOverlay",
+			false,
+			false
 		)
 		_expect(overlays.is_empty(), "follow path diagnostics stay uninstantiated by default")
 		var machine := destination_mom.get_node_or_null("NpcStateMachine") as NpcStateMachine
 		var travel_follow := machine.get_state(&"TravelFollow") if machine != null else null
-		if travel_follow != null:
+		var destination_component := destination_mom.get_node_or_null(
+			"TravelCompanion"
+		) as TravelCompanionComponent
+		if (
+			travel_follow != null
+			and destination_component != null
+			and destination_player != null
+		):
+			destination_player.global_position.x = (
+				destination_mom.global_position.x
+				+ destination_component.follow_start_horizontal_distance
+				+ 40.0
+			)
+			destination_component.set("_request_retry_timer", 0.0)
+			destination_component.evaluate_follow_need()
+			_expect(
+				machine.current_state != null
+				and String(machine.current_state.name) == "TravelFollow",
+				"moving the destination player far activates Follow"
+			)
+			_expect(
+				destination_traversal != null
+				and destination_traversal.is_owned_by(
+					travel_follow,
+					travel_follow.get_traversal_session_id()
+				),
+				"restored TravelFollow owns its fresh traversal session"
+			)
 			travel_follow.set("show_follow_debug_paths", true)
 		await physics_frame
 		await physics_frame
 		overlays = destination_mom.find_children(
-			"TravelFollowDebugOverlay", "NpcFollowDebugOverlay", false, false
+			"NpcPlatformTraversalDebugOverlay",
+			"NpcPlatformTraversalDebugOverlay",
+			false,
+			false
 		)
 		_expect(overlays.size() == 1, "follow path diagnostics can still be enabled on demand")
+		if destination_component != null and destination_player != null:
+			destination_player.global_position = destination_mom.global_position + Vector2(20.0, 0.0)
+			destination_component.set("_request_retry_timer", 0.0)
 		await _wait_frames(4)
-		_expect_follow_presentation(destination_mom, "settled destination")
+		_expect(
+			destination_machine != null
+			and destination_machine.current_state != null
+			and String(destination_machine.current_state.name) == "Idle",
+			"settled destination Mom remains Idle instead of retaining Run"
+		)
+		_expect(
+			destination_traversal != null and not destination_traversal.has_owner(),
+			"restored Follow releases traversal after catching up"
+		)
 
 	_finish()
 
 
-func _expect_follow_presentation(mom: Node, label: String) -> void:
+func _expect_distance_selected_presentation(mom: Node, player: Node2D, label: String) -> void:
 	var machine := mom.get_node_or_null("NpcStateMachine") as NpcStateMachine
 	var animation_player := mom.get_node_or_null("AnimationPlayer") as AnimationPlayer
+	var animation_controller := mom.get_node_or_null(
+		"NpcAnimationController"
+	) as NpcAnimationController
+	var component := mom.get_node_or_null("TravelCompanion") as TravelCompanionComponent
+	var expected_state := "TravelFollow"
+	if component != null and player != null:
+		var horizontal_distance := absf(player.global_position.x - (mom as Node2D).global_position.x)
+		var vertical_separation := absf(player.global_position.y - (mom as Node2D).global_position.y)
+		if (
+			horizontal_distance <= component.follow_start_horizontal_distance
+			and vertical_separation <= component.follow_start_vertical_separation
+		):
+			expected_state = "Idle"
 	_expect(
 		machine != null
 		and machine.current_state != null
-		and String(machine.current_state.name) == "TravelFollow",
-		"%s Mom is in TravelFollow" % label
+		and String(machine.current_state.name) == expected_state,
+		"%s Mom selects %s from companion distance" % [label, expected_state]
 	)
-	_expect(
-		animation_player != null
-		and animation_player.current_animation == &"run"
-		and animation_player.is_playing(),
-		"%s Mom keeps the running follow animation" % label
-	)
+	if expected_state == "TravelFollow":
+		_expect(
+			animation_controller != null
+			and animation_controller.get_latest_requested_animation() == &"run"
+			and animation_player != null
+			and animation_player.current_animation in [&"idle", &"walk", &"run_start", &"run"]
+			and animation_player.is_playing(),
+			"%s Mom preserves Run intent with grounded locomotion presentation: state=%s animation=%s playing=%s velocity=%s"
+			% [
+				label,
+				expected_state,
+				String(animation_player.current_animation) if animation_player != null else "missing",
+				animation_player.is_playing() if animation_player != null else false,
+				(mom as CharacterBody2D).velocity if mom is CharacterBody2D else Vector2.ZERO,
+			]
+		)
+	else:
+		_expect(
+			animation_controller != null
+			and animation_controller.get_latest_requested_animation() == &"idle"
+			and animation_player != null
+			and animation_player.current_animation == &"idle",
+			"%s Mom uses the idle animation while caught up" % label
+		)
 
 
 func _wait_for_scene(expected_path: String) -> void:

@@ -84,9 +84,9 @@ func _validate_scene_structure_and_vertical_slice() -> void:
 	_expect(home_text.contains("[connection signal=\"area_entered\" from=\"RoomVisibilityTriggers/Hall\" to=\"RoomVisibilityAnimation\" method=\"play\" unbinds=1 binds= [&\"hall\"]]"), "Hall visibility connection is preserved")
 	_expect(home_text.contains("[connection signal=\"area_entered\" from=\"RoomVisibilityTriggers/Bedroom\" to=\"RoomVisibilityAnimation\" method=\"play\" unbinds=1 binds= [&\"bedroom\"]]"), "Bedroom visibility connection is preserved")
 	_expect(home_text.contains("[connection signal=\"area_entered\" from=\"RoomVisibilityTriggers/Bathroom\" to=\"RoomVisibilityAnimation\" method=\"play\" unbinds=1 binds= [&\"bathroom\"]]"), "Bathroom visibility connection is preserved")
-	_expect(home_text.contains("polygon = PackedVector2Array(-20, -4096, 456, -4096, 456, 4096, -20, 4096)"), "Kitchen visibility still ends at x=456")
-	_expect(home_text.contains("polygon = PackedVector2Array(456, -4096, 715, -4096, 715, 4096, 456, 4096)"), "Hall visibility still begins at x=456")
-	_expect(home_text.count("color = Color(0, 0, 0, 0.7)") == 5, "all five inactive room overlays are 70 percent dark")
+	_expect(home_text.contains("polygon = PackedVector2Array(-20, 200, 456, 200, 456, 4096, -20, 4096)"), "Kitchen visibility still ends at x=456")
+	_expect(home_text.contains("polygon = PackedVector2Array(456, 200, 715, 200, 715, 4096, 456, 4096)"), "Hall visibility still begins at x=456")
+	_expect(home_text.count("color = Color(0, 0, 0, 0.7)") == 9, "all nine inactive room overlays are 70 percent dark")
 
 
 func _validate_permission_semantics() -> void:
@@ -141,12 +141,10 @@ func _validate_player_interaction_and_cleanup() -> void:
 	_expect(not _has_exception(door, player), "player has no collision exception before Up")
 	_expect(player.move_and_collide(Vector2(96.0, 0.0), true) != null, "closed barrier physically blocks the player")
 
-	Input.action_press(&"up")
-	await process_frame
-	await process_frame
-	Input.action_release(&"up")
-	_expect(door.is_actor_granted(player), "Up grants passage to the waiting player")
-	_expect(granted_actors == [player], "Up grants only the player")
+	var direct_result: Dictionary = door.request_passage(player)
+	_expect(bool(direct_result.get("accepted", false)), "the routed door request grants the waiting player")
+	_expect(door.is_actor_granted(player), "the routed request grants passage to the waiting player")
+	_expect(granted_actors == [player], "the routed request grants only the player")
 	_expect(opened_events.size() == 1, "player grant opens the visual door once")
 	_expect(_has_exception(door, player), "player and barrier receive reciprocal exceptions")
 	_expect(not (door.get_node("DoorBarrier/CollisionShape2D") as CollisionShape2D).disabled, "grant does not disable the barrier")
@@ -176,7 +174,7 @@ func _validate_player_interaction_and_cleanup() -> void:
 	Input.action_press(&"up")
 	door.call("_on_request_area_body_entered", held_input_player)
 	Input.action_release(&"up")
-	_expect(door.is_actor_granted(held_input_player), "Up held while entering the request area still grants passage")
+	_expect(not door.is_actor_granted(held_input_player), "held input without a new routed press does not grant passage")
 	door.call("_on_clearance_area_body_exited", held_input_player)
 
 	door.queue_free()
@@ -333,10 +331,7 @@ func _validate_realhometest_player_slice() -> void:
 	_expect(not _collision_rect(door.get_node("RequestArea/CollisionShape2D")).intersects(_collision_rect(shower_spot.get_node("CollisionShape2D"))), "Bathroom door and shower interaction boxes do not intersect")
 	_expect(not _collision_rect(bedroom_door.get_node("RequestArea/CollisionShape2D")).intersects(_collision_rect(sleep_spot.get_node("CollisionShape2D"))), "Bedroom door and sleep interaction boxes do not intersect")
 	_expect(not door.is_actor_granted(player), "live door remains closed until real Up input")
-	Input.action_press(&"up")
-	await process_frame
-	await process_frame
-	Input.action_release(&"up")
+	await _press_interact()
 	_expect(door.is_actor_granted(player), "realhometest Up input grants the actual player")
 	_expect(granted_actors == [player], "live scene grant targets the actual player body")
 	_expect(_has_exception(door, player), "live player and barrier have reciprocal exceptions")
@@ -364,10 +359,7 @@ func _validate_realhometest_player_slice() -> void:
 			break
 	Input.action_release(&"left")
 	_expect(player.global_position.x > 722.0, "closed live door blocks the player returning from Bathroom")
-	Input.action_press(&"up")
-	await process_frame
-	await process_frame
-	Input.action_release(&"up")
+	await _press_interact()
 	_expect(door.is_actor_granted(player), "live door grants again from the Bathroom side")
 	Input.action_press(&"left")
 	for _frame in range(120):
@@ -391,10 +383,7 @@ func _validate_realhometest_player_slice() -> void:
 	_expect(door.request_area.overlaps_body(player), "Hall approach enters the InteriorDoor request zone")
 	_expect(not outside_door.overlaps_body(player), "Interior and outside Up interaction zones do not overlap")
 	_expect(not stove.overlaps_body(player), "Interior door and stove Up interactions remain separate")
-	Input.action_press(&"up")
-	await process_frame
-	await process_frame
-	Input.action_release(&"up")
+	await _press_interact()
 	_expect(door.is_actor_granted(player), "pressing Up while pushing against the door grants reliably")
 	for _frame in range(120):
 		await physics_frame
@@ -426,6 +415,19 @@ func _add_test_door() -> InteriorDoor:
 	door.request_area.monitoring = false
 	door.clearance_area.monitoring = false
 	return door
+
+
+func _press_interact() -> void:
+	var press := InputEventAction.new()
+	press.action = &"up"
+	press.pressed = true
+	Input.parse_input_event(press)
+	await process_frame
+	var release := InputEventAction.new()
+	release.action = &"up"
+	release.pressed = false
+	Input.parse_input_event(release)
+	await process_frame
 
 
 func _has_exception(door: InteriorDoor, actor: PhysicsBody2D) -> bool:

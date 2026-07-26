@@ -6,6 +6,8 @@ class_name PlayerStateFall extends PlayerState
 #coyote time:
 @export var coyote_time : float = 0.1
 var coyote_timer: float = 0
+var air_movement_speed: float = 260.0
+var using_running_profile: bool = false
 
 
 func init() -> void:
@@ -14,6 +16,7 @@ func init() -> void:
 
 
 func enter() -> void:
+	_capture_air_profile()
 	if player.previous_state != crouch:
 		player.ledgedetec.enabled = true
 	player.animation_player.play("jump")
@@ -75,7 +78,7 @@ func process(_delta: float) -> PlayerState:
 	return next_state
 
 func physics_update_before_move(_delta: float) -> void:
-	player.velocity.x = player.direction.x * player.move_speed
+	player.velocity.x = player.direction.x * air_movement_speed
 
 
 func physics_update_after_move(_delta: float) -> PlayerState:
@@ -97,3 +100,23 @@ func set_jump_frame() -> void:
 	var frame : float = remap(player.velocity.y, 0.0, 1000, 0.5, 1.0)
 	player.animation_player.seek(frame, true)
 	pass
+
+
+func get_air_movement_speed() -> float:
+	return air_movement_speed
+
+
+func is_using_running_profile() -> bool:
+	return using_running_profile
+
+
+func _capture_air_profile() -> void:
+	if player.previous_state == jump:
+		using_running_profile = jump.is_using_running_profile()
+		air_movement_speed = jump.get_air_movement_speed()
+		return
+
+	using_running_profile = (
+		player.previous_state == run and run.is_running
+	) or player.previous_state == dash_state
+	air_movement_speed = run.get_movement_speed_for_mode(using_running_profile)

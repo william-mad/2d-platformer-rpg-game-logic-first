@@ -28,6 +28,7 @@ const MEAL_OWNER_CLEANUP := "cleanup"
 @export_range(0.05, 30.0, 0.05, "suffix:s") var player_work_duration_seconds: float = 2.0
 @export_range(0.0, 10.0, 0.05, "suffix:s") var player_work_cooldown_seconds: float = 0.35
 @export var player_work_interaction_id: StringName = &"work"
+@export var interaction_priority: int = 100
 
 @export_group("Optional Eat Phase")
 @export var eat_world_definition: NpcSpotDefinition
@@ -86,19 +87,6 @@ func _process(delta: float) -> void:
 	player_work_cooldown = maxf(player_work_cooldown - delta, 0.0)
 	if _update_active_player_action(delta):
 		return
-	if not allow_player_work or player_work_cooldown > 0.0:
-		return
-	if player_work_action == &"" or not InputMap.has_action(player_work_action):
-		return
-
-	var player := _get_closest_player_worker()
-	if player == null:
-		return
-	if can_player_work(player) and Input.is_action_pressed(player_work_action):
-		_start_player_action(player, &"work", 0.0)
-	elif has_food_available() and _player_can_eat(player):
-		if Input.is_action_just_pressed(player_work_action):
-			_start_player_action(player, &"eat", player_eat_duration_seconds)
 
 
 func _apply_world_definition() -> void:
@@ -312,6 +300,39 @@ func can_player_work(player: Node2D) -> bool:
 		and _player_owner_is_allowed_for_current_work_stage(player)
 		and has_work_needed()
 	)
+
+
+func can_interact(actor: Node) -> bool:
+	var player := actor as Node2D
+	if (
+		player == null
+		or not nearby_players.has(player)
+		or active_player_action != &""
+		or player_work_cooldown > 0.0
+		or not allow_player_work
+	):
+		return false
+	return can_player_work(player) or (has_food_available() and _player_can_eat(player))
+
+
+func interact(actor: Node) -> bool:
+	if not can_interact(actor):
+		return false
+	var player := actor as Node2D
+	if can_player_work(player):
+		_start_player_action(player, &"work", 0.0)
+	else:
+		_start_player_action(player, &"eat", player_eat_duration_seconds)
+	return true
+
+
+func get_interaction_priority(_actor: Node) -> int:
+	return interaction_priority
+
+
+func get_interaction_prompt(actor: Node) -> String:
+	var player := actor as Node2D
+	return "Work" if player != null and can_player_work(player) else "Eat"
 
 
 func _player_can_eat(player: Node2D) -> bool:
@@ -563,7 +584,10 @@ func _update_active_player_action(delta: float) -> bool:
 
 
 func _update_active_player_work(delta: float) -> bool:
-	if not Input.is_action_pressed(player_work_action):
+	if (
+		not active_player.has_method("is_interaction_action_pressed")
+		or not bool(active_player.call("is_interaction_action_pressed"))
+	):
 		_cancel_player_action()
 		return true
 	if is_work_complete():
@@ -1293,27 +1317,16 @@ func _on_work_body_entered(body: Node2D) -> void:
 		return
 	if not nearby_players.has(body):
 		nearby_players.append(body)
+	if body.has_method("register_interaction_candidate"):
+		body.call("register_interaction_candidate", self)
 
 
 func _on_work_body_exited(body: Node2D) -> void:
 	nearby_players.erase(body)
+	if body.has_method("unregister_interaction_candidate"):
+		body.call("unregister_interaction_candidate", self)
 	if body == active_player:
 		_cancel_player_action()
-
-
-func _get_closest_player_worker() -> Node2D:
-	var closest_player: Node2D
-	var closest_distance := INF
-	for player in nearby_players.duplicate():
-		if player == null or not is_instance_valid(player):
-			nearby_players.erase(player)
-			continue
-		var distance := global_position.distance_squared_to(player.global_position)
-		if distance >= closest_distance:
-			continue
-		closest_distance = distance
-		closest_player = player
-	return closest_player
 
 
 func _debug_realtest1_meal_spot_disabled() -> bool:

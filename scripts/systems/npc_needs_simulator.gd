@@ -298,27 +298,6 @@ func _apply_emotion_decay(
 			var anger := float(social_stats[anger_name])
 			var full_hours := maxf(float(anger_decay.get("full_decay_game_hours", 4.0)), 0.001)
 			social_stats[anger_name] = maxf(anger - (100.0 / full_hours) * game_hours, 0.0)
-	var fear_decay = profile.get("fear_decay", {})
-	if not (fear_decay is Dictionary) or not bool(fear_decay.get("enabled", false)):
-		return
-	var fear_name := String(fear_decay.get("value_name", "fear"))
-	if _is_stored_only_value(fear_name) or not social_stats.has(fear_name):
-		return
-	var fear := float(social_stats[fear_name])
-	var panic_floor := float(fear_decay.get("panic_floor", 90.0))
-	var stop_value := maxf(float(fear_decay.get("stop_value", 69.9)), 0.0)
-	if fear <= stop_value:
-		return
-	if fear > panic_floor:
-		var panic_hours := float(fear_decay.get("panic_cooldown_game_hours", 1.0 / 6.0))
-		if panic_hours <= 0.0:
-			fear = panic_floor
-		else:
-			fear = maxf(fear - ((100.0 - panic_floor) / panic_hours) * game_hours, panic_floor)
-	else:
-		var slow_rate := float(fear_decay.get("slow_decay_per_game_hour", 5.0))
-		fear = maxf(fear - slow_rate * game_hours, stop_value)
-	social_stats[fear_name] = fear
 
 
 func _is_stored_only_value(value_name: String) -> bool:

@@ -95,6 +95,10 @@ func change_scene(scene_path: String) -> bool:
 	return true
 
 
+func is_scene_transition_in_progress() -> bool:
+	return loading_in_progress or not active_player_transition.is_empty()
+
+
 func request_player_scene_transition(
 	player: Node,
 	target_scene_path: String,

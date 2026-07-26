@@ -16,6 +16,8 @@ signal door_closed(door_id: StringName)
 @export var interaction_action: StringName = &"up"
 @export var player_requires_interaction: bool = true
 @export var auto_open_for_npcs: bool = true
+@export var interaction_priority: int = 30
+@export var interaction_prompt: String = "Open door"
 
 @export_group("NPC Permissions")
 @export var allowed_npc_ids: Array[StringName] = []
@@ -42,7 +44,6 @@ var _close_serial: int = 0
 var _active_close_serial: int = 0
 var _door_is_open: bool = false
 var _is_exiting: bool = false
-var _interaction_was_pressed: bool = false
 
 
 func _ready() -> void:
@@ -51,51 +52,6 @@ func _ready() -> void:
 	request_area.body_exited.connect(_on_request_area_body_exited)
 	clearance_area.body_exited.connect(_on_clearance_area_body_exited)
 	animation_player.animation_finished.connect(_on_animation_finished)
-
-
-func _input(event: InputEvent) -> void:
-	if interaction_action.is_empty():
-		return
-	if event.is_action_pressed(interaction_action):
-		_interaction_was_pressed = true
-		_attempt_player_interaction()
-	elif event.is_action_released(interaction_action):
-		_interaction_was_pressed = false
-
-
-func _process(_delta: float) -> void:
-	if interaction_action.is_empty():
-		return
-	var interaction_is_pressed := Input.is_action_pressed(interaction_action)
-	if not interaction_is_pressed:
-		_interaction_was_pressed = false
-		return
-	if _interaction_was_pressed:
-		return
-	_interaction_was_pressed = true
-	_attempt_player_interaction()
-
-
-func _attempt_player_interaction() -> void:
-	if interaction_action.is_empty():
-		return
-
-	# Body signals are delivered on the physics step. Refreshing overlaps here avoids
-	# losing an interaction pressed on the same frame the player reaches the area.
-	if request_area.monitoring:
-		for overlapping_body in request_area.get_overlapping_bodies():
-			var overlapping_actor := overlapping_body as Node2D
-			if overlapping_actor != null and overlapping_actor.is_in_group(String(player_group)):
-				_track_request_actor(overlapping_actor)
-
-	for actor_id in _request_actors.keys():
-		var actor := _get_tracked_actor(_request_actors, int(actor_id))
-		if actor == null:
-			_request_actors.erase(actor_id)
-			_denied_request_actors.erase(actor_id)
-			continue
-		if actor.is_in_group(String(player_group)) and not is_actor_granted(actor):
-			request_passage(actor)
 
 
 func _configure_request_area() -> void:
@@ -155,6 +111,33 @@ func can_actor_use(actor: Node) -> bool:
 	if actor.is_in_group(String(npc_group)):
 		return can_npc_use(actor)
 	return false
+
+
+func can_interact(actor: Node) -> bool:
+	if not player_requires_interaction or not request_area.monitoring:
+		return false
+	if actor == null or not is_instance_valid(actor):
+		return false
+	if not actor.is_in_group(String(player_group)) or not can_actor_use(actor):
+		return false
+	if _get_tracked_actor(_request_actors, int(actor.get_instance_id())) != actor:
+		return false
+	return not is_actor_granted(actor)
+
+
+func interact(actor: Node) -> bool:
+	if not can_interact(actor):
+		return false
+	var result := request_passage(actor)
+	return bool(result.get("accepted", false))
+
+
+func get_interaction_priority(_actor: Node) -> int:
+	return interaction_priority
+
+
+func get_interaction_prompt(_actor: Node) -> String:
+	return interaction_prompt
 
 
 func can_npc_use(npc: Node) -> bool:
@@ -221,20 +204,18 @@ func _on_request_area_body_entered(actor: Node2D) -> void:
 	_track_request_actor(actor)
 
 	if actor.is_in_group(String(player_group)):
-		if (
-			not player_requires_interaction
-			or (
-				not interaction_action.is_empty()
-				and Input.is_action_pressed(interaction_action)
-			)
-		):
+		if not player_requires_interaction:
 			request_passage(actor)
+		elif actor.has_method("register_interaction_candidate"):
+			actor.call("register_interaction_candidate", self)
 		return
 	if actor.is_in_group(String(npc_group)) and auto_open_for_npcs:
 		request_passage(actor)
 
 
 func _on_request_area_body_exited(actor: Node2D) -> void:
+	if actor.is_in_group(String(player_group)) and actor.has_method("unregister_interaction_candidate"):
+		actor.call("unregister_interaction_candidate", self)
 	var actor_id := int(actor.get_instance_id())
 	if _get_tracked_actor(_request_actors, actor_id) == actor:
 		_request_actors.erase(actor_id)

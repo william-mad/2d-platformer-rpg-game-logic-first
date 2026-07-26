@@ -17,6 +17,8 @@ const DEFAULT_DIALOGUE_METADATA := &"default_dialogue_definition"
 @export var cooldown_seconds: float = 0.35
 @export var max_distance: float = 120.0
 @export var npc_groups: Array[StringName] = [&"npc"]
+@export var interaction_priority: int = 60
+@export var interaction_prompt: String = "Talk"
 
 @export_group("Menus")
 @export var option_actions: Array[StringName] = [
@@ -113,6 +115,8 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	if player != null and is_instance_valid(player) and player.has_method("unregister_interaction_candidate"):
+		player.call("unregister_interaction_candidate", self)
 	# The UI may disappear during a scene change; never leave its NPC paused behind.
 	if menu_target_npc != null and is_instance_valid(menu_target_npc):
 		_end_target_menu_hold(menu_target_npc)
@@ -137,53 +141,65 @@ func _process(delta: float) -> void:
 		if not _menu_is_open():
 			return
 
-		if _handle_menu_navigation_input():
-			return
-
 		_handle_menu_option_input()
 		return
 
-	if cooldown > 0.0:
-		return
 
-	if not Input.is_action_just_pressed(interaction_action):
-		return
-	if _player_is_at_active_work_spot():
-		return
-
-	_try_open_interaction_menu()
-
-
-func _player_is_at_active_work_spot() -> bool:
-	# Work has contextual priority when Up could otherwise trigger work and talk together.
-	if player == null or not is_instance_valid(player) or not player.is_inside_tree():
+func can_interact(actor: Node) -> bool:
+	if actor != player or cooldown > 0.0 or _menu_is_open():
 		return false
-	for spot_node in player.get_tree().get_nodes_in_group("npc_work_spot"):
-		var spot := spot_node as Area2D
-		if spot == null or not is_instance_valid(spot):
-			continue
-		if not spot.has_method("can_player_work"):
-			continue
-		if not bool(spot.call("can_player_work", player)):
-			continue
-		if spot.overlaps_body(player):
-			return true
-	return false
+	if _player_gameplay_control_is_claimed():
+		return false
+	var target_npc := _get_closest_npc()
+	return target_npc != null and _get_block_reason(target_npc).is_empty()
 
 
-func _try_open_interaction_menu() -> void:
+func interact(actor: Node) -> bool:
+	if not can_interact(actor):
+		return false
+	return _try_open_interaction_menu()
+
+
+func get_interaction_priority(_actor: Node) -> int:
+	return interaction_priority
+
+
+func get_interaction_prompt(_actor: Node) -> String:
+	return interaction_prompt
+
+
+func get_interaction_position(_actor: Node) -> Vector2:
+	var target_npc := menu_target_npc if _menu_is_open() else _get_closest_npc()
+	return target_npc.global_position if target_npc != null else global_position
+
+
+func is_world_interaction_ui_open() -> bool:
+	return _menu_is_open()
+
+
+func consume_player_interaction_input(actor: Node) -> bool:
+	if actor != player or not _menu_is_open():
+		return false
+	if active_menu == MENU_GOSSIP and _get_gossip_page_count() > 1:
+		gossip_page_index = (gossip_page_index + 1) % _get_gossip_page_count()
+		_show_gossip_menu("")
+	return true
+
+
+func _try_open_interaction_menu() -> bool:
 	var target_npc := _get_closest_npc()
 	if target_npc == null:
-		return
+		return false
 
 	var block_reason := _get_block_reason(target_npc)
 	if not block_reason.is_empty():
 		interaction_blocked.emit(player, target_npc, interaction_id, block_reason)
-		return
+		return false
 	menu_target_npc = target_npc
 	active_menu = MENU_INTERACTION
 	_show_interaction_menu("")
 	cooldown = cooldown_seconds
+	return _menu_is_open()
 
 
 func show_npc_prompt(
@@ -694,23 +710,6 @@ func _get_pressed_option_index() -> int:
 	return -1
 
 
-func _handle_menu_navigation_input() -> bool:
-	if active_menu != MENU_GOSSIP:
-		return false
-	if not InputMap.has_action(interaction_action):
-		return false
-	if not Input.is_action_just_pressed(interaction_action):
-		return false
-
-	var page_count := _get_gossip_page_count()
-	if page_count <= 1:
-		return false
-
-	gossip_page_index = (gossip_page_index + 1) % page_count
-	_show_gossip_menu("")
-	return true
-
-
 func _tick_menu_timer(delta: float) -> void:
 	if menu_timer <= 0.0:
 		return
@@ -836,6 +835,13 @@ func _close_menu(release_target_hold: bool = true) -> void:
 	if menu_panel != null and is_instance_valid(menu_panel):
 		menu_panel.visible = false
 	_unwatch_target_interaction_gate()
+	if (
+		nearby_npcs.is_empty()
+		and player != null
+		and is_instance_valid(player)
+		and player.has_method("unregister_interaction_candidate")
+	):
+		player.call("unregister_interaction_candidate", self)
 
 
 func close_for_scripted_handoff() -> bool:
@@ -1274,11 +1280,21 @@ func _on_body_entered(body: Node2D) -> void:
 		return
 
 	nearby_npcs.append(body)
+	if player != null and is_instance_valid(player) and player.has_method("register_interaction_candidate"):
+		player.call("register_interaction_candidate", self)
 
 
 func _on_body_exited(body: Node2D) -> void:
 	# Removes bodies that leave the interaction area.
 	nearby_npcs.erase(body)
+	if (
+		nearby_npcs.is_empty()
+		and not _menu_is_open()
+		and player != null
+		and is_instance_valid(player)
+		and player.has_method("unregister_interaction_candidate")
+	):
+		player.call("unregister_interaction_candidate", self)
 	if close_menu_when_target_exits and body == menu_target_npc:
 		if active_menu == MENU_NPC_PROMPT:
 			_finish_npc_prompt(false, "target_left")

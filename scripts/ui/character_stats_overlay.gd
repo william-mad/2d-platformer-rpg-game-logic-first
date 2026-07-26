@@ -21,7 +21,6 @@ class_name CharacterStatsOverlay extends CanvasLayer
 	"love",
 	"favor",
 	"trust",
-	"fear",
 	"anger",
 	"sadness",
 	"suspicion",

@@ -9,6 +9,7 @@ class_name SaveSpot extends Area2D
 @export var save_menu_title: String = "CHOOSE SAVE FILE"
 @export var save_menu_cancel_text: String = "BACK"
 @export var feedback_seconds: float = 1.4
+@export var interaction_priority: int = 80
 
 @onready var label: Label = get_node_or_null("%Label") as Label
 @onready var zone_visual: Polygon2D = get_node_or_null("%ZoneVisual") as Polygon2D
@@ -20,6 +21,9 @@ var save_menu_layer: CanvasLayer
 var save_menu_title_label: Label
 var save_menu_slot_buttons: Array[Button] = []
 var save_menu_cancel_button: Button
+var active_player: Node2D
+var player_control_claim_token: int = 0
+var interaction_focused: bool = false
 
 
 func _ready() -> void:
@@ -40,24 +44,54 @@ func _process(delta: float) -> void:
 		_process_save_menu_shortcuts()
 		return
 
-	if player_inside and Input.is_action_just_pressed(save_action):
-		_save_here()
-
-	if not player_inside and is_zero_approx(feedback_timer):
+	if not save_menu_open and is_zero_approx(feedback_timer):
 		set_process(false)
 
 
-func _save_here() -> void:
+func can_interact(actor: Node) -> bool:
+	return (
+		actor != null
+		and is_instance_valid(actor)
+		and actor == active_player
+		and player_inside
+		and not save_menu_open
+	)
+
+
+func interact(actor: Node) -> bool:
+	if not can_interact(actor):
+		return false
+	return _save_here(actor as Node2D)
+
+
+func get_interaction_priority(_actor: Node) -> int:
+	return interaction_priority
+
+
+func get_interaction_prompt(_actor: Node) -> String:
+	return ready_text
+
+
+func set_interaction_focused(_actor: Node, focused: bool) -> void:
+	interaction_focused = focused
+	_update_label_visibility()
+
+
+func consume_player_interaction_input(actor: Node) -> bool:
+	return save_menu_open and actor == active_player
+
+
+func _save_here(player: Node2D) -> bool:
 	# This is the only line a save point really needs: it asks the global save system to store the current scene.
 	if not has_node("/root/SaveSystem"):
 		_show_feedback(missing_system_text, false)
-		return
+		return true
 
 	if choose_slot_on_save:
-		_open_save_menu()
-		return
+		return _open_save_menu(player)
 
 	_save_to_slot(save_slot)
+	return true
 
 
 func _save_to_slot(slot: String) -> void:
@@ -72,6 +106,7 @@ func _show_feedback(message: String, success: bool) -> void:
 	feedback_timer = feedback_seconds
 	set_process(true)
 	_update_label(message)
+	_update_label_visibility()
 
 	if zone_visual == null:
 		return
@@ -85,34 +120,58 @@ func _update_label(message: String) -> void:
 
 	if zone_visual != null and message == ready_text:
 		zone_visual.color = Color(0.25, 0.68, 0.95, 0.38)
+	_update_label_visibility()
+
+
+func _update_label_visibility() -> void:
+	if label != null:
+		label.visible = interaction_focused or feedback_timer > 0.0
 
 
 func _on_body_entered(body: Node2D) -> void:
 	if body.is_in_group("player"):
 		player_inside = true
-		set_process(true)
+		active_player = body
+		if body.has_method("register_interaction_candidate"):
+			body.call("register_interaction_candidate", self)
 
 
 func _on_body_exited(body: Node2D) -> void:
 	if body.is_in_group("player"):
+		if body.has_method("unregister_interaction_candidate"):
+			body.call("unregister_interaction_candidate", self)
 		player_inside = false
 		_close_save_menu()
+		if body == active_player:
+			active_player = null
 
 
 func _refresh_player_inside() -> void:
+	if (
+		active_player != null
+		and is_instance_valid(active_player)
+		and active_player.has_method("unregister_interaction_candidate")
+	):
+		active_player.call("unregister_interaction_candidate", self)
 	player_inside = false
+	active_player = null
 	for body in get_overlapping_bodies():
 		if body.is_in_group("player"):
 			player_inside = true
+			active_player = body
+			if body.has_method("register_interaction_candidate"):
+				body.call("register_interaction_candidate", self)
 			break
 
-	set_process(player_inside or feedback_timer > 0.0)
+	set_process(feedback_timer > 0.0 or save_menu_open)
 
 
-func _open_save_menu() -> void:
+func _open_save_menu(player: Node2D) -> bool:
 	if not has_node("/root/SaveSystem"):
 		_show_feedback(missing_system_text, false)
-		return
+		return true
+	if not _acquire_player_control_claim(player):
+		return false
 
 	_ensure_save_menu()
 	_refresh_save_menu()
@@ -120,6 +179,7 @@ func _open_save_menu() -> void:
 	save_menu_layer.visible = true
 	set_process(true)
 	_focus_first_save_menu_button()
+	return true
 
 
 func _close_save_menu() -> void:
@@ -127,6 +187,39 @@ func _close_save_menu() -> void:
 		save_menu_layer.visible = false
 
 	save_menu_open = false
+	_release_player_control_claim()
+	if is_zero_approx(feedback_timer):
+		set_process(false)
+
+
+func _exit_tree() -> void:
+	_release_player_control_claim()
+
+
+func _acquire_player_control_claim(player: Node2D) -> bool:
+	if player_control_claim_token != 0:
+		return player == active_player
+	if not is_inside_tree():
+		return false
+	var gameplay_flow := get_node_or_null("/root/GameplayFlow")
+	if gameplay_flow == null or not gameplay_flow.has_method("acquire_player_control_claim"):
+		return false
+	player_control_claim_token = int(gameplay_flow.call(
+		"acquire_player_control_claim", self, player, &"save_menu", &"ui_only"
+	))
+	return player_control_claim_token != 0
+
+
+func _release_player_control_claim() -> void:
+	if player_control_claim_token == 0:
+		return
+	if not is_inside_tree():
+		player_control_claim_token = 0
+		return
+	var gameplay_flow := get_node_or_null("/root/GameplayFlow")
+	if gameplay_flow != null and gameplay_flow.has_method("release_player_control_claim"):
+		gameplay_flow.call("release_player_control_claim", player_control_claim_token, self)
+	player_control_claim_token = 0
 
 
 func _process_save_menu_shortcuts() -> void:

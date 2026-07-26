@@ -4,6 +4,7 @@ class_name NpcStateTestPad extends Area2D
 @export var extra_target_npc_paths: Array[NodePath] = []
 @export var stat_delta: Dictionary = {}
 @export var set_values: Dictionary = {}
+@export_range(-1.0, 100.0, 0.1) var set_player_relationship_fear: float = -1.0
 @export var state_request: StringName = &""
 @export var request_priority: int = 200
 
@@ -16,6 +17,7 @@ class_name NpcStateTestPad extends Area2D
 @export var interaction_action: StringName = &"up"
 @export var requires_interaction: bool = true
 @export var cooldown_seconds: float = 0.35
+@export var interaction_priority: int = 20
 
 @export_group("Visual")
 @export var pad_label: String = ""
@@ -25,9 +27,12 @@ class_name NpcStateTestPad extends Area2D
 @onready var label: Label = get_node_or_null("%Label") as Label
 
 var cooldown: float = 0.0
+var nearby_players: Array[Node2D] = []
 
 
 func _ready() -> void:
+	body_entered.connect(_on_body_entered)
+	body_exited.connect(_on_body_exited)
 	if zone_visual != null:
 		zone_visual.color = pad_color
 
@@ -37,6 +42,8 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	cooldown = maxf(cooldown - delta, 0.0)
+	if requires_interaction:
+		return
 
 	var player := _get_player_inside()
 	if player == null:
@@ -45,11 +52,29 @@ func _process(delta: float) -> void:
 	if cooldown > 0.0:
 		return
 
-	if requires_interaction and not Input.is_action_just_pressed(interaction_action):
-		return
-
 	_apply_to_target(player)
 	cooldown = cooldown_seconds
+
+
+func can_interact(actor: Node) -> bool:
+	var player := actor as Node2D
+	return requires_interaction and player != null and nearby_players.has(player) and cooldown <= 0.0
+
+
+func interact(actor: Node) -> bool:
+	if not can_interact(actor):
+		return false
+	_apply_to_target(actor as Node2D)
+	cooldown = cooldown_seconds
+	return true
+
+
+func get_interaction_priority(_actor: Node) -> int:
+	return interaction_priority
+
+
+func get_interaction_prompt(_actor: Node) -> String:
+	return pad_label if not pad_label.is_empty() else "Test interaction"
 
 
 func _apply_to_target(player: Node2D) -> void:
@@ -77,6 +102,16 @@ func _apply_to_target_path(target_path: NodePath, player: Node2D) -> void:
 
 	if receiver != null and not stat_delta.is_empty():
 		receiver.call("apply_social_event", stat_delta, player, false)
+	if set_player_relationship_fear >= 0.0:
+		var relationships := get_node_or_null("/root/Relationships")
+		if relationships != null and relationships.has_method("set_fear"):
+			relationships.call(
+				"set_fear",
+				target_node,
+				player,
+				set_player_relationship_fear,
+				"test_pad"
+			)
 
 	if machine == null:
 		return
@@ -109,8 +144,25 @@ func _get_machine(target_node: Node) -> NpcStateMachine:
 
 
 func _get_player_inside() -> Node2D:
-	for body in get_overlapping_bodies():
-		if body.is_in_group("player"):
-			return body
+	for body in nearby_players.duplicate():
+		if body == null or not is_instance_valid(body):
+			nearby_players.erase(body)
+			continue
+		return body
 
 	return null
+
+
+func _on_body_entered(body: Node2D) -> void:
+	if not body.is_in_group("player"):
+		return
+	if not nearby_players.has(body):
+		nearby_players.append(body)
+	if requires_interaction and body.has_method("register_interaction_candidate"):
+		body.call("register_interaction_candidate", self)
+
+
+func _on_body_exited(body: Node2D) -> void:
+	nearby_players.erase(body)
+	if body.has_method("unregister_interaction_candidate"):
+		body.call("unregister_interaction_candidate", self)

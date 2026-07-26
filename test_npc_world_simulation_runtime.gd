@@ -1080,7 +1080,6 @@ func _make_loaded_afternoon_mom_record(total_hours: float, activity: Dictionary)
 				"anger": 0.0,
 				"boredom": 51.935763,
 				"disabled": 0.0,
-				"fear": 0.0,
 				"hp": 100.0,
 				"hunger": 41.136205,
 				"lonely": 0.0,

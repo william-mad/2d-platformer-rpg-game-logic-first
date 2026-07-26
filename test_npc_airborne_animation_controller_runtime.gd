@@ -1,9 +1,5 @@
 extends SceneTree
 
-const AirborneControllerScript = preload(
-	"res://scenes/creatures/npc/npc_airborne_animation_controller.gd"
-)
-
 var _failures: Array[String] = []
 
 
@@ -11,6 +7,19 @@ class TestNpc:
 	extends CharacterBody2D
 
 	var direction: int = 1
+
+
+class TestAirborneLocomotionController:
+	extends NpcAirborneAnimationController
+
+	var sampled_horizontal_speed: float = 0.0
+	var test_grounded: bool = true
+
+	func _get_actual_horizontal_speed() -> float:
+		return sampled_horizontal_speed
+
+	func _is_grounded_for_locomotion() -> bool:
+		return test_grounded
 
 
 func _initialize() -> void:
@@ -44,12 +53,16 @@ func _test_velocity_driven_airborne_frames_and_resume() -> void:
 	npc.add_child(player)
 	var library := AnimationLibrary.new()
 	library.add_animation(&"idle", _make_empty_animation())
+	library.add_animation(&"talk", _make_empty_animation())
+	library.add_animation(&"walk", _make_empty_animation(Animation.LOOP_LINEAR))
+	library.add_animation(&"run_start", _make_empty_animation())
 	library.add_animation(&"run", _make_empty_animation())
 	library.add_animation(&"jump_fall", _make_six_frame_airborne_animation())
 	player.add_animation_library(&"", library)
 
-	var controller := AirborneControllerScript.new() as NpcAirborneAnimationController
+	var controller := TestAirborneLocomotionController.new()
 	controller.name = "NpcAnimationController"
+	controller.grounded_locomotion_enabled = true
 	npc.add_child(controller)
 	controller.set_physics_process(false)
 	controller.bind_npc(npc)
@@ -79,13 +92,51 @@ func _test_velocity_driven_airborne_frames_and_resume() -> void:
 	controller._seek_airborne_pose(590.0)
 	_expect(sprite.frame == 5, "late fall uses falling placeholder frame 5")
 
+	var started: Array[StringName] = []
+	player.animation_started.connect(func(animation_name: StringName) -> void:
+		started.append(animation_name)
+	)
+	controller.sampled_horizontal_speed = 161.0
 	_expect(controller.request_animation(&"run"), "ground animation requests remain accepted in the air")
 	_expect(player.assigned_animation == &"jump_fall", "ground requests do not interrupt jump_fall")
+	_expect(
+		controller.get_latest_requested_animation() == &"run",
+		"airborne controller stores the latest logical request"
+	)
 	_expect(controller.face_x_direction(-1.0), "airborne controller retains normal facing support")
 	_expect(sprite.flip_h, "airborne animation retains horizontal flipping")
 	controller._finish_airborne_override()
-	_expect(player.current_animation == &"run" and player.is_playing(), "landing resumes the newest requested animation")
+	_expect(
+		player.current_animation == &"run"
+		and player.is_playing()
+		and controller.get_locomotion_phase()
+		== NpcAnimationController.LocomotionPhase.RUN,
+		"fast landing reevaluates Run intent and enters Run directly"
+	)
+	_expect(
+		not started.has(&"run_start"),
+		"landing at high speed does not replay RunStart"
+	)
 	_expect(sprite.flip_h, "landing does not reset facing")
+
+	controller.sampled_horizontal_speed = 77.0
+	controller.request_animation(&"walk")
+	player.speed_scale = 1.35
+	controller._begin_airborne_override(-300.0)
+	_expect(
+		is_equal_approx(player.speed_scale, 1.0),
+		"airborne override resets grounded locomotion playback speed"
+	)
+	_expect(controller.request_animation(&"talk"), "Talk request is accepted while airborne")
+	controller._finish_airborne_override()
+	_expect(
+		player.current_animation == &"talk" and player.is_playing(),
+		"landing restores the newest non-locomotion request"
+	)
+	_expect(
+		is_equal_approx(player.speed_scale, 1.0),
+		"airborne non-locomotion restoration keeps playback speed clean"
+	)
 
 	npc.queue_free()
 
@@ -179,9 +230,10 @@ func _test_mom_damage_hop_uses_and_restores_airborne_animation() -> void:
 	await process_frame
 
 
-func _make_empty_animation() -> Animation:
+func _make_empty_animation(loop_mode: int = Animation.LOOP_NONE) -> Animation:
 	var animation := Animation.new()
 	animation.length = 1.0
+	animation.loop_mode = loop_mode
 	return animation
 
 

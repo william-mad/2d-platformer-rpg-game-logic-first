@@ -1,6 +1,6 @@
 class_name PlayerStateRun extends PlayerState
 
-@export var walk_speed: float = 350.0
+@export var walk_speed: float = 260.0
 @export var walk_animation: StringName = &"run"
 @export var run_animation: StringName = &"run"
 @export_range(0.0, 2.0, 0.05, "suffix:s") var idle_to_walk_delay: float = 1.0
@@ -54,8 +54,7 @@ func process(_delta: float) -> PlayerState:
 	return next_state
 
 func physics_update_before_move(_delta: float) -> void:
-	var movement_speed := player.move_speed if is_running else walk_speed
-	player.velocity.x = player.direction.x * movement_speed
+	player.velocity.x = player.direction.x * get_current_movement_speed()
 
 
 func physics_update_after_move(_delta: float) -> PlayerState:
@@ -89,3 +88,11 @@ func cancel_idle_to_walk_countdown() -> void:
 func clear_running() -> void:
 	is_running = false
 	idle_to_walk_at_msec = 0
+
+
+func get_current_movement_speed() -> float:
+	return get_movement_speed_for_mode(is_running)
+
+
+func get_movement_speed_for_mode(use_running_speed: bool) -> float:
+	return player.move_speed if use_running_speed else walk_speed

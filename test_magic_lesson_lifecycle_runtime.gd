@@ -2,9 +2,12 @@ extends SceneTree
 
 const TEST_NPC_ID := "magic_lesson_test_mom"
 const TEST_SESSION_ID := "magic-lesson-session"
+const COMPLETION_SESSION_ID := "magic-lesson-completion-session"
 const TEST_SPOT_ID := &"magic_lesson_test_spot"
 const TEST_SCENE_PATH := "res://magic_lesson_lifecycle_test.tscn"
 const LESSON_SCENE_PATH := "res://scenes/testscenes/realhometest.tscn"
+const CLASS_POSITION := Vector2(320.0, 144.0)
+const SAVED_ORIGIN_POSITION := Vector2(-640.0, -360.0)
 
 var _failures: Array[String] = []
 var _cancellation_count: int = 0
@@ -13,8 +16,16 @@ var _cancellation_count: int = 0
 class TestMom:
 	extends CharacterBody2D
 
+	var home_position := Vector2.ZERO
+	var location_position_call_count: int = 0
+
 	func get_npc_location_id() -> StringName:
 		return StringName(TEST_NPC_ID)
+
+	func set_npc_location_position(spawn_position: Vector2) -> void:
+		location_position_call_count += 1
+		global_position = spawn_position
+		home_position = spawn_position
 
 
 class TestPlayer:
@@ -90,6 +101,10 @@ func _initialize() -> void:
 	lesson_spot.name = "LessonSpot"
 	lesson_spot.spot_id = TEST_SPOT_ID
 	lesson_spot.require_player_in_lesson_zone = false
+	var mom_marker := Marker2D.new()
+	mom_marker.name = "MomLessonPosition"
+	mom_marker.position = CLASS_POSITION
+	lesson_spot.add_child(mom_marker)
 	test_scene.add_child(lesson_spot)
 
 	simulator.spot_reservations.clear()
@@ -178,6 +193,12 @@ func _initialize() -> void:
 		String(handoff_record.get("scene_path", "")) == LESSON_SCENE_PATH,
 		"remote handoff relocates Mom's record to the lesson scene"
 	)
+	_expect(
+		String((handoff_record.get("activity", {}) as Dictionary).get(
+			"return_scene_path", ""
+		)) == TEST_SCENE_PATH,
+		"handoff retains the pre-invitation origin for failure recovery"
+	)
 	var legacy_handoff_record := handoff_record.duplicate(true)
 	var legacy_action: Dictionary = legacy_handoff_record.get("action", {})
 	legacy_action.erase("metadata")
@@ -192,8 +213,13 @@ func _initialize() -> void:
 		"save normalization restores lesson phase into action metadata"
 	)
 
+	# Simulate the accepted player handoff having loaded the lesson scene.
+	test_scene.scene_file_path = LESSON_SCENE_PATH
+	locations.active_scene_path = LESSON_SCENE_PATH
 	var local_mom := TestMom.new()
 	local_mom.name = "LocalLessonMom"
+	local_mom.home_position = Vector2(72.0, 96.0)
+	local_mom.velocity = Vector2(14.0, -11.0)
 	var local_machine := NpcStateMachine.new()
 	local_machine.name = "NpcStateMachine"
 	local_machine.active = false
@@ -213,6 +239,16 @@ func _initialize() -> void:
 	var start_result: Dictionary = lesson_spot.start_lesson(local_mom, player, TEST_SESSION_ID)
 	_expect(bool(start_result.get("accepted", false)), "local lesson starts under the handoff session")
 	_expect(lesson_spot.get_lesson_state() == &"running", "local controller enters running")
+	_expect(local_mom.global_position == CLASS_POSITION, "local lesson stages Mom at the class marker")
+	_expect(
+		local_mom.home_position == Vector2(72.0, 96.0),
+		"temporary lesson staging preserves Mom's home position"
+	)
+	_expect(
+		local_mom.location_position_call_count == 0,
+		"temporary lesson staging does not use the location restoration setter"
+	)
+	_expect(local_mom.velocity == Vector2.ZERO, "temporary lesson staging stops Mom's velocity")
 	_expect(
 		String((locations.get_record_snapshot(TEST_NPC_ID).get("activity", {}) as Dictionary).get(
 			"lesson_phase", ""
@@ -241,6 +277,132 @@ func _initialize() -> void:
 	_expect(
 		int(simulator.spot_claim_counts.get(TEST_SPOT_ID, 0)) == 0,
 		"terminal cancellation releases the lesson reservation"
+	)
+	var cancelled_record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	_expect(is_instance_valid(local_mom), "local cancellation keeps the live Mom instance")
+	_expect(
+		String(cancelled_record.get("scene_path", "")) == LESSON_SCENE_PATH,
+		"local cancellation keeps Mom in the loaded lesson scene"
+	)
+	_expect(
+		cancelled_record.get("last_position", Vector2.ZERO) == local_mom.global_position,
+		"local cancellation records Mom's actual class position"
+	)
+	_expect(
+		(cancelled_record.get("activity", {}) as Dictionary).is_empty()
+		and (cancelled_record.get("action", {}) as Dictionary).is_empty(),
+		"local cancellation clears the exact activity and action descriptors"
+	)
+	_expect(
+		local_machine.get_active_action_session_id().is_empty(),
+		"local cancellation detaches the finished InvitePlayer action"
+	)
+
+	var completion_claim: Dictionary = simulator.call(
+		"try_claim_spot",
+		StringName(TEST_NPC_ID),
+		COMPLETION_SESSION_ID,
+		TEST_SPOT_ID,
+		&"activity"
+	)
+	var completion_reservation_id := String(completion_claim.get("reservation_id", ""))
+	var completion_activity := activity.duplicate(true)
+	completion_activity["session_id"] = COMPLETION_SESSION_ID
+	completion_activity["action_session_id"] = COMPLETION_SESSION_ID
+	completion_activity["activity_id"] = COMPLETION_SESSION_ID
+	completion_activity["lesson_phase"] = "handoff"
+	completion_activity["target_scene_path"] = LESSON_SCENE_PATH
+	completion_activity["target_position"] = CLASS_POSITION
+	completion_activity["return_scene_path"] = TEST_SCENE_PATH
+	completion_activity["return_position"] = SAVED_ORIGIN_POSITION
+	completion_activity["reservation_ids"] = [completion_reservation_id]
+	var completion_action := NpcActionSession.create(
+		TEST_NPC_ID,
+		&"InvitePlayer",
+		&"schedule",
+		lesson_spot,
+		completion_activity
+	)
+	completion_action.status = NpcActionSession.Status.ACTIVE
+	completion_action.phase = &"executing"
+	local_machine.active_action = completion_action
+	var completion_record := cancelled_record.duplicate(true)
+	completion_record["scene_path"] = LESSON_SCENE_PATH
+	completion_record["last_position"] = local_mom.global_position
+	completion_record["activity"] = completion_activity.duplicate(true)
+	completion_record["action"] = completion_action.to_descriptor()
+	completion_record["pending_travel"] = {}
+	locations.npc_records[TEST_NPC_ID] = completion_record
+	locations.live_npcs[TEST_NPC_ID] = local_mom
+
+	var completion_start: Dictionary = lesson_spot.start_lesson(
+		local_mom, player, COMPLETION_SESSION_ID
+	)
+	_expect(
+		bool(completion_start.get("accepted", false)),
+		"cross-scene-origin completion lesson starts"
+	)
+	var running_record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	var running_activity: Dictionary = running_record.get("activity", {})
+	_expect(
+		String(running_activity.get("return_scene_path", "")) == TEST_SCENE_PATH
+		and running_activity.get("return_position", Vector2.ZERO) == SAVED_ORIGIN_POSITION,
+		"saved cross-scene origin remains available before local completion"
+	)
+	var completed_class_position := local_mom.global_position
+	_expect(
+		completed_class_position == CLASS_POSITION,
+		"completion fixture keeps Mom at the visible class position"
+	)
+	_expect(
+		lesson_spot.complete_lesson(COMPLETION_SESSION_ID),
+		"current cross-scene-origin lesson completes"
+	)
+	var completed_record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	_expect(
+		is_instance_valid(local_mom) and not local_mom.is_queued_for_deletion(),
+		"completion does not queue-free the live Mom instance"
+	)
+	_expect(
+		locations.live_npcs.get(TEST_NPC_ID, null) == local_mom,
+		"completion keeps the same live Mom registered"
+	)
+	_expect(
+		String(completed_record.get("scene_path", "")) == LESSON_SCENE_PATH,
+		"completion keeps Mom's record in the loaded lesson scene"
+	)
+	_expect(
+		completed_record.get("last_position", Vector2.ZERO) == completed_class_position
+		and local_mom.global_position == completed_class_position,
+		"completion records Mom's actual class position"
+	)
+	_expect(
+		(completed_record.get("activity", {}) as Dictionary).is_empty()
+		and (completed_record.get("action", {}) as Dictionary).is_empty(),
+		"completion clears the exact activity and action descriptors"
+	)
+	_expect(
+		local_machine.get_active_action_session_id().is_empty(),
+		"completion detaches the finished InvitePlayer action for normal reconciliation"
+	)
+	_expect(
+		not simulator.spot_reservations.has(completion_reservation_id)
+		and int(simulator.spot_claim_counts.get(TEST_SPOT_ID, 0)) == 0,
+		"completion releases the exact lesson reservation once"
+	)
+	_expect(
+		not lesson_spot.complete_lesson(COMPLETION_SESSION_ID),
+		"repeated completion is harmless"
+	)
+	_expect(
+		not simulator.spot_reservations.has(completion_reservation_id)
+		and int(simulator.spot_claim_counts.get(TEST_SPOT_ID, 0)) == 0,
+		"repeated completion cannot release or recreate the reservation"
+	)
+	await process_frame
+	_expect(
+		is_instance_valid(local_mom) and not local_mom.is_queued_for_deletion(),
+		"Mom remains live after deferred completion work"
 	)
 
 	var failed_transfer_activity := activity.duplicate(true)

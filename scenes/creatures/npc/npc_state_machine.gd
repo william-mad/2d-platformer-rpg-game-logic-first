@@ -23,6 +23,9 @@ const STORED_ONLY_VALUE_KEYS := {
 	"energy": true,
 	"suspicion": true,
 }
+const DEPRECATED_GLOBAL_VALUE_KEYS := {
+	"fear": true,
+}
 
 const STATE_ALIASES := {
 	"ReactToPlayer": "ReactToEvent",
@@ -47,6 +50,16 @@ const SCRIPTED_CONTROL_EMERGENCY_STATES := {
 	"DisabledDead": true,
 	"Collapse": true,
 	"ReactToEvent": true,
+}
+
+const ACTIVE_TRAVEL_BLOCKED_STATES := {
+	"Work": true,
+	"Recreation": true,
+	"RoutineTask": true,
+	"LookForTalkTarget": true,
+	"InvitePlayer": true,
+	"Sleep": true,
+	"Rest": true,
 }
 
 enum MonsterSightReaction {
@@ -144,9 +157,8 @@ enum MonsterSightReaction {
 @export_range(0.0, 30.0, 0.1, "suffix:s") var default_player_interaction_hold_seconds: float = 5.0
 @export_range(0.0, 120.0, 0.1, "suffix:s") var default_player_interaction_cooldown_seconds: float = 20.0
 
-@export_group("Fear Decay")
+@export_group("Relationship Fear Decay")
 @export var fear_decay_enabled: bool = true
-@export var fear_decay_value_name: StringName = &"fear"
 @export_range(0.0, 100.0, 0.1) var fear_panic_floor: float = 90.0
 @export_range(0.0, 1440.0, 1.0, "suffix:min") var fear_panic_cooldown_game_minutes: float = 10.0
 @export_range(0.0, 100.0, 0.1, "suffix:/h") var fear_slow_decay_per_game_hour: float = 5.0
@@ -170,7 +182,6 @@ enum MonsterSightReaction {
 	"favor": 50.0,
 	"love": 0.0,
 	"trust": 50.0,
-	"fear": 0.0,
 	"anger": 0.0,
 	"hunger": 25.0,
 	"energy": 100.0,
@@ -208,14 +219,6 @@ enum MonsterSightReaction {
 		"state": "Downed",
 		"at_least": 100.0,
 		"priority": 99
-	},
-	"high_fear": {
-		"value": "fear",
-		"state": "Flee",
-		"at_least": 70.0,
-		"delta_at_least": 0.001,
-		"only_when_changed": true,
-		"priority": 90
 	},
 	"anger_fight": {
 		"value": "anger",
@@ -431,18 +434,18 @@ func _physics_process(delta: float) -> void:
 	if _reconcile_requested_active_action_state():
 		_update_passive_needs(delta)
 		if auto_move_and_slide:
-			npc.move_and_slide()
+			_move_npc_with_rope(delta)
 		return
 	if _reconcile_current_state_action_session_if_needed():
 		_update_passive_needs(delta)
 		if auto_move_and_slide:
-			npc.move_and_slide()
+			_move_npc_with_rope(delta)
 		return
 	apply_gravity(delta)
 	if _process_npc_damage_hop(delta):
 		_update_passive_needs(delta)
 		if auto_move_and_slide:
-			npc.move_and_slide()
+			_move_npc_with_rope(delta)
 		return
 
 	if _player_interaction_hold_is_active():
@@ -451,7 +454,7 @@ func _physics_process(delta: float) -> void:
 			_process_player_interaction_hold()
 			_update_passive_needs(delta)
 			if auto_move_and_slide:
-				npc.move_and_slide()
+				_move_npc_with_rope(delta)
 			return
 		_invalidate_player_interaction_hold(String(hold_gate.get("reason", "interaction_unavailable")))
 
@@ -459,7 +462,7 @@ func _physics_process(delta: float) -> void:
 		_process_interaction_overlay(delta)
 		_update_passive_needs(delta)
 		if auto_move_and_slide:
-			npc.move_and_slide()
+			_move_npc_with_rope(delta)
 		return
 
 	# Only the primary state runs per-frame behavior; value-rule decisions stay event-driven.
@@ -477,7 +480,12 @@ func _physics_process(delta: float) -> void:
 	_update_passive_needs(delta)
 
 	if auto_move_and_slide:
-		npc.move_and_slide()
+		_move_npc_with_rope(delta)
+
+
+func _move_npc_with_rope(delta: float) -> void:
+	npc.velocity = Rope.constrain_attached_velocity(npc, npc.velocity, delta)
+	npc.move_and_slide()
 
 
 func _process_interaction_overlay(delta: float) -> void:
@@ -553,6 +561,12 @@ func initialize_states() -> void:
 func get_state(state_name: StringName) -> NpcState:
 	var key := _canonical_state_key(state_name)
 	return _state_lookup.get(key, null) as NpcState
+
+
+func get_platform_traversal() -> NpcPlatformTraversal:
+	if npc == null or not is_instance_valid(npc):
+		return null
+	return npc.get_node_or_null("NpcPlatformTraversal") as NpcPlatformTraversal
 
 
 func request_scripted_state(
@@ -740,8 +754,8 @@ func _cancel_and_clear_active_action(reason: String) -> void:
 
 
 func cancel_and_clear_active_action_for_override(reason: String) -> bool:
-	# External runtime states call this only after the previous state's exit hook
-	# has had a chance to release its state-owned reservation.
+	# External gameplay contexts use this once when taking ownership from an
+	# ordinary activity. Cancellation is authoritative for reservation release.
 	_cancel_and_clear_active_action(reason)
 	_proposed_action = null
 	_action_state_reconciliation_requested = false
@@ -939,16 +953,14 @@ func change_state(
 		and not continuing_social_approach
 	):
 		return _reject_state_request(requested_name, "already_socially_engaged")
-	if _is_active_travel_companion():
-		if String(requested_name) == "Idle":
-			var follow_state := get_state(&"TravelFollow")
-			if follow_state != null:
-				new_state = follow_state
-		elif String(requested_name) in ["Work", "Recreation", "RoutineTask", "LookForTalkTarget", "InvitePlayer", "Sleep", "Rest"]:
-			return _reject_state_request(
-				requested_name,
-				"Travel companion social/schedule activity disabled"
-			)
+	if (
+		_is_active_travel_companion()
+		and not is_state_allowed_for_active_travel_companion(requested_name)
+	):
+		return _reject_state_request(
+			requested_name,
+			"Travel companion social/schedule activity disabled"
+		)
 
 	if current_state == new_state:
 		return _reject_state_request(requested_name, "state_already_active")
@@ -1005,8 +1017,7 @@ func _commit_state_change(
 	new_state.next_state = null
 	new_state.enter()
 	_pending_primary_state = null
-	if interaction_overlay != null and interaction_overlay.has_method("refresh_overlay_presentation"):
-		interaction_overlay.call("refresh_overlay_presentation")
+	_refresh_interaction_animation_presentation()
 	_invalidate_player_interaction_for_current_state()
 
 	_update_debug_label()
@@ -1102,13 +1113,9 @@ func _request_state_direct(
 			return _reject_state_request(state_name, "moving_to_target")
 
 	var transition_state := requested_state
-	if _is_active_travel_companion() and String(transition_state.name) == "Idle":
-		var follow_state := get_state(&"TravelFollow")
-		if follow_state != null:
-			transition_state = follow_state
-	elif (
+	if (
 		_is_active_travel_companion()
-		and String(transition_state.name) in ["Work", "Recreation", "RoutineTask", "LookForTalkTarget", "InvitePlayer", "Sleep", "Rest"]
+		and not is_state_allowed_for_active_travel_companion(StringName(transition_state.name))
 	):
 		return _reject_state_request(
 			state_name,
@@ -2073,9 +2080,9 @@ func _consume_or_build_action_session(
 	request_priority: int,
 	request_context: Dictionary
 ) -> NpcActionSession:
-	# TravelFollow belongs to PlayerRuntime, not the activity transaction lane.
-	# Keeping the previous action alive until its state exits lets that state
-	# release state-owned reservations before TravelFollow clears the session.
+	# Idle and TravelFollow belong outside the activity transaction lane. The
+	# travel context coordinator reconciles the previous activity once when the
+	# session becomes live, not every time Follow is entered.
 	if action_kind == &"" or String(action_kind) in ["Idle", "TravelFollow"]:
 		return null
 	if (
@@ -2659,7 +2666,7 @@ func _maybe_fight_from_seen_target(seen_target: Node2D) -> bool:
 
 
 func _maybe_flee_from_seen_player(seen_target: Node2D) -> bool:
-	# Seeing the player can start a flee burst if fear was already high.
+	# Player fear is directed relationship data, never a generic NPC value.
 	if not flee_from_seen_player_when_afraid:
 		return false
 
@@ -2672,7 +2679,11 @@ func _maybe_flee_from_seen_player(seen_target: Node2D) -> bool:
 	if _anger_meets_fight_threshold():
 		return false
 
-	if get_value(fear_decay_value_name) < _get_flee_fear_threshold():
+	if (
+		npc == null
+		or not npc.has_method("should_flee_from_actor")
+		or not bool(npc.call("should_flee_from_actor", seen_target))
+	):
 		return false
 
 	return request_state(
@@ -3337,6 +3348,7 @@ func _accept_talk_request(
 	)
 	talk_state.next_state = null
 	talk_state.enter()
+	_refresh_interaction_animation_presentation()
 	last_state_request_failure_reason = ""
 	_update_debug_label()
 	_breadcrumb(
@@ -3438,6 +3450,25 @@ func primary_state_continues_under_talk() -> bool:
 	# Recreation, and Idle may continue. Sleep, Fight, Flee, Downed/death, movement,
 	# scene travel, invitations, and other non-interruptible states reject Talk.
 	return current_state != null and current_state.can_continue_during_talk()
+
+
+func _refresh_interaction_animation_presentation() -> void:
+	if interaction_overlay == null:
+		return
+
+	# A compatible non-idle activity keeps its authored animation while Talk uses
+	# only the interaction lane. Idle has no activity presentation to preserve, so
+	# normal Talk remains visible and continues facing its partner.
+	if (
+		current_state != null
+		and not _current_state_is(&"Idle")
+		and primary_state_continues_under_talk()
+	):
+		current_state.resume_presentation_after_talk_overlay()
+		return
+
+	if interaction_overlay.has_method("refresh_overlay_presentation"):
+		interaction_overlay.call("refresh_overlay_presentation")
 
 
 func _overlay_survives_primary_transition(new_state: NpcState) -> bool:
@@ -3816,7 +3847,7 @@ func apply_value_delta(
 	actor: Node2D = null,
 	evaluate_reactions: bool = true
 ) -> bool:
-	# Use deltas for events: {"fear": 20.0} raises fear and may trigger a rule.
+	# Use deltas for undirected NPC values. Directed fear belongs to Relationships.
 	_normalize_values_in_place(values)
 	var previous_values := values.duplicate(true)
 	var normalized_delta := _normalize_value_delta(value_delta)
@@ -4204,9 +4235,6 @@ func _apply_passive_need_growth(real_seconds: float) -> void:
 			loneliness_decay_per_hour * recovery_game_hours
 		)
 
-	var fear_delta := _get_fear_decay_delta(game_hours)
-	if not _is_active_travel_companion() and not is_equal_approx(fear_delta, 0.0):
-		value_delta[String(fear_decay_value_name)] = fear_delta
 	if not _is_active_travel_companion() and fear_decay_enabled and npc != null and npc.has_method("decay_relationship_fear"):
 		var flee_threshold := _get_flee_fear_threshold()
 		var fear_stop_value := maxf(
@@ -4239,6 +4267,10 @@ func _is_active_travel_companion() -> bool:
 		return false
 	var runtime := get_node_or_null("/root/PlayerRuntime")
 	return runtime != null and runtime.has_method("is_active_companion") and bool(runtime.call("is_active_companion", npc))
+
+
+func is_state_allowed_for_active_travel_companion(state_name: StringName) -> bool:
+	return not ACTIVE_TRAVEL_BLOCKED_STATES.has(String(state_name))
 
 
 func _get_travel_need_multipliers() -> Dictionary:
@@ -4333,47 +4365,10 @@ func _get_anger_decay_delta(game_hours: float) -> float:
 	return -minf(current_anger, decay_per_hour * game_hours)
 
 
-func _get_fear_decay_delta(game_hours: float) -> float:
-	# Fear cools only on passive ticks: quickly to 90, then slowly below flee threshold.
-	if not fear_decay_enabled or fear_decay_value_name == &"" or game_hours <= 0.0:
-		return 0.0
-
-	var current_fear := get_value(fear_decay_value_name)
-	var flee_threshold := _get_flee_fear_threshold()
-	var stop_value := maxf(flee_threshold - fear_decay_stop_below_flee_threshold_by, 0.0)
-	if current_fear <= stop_value:
-		return 0.0
-
-	var next_fear := current_fear
-	if current_fear > fear_panic_floor:
-		var panic_hours := fear_panic_cooldown_game_minutes / 60.0
-		if panic_hours <= 0.0:
-			next_fear = fear_panic_floor
-		else:
-			var panic_decay_per_hour := (100.0 - fear_panic_floor) / panic_hours
-			next_fear = maxf(current_fear - (panic_decay_per_hour * game_hours), fear_panic_floor)
-	else:
-		next_fear = maxf(current_fear - (fear_slow_decay_per_game_hour * game_hours), stop_value)
-
-	return next_fear - current_fear
-
-
 func _get_flee_fear_threshold() -> float:
-	var fallback_threshold := 70.0
-	for rule_name in value_state_rules.keys():
-		var rule = value_state_rules[rule_name]
-		if not (rule is Dictionary):
-			continue
-
-		var rule_dictionary: Dictionary = rule
-		if String(rule_dictionary.get("state", "")) != "Flee":
-			continue
-		if _canonical_value_key(rule_dictionary.get("value", "")) != _canonical_value_key(fear_decay_value_name):
-			continue
-		if rule_dictionary.has("at_least"):
-			return _variant_to_float(rule_dictionary["at_least"])
-
-	return fallback_threshold
+	if npc != null and npc.has_method("get_relationship_flee_fear_threshold"):
+		return float(npc.call("get_relationship_flee_fear_threshold"))
+	return 70.0
 
 
 func _get_anger_fight_threshold() -> float:
@@ -4485,6 +4480,11 @@ func _queue_idle_value_reaction_check() -> void:
 
 	idle_value_reaction_queued = true
 	call_deferred("_run_idle_value_reaction_check")
+
+
+func resume_ordinary_planning_if_idle() -> void:
+	if current_state != null and String(current_state.name) == "Idle":
+		_queue_idle_value_reaction_check()
 
 
 func _run_idle_value_reaction_check() -> void:
@@ -5069,12 +5069,16 @@ func _normalize_values_in_place(target_values: Dictionary) -> void:
 		if not target_values.has(new_key):
 			target_values[new_key] = target_values[old_key]
 		target_values.erase(old_key)
+	for deprecated_key in DEPRECATED_GLOBAL_VALUE_KEYS:
+		target_values.erase(deprecated_key)
 
 
 func _normalize_value_delta(value_delta: Dictionary) -> Dictionary:
 	var normalized := {}
 	for value_key in value_delta.keys():
 		var key := _canonical_value_key(value_key)
+		if DEPRECATED_GLOBAL_VALUE_KEYS.has(key):
+			continue
 		normalized[key] = _variant_to_float(normalized.get(key, 0.0)) + _variant_to_float(value_delta[value_key])
 
 	return normalized

@@ -5,15 +5,6 @@ const NpcRouteLocationCoordinator = preload(
 )
 const COMPANION_RESTORE_RETRY_SECONDS: float = 0.05
 const COMPANION_RESTORE_MAX_ATTEMPTS: int = 20
-const FOLLOW_INTERRUPT_STATE_NAMES := [
-	"LookForMonster",
-	"Fight",
-	"Flee",
-	"Collapse",
-	"Downed",
-	"DisabledDead",
-]
-
 var pending_player_data: Dictionary = {}
 var pending_target_spawn_id: StringName = &""
 var travel_session: Dictionary = _empty_travel_session()
@@ -90,9 +81,9 @@ func start_travel(npc: Node, player: Node, policy: TravelPolicy) -> Dictionary:
 		return {"success": false, "reason": "Traveler has no persistent identity."}
 	if is_travel_active():
 		if String(travel_session.get("companion_npc_id", "")) == npc_id:
-			if _enable_live_companion_follow(npc):
+			if _activate_live_companion_context(npc, player, false):
 				return {"success": true, "reason": "Already traveling together."}
-			return {"success": false, "reason": "Traveler cannot start following yet."}
+			return {"success": false, "reason": "Traveler context is not ready yet."}
 		return {"success": false, "reason": "Another companion is already traveling."}
 	var current_scene := get_tree().current_scene
 	var scene_path := current_scene.scene_file_path if current_scene != null else ""
@@ -108,9 +99,9 @@ func start_travel(npc: Node, player: Node, policy: TravelPolicy) -> Dictionary:
 		"travel_policy_id": String(policy.policy_id if policy != null else &"default_companion"),
 		"ending": false,
 	}
-	if not _enable_live_companion_follow(npc):
+	if not _activate_live_companion_context(npc, player, true):
 		travel_session = _empty_travel_session()
-		return {"success": false, "reason": "Traveler cannot start following yet."}
+		return {"success": false, "reason": "Traveler context is not ready yet."}
 	var locations := get_node_or_null("/root/NpcLocations")
 	if locations != null and locations.has_method("synchronize_live_records"):
 		locations.call("synchronize_live_records")
@@ -136,7 +127,9 @@ func is_active_companion(npc_or_id) -> bool:
 	if not is_travel_active():
 		return false
 	var npc_id := ""
-	if npc_or_id is Node and npc_or_id.has_method("get_npc_location_id"):
+	if npc_or_id is Node:
+		if not npc_or_id.has_method("get_npc_location_id"):
+			return false
 		npc_id = String(npc_or_id.call("get_npc_location_id"))
 	else:
 		npc_id = String(npc_or_id)
@@ -242,13 +235,13 @@ func _attempt_companion_restore(generation: int) -> void:
 	):
 		_schedule_companion_restore_retry(generation)
 		return
-	if not _enable_live_companion_follow(npc):
-		_schedule_companion_restore_retry(generation)
-		return
 	var companion_spawn := get_tree().get_first_node_in_group(&"companion_spawn") as Node2D
 	npc.global_position = companion_spawn.global_position if companion_spawn != null else (player as Node2D).global_position + Vector2(-72.0, -8.0)
 	if npc is CharacterBody2D:
 		(npc as CharacterBody2D).velocity = Vector2.ZERO
+	if not _activate_live_companion_context(npc, player, true):
+		_schedule_companion_restore_retry(generation)
+		return
 	_pending_companion_restore = false
 	_companion_restore_player_ref = null
 	_companion_restore_attempts = 0
@@ -338,28 +331,29 @@ func _cancel_pending_companion_restore() -> void:
 	_companion_restore_exhaustion_warned = false
 
 
-func _enable_live_companion_follow(npc: Node) -> bool:
+func _activate_live_companion_context(
+	npc: Node,
+	player: Node = null,
+	cleanup_previous_activity: bool = true
+) -> bool:
 	if npc == null or not is_instance_valid(npc):
 		return false
-	var machine := npc.get_node_or_null("NpcStateMachine") as NpcStateMachine
-	if machine == null or machine.current_state == null:
+	var component := npc.get_node_or_null("TravelCompanion") as TravelCompanionComponent
+	if component == null:
 		return false
-	var current_state_name := String(machine.current_state.name)
-	if current_state_name == "TravelFollow":
-		machine.cancel_and_clear_active_action_for_override("travel_follow_restore")
-		machine.current_state.resume_presentation_after_talk_overlay()
-		return true
-	if current_state_name in FOLLOW_INTERRUPT_STATE_NAMES:
-		return true
-	return machine.request_state(&"TravelFollow", null, "travel_companion", 90)
+	return component.activate_travel_context(player, cleanup_previous_activity)
 
 
 func _end_travel(npc: Node) -> void:
-	travel_session = _empty_travel_session()
 	_cancel_pending_companion_restore()
-	var machine := npc.get_node_or_null("NpcStateMachine") as NpcStateMachine if npc != null else null
-	if machine != null and machine.current_state != null and String(machine.current_state.name) == "TravelFollow":
-		machine.request_state(&"Idle", null, "travel_ended", 100)
+	var component := (
+		npc.get_node_or_null("TravelCompanion") as TravelCompanionComponent
+		if npc != null
+		else null
+	)
+	travel_session = _empty_travel_session()
+	if component != null:
+		component.deactivate_travel_context(true)
 
 
 func _empty_travel_session() -> Dictionary:

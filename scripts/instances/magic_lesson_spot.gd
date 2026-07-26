@@ -232,7 +232,7 @@ func decline_lesson(mom: Node2D, player: Node2D, _prompt_id: StringName = &"") -
 	if not _terminal_session_is_current(active_action_session_id):
 		_log_lesson_transition("inviting", "declined", false, "stale_terminal_session")
 		return
-	if not _finish_scheduled_activity(active_action_session_id):
+	if not _finish_scheduled_activity_to_saved_origin(active_action_session_id):
 		return
 	skipped_day = _get_current_day()
 	state = STATE_DECLINED
@@ -297,7 +297,7 @@ func complete_lesson(expected_session_id: String = "") -> bool:
 	var completed_mom := active_mom
 	var completed_player := active_player
 	_finalize_lesson_score(completed_mom, completed_player)
-	if not _finish_scheduled_activity(expected_session):
+	if not _finish_local_lesson_activity(expected_session, true):
 		return false
 	_apply_reward_once()
 	completed_day = _get_current_day()
@@ -319,7 +319,13 @@ func cancel_lesson(reason: StringName, expected_session_id: String = "") -> bool
 	if not _terminal_session_is_current(expected_session):
 		_log_lesson_transition(String(state), "cancelled", false, "stale_terminal_session")
 		return false
-	if not _finish_scheduled_activity(expected_session):
+	var lesson_was_running := state == STATE_RUNNING
+	var activity_finished := (
+		_finish_local_lesson_activity(expected_session, false)
+		if lesson_was_running
+		else _finish_scheduled_activity_to_saved_origin(expected_session)
+	)
+	if not activity_finished:
 		return false
 	state = STATE_CANCELLED
 	_unlock_participants()
@@ -378,11 +384,12 @@ func _place_participants() -> void:
 	var player_position := _get_marker_position(player_marker_path, global_position + Vector2(28.0, 0.0))
 
 	if active_mom != null and is_instance_valid(active_mom):
-		if active_mom.has_method("set_npc_location_position"):
-			active_mom.call("set_npc_location_position", mom_position)
-		else:
-			active_mom.global_position = mom_position
-		_stop_body(active_mom)
+		# Lesson staging is temporary. The location setter also changes the NPC's
+		# persistent home position, so it must remain reserved for restoration.
+		active_mom.global_position = mom_position
+		var mom_body := active_mom as CharacterBody2D
+		if mom_body != null:
+			mom_body.velocity = Vector2.ZERO
 
 	if active_player != null and is_instance_valid(active_player):
 		active_player.global_position = player_position
@@ -531,7 +538,60 @@ func _award_lesson_time_xp(delta: float) -> void:
 	})
 
 
-func _finish_scheduled_activity(expected_session_id: String) -> bool:
+func _finish_local_lesson_activity(
+	expected_session_id: String,
+	completed: bool
+) -> bool:
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations == null or not locations.has_method("finish_scheduled_activity"):
+		return false
+	if active_mom_id.is_empty() or expected_session_id.is_empty():
+		return false
+
+	var finish_scene_path := _get_current_scene_path()
+	var finish_position := (
+		active_mom.global_position
+		if active_mom != null and is_instance_valid(active_mom)
+		else global_position
+	)
+	var finished := bool(locations.call(
+		"finish_scheduled_activity",
+		active_mom_id,
+		finish_scene_path,
+		finish_position,
+		expected_session_id
+	))
+	if not finished:
+		return false
+	_reconcile_finished_local_action(expected_session_id, completed)
+	return true
+
+
+func _reconcile_finished_local_action(expected_session_id: String, completed: bool) -> void:
+	if active_mom == null or not is_instance_valid(active_mom):
+		return
+	var machine := active_mom.get_node_or_null("NpcStateMachine")
+	if (
+		machine == null
+		or not machine.has_method("get_active_action_session_id")
+		or String(machine.call("get_active_action_session_id")) != expected_session_id
+	):
+		return
+
+	var terminal_accepted := false
+	if completed and machine.has_method("complete_active_action"):
+		terminal_accepted = bool(machine.call(
+			"complete_active_action", expected_session_id, "magic_lesson_completed"
+		))
+	elif not completed and machine.has_method("cancel_active_action"):
+		terminal_accepted = bool(machine.call(
+			"cancel_active_action", expected_session_id, "magic_lesson_cancelled"
+		))
+	if terminal_accepted and machine.has_method("clear_terminal_action"):
+		machine.call("clear_terminal_action", expected_session_id)
+
+
+func _finish_scheduled_activity_to_saved_origin(expected_session_id: String) -> bool:
 	var locations := get_node_or_null("/root/NpcLocations")
 	if locations == null or not locations.has_method("finish_scheduled_activity"):
 		return false

@@ -9,7 +9,6 @@ social_stats = {
 "disabled": 0.0,
 "energy": 90.0,
 "favor": 62.0,
-"fear": 0.0,
 "hp": 100.0,
 "knockout": 0.0,
 "hunger": 35.0,
@@ -34,7 +33,6 @@ event_bus_reactions = {
 "state_request": "ReactToEvent",
 "stat_delta": {
 "anger": 8.0,
-"fear": 25.0,
 "trust": -6.0
 }
 }
@@ -71,14 +69,6 @@ value_state_rules = {
 "priority": 35,
 "state": "ReactToEvent",
 "value": "favor"
-},
-"high_fear": {
-"at_least": 60.0,
-"delta_at_least": 0.001,
-"only_when_changed": true,
-"priority": 90,
-"state": "Flee",
-"value": "fear"
 },
 "anger_fight": {
 "at_least": 100.0,

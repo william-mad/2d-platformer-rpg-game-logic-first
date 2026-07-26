@@ -6,6 +6,9 @@ const STORED_ONLY_STAT_KEYS := {
 	"energy": true,
 	"suspicion": true,
 }
+const DEPRECATED_GLOBAL_STAT_KEYS := {
+	"fear": true,
+}
 
 signal target_seen(target: Node2D)
 signal target_lost(target: Node2D)
@@ -23,6 +26,9 @@ const STAT_KEY_ALIASES := {
 @export var patrol_range: float = 240.0
 @export var starts_moving_right: bool = true
 
+@export_group("Rope")
+@export_range(0.01, 1000.0, 0.01) var rope_weight: float = 2.0
+
 @export_group("Social Stats")
 @export var favor_min: float = 0.0
 @export var favor_max: float = 100.0
@@ -31,7 +37,6 @@ const STAT_KEY_ALIASES := {
 	"favor": 50.0,
 	"love": 0.0,
 	"trust": 50.0,
-	"fear": 0.0,
 	"anger": 0.0,
 	"hunger": 25.0,
 	"energy": 100.0,
@@ -103,7 +108,6 @@ const STAT_KEY_ALIASES := {
 		"ignore_self_as_actor": true,
 		"ignore_self_as_target": true,
 		"stat_delta": {
-			"fear": 15.0,
 			"trust": -4.0
 		},
 		"state_request": "ReactToEvent",
@@ -124,6 +128,7 @@ const STAT_KEY_ALIASES := {
 @onready var favor_bar: ProgressBar = %FavorBar
 @onready var hp_bar: CreatureHpBar = get_node_or_null("HPBar") as CreatureHpBar
 @onready var knockout_bar: ProgressBar = get_node_or_null("KnockoutBar") as ProgressBar
+@onready var rope_attach_point: Marker2D = get_node_or_null("RopeAttachPoint") as Marker2D
 @onready var name_label: Label = get_node_or_null("NameLabel") as Label
 @onready var npc_inventory: NpcInventoryComponent = get_node_or_null("NpcInventory") as NpcInventoryComponent
 @onready var npc_inventory_drop: NpcInventoryDropComponent = get_node_or_null("NpcInventoryDrop") as NpcInventoryDropComponent
@@ -196,7 +201,7 @@ func _physics_process(delta: float) -> void:
 	if is_downed:
 		velocity.x = 0.0
 		_update_favor_bar_visibility()
-		move_and_slide()
+		_move_and_slide_with_rope(delta)
 		return
 
 	if process_damage_hop(delta):
@@ -208,7 +213,16 @@ func _physics_process(delta: float) -> void:
 		_process_patrol()
 
 	_update_favor_bar_visibility()
+	_move_and_slide_with_rope(delta)
+
+
+func _move_and_slide_with_rope(delta: float) -> void:
+	velocity = Rope.constrain_attached_velocity(self, velocity, delta)
 	move_and_slide()
+
+
+func get_rope_attach_point() -> Node2D:
+	return rope_attach_point if rope_attach_point != null else self
 
 
 func can_see(target: Node2D) -> bool:
@@ -296,11 +310,17 @@ func take_damage(
 	var previous_hp := get_hp()
 	var damage_actor := damage_source as Node2D
 	var damage_came_from_monster := _is_monster_damage_source(damage_source)
+	var damage_came_from_player := (
+		damage_actor != null
+		and damage_actor.is_in_group("player")
+		and not damage_came_from_monster
+	)
 	var damage_came_from_npc := (
 		damage_actor != null
 		and damage_actor.is_in_group("npc")
 		and not damage_came_from_monster
 	)
+	var damage_has_relationship_actor := damage_came_from_player or damage_came_from_npc
 	var emotion_stats := _get_damage_emotion_stats(amount, previous_hp)
 	if damage_came_from_monster:
 		emotion_stats.clear()
@@ -309,8 +329,12 @@ func take_damage(
 	if damage_came_from_npc and emotion_stats.has("anger"):
 		relationship_anger_delta = float(emotion_stats.get("anger", 0.0))
 		emotion_stats.erase("anger")
-	if damage_came_from_npc and emotion_stats.has("fear"):
+	if damage_has_relationship_actor and emotion_stats.has("fear"):
 		relationship_fear_delta = float(emotion_stats.get("fear", 0.0))
+		emotion_stats.erase("fear")
+	else:
+		# Fear is directed relationship data. Environment and unknown-source
+		# damage must not recreate the removed global fear value.
 		emotion_stats.erase("fear")
 
 	var damage_stats := {
@@ -320,23 +344,27 @@ func take_damage(
 		damage_stats["favor"] = -amount * damage_favor_penalty
 	damage_stats.merge(emotion_stats, true)
 
-	# Damage is handled as a social value change, so hp/fear/favor rules can drive any state.
+	# HP and legacy undirected reactions stay on the NPC; fear of an attacker is
+	# stored only in that actor's relationship record below.
 	# Add hurt animations here later:
 	# if animation_player != null:
 	# 	animation_player.play("hurt")
 	apply_social_event(damage_stats, damage_actor, false)
 
 	var damage_taken := previous_hp - get_hp()
-	if damage_came_from_npc and damage_taken > 0.0:
+	if damage_has_relationship_actor and damage_taken > 0.0:
+		var damage_relationship_reason := (
+			"damaged_by_player" if damage_came_from_player else "damaged_by_npc"
+		)
 		change_relationship_favor_for(
 			damage_actor,
 			-damage_taken * damage_favor_penalty,
-			"damaged_by_npc"
+			damage_relationship_reason
 		)
 		var relationship_anger := change_relationship_anger_for(
 			damage_actor,
 			relationship_anger_delta,
-			"damaged_by_npc"
+			damage_relationship_reason
 		)
 		if (
 			npc_state_machine != null
@@ -352,7 +380,7 @@ func take_damage(
 		var relationship_fear := change_relationship_fear_for(
 			damage_actor,
 			relationship_fear_delta,
-			"damaged_by_npc"
+			damage_relationship_reason
 		)
 		if (
 			npc_state_machine != null
@@ -694,7 +722,6 @@ func _get_world_simulation_profile() -> Dictionary:
 		},
 		"fear_decay": {
 			"enabled": npc_state_machine.fear_decay_enabled,
-			"value_name": String(npc_state_machine.fear_decay_value_name),
 			"panic_floor": npc_state_machine.fear_panic_floor,
 			"panic_cooldown_game_hours": (
 				npc_state_machine.fear_panic_cooldown_game_minutes / 60.0
@@ -820,9 +847,21 @@ func should_flee_from_npc(other: Node) -> bool:
 	return (
 		other != null
 		and other.is_in_group("npc")
+		and should_flee_from_actor(other)
+	)
+
+
+func should_flee_from_actor(other: Node) -> bool:
+	return (
+		other != null
+		and is_instance_valid(other)
 		and get_relationship_anger_for(other, 0.0) < npc_relationship_fight_anger_threshold
 		and get_relationship_fear_for(other, 0.0) >= npc_relationship_flee_fear_threshold
 	)
+
+
+func get_relationship_flee_fear_threshold() -> float:
+	return npc_relationship_flee_fear_threshold
 
 
 func should_fight_npc(other: Node) -> bool:
@@ -992,7 +1031,6 @@ func _ensure_social_stats() -> void:
 		"favor": 50.0,
 		"love": 0.0,
 		"trust": 50.0,
-		"fear": 0.0,
 		"anger": 0.0,
 		"hunger": 25.0,
 		"energy": 100.0,
@@ -1041,6 +1079,8 @@ func _normalize_stat_values(values: Dictionary) -> Dictionary:
 		if not normalized.has(new_key):
 			normalized[new_key] = normalized[old_key]
 		normalized.erase(old_key)
+	for deprecated_key in DEPRECATED_GLOBAL_STAT_KEYS:
+		normalized.erase(deprecated_key)
 
 	return normalized
 
@@ -1049,6 +1089,8 @@ func _normalize_stat_delta(stat_delta: Dictionary) -> Dictionary:
 	var normalized := {}
 	for stat_key in stat_delta.keys():
 		var key := _canonical_stat_key(stat_key)
+		if DEPRECATED_GLOBAL_STAT_KEYS.has(key):
+			continue
 		normalized[key] = float(normalized.get(key, 0.0)) + float(stat_delta[stat_key])
 
 	return normalized

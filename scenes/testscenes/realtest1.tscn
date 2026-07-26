@@ -25,7 +25,7 @@
 [ext_resource type="Script" uid="uid://bwvh30h8x6rcw" path="res://scripts/monsters/slime_hourly_spawner.gd" id="29_slime_hourly"]
 [ext_resource type="PackedScene" path="res://scenes/things/slime_spawner.tscn" id="30_slime_spawner"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_travel_door.tscn" id="31_route_door"]
-[ext_resource type="Script" path="res://scripts/instances/scripted_event_smoke_test.gd" id="32_scripted_event_smoke"]
+[ext_resource type="Script" uid="uid://dn42doidkbj0h" path="res://scripts/instances/scripted_event_smoke_test.gd" id="32_scripted_event_smoke"]
 [ext_resource type="PackedScene" path="res://scenes/items/world_loot_container.tscn" id="33_debug_sword_pickup"]
 [ext_resource type="Resource" path="res://data/npc_routes/edges/realtest1_to_realhometest.tres" id="34_yard_home_route"]
 
@@ -185,7 +185,7 @@ texture = ExtResource("3_b5vik")
 flip_h = true
 
 [node name="HiddenSpot" parent="." unique_id=525282655 instance=ExtResource("7_ju3ft")]
-position = Vector2(-615, 348)
+position = Vector2(2035, 109)
 
 [node name="Sprite2D5" type="Sprite2D" parent="." unique_id=750089689]
 visible = false
@@ -269,13 +269,12 @@ position = Vector2(-240, 367)
 script = ExtResource("27_player_spawn")
 spawn_id = &"from_realhometest"
 
-[node name="DebugWoodenSwordPickup" parent="." instance=ExtResource("33_debug_sword_pickup")]
+[node name="DebugWoodenSwordPickup" parent="." unique_id=503729417 instance=ExtResource("33_debug_sword_pickup")]
 position = Vector2(-50, 368)
 authored_item_id = &"wooden_sword"
-authored_quantity = 1
 development_only = true
 
-[node name="DebugLabel" type="Label" parent="DebugWoodenSwordPickup"]
+[node name="DebugLabel" type="Label" parent="DebugWoodenSwordPickup" unique_id=1122084673]
 offset_left = -82.0
 offset_top = -104.0
 offset_right = 82.0
@@ -312,7 +311,7 @@ position = Vector2(2520, 368)
 [node name="MomNpc" parent="." unique_id=259380572 instance=ExtResource("15_mom_npc")]
 position = Vector2(520, 368)
 
-[node name="ScriptedEventSmokeDestination" type="Marker2D" parent="."]
+[node name="ScriptedEventSmokeDestination" type="Marker2D" parent="." unique_id=27045210]
 position = Vector2(180, 368)
 script = ExtResource("32_scripted_event_smoke")
 
@@ -369,7 +368,6 @@ social_stats = {
 "disabled": 0.0,
 "energy": 80.0,
 "favor": 55.0,
-"fear": 0.0,
 "hp": 100.0,
 "hunger": 20.0,
 "lonely": 0.0,

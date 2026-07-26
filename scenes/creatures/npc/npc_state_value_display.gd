@@ -8,7 +8,6 @@ class_name NpcStateValueDisplay extends Label
 	"favor",
 	"love",
 	"trust",
-	"fear",
 	"anger",
 	"hunger",
 	"energy",

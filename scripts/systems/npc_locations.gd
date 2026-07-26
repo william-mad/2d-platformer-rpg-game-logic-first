@@ -1816,6 +1816,15 @@ func _normalize_loaded_record(npc_id: String, saved_record: Dictionary) -> Dicti
 
 	if not (record.get("node_state", null) is Dictionary):
 		record["node_state"] = {}
+	var normalized_node_state: Dictionary = record["node_state"]
+	var loaded_social_stats = normalized_node_state.get("social_stats", {})
+	if loaded_social_stats is Dictionary:
+		var normalized_social_stats: Dictionary = loaded_social_stats.duplicate(true)
+		# Global fear was ambiguous legacy data. Directed fear remains in the
+		# Relationships save section and is intentionally untouched.
+		normalized_social_stats.erase("fear")
+		normalized_node_state["social_stats"] = normalized_social_stats
+		record["node_state"] = normalized_node_state
 	if not (record.get("activity", null) is Dictionary):
 		record["activity"] = {}
 	if not (record.get("action", null) is Dictionary):

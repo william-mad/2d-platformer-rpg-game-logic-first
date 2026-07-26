@@ -1,8 +1,8 @@
-class_name NpcFollowDebugOverlay
+class_name NpcPlatformTraversalDebugOverlay
 extends Node2D
 
 var follower: CharacterBody2D
-var recorder: PlayerBreadcrumbRecorder
+var recorder: Node
 var target_position: Vector2
 var has_target: bool = false
 var active_traversal: Dictionary = {}
@@ -14,7 +14,7 @@ var gravity_strength: float = 1200.0
 var maximum_breadcrumbs: int = 40
 
 
-func configure(character: CharacterBody2D, breadcrumb_recorder: PlayerBreadcrumbRecorder) -> void:
+func configure(character: CharacterBody2D, breadcrumb_recorder: Node) -> void:
 	follower = character
 	recorder = breadcrumb_recorder
 	top_level = true
@@ -73,7 +73,10 @@ func _draw() -> void:
 func _draw_breadcrumb_history() -> void:
 	if recorder == null or not is_instance_valid(recorder):
 		return
-	var breadcrumbs := recorder.get_debug_breadcrumbs(maximum_breadcrumbs)
+	if not recorder.has_method("get_debug_breadcrumbs"):
+		return
+	var breadcrumb_value = recorder.call("get_debug_breadcrumbs", maximum_breadcrumbs)
+	var breadcrumbs: Array = breadcrumb_value if breadcrumb_value is Array else []
 	# Recorder retains only the newest grounded point and newest completed
 	# traversal. Traversals are drawn as arcs, never as straight history chords.
 	for index in range(breadcrumbs.size() - 1, -1, -1):

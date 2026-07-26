@@ -11,6 +11,8 @@ class_name NpcGlobalEventArea extends Area2D
 @export var zone_color: Color = Color(0.45, 0.2, 0.95, 0.35)
 @export var feedback_visible_time: float = 1.0
 @export var feedback_fade_time: float = 0.6
+@export var interaction_priority: int = 70
+@export var interaction_prompt: String = "Interact"
 
 @onready var zone_visual: Polygon2D = get_node_or_null("%ZoneVisual") as Polygon2D
 @onready var feedback_label: Label = get_node_or_null("%FeedbackLabel") as Label
@@ -18,9 +20,12 @@ class_name NpcGlobalEventArea extends Area2D
 var applied_bodies: Dictionary = {}
 var cooldowns: Dictionary = {}
 var feedback_tween: Tween
+var nearby_players: Array[Node2D] = []
 
 
 func _ready() -> void:
+	body_entered.connect(_on_body_entered)
+	body_exited.connect(_on_body_exited)
 	if zone_visual != null:
 		zone_visual.color = zone_color
 	if feedback_label != null:
@@ -30,24 +35,55 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_tick_cooldowns(delta)
 
-	var player := _get_interacting_player()
-	if player != null and Input.is_action_just_pressed(interaction_action):
-		_try_apply_to_player(player)
 
-
-func _try_apply_to_player(player: Node2D) -> void:
+func can_interact(actor: Node) -> bool:
+	var player := actor as Node2D
+	if player == null or not nearby_players.has(player):
+		return false
 	var body_id := player.get_instance_id()
 	if trigger_once and bool(applied_bodies.get(body_id, false)):
-		return
-
+		return false
 	if float(cooldowns.get(body_id, 0.0)) > 0.0:
-		return
+		return false
+	return _has_applicable_target()
+
+
+func interact(actor: Node) -> bool:
+	if not can_interact(actor):
+		return false
+	return _try_apply_to_player(actor as Node2D)
+
+
+func get_interaction_priority(_actor: Node) -> int:
+	return interaction_priority
+
+
+func get_interaction_prompt(_actor: Node) -> String:
+	return interaction_prompt
+
+
+func _try_apply_to_player(player: Node2D) -> bool:
+	var body_id := player.get_instance_id()
 
 	var applied_summaries := _apply_to_designated_npcs(player)
 	if not applied_summaries.is_empty():
 		applied_bodies[body_id] = true
 		cooldowns[body_id] = cooldown_seconds
 		_show_feedback(_build_feedback_text(applied_summaries))
+		return true
+	return false
+
+
+func _has_applicable_target() -> bool:
+	for target_path in target_npc_paths:
+		var target_npc := get_node_or_null(target_path)
+		if (
+			target_npc != null
+			and _get_event_receiver(target_npc) != null
+			and not _get_stat_delta_for_npc(target_npc, target_path).is_empty()
+		):
+			return true
+	return false
 
 
 func _apply_to_designated_npcs(player: Node2D) -> Array[String]:
@@ -92,12 +128,19 @@ func _get_event_receiver(target_node: Node) -> Node:
 	return target_node.get_node_or_null("NpcStateMachine")
 
 
-func _get_interacting_player() -> Node2D:
-	for body in get_overlapping_bodies():
-		if body.is_in_group("player"):
-			return body
+func _on_body_entered(body: Node2D) -> void:
+	if not body.is_in_group("player"):
+		return
+	if not nearby_players.has(body):
+		nearby_players.append(body)
+	if body.has_method("register_interaction_candidate"):
+		body.call("register_interaction_candidate", self)
 
-	return null
+
+func _on_body_exited(body: Node2D) -> void:
+	nearby_players.erase(body)
+	if body.has_method("unregister_interaction_candidate"):
+		body.call("unregister_interaction_candidate", self)
 
 
 func _format_stat_delta(target_npc: Node, stat_delta: Dictionary) -> String:

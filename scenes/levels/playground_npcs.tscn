@@ -143,7 +143,6 @@ location_id = &"square_npc"
 npc_scene_path = "res://scenes/creatures/social_npc.tscn"
 social_stats = {
 "favor": 55.0,
-"fear": 0.0,
 "hunger": 25.0,
 "love": 5.0
 }
@@ -155,7 +154,6 @@ location_id = &"square_npc2"
 npc_scene_path = "res://scenes/creatures/social_npc.tscn"
 social_stats = {
 "favor": 40.0,
-"fear": 15.0,
 "hunger": 35.0,
 "love": 0.0
 }
@@ -174,8 +172,7 @@ zone_color = Color(0.2, 0.8, 0.25, 0.35)
 position = Vector2(-1250, 360)
 target_npc_path = NodePath("../SquareNpc")
 stat_delta = {
-"favor": -12.0,
-"fear": 6.0
+"favor": -12.0
 }
 cooldown_seconds = 1.5
 zone_color = Color(0.95, 0.12, 0.1, 0.35)

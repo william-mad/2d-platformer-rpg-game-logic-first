@@ -70,6 +70,23 @@ class EmptyFoodSpot:
 		return 0.0
 
 
+class OverlayWorkSpot:
+	extends Node2D
+
+	func can_serve_npc_need(
+		_npc_node: Node2D,
+		_requested_state_name: StringName,
+		_requested_value_name: StringName = &""
+	) -> bool:
+		return true
+
+	func has_work_needed() -> bool:
+		return true
+
+	func get_routine_task_animation_name() -> StringName:
+		return &"meal_prep_1"
+
+
 class MealCompletionFoodSpot:
 	extends Node2D
 
@@ -148,6 +165,8 @@ func _initialize() -> void:
 		_test_scheduled_sleep_does_not_wake_when_need_is_sated()
 	elif OS.get_cmdline_user_args().has("--collapse-recovery-only"):
 		_test_collapse_recovers_in_place_until_sleep_need_seventy()
+	elif OS.get_cmdline_user_args().has("--work-animation-only"):
+		_test_work_animation_remains_primary_during_talk()
 	else:
 		_run_tests()
 	if _failures.is_empty():
@@ -174,6 +193,7 @@ func _run_tests() -> void:
 	_test_active_talk_allows_emergency_interrupt()
 	_test_emergency_cancels_both_talk_overlays_once()
 	_test_eat_lifecycle_is_not_restarted_by_talk()
+	_test_work_animation_remains_primary_during_talk()
 	_test_sated_eat_marks_meal_without_consuming()
 	_test_routine_task_exact_target_does_not_fall_back()
 	_test_duplicate_talk_request_does_not_restart_talk()
@@ -612,6 +632,68 @@ func _test_eat_lifecycle_is_not_restarted_by_talk() -> void:
 	_expect_primary_state(machine, "Eat", "ending Talk does not re-enter or replace Eat")
 	_expect_true(machine.current_state == eat_state, "the same entered Eat instance remains authoritative")
 	_expect_equal(eat_state.eat_timer, timer_before, "Talk end does not reset the Eat timer")
+	_free_setup(setup)
+
+
+func _test_work_animation_remains_primary_during_talk() -> void:
+	var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
+	var npc: CharacterBody2D = setup["npc"]
+	var machine: NpcStateMachine = setup["machine"]
+	var work_state := machine.get_state(&"Work") as NpcStateWork
+	var talk_state := machine.get_state(&"Talk") as NpcStateTalk
+	work_state.animation_name = &"work"
+	talk_state.animation_name = &"talk"
+
+	var sprite := Sprite2D.new()
+	sprite.name = "Sprite2D"
+	npc.add_child(sprite)
+	var player := AnimationPlayer.new()
+	player.name = "AnimationPlayer"
+	npc.add_child(player)
+	var library := AnimationLibrary.new()
+	for animation_name in [&"meal_prep_1", &"talk", &"work"]:
+		var animation := Animation.new()
+		animation.length = 1.0
+		animation.loop_mode = Animation.LOOP_LINEAR
+		library.add_animation(animation_name, animation)
+	player.add_animation_library(&"", library)
+	var controller := NpcAnimationController.new()
+	controller.name = "NpcAnimationController"
+	npc.add_child(controller)
+	machine.bind_npc(npc)
+
+	var started: Array[StringName] = []
+	player.animation_started.connect(func(animation_name: StringName) -> void:
+		started.append(animation_name)
+	)
+	var work_spot := OverlayWorkSpot.new()
+	work_spot.name = "OverlayWorkSpot"
+	work_spot.global_position = Vector2.ZERO
+	root.add_child(work_spot)
+	setup["spot"] = work_spot
+
+	_expect_true(machine.assign_work_target(work_spot, 60), "Work starts before Talk")
+	_expect_equal(player.current_animation, &"meal_prep_1", "Work selects meal-prep presentation")
+	started.clear()
+	_expect_true(machine.request_talk(setup["partner"], 60, false), "Talk overlays active Work")
+	_expect_primary_state(machine, "Work", "Work remains primary during Talk")
+	_expect_equal(
+		player.current_animation,
+		&"meal_prep_1",
+		"Talk keeps the primary Work presentation visible"
+	)
+	_expect_false(started.has(&"talk"), "Talk does not briefly take animation ownership from Work")
+	_expect_equal(
+		controller.get_latest_requested_animation(),
+		&"meal_prep_1",
+		"the centralized animation request remains the activity request"
+	)
+	machine.cancel_talk_with(setup["partner"], "test_complete")
+	_expect_equal(
+		player.current_animation,
+		&"meal_prep_1",
+		"ending Talk preserves the same Work presentation"
+	)
 	_free_setup(setup)
 
 

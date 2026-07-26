@@ -10,26 +10,31 @@ class_name NpcAirborneAnimationController extends NpcAnimationController
 @export var falling_requires_prior_ground_contact: bool = true
 
 var _airborne_override_active: bool = false
-var _resume_animation_name: StringName = &""
 var _rise_speed_reference: float = 1.0
 var _fall_speed_reference: float = 1.0
 var _previous_vertical_velocity: float = 0.0
 var _has_seen_ground: bool = false
 
 
-func _ready() -> void:
-	# The state machine owns movement at the default priority. Reading its result
-	# afterward keeps the visual overlay independent from every individual state.
-	process_physics_priority = 1
-	super()
+func bind_npc(bound_npc: Node2D) -> void:
+	_airborne_override_active = false
+	_previous_vertical_velocity = 0.0
+	_has_seen_ground = false
+	super(bound_npc)
 
 
-func _physics_process(_delta: float) -> void:
+func is_airborne_animation_active() -> bool:
+	return _airborne_override_active
+
+
+func _post_movement_animation_update(delta: float) -> void:
 	_resolve_nodes()
 	var body := npc as CharacterBody2D
 	if not airborne_animation_enabled or body == null or animation_player == null:
 		if _airborne_override_active:
 			_finish_airborne_override()
+		else:
+			super(delta)
 		return
 
 	var is_grounded := body.is_on_floor()
@@ -59,33 +64,12 @@ func _physics_process(_delta: float) -> void:
 		)
 	):
 		_begin_airborne_override(body.velocity.y)
+		return
+
+	super(delta)
 
 
-func request_animation(requested_name: StringName, required: bool = true) -> bool:
-	if not _airborne_override_active:
-		return super(requested_name, required)
-	if requested_name == &"":
-		return false
-
-	_resolve_nodes()
-	if animation_player == null:
-		if required:
-			_warn_missing_animation_player_once(requested_name)
-		return false
-
-	var resolved_name := resolve_animation_name(requested_name)
-	if resolved_name == &"":
-		if required:
-			_warn_missing_animation_once(requested_name)
-		return false
-	if resolved_name != airborne_animation_name:
-		# State changes are still accepted in the air; only their visual playback is
-		# deferred so landing resumes the animation belonging to the latest state.
-		_resume_animation_name = resolved_name
-	return true
-
-
-func is_airborne_animation_active() -> bool:
+func _visual_override_owns_playback() -> bool:
 	return _airborne_override_active
 
 
@@ -93,12 +77,8 @@ func _begin_airborne_override(vertical_velocity: float) -> void:
 	if animation_player == null or not animation_player.has_animation(airborne_animation_name):
 		return
 
-	var current_animation := animation_player.current_animation
-	if current_animation == &"":
-		current_animation = animation_player.assigned_animation
-	if current_animation != &"" and current_animation != airborne_animation_name:
-		_resume_animation_name = current_animation
-
+	_cancel_ground_locomotion_visual()
+	_reset_playback_speed()
 	_airborne_override_active = true
 	_previous_vertical_velocity = vertical_velocity
 	if vertical_velocity < -activation_velocity_threshold:
@@ -151,17 +131,16 @@ func _seek_airborne_pose(vertical_velocity: float) -> void:
 func _finish_airborne_override() -> void:
 	_airborne_override_active = false
 	_previous_vertical_velocity = 0.0
+	_reset_playback_speed()
 	if animation_player == null:
-		_resume_animation_name = &""
 		return
 
-	var resume_name := _resume_animation_name
-	_resume_animation_name = &""
-	if resume_name != &"" and animation_player.has_animation(resume_name):
-		animation_player.play(resume_name)
+	# Reevaluate the latest logical request. Locomotion samples landing speed and
+	# goes directly to Walk/Run; non-locomotion requests resume their own clip.
+	if _resume_latest_requested_visual(false):
 		return
 	var fallback_name := resolve_animation_name(grounded_fallback_animation_name)
 	if fallback_name != &"" and fallback_name != airborne_animation_name:
-		animation_player.play(fallback_name)
+		_play_resolved_animation(fallback_name)
 		return
 	animation_player.stop()

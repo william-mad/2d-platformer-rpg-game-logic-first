@@ -26,6 +26,7 @@ const CLAIM_SUPPRESSED_ACTIONS: Array[StringName] = [
 @onready var ledgedetec: RayCast2D = %ledgedetec
 @onready var player_inventory: PlayerInventoryComponent = get_node_or_null("PlayerInventory") as PlayerInventoryComponent
 @onready var player_equipment: PlayerEquipmentComponent = get_node_or_null("PlayerEquipment") as PlayerEquipmentComponent
+@onready var interaction_router: InteractionRouter = get_node_or_null("InteractionRouter") as InteractionRouter
 
 #endregion
 
@@ -34,10 +35,11 @@ const CLAIM_SUPPRESSED_ACTIONS: Array[StringName] = [
 @onready var rope: Rope = $rope
 @onready var rope_detector: Area2D = %RopeDetector
 @onready var rope_origin: Marker2D = %RopeOrigin
+@export_range(0.01, 1000.0, 0.01) var rope_weight: float = 1.0
 #endregion
 
 #region //export variables
-@export var move_speed : float = 700
+@export var move_speed : float = 520
 @export var knockback_force: Vector2 = Vector2(220, -160)
 @export var knockback_time: float = 0.15
 @export_group("Knockout")
@@ -107,8 +109,6 @@ var previous_state : PlayerState:
 var direction : Vector2 = Vector2.ZERO
 var gravity : float = 1500.0
 var gravity_multiplier : float = 1.0
-var nearby_attachables: Array[Node2D] = []
-var current_rope_target: Node2D = null
 var knockback_timer: float = 0.0
 var gameplay_control_claim_token: int = 0
 var gameplay_control_claim_owner: WeakRef
@@ -116,16 +116,18 @@ var gameplay_control_claim_reason: StringName = &""
 var gameplay_control_mode: StringName = &""
 var _gameplay_input_resume_frame: int = 0
 var _claim_suppressed_actions: Dictionary = {}
+var player_hud
 
 func _ready() -> void:
 	add_to_group(&"saveable")
+	player_hud = get_node_or_null("/root/PlayerHud")
 	var animation_callback := Callable(self, "_on_player_animation_started")
 	if not animation_player.animation_started.is_connected(animation_callback):
 		animation_player.animation_started.connect(animation_callback)
 	_sync_player_animation_visual(animation_player.current_animation)
-	rope_detector.body_entered.connect(_on_rope_detector_body_entered)
-	rope_detector.body_exited.connect(_on_rope_detector_body_exited)
-	PlayerHud.visible = true
+	rope.configure(self, rope_origin, rope_detector)
+	if player_hud != null:
+		player_hud.visible = true
 	hp = max_hp
 	knockout_amount = 0.0
 	knockout_active = false
@@ -139,14 +141,14 @@ func _ready() -> void:
 		player_equipment.bind_inventory(get_inventory())
 	_apply_pending_runtime_state()
 	_bind_gameplay_control_claim_notifications()
-	if PlayerHud.has_method("bind_player_inventory"):
-		PlayerHud.call("bind_player_inventory", get_inventory(), self)
+	if player_hud != null and player_hud.has_method("bind_player_inventory"):
+		player_hud.call("bind_player_inventory", get_inventory(), self)
 	pass
 
 
 func _exit_tree() -> void:
-	if PlayerHud.has_method("unbind_player_inventory"):
-		PlayerHud.call("unbind_player_inventory", get_inventory())
+	if player_hud != null and player_hud.has_method("unbind_player_inventory"):
+		player_hud.call("unbind_player_inventory", get_inventory())
 
 
 func get_save_id() -> String:
@@ -308,18 +310,20 @@ func sync_stats_to_hud() -> void:
 	hunger = clampf(hunger, 0.0, 100.0)
 	sleep_need = clampf(sleep_need, 0.0, 100.0)
 
-	PlayerHud.setup_hp(max_hp, hp)
-	PlayerHud.setup_mana(max_mana, mana_amount, mana_2_amount)
-	if PlayerHud.has_method("setup_knockout"):
-		PlayerHud.call(
+	if player_hud == null:
+		return
+	player_hud.setup_hp(max_hp, hp)
+	player_hud.setup_mana(max_mana, mana_amount, mana_2_amount)
+	if player_hud.has_method("setup_knockout"):
+		player_hud.call(
 			"setup_knockout",
 			max_knockout,
 			knockout_amount,
 			knockout_active,
 			is_downed
 		)
-	if PlayerHud.has_method("setup_needs"):
-		PlayerHud.call("setup_needs", 100.0, hunger, sleep_need)
+	if player_hud.has_method("setup_needs"):
+		player_hud.call("setup_needs", 100.0, hunger, sleep_need)
 
 
 func _collect_extra_save_values() -> Dictionary:
@@ -347,9 +351,12 @@ func _has_player_property(property_name: StringName) -> bool:
 	return false
 	
 func _unhandled_input( event: InputEvent) -> void:
-	if is_gameplay_control_claimed() or _gameplay_input_release_is_pending():
-		return
 	if _consume_claim_suppressed_action(event):
+		return
+	if interaction_router != null and interaction_router.route_input(event):
+		get_viewport().set_input_as_handled()
+		return
+	if is_gameplay_control_claimed() or _gameplay_input_release_is_pending():
 		return
 	if is_downed or is_movement_locked():
 		return
@@ -395,30 +402,49 @@ func _process(_delta: float) -> void:
 	
 func _physics_process(_delta: float) -> void:
 	velocity.y += gravity * _delta * gravity_multiplier
+	var velocity_before_state_update := velocity
 
 	if is_gameplay_control_claimed() or _gameplay_input_release_is_pending():
 		velocity.x = 0.0
 		if knockback_timer > 0.0:
 			knockback_timer = maxf(knockback_timer - _delta, 0.0)
-		move_and_slide()
+		_move_and_slide_with_rope(_delta)
 		return
 
 	if is_movement_locked():
 		velocity.x = 0.0
 		if knockback_timer > 0.0:
 			knockback_timer = maxf(knockback_timer - _delta, 0.0)
-		move_and_slide()
+		_move_and_slide_with_rope(_delta)
 		return
 
 	if knockback_timer > 0.0:
 		knockback_timer -= _delta
-		move_and_slide()
+		_move_and_slide_with_rope(_delta)
 		return
 
 	current_state.physics_update_before_move(_delta)
-	move_and_slide()
+	if (
+		is_zero_approx(direction.x)
+		and (
+			current_state is PlayerStateJump
+			or current_state is PlayerStateFall
+		)
+	):
+		velocity = rope.preserve_passive_swing_velocity(
+			self,
+			velocity,
+			velocity_before_state_update,
+			_delta
+		)
+	_move_and_slide_with_rope(_delta)
 	change_state(current_state.physics_update_after_move(_delta))
 	pass
+
+
+func _move_and_slide_with_rope(delta: float) -> void:
+	velocity = Rope.constrain_attached_velocity(self, velocity, delta)
+	move_and_slide()
 
 
 func initialize_states () -> void:
@@ -510,51 +536,8 @@ func _player_visual_is_hidden() -> bool:
 
 
 func toggle_rope() -> void:
-	if rope.active:
-		rope.detach()
-		current_rope_target = null
-		return
-
-	var target := get_closest_attachable()
-
-	if target == null:
+	if not rope.toggle_closest():
 		print("No rope target nearby.")
-		return
-
-	current_rope_target = target
-
-	var target_attach_point: Node2D = target
-
-	if target.has_method("get_rope_attach_point"):
-		target_attach_point = target.get_rope_attach_point()
-
-	rope.attach(
-		self,
-		current_rope_target,
-		rope_origin,
-		target_attach_point
-	)
-
-	print("Attached rope to: ", current_rope_target.name)
-
-func get_closest_attachable() -> Node2D:
-	var closest: Node2D = null
-	var closest_distance := INF
-
-	for body in nearby_attachables:
-		if body == null:
-			continue
-
-		if not is_instance_valid(body):
-			continue
-
-		var distance := global_position.distance_to(body.global_position)
-
-		if distance < closest_distance:
-			closest_distance = distance
-			closest = body
-
-	return closest
 
 
 func take_damage(
@@ -570,8 +553,11 @@ func take_damage(
 	var previous_hp := hp
 	hp = maxf(hp - amount, 0.0)
 	var damage_taken := previous_hp - hp
-	DamageEvents.emit_damage_dealt(damage_taken, damage_source, self)
-	PlayerHud.set_hp(hp)
+	var damage_events := get_node_or_null("/root/DamageEvents")
+	if damage_events != null and damage_events.has_method("emit_damage_dealt"):
+		damage_events.call("emit_damage_dealt", damage_taken, damage_source, self)
+	if player_hud != null:
+		player_hud.set_hp(hp)
 
 	if hp <= 0:
 		_defeat()
@@ -615,7 +601,8 @@ func heal(amount: float) -> void:
 	if dead or amount <= 0.0:
 		return
 	hp = minf(hp + amount, max_hp)
-	PlayerHud.set_hp(hp)
+	if player_hud != null:
+		player_hud.set_hp(hp)
 
 
 func restore_full_health() -> void:
@@ -703,8 +690,8 @@ func exit_downed_state() -> void:
 
 
 func sync_knockout_bar() -> void:
-	if PlayerHud.has_method("set_knockout"):
-		PlayerHud.call("set_knockout", knockout_amount, knockout_active, is_downed)
+	if player_hud != null and player_hud.has_method("set_knockout"):
+		player_hud.call("set_knockout", knockout_amount, knockout_active, is_downed)
 
 
 func update_player_needs(delta: float) -> void:
@@ -740,8 +727,8 @@ func apply_hunger_delta(delta: float) -> float:
 	var previous_value := hunger
 	hunger = clampf(hunger + delta, 0.0, 100.0)
 	var changed_by := hunger - previous_value
-	if PlayerHud.has_method("set_hunger"):
-		PlayerHud.call("set_hunger", hunger)
+	if player_hud != null and player_hud.has_method("set_hunger"):
+		player_hud.call("set_hunger", hunger)
 	if not is_zero_approx(changed_by):
 		hunger_changed.emit(hunger, changed_by)
 	return changed_by
@@ -750,8 +737,8 @@ func apply_hunger_delta(delta: float) -> float:
 func apply_sleep_need_delta(delta: float) -> float:
 	var previous_value := sleep_need
 	sleep_need = clampf(sleep_need + delta, 0.0, 100.0)
-	if PlayerHud.has_method("set_sleep_need"):
-		PlayerHud.call("set_sleep_need", sleep_need)
+	if player_hud != null and player_hud.has_method("set_sleep_need"):
+		player_hud.call("set_sleep_need", sleep_need)
 	return sleep_need - previous_value
 
 
@@ -816,6 +803,86 @@ func is_movement_locked() -> bool:
 			active_spot_action = &""
 
 	return movement_lock_source != null
+
+
+func register_interaction_candidate(candidate: Node) -> bool:
+	return interaction_router != null and interaction_router.register_candidate(candidate)
+
+
+func unregister_interaction_candidate(candidate: Node) -> void:
+	if interaction_router != null:
+		interaction_router.unregister_candidate(candidate)
+
+
+func refresh_interaction_candidate(candidate: Node = null) -> void:
+	if interaction_router != null:
+		interaction_router.notify_candidate_changed(candidate)
+
+
+func get_focused_interactable() -> Node:
+	return interaction_router.get_focused_interactable() if interaction_router != null else null
+
+
+func get_interaction_prompt() -> String:
+	return interaction_router.get_interaction_prompt() if interaction_router != null else ""
+
+
+func get_interaction_debug_snapshot() -> Dictionary:
+	return interaction_router.get_debug_snapshot() if interaction_router != null else {
+		"enabled": false,
+		"current_block_reason": &"interaction_router_missing",
+	}
+
+
+func is_interaction_action_pressed() -> bool:
+	return interaction_router != null and interaction_router.is_interaction_action_pressed()
+
+
+func consume_owned_interaction_input() -> bool:
+	var talk_interactor := get_node_or_null("NpcTalkInteractor")
+	if (
+		talk_interactor != null
+		and talk_interactor.has_method("consume_player_interaction_input")
+		and bool(talk_interactor.call("consume_player_interaction_input", self))
+	):
+		return true
+
+	var gameplay_flow := get_node_or_null("/root/GameplayFlow")
+	if gameplay_flow == null or not gameplay_flow.has_method("get_player_control_claim"):
+		return false
+	var claim: Dictionary = gameplay_flow.call("get_player_control_claim", self)
+	var owner_ref := claim.get("owner") as WeakRef
+	var claim_owner: Object = owner_ref.get_ref() if owner_ref != null else null
+	return (
+		claim_owner != null
+		and claim_owner.has_method("consume_player_interaction_input")
+		and bool(claim_owner.call("consume_player_interaction_input", self))
+	)
+
+
+func get_world_interaction_block_reason() -> StringName:
+	if is_gameplay_control_claimed():
+		return &"player_control_claimed"
+	if is_downed or (not states.is_empty() and current_state is PlayerStateDowned):
+		return &"player_downed"
+	if dead or _is_game_over_handling_active():
+		return &"player_dead_or_game_over"
+	if is_movement_locked():
+		return &"player_movement_locked"
+	if active_spot_action != &"" or active_spot != null:
+		return &"player_spot_action_active"
+	if _is_scene_transition_in_progress():
+		return &"scene_transition_in_progress"
+	var talk_interactor := get_node_or_null("NpcTalkInteractor")
+	if (
+		talk_interactor != null
+		and talk_interactor.has_method("is_world_interaction_ui_open")
+		and bool(talk_interactor.call("is_world_interaction_ui_open"))
+	):
+		return &"interaction_ui_open"
+	if not is_on_floor():
+		return &"player_not_grounded"
+	return &""
 
 
 func can_accept_player_control_claim(control_mode: StringName) -> Dictionary:
@@ -952,7 +1019,11 @@ func _consume_claim_suppressed_action(event: InputEvent) -> bool:
 
 func _is_scene_transition_in_progress() -> bool:
 	var scene_loader := get_node_or_null("/root/SceneLoader")
-	return scene_loader != null and bool(scene_loader.get("loading_in_progress"))
+	if scene_loader == null:
+		return false
+	if scene_loader.has_method("is_scene_transition_in_progress"):
+		return bool(scene_loader.call("is_scene_transition_in_progress"))
+	return bool(scene_loader.get("loading_in_progress"))
 
 
 func _is_game_over_handling_active() -> bool:
@@ -1010,7 +1081,8 @@ func update_mana_charge(delta: float) -> void:
 
 func charge_mana(amount: float) -> void:
 	mana_amount = minf(mana_amount + amount, mana_2_amount)
-	PlayerHud.set_mana(mana_amount)
+	if player_hud != null:
+		player_hud.set_mana(mana_amount)
 
 
 func update_mana_2_charge(delta: float) -> void:
@@ -1035,8 +1107,9 @@ func sync_mana_2_bar() -> void:
 	if mana_amount > mana_2_amount:
 		mana_amount = mana_2_amount
 
-	PlayerHud.set_mana_2(mana_2_amount)
-	PlayerHud.set_mana(mana_amount)
+	if player_hud != null:
+		player_hud.set_mana_2(mana_2_amount)
+		player_hud.set_mana(mana_amount)
 
 
 func spend_mana_2(amount: float) -> void:
@@ -1046,7 +1119,8 @@ func spend_mana_2(amount: float) -> void:
 
 func clear_mana_charge() -> void:
 	mana_amount = 0.0
-	PlayerHud.set_mana(mana_amount)
+	if player_hud != null:
+		player_hud.set_mana(mana_amount)
 
 
 func _fade_defeat_screen() -> void:
@@ -1140,24 +1214,3 @@ func force_flee_from(threat: Node2D, duration: float = 1.2, speed: float = 700.0
 	apply_facing_left(flee_direction < 0.0)
 	velocity.x = flee_direction * maxf(speed, 0.0)
 	knockback_timer = maxf(knockback_timer, maxf(duration, 0.0))
-
-
-func _on_rope_detector_body_entered(body: Node2D) -> void:
-	track_rope_attachable(body)
-
-
-func _on_rope_detector_body_exited(body: Node2D) -> void:
-	untrack_rope_attachable(body)
-
-
-func track_rope_attachable(attachable: Node2D) -> void:
-	if not attachable.is_in_group("rope_attachable"):
-		return
-
-	if not nearby_attachables.has(attachable):
-		nearby_attachables.append(attachable)
-
-
-func untrack_rope_attachable(attachable: Node2D) -> void:
-	if nearby_attachables.has(attachable):
-		nearby_attachables.erase(attachable)
