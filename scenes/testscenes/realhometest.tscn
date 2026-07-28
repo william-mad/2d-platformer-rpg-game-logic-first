@@ -15,8 +15,11 @@
 [ext_resource type="Texture2D" uid="uid://cln1vred4ex8i" path="res://images/backgrounds/layout house1.png" id="15_house_layout"]
 [ext_resource type="Script" uid="uid://dtgbx4hm4n2e2" path="res://scripts/testscenes/realhome_character_silhouettes.gd" id="16_character_silhouettes"]
 [ext_resource type="PackedScene" uid="uid://dcecq2euo3we1" path="res://scenes/things/interior_door.tscn" id="16_interior_door"]
+[ext_resource type="Script" uid="uid://fprytbgpdfb2" path="res://scripts/activities/interactive_activity_definition.gd" id="17_0rflt"]
 [ext_resource type="Resource" path="res://data/npc_routes/edges/realhometest_to_realtest1.tres" id="17_home_yard_route"]
 [ext_resource type="Resource" path="res://data/npc_routes/edges/realhometest_to_mom_bedroom.tres" id="18_home_bedroom_route"]
+[ext_resource type="Resource" uid="uid://gk33j2oopnkm" path="res://data/interactive_activities/mana_balance.tres" id="19_mana_balance"]
+[ext_resource type="Script" uid="uid://dv7yuq7ydxoyl" path="res://scripts/activities/interactive_activity_launch_options.gd" id="20_activity_launch_options"]
 
 [sub_resource type="Gradient" id="Gradient_second_floor_window_light"]
 offsets = PackedFloat32Array(0, 0.52, 0.76, 1)
@@ -834,6 +837,13 @@ height = 4096
 fill_from = Vector2(0, 0.5)
 fill_to = Vector2(1, 0.5)
 
+[sub_resource type="Resource" id="ActivityLaunchOptions_magic_training"]
+script = ExtResource("20_activity_launch_options")
+selection_policy = 1
+menu_title = "Magic Training"
+menu_prompt = "Choose what to train"
+confirm_text = "Z: Begin"
+
 [node name="RealHomeTest" type="Node2D" unique_id=1113784681]
 
 [node name="BlackSurroundings" type="Polygon2D" parent="." unique_id=154140447]
@@ -1081,7 +1091,7 @@ limit_right = 1024
 limit_bottom = 567
 
 [node name="OutsideDoor" parent="." unique_id=1318597514 instance=ExtResource("3_door")]
-position = Vector2(533, 366)
+position = Vector2(-20, 394)
 target_scene_path = "res://scenes/testscenes/realtest1.tscn"
 target_spawn_id = &"from_realhometest"
 route_edge = ExtResource("17_home_yard_route")
@@ -1095,7 +1105,7 @@ route_edge = ExtResource("18_home_bedroom_route")
 owner_ids = Array[StringName]([&"mom", &"player"])
 
 [node name="PlayerSpawnFromYard" type="Marker2D" parent="." unique_id=334133969]
-position = Vector2(534, 363)
+position = Vector2(-21, 370)
 script = ExtResource("9_player_spawn")
 spawn_id = &"from_realtest1"
 
@@ -1132,6 +1142,8 @@ visible = false
 position = Vector2(-301, 368)
 script = ExtResource("12_magic_lesson")
 world_definition = ExtResource("13_mom_magic_lesson")
+interactive_activity_definitions = Array[ExtResource("17_0rflt")]([ExtResource("19_mana_balance")])
+interactive_activity_launch_options = SubResource("ActivityLaunchOptions_magic_training")
 
 [node name="MomLessonPosition" type="Marker2D" parent="MomMagicLessonSpot" unique_id=1540572963]
 position = Vector2(-96, 0)

@@ -41,6 +41,7 @@ class_name NpcSpotDefinition extends Resource
 @export var meal_cycle_stage: StringName = &""
 @export var meal_cycle_food_spot_id: StringName = &""
 @export var meal_cycle_schedule: Array[Dictionary] = []
+@export var meal_cycle_recipe: ProcessingRecipeDefinition
 @export var meal_cycle_prep_owner_ids: Array[StringName] = []
 @export var meal_cycle_food_owner_ids: Array[StringName] = []
 @export var meal_cycle_cleanup_owner_ids: Array[StringName] = []
@@ -99,6 +100,31 @@ func get_validation_errors() -> Array[String]:
 					"active_time_windows[%d].%s must be between 0 and 24" % [
 						index, field_name,
 					]
+				)
+	if meal_cycle_recipe != null:
+		var catalog := ItemCatalog.new()
+		if not catalog.load_definitions():
+			errors.append(
+				"meal_cycle_recipe cannot be validated because the item catalog is invalid: %s"
+				% "; ".join(catalog.get_validation_errors())
+			)
+		else:
+			for recipe_error in meal_cycle_recipe.validate(catalog):
+				errors.append("meal_cycle_recipe: %s" % recipe_error)
+			var edible_output_found := false
+			for raw_item_id: Variant in meal_cycle_recipe.output_items:
+				var item_id := StringName(String(raw_item_id).strip_edges())
+				var raw_quantity: Variant = meal_cycle_recipe.output_items[raw_item_id]
+				if (
+					typeof(raw_quantity) == TYPE_INT
+					and int(raw_quantity) > 0
+					and catalog.get_food_value(item_id) > 0.0
+				):
+					edible_output_found = true
+					break
+			if not edible_output_found:
+				errors.append(
+					"meal_cycle_recipe must produce at least one edible output with positive hunger value"
 				)
 	return errors
 

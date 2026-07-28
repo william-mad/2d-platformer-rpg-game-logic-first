@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="InteractiveActivityDefinition" format=3 uid="uid://gk33j2oopnkm"]
+
+[ext_resource type="Script" uid="uid://fprytbgpdfb2" path="res://scripts/activities/interactive_activity_definition.gd" id="1_definition"]
+[ext_resource type="PackedScene" path="res://scenes/activities/mana_balance/mana_balance_module.tscn" id="2_module"]
+[ext_resource type="Script" uid="uid://dn4xgtki34eno" path="res://scripts/activities/interactive_activity_input_profile.gd" id="3_profile"]
+[ext_resource type="Script" uid="uid://dp7kee3wllmwb" path="res://scripts/activities/mana_balance/mana_balance_config.gd" id="4_config"]
+
+[sub_resource type="Resource" id="InputProfile_mana_balance"]
+script = ExtResource("3_profile")
+
+[sub_resource type="Resource" id="Config_mana_balance"]
+script = ExtResource("4_config")
+
+[resource]
+script = ExtResource("1_definition")
+id = &"mana_balance"
+display_name = "Mana Balance"
+description = "Steady a mana orb against a shifting magical current."
+module_scene = ExtResource("2_module")
+input_profile = SubResource("InputProfile_mana_balance")
+module_config = SubResource("Config_mana_balance")
+metadata = {
+"presentation_mount": "hud"
+}

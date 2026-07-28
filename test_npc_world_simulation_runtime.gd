@@ -86,6 +86,22 @@ class MockLiveEatSpot:
 		return accepts_eat
 
 
+class MockMealPlayer:
+	extends Node2D
+
+	var hunger: float = 50.0
+	var inventory := InventoryModel.new()
+
+	func _init() -> void:
+		add_to_group("player")
+
+	func can_eat() -> bool:
+		return hunger > 0.0
+
+	func get_inventory() -> InventoryModel:
+		return inventory
+
+
 class MockMagicLessonSpot:
 	extends Node2D
 
@@ -144,8 +160,14 @@ func _run_tests() -> void:
 		return
 
 	world_time.set("auto_advance", false)
+	_test_atomic_multi_item_transfer()
+	_test_no_ingredients_create_no_food(simulator, world_time)
 	_test_breakfast_stage_order(simulator, world_time)
-	_test_late_food_does_not_call_eaters(simulator, world_time)
+	_test_late_food_calls_eaters(simulator, world_time)
+	_test_completion_after_cleanup_does_not_reopen_meal(simulator, world_time)
+	_test_recipe_quantity_above_100_is_not_clamped(simulator, world_time)
+	_test_supply_and_reservation_safety(simulator, world_time)
+	_test_meal_save_load_and_legacy_migration(simulator, world_time)
 	_test_skipped_time_forces_cleanup(simulator, world_time)
 	_test_cleanup_owner_filter(simulator, world_time)
 	_test_cleanup_work_is_faster_than_prep(simulator, world_time)
@@ -173,24 +195,70 @@ func _reset_meal_cycle(simulator: Node, world_time: Node, total_hours: float) ->
 	return simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
 
 
+func _supply_meal_batches(simulator: Node, batch_count: int) -> InventoryModel:
+	var source := InventoryModel.new()
+	var add_result := source.add(&"raw_slime_meat", batch_count)
+	_expect_true(add_result.success, "meal test source ingredients can be created")
+	var result = simulator.call(
+		"supply_meal_cycle_recipe_batches",
+		PREP_SPOT_ID,
+		source,
+		batch_count
+	) as InventoryResult
+	_expect_true(result != null and result.success, "meal recipe batches can be supplied")
+	return source
+
+
+func _test_no_ingredients_create_no_food(simulator: Node, world_time: Node) -> void:
+	var state := _reset_meal_cycle(simulator, world_time, 6.0)
+	_expect_equal(state.get("stage", ""), STAGE_PREP, "06:00 requests preparation")
+	_expect_false(bool(state.get("work_call_active", true)), "prep waits without ingredients")
+	_expect_true(bool(state.get("waiting_for_ingredients", false)), "missing ingredients are explicit")
+	simulator.call("set_spot_value", PREP_SPOT_ID, 0.0)
+	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_equal(state.get("stage", ""), STAGE_PREP, "invalid completion remains preparation")
+	_expect_false(bool(state.get("food_available", true)), "invalid completion creates no free food")
+
+
 func _test_breakfast_stage_order(simulator: Node, world_time: Node) -> void:
 	var state := _reset_meal_cycle(simulator, world_time, 6.0)
 	_expect_equal(state.get("stage", ""), STAGE_PREP, "06:00 starts breakfast prep")
 	_expect_equal(state.get("meal", ""), "breakfast", "06:00 assigns breakfast")
-	_expect_true(bool(state.get("work_call_active", false)), "06:00 calls prep owners")
+	_expect_false(bool(state.get("work_call_active", true)), "06:00 waits for pantry stock")
 	_expect_equal(float(state.get("value", 0.0)), 100.0, "06:00 sets work to 100")
 
+	var source := _supply_meal_batches(simulator, 3)
+	_expect_equal(source.get_quantity(&"raw_slime_meat"), 0, "supplied ingredients leave source inventory")
+	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_true(bool(state.get("work_call_active", false)), "supply activates prep work")
+	_expect_equal(int(state.get("reserved_recipe_batches", 0)), 3, "three batches are reserved")
 	simulator.call("set_spot_value", PREP_SPOT_ID, 0.0)
 	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
 	_expect_equal(state.get("stage", ""), STAGE_FOOD, "prep completion switches to food")
 	_expect_true(bool(state.get("food_available", false)), "prep completion makes food available")
 	_expect_false(bool(state.get("meal_called", false)), "food ready does not call eaters early")
-	_expect_equal(float(state.get("food_value", 0.0)), 100.0, "prep completion fills the food limit")
-	_expect_equal(float(simulator.call("get_spot_value", FOOD_SPOT_ID, 0.0)), 100.0, "food flag is available")
+	_expect_false(bool(state.get("meal_window_open", true)), "food readiness does not open the social window")
+	_expect_approx(float(state.get("food_value", 0.0)), 90.0, 0.001, "three batches create 90 points")
+	_expect_approx(float(state.get("food_limit", 0.0)), 90.0, 0.001, "dynamic limit matches batch")
+	_expect_approx(float(simulator.call("get_spot_value", FOOD_SPOT_ID, 0.0)), 90.0, 0.001, "food mirror has 90 points")
+	var food_definition = simulator.call("get_spot_definition", FOOD_SPOT_ID)
+	_expect_false(
+		bool(simulator.call("_meal_cycle_definition_is_available", food_definition)),
+		"NPC food definition remains unavailable before the call"
+	)
+	var player := MockMealPlayer.new()
+	var spot := NpcWorkSpot.new()
+	spot.world_definition = simulator.call("get_spot_definition", PREP_SPOT_ID)
+	spot.eat_world_definition = food_definition
+	spot.call("_apply_meal_cycle_state", state)
+	_expect_true(bool(spot.call("_player_can_eat", player)), "player may eat physical food before call")
+	spot.free()
+	player.free()
 
 	world_time.call("set_total_hours", 7.0)
 	simulator.call("_process_meal_cycle_schedule_until_snapshot", world_time.call("get_snapshot"))
 	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_true(bool(state.get("meal_window_open", false)), "07:00 opens breakfast window")
 	_expect_true(bool(state.get("meal_called", false)), "07:00 calls breakfast food owners")
 	var owner_data = state.get("owner_meal_data", {})
 	_expect_true(owner_data is Dictionary and owner_data.has("mom"), "breakfast stores mom meal data")
@@ -205,6 +273,7 @@ func _test_breakfast_stage_order(simulator: Node, world_time: Node) -> void:
 	_expect_equal(state.get("meal", ""), "breakfast", "cleanup keeps breakfast as current meal")
 	_expect_equal(float(state.get("value", 0.0)), 100.0, "cleanup starts with 100 work")
 	_expect_false(bool(state.get("food_available", true)), "cleanup clears food availability")
+	_expect_false(bool(state.get("meal_window_open", true)), "cleanup closes the meal window")
 
 	simulator.call("set_spot_value", PREP_SPOT_ID, 0.0)
 	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
@@ -213,21 +282,199 @@ func _test_breakfast_stage_order(simulator: Node, world_time: Node) -> void:
 	_expect_false(bool(state.get("work_call_active", true)), "reset prep waits for next scheduled call")
 
 
-func _test_late_food_does_not_call_eaters(simulator: Node, world_time: Node) -> void:
+func _test_late_food_calls_eaters(simulator: Node, world_time: Node) -> void:
 	_reset_meal_cycle(simulator, world_time, 6.0)
+	_supply_meal_batches(simulator, 1)
+	var pending_state: Dictionary = simulator.spot_runtime_states[String(PREP_SPOT_ID)]
+	pending_state["pending_work_completion_total_hours"] = 7.5
+	simulator.spot_runtime_states[String(PREP_SPOT_ID)] = pending_state
 	world_time.call("set_total_hours", 7.0)
 	simulator.call("_process_meal_cycle_schedule_until_snapshot", world_time.call("get_snapshot"))
-	simulator.call("set_spot_value", PREP_SPOT_ID, 0.0)
-
-	world_time.call("set_total_hours", 7.5)
-	simulator.call("_process_meal_cycle_schedule_until_snapshot", world_time.call("get_snapshot"))
 	var state: Dictionary = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_true(bool(state.get("meal_window_open", false)), "call opens window while food is late")
+	_expect_false(bool(state.get("meal_called", true)), "NPCs are not called before food exists")
+	world_time.call("set_total_hours", 7.5)
+	simulator.call("_advance_meal_cycle_work_complete", PREP_SPOT_ID)
+
+	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
 	_expect_equal(state.get("stage", ""), STAGE_FOOD, "late prep completion still creates food")
-	_expect_false(bool(state.get("meal_called", true)), "food becoming ready after 07:00 is not called late")
+	_expect_true(bool(state.get("meal_window_open", false)), "late food keeps the existing window open")
+	_expect_true(bool(state.get("meal_called", false)), "late food immediately calls NPC eaters")
+
+
+func _test_completion_after_cleanup_does_not_reopen_meal(
+	simulator: Node,
+	world_time: Node
+) -> void:
+	_reset_meal_cycle(simulator, world_time, 6.0)
+	_supply_meal_batches(simulator, 1)
+	world_time.call("set_total_hours", 8.0)
+	simulator.call("_process_meal_cycle_schedule_until_snapshot", world_time.call("get_snapshot"))
+	simulator.call("_advance_meal_cycle_work_complete", PREP_SPOT_ID)
+	var state: Dictionary = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_false(bool(state.get("food_available", true)), "post-cleanup callback creates no food")
+	_expect_false(bool(state.get("meal_window_open", true)), "post-cleanup callback does not reopen window")
+	_expect_false(bool(state.get("meal_called", true)), "post-cleanup callback does not call NPCs")
+
+
+func _test_atomic_multi_item_transfer() -> void:
+	var source := InventoryModel.new()
+	var destination := InventoryModel.new()
+	source.add(&"ingredient_a", 2)
+	source.add(&"ingredient_b", 3)
+	source.reserve_items(&"equipped_b", {&"ingredient_b": 2})
+	var source_before := source.get_save_data()
+	var destination_before := destination.get_save_data()
+	var failed := InventoryTransactionService.transfer_items(
+		source,
+		destination,
+		{&"ingredient_a": 2, &"ingredient_b": 2}
+	)
+	_expect_false(failed.success, "multi-item transfer rejects unavailable reserved stock")
+	_expect_equal(source.get_save_data(), source_before, "failed transfer preserves source exactly")
+	_expect_equal(destination.get_save_data(), destination_before, "failed transfer preserves destination exactly")
+
+	var transferred := InventoryTransactionService.transfer_items(
+		source,
+		destination,
+		{&"ingredient_a": 2, &"ingredient_b": 1}
+	)
+	_expect_true(transferred.success, "valid multi-item transfer commits atomically")
+	_expect_equal(source.get_quantity(&"ingredient_a"), 0, "first transferred item leaves source")
+	_expect_equal(source.get_quantity(&"ingredient_b"), 2, "only unreserved second item transfers")
+	_expect_equal(destination.get_quantity(&"ingredient_a"), 2, "first item reaches destination")
+	_expect_equal(destination.get_quantity(&"ingredient_b"), 1, "second item reaches destination")
+
+
+func _test_recipe_quantity_above_100_is_not_clamped(
+	simulator: Node,
+	world_time: Node
+) -> void:
+	_reset_meal_cycle(simulator, world_time, 6.0)
+	_supply_meal_batches(simulator, 4)
+	world_time.call("set_total_hours", 6.5)
+	simulator.call("set_spot_value", PREP_SPOT_ID, 0.0)
+	var state: Dictionary = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_approx(float(state.get("meal_batch_total_points", 0.0)), 120.0, 0.001, "four batches total 120 points")
+	_expect_approx(float(state.get("meal_batch_remaining_points", 0.0)), 120.0, 0.001, "four batches retain 120 points")
+	_expect_approx(float(state.get("food_limit", 0.0)), 120.0, 0.001, "dynamic meal maximum exceeds legacy 100")
+	_expect_approx(float(simulator.call("get_spot_value", FOOD_SPOT_ID, 0.0)), 120.0, 0.001, "food mirror does not clamp 120 to 100")
+
+
+func _test_supply_and_reservation_safety(simulator: Node, world_time: Node) -> void:
+	var state := _reset_meal_cycle(simulator, world_time, 6.0)
+	var player := MockMealPlayer.new()
+	player.inventory.add(&"raw_slime_meat", 3)
+	player.inventory.reserve_items(&"equipped_food", {&"raw_slime_meat": 1})
+	var spot := NpcWorkSpot.new()
+	spot.world_definition = simulator.call("get_spot_definition", PREP_SPOT_ID)
+	spot.eat_world_definition = simulator.call("get_spot_definition", FOOD_SPOT_ID)
+	spot.call("_apply_meal_cycle_state", state)
+	spot.nearby_players.append(player)
+	_expect_equal(
+		spot.get_interaction_prompt(player),
+		"Supply Ingredients",
+		"waiting meal spot advertises ingredient supply"
+	)
+	spot.free()
+
+	var supply_result = simulator.call(
+		"supply_meal_cycle_recipe_batches",
+		PREP_SPOT_ID,
+		player.inventory,
+		2
+	) as InventoryResult
+	_expect_true(supply_result != null and supply_result.success, "available player batches supply successfully")
+	_expect_equal(player.inventory.get_quantity(&"raw_slime_meat"), 1, "reserved player item remains")
+	_expect_equal(player.inventory.get_reserved_quantity(&"raw_slime_meat"), 1, "equipped reservation is untouched")
+	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_true(bool(state.get("work_call_active", false)), "supply activates waiting preparation")
+	_expect_equal(int(state.get("reserved_recipe_batches", 0)), 2, "pantry reserves two recipe batches")
+
+	var pantry := InventoryModel.new()
+	var pantry_load := pantry.apply_save_data(state.get("ingredient_inventory", {}))
+	_expect_true(pantry_load.success, "persistent pantry uses InventoryModel save data")
+	var elsewhere := InventoryModel.new()
+	var steal_result := InventoryTransactionService.transfer_item(
+		pantry,
+		elsewhere,
+		&"raw_slime_meat",
+		1
+	)
+	_expect_false(steal_result.success, "reserved prep ingredients cannot transfer elsewhere")
+
+	world_time.call("set_total_hours", 8.0)
+	simulator.call("_process_meal_cycle_schedule_until_snapshot", world_time.call("get_snapshot"))
+	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	pantry = InventoryModel.new()
+	pantry_load = pantry.apply_save_data(state.get("ingredient_inventory", {}))
+	_expect_true(pantry_load.success, "cleanup keeps pantry serialization valid")
+	_expect_equal(pantry.get_quantity(&"raw_slime_meat"), 2, "cleanup preserves pantry ingredients")
+	_expect_equal(pantry.get_available_quantity(&"raw_slime_meat"), 2, "cleanup releases prep reservation")
+	_expect_equal(pantry.get_all_reservations().size(), 0, "cleanup leaves no stale reservation")
+	player.free()
+
+
+func _test_meal_save_load_and_legacy_migration(simulator: Node, world_time: Node) -> void:
+	_reset_meal_cycle(simulator, world_time, 6.0)
+	_supply_meal_batches(simulator, 2)
+	var saved: Dictionary = simulator.call("get_save_data")
+	simulator.call("apply_save_data", saved)
+	var state: Dictionary = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	var pantry := InventoryModel.new()
+	var pantry_load := pantry.apply_save_data(state.get("ingredient_inventory", {}))
+	_expect_true(pantry_load.success, "saved pantry restores")
+	_expect_equal(pantry.get_quantity(&"raw_slime_meat"), 2, "stored ingredients persist")
+	_expect_equal(pantry.get_all_reservations().size(), 1, "active prep reservation persists")
+	_expect_true(bool(state.get("work_call_active", false)), "valid restored reservation keeps prep active")
+
+	world_time.call("set_total_hours", 6.5)
+	simulator.call("set_spot_value", PREP_SPOT_ID, 0.0)
+	simulator.call("set_spot_value", FOOD_SPOT_ID, 50.0)
+	saved = simulator.call("get_save_data")
+	simulator.call("apply_save_data", saved)
+	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_approx(float(state.get("food_value", 0.0)), 50.0, 0.001, "remaining prepared food survives save/load")
+	_expect_approx(float(state.get("food_limit", 0.0)), 60.0, 0.001, "restored food keeps original batch total")
+
+	var legacy_states: Dictionary = (saved.get("spot_runtime_states", {}) as Dictionary).duplicate(true)
+	var legacy_controller: Dictionary = (legacy_states[String(PREP_SPOT_ID)] as Dictionary).duplicate(true)
+	for field_name in [
+		"meal_schema_version",
+		"ingredient_inventory",
+		"ingredient_reservation_id",
+		"reserved_recipe_batches",
+		"waiting_for_ingredients",
+		"meal_batch_total_points",
+		"meal_batch_remaining_points",
+		"meal_window_open",
+	]:
+		legacy_controller.erase(field_name)
+	legacy_controller["stage"] = STAGE_FOOD
+	legacy_controller["meal"] = "breakfast"
+	legacy_controller["food_available"] = true
+	legacy_controller["meal_called"] = true
+	legacy_controller["last_food_call_meal"] = "breakfast"
+	legacy_controller["work_call_active"] = false
+	legacy_controller["food_value"] = 42.0
+	legacy_controller["food_limit"] = 100.0
+	legacy_states[String(PREP_SPOT_ID)] = legacy_controller
+	var legacy_food: Dictionary = (legacy_states[String(FOOD_SPOT_ID)] as Dictionary).duplicate(true)
+	legacy_food["value"] = 42.0
+	legacy_food["maximum"] = 100.0
+	legacy_food["meal_cycle_food_active"] = true
+	legacy_states[String(FOOD_SPOT_ID)] = legacy_food
+	simulator.call("apply_save_data", {"spot_runtime_states": legacy_states})
+	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_equal(int(state.get("meal_schema_version", 0)), 1, "legacy state migrates schema")
+	_expect_true(state.get("ingredient_inventory", {}) is Dictionary, "legacy state gets empty pantry")
+	_expect_true(bool(state.get("meal_window_open", false)), "legacy call state derives open window")
+	_expect_approx(float(state.get("food_value", 0.0)), 42.0, 0.001, "legacy active food value is preserved")
 
 
 func _test_skipped_time_forces_cleanup(simulator: Node, world_time: Node) -> void:
 	_reset_meal_cycle(simulator, world_time, 6.0)
+	_supply_meal_batches(simulator, 1)
 	world_time.call("set_total_hours", 6.5)
 	simulator.call("set_spot_value", PREP_SPOT_ID, 0.0)
 	world_time.call("set_total_hours", 9.0)
@@ -259,6 +506,7 @@ func _test_cleanup_work_is_faster_than_prep(simulator: Node, world_time: Node) -
 		return
 
 	_reset_meal_cycle(simulator, world_time, 6.0)
+	_supply_meal_batches(simulator, 1)
 	simulator.call("_apply_meal_cycle_work_progress", prep_definition, 0.125, 6.125)
 	var state: Dictionary = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
 	_expect_approx(float(state.get("value", 0.0)), 75.0, 0.001, "prep keeps the base work rate")
@@ -281,6 +529,7 @@ func _test_cleanup_work_is_faster_than_prep(simulator: Node, world_time: Node) -
 
 func _test_sated_meal_owner_is_not_called_again(simulator: Node, world_time: Node) -> void:
 	_reset_meal_cycle(simulator, world_time, 6.0)
+	_supply_meal_batches(simulator, 3)
 	world_time.call("set_total_hours", 6.5)
 	simulator.call("set_spot_value", PREP_SPOT_ID, 0.0)
 	world_time.call("set_total_hours", 7.0)
@@ -323,7 +572,7 @@ func _test_sated_meal_owner_is_not_called_again(simulator: Node, world_time: Nod
 	_expect_true(offscreen_activity_finished, "offscreen eating finishes when hunger reaches zero")
 	_expect_approx(
 		float(simulator.call("get_spot_value", FOOD_SPOT_ID, 0.0)),
-		90.0,
+		80.0,
 		0.001,
 		"offscreen eating consumes only the hunger it sates"
 	)
@@ -345,6 +594,7 @@ func _test_sated_meal_owner_is_not_called_again(simulator: Node, world_time: Nod
 
 func _test_offscreen_eating_consumes_food_one_to_one(simulator: Node, world_time: Node) -> void:
 	_reset_meal_cycle(simulator, world_time, 6.0)
+	_supply_meal_batches(simulator, 1)
 	world_time.call("set_total_hours", 6.5)
 	simulator.call("set_spot_value", PREP_SPOT_ID, 0.0)
 	world_time.call("set_total_hours", 7.0)

@@ -213,10 +213,8 @@ func set_spot_value(spot_id: StringName, value: float, allow_cycle_transition: b
 		elif (
 			allow_cycle_transition
 			and state.has("meal_cycle_controller_id")
-			and previous_value > done_threshold
-			and next_value <= done_threshold
 		):
-			_deplete_meal_cycle_food(spot_id)
+			_apply_meal_cycle_food_value_changed(spot_id, next_value)
 		elif bool(state.get("meal_cycle_enabled", false)):
 			_notify_meal_cycle_state(spot_id)
 		else:
@@ -1986,6 +1984,19 @@ func get_meal_cycle_state(spot_id: StringName) -> Dictionary:
 	return NpcMealCycleRuntime.get_meal_cycle_state(self, spot_id)
 
 
+func supply_meal_cycle_recipe_batches(
+	controller_spot_id: StringName,
+	source_inventory: InventoryModel,
+	requested_batches: int
+) -> InventoryResult:
+	return NpcMealCycleRuntime.supply_meal_cycle_recipe_batches(
+		self,
+		controller_spot_id,
+		source_inventory,
+		requested_batches
+	)
+
+
 func mark_meal_owner_sated(
 	spot_id: StringName,
 	owner_id: StringName,
@@ -2089,6 +2100,17 @@ func _deplete_meal_cycle_food(food_spot_id: StringName) -> void:
 		_breadcrumb("npc_world:meal_cycle_food_deplete_skip", String(food_spot_id))
 		return
 	NpcMealCycleRuntime._deplete_meal_cycle_food(self, food_spot_id)
+
+
+func _apply_meal_cycle_food_value_changed(
+	food_spot_id: StringName,
+	remaining_points: float
+) -> void:
+	NpcMealCycleRuntime._apply_meal_cycle_food_value_changed(
+		self,
+		food_spot_id,
+		remaining_points
+	)
 
 
 func _apply_meal_cycle_work_progress(

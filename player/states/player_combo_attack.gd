@@ -52,7 +52,10 @@ func process(delta: float) -> PlayerState:
 	combo_requested = false
 
 	if player.is_on_floor():
-		if Input.is_action_pressed("crouch"):
+		if (
+			Input.is_action_pressed("crouch")
+			and not player.is_terrain_rope_length_control_active()
+		):
 			return crouch
 		if Input.is_action_pressed("jump"):
 			return jump

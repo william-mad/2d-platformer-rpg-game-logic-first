@@ -1,0 +1,16 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/activities/shared/controlled_orb.gd" id="1_orb"]
+
+[node name="ControlledOrb" type="CharacterBody2D"]
+collision_layer = 0
+collision_mask = 0
+script = ExtResource("1_orb")
+
+[node name="Glow" type="Polygon2D" parent="."]
+polygon = PackedVector2Array(15, 0, 12.99, 7.5, 7.5, 12.99, 0, 15, -7.5, 12.99, -12.99, 7.5, -15, 0, -12.99, -7.5, -7.5, -12.99, 0, -15, 7.5, -12.99, 12.99, -7.5)
+color = Color(0.25, 0.65, 1, 0.28)
+
+[node name="Core" type="Polygon2D" parent="."]
+polygon = PackedVector2Array(9, 0, 7.79, 4.5, 4.5, 7.79, 0, 9, -4.5, 7.79, -7.79, 4.5, -9, 0, -7.79, -4.5, -4.5, -7.79, 0, -9, 4.5, -7.79, 7.79, -4.5)
+color = Color(0.72, 0.92, 1, 1)

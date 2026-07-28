@@ -361,10 +361,11 @@ func _unhandled_input( event: InputEvent) -> void:
 	if is_downed or is_movement_locked():
 		return
 
+	if _consume_terrain_rope_length_input(event):
+		return
+	if _handle_rope_input(event):
+		return
 	change_state(current_state.handle_input( event ))
-	#REMOVEEEEE later for propper attack state.
-	if event.is_action_pressed("attach_rope"):
-		toggle_rope()
 
 	
 	pass
@@ -401,10 +402,15 @@ func _process(_delta: float) -> void:
 	
 	
 func _physics_process(_delta: float) -> void:
+	if rope != null and (dead or is_downed):
+		rope.cancel_pending_throw()
+	if rope != null and rope.is_throw_charging():
+		rope.set_throw_facing(_get_rope_facing_direction())
 	velocity.y += gravity * _delta * gravity_multiplier
 	var velocity_before_state_update := velocity
 
 	if is_gameplay_control_claimed() or _gameplay_input_release_is_pending():
+		rope.cancel_pending_throw()
 		velocity.x = 0.0
 		if knockback_timer > 0.0:
 			knockback_timer = maxf(knockback_timer - _delta, 0.0)
@@ -412,6 +418,7 @@ func _physics_process(_delta: float) -> void:
 		return
 
 	if is_movement_locked():
+		rope.cancel_pending_throw()
 		velocity.x = 0.0
 		if knockback_timer > 0.0:
 			knockback_timer = maxf(knockback_timer - _delta, 0.0)
@@ -419,22 +426,28 @@ func _physics_process(_delta: float) -> void:
 		return
 
 	if knockback_timer > 0.0:
+		rope.cancel_pending_throw()
 		knockback_timer -= _delta
 		_move_and_slide_with_rope(_delta)
 		return
 
+	if rope.has_terrain_anchor():
+		# Space keeps its jump behavior while reeling in; Down is reserved for payout.
+		rope.adjust_terrain_length(
+			Input.is_action_pressed("jump"),
+			Input.is_action_pressed("crouch"),
+			_delta
+		)
 	current_state.physics_update_before_move(_delta)
 	if (
-		is_zero_approx(direction.x)
-		and (
-			current_state is PlayerStateJump
-			or current_state is PlayerStateFall
-		)
+		current_state is PlayerStateJump
+		or current_state is PlayerStateFall
 	):
-		velocity = rope.preserve_passive_swing_velocity(
+		velocity = rope.apply_anchored_swing_control(
 			self,
 			velocity,
 			velocity_before_state_update,
+			direction.x,
 			_delta
 		)
 	_move_and_slide_with_rope(_delta)
@@ -540,6 +553,61 @@ func toggle_rope() -> void:
 		print("No rope target nearby.")
 
 
+func _handle_rope_input(event: InputEvent) -> bool:
+	if (
+		not event.is_action_pressed("attach_rope")
+		and not event.is_action_released("attach_rope")
+	):
+		return false
+	if event is InputEventKey and (event as InputEventKey).echo:
+		return true
+
+	if event.is_action_pressed("attach_rope"):
+		if rope.active:
+			rope.detach()
+		elif rope.has_pending_throw():
+			rope.cancel_pending_throw()
+		else:
+			rope.begin_throw_charge(_get_rope_facing_direction())
+		return true
+
+	if not rope.is_throw_charging():
+		return true
+	rope.set_throw_facing(_get_rope_facing_direction())
+	if rope.is_quick_throw_release():
+		rope.cancel_pending_throw()
+		toggle_rope()
+	else:
+		rope.release_throw_charge()
+	return true
+
+
+func _consume_terrain_rope_length_input(event: InputEvent) -> bool:
+	return (
+		rope != null
+		and rope.has_terrain_anchor()
+		and event.is_action_pressed("crouch")
+	)
+
+
+func is_terrain_rope_length_control_active() -> bool:
+	return rope != null and rope.has_terrain_anchor()
+
+
+func _get_rope_facing_direction() -> float:
+	return -1.0 if sprite_2d.flip_h else 1.0
+
+
+func prepare_for_external_activity(_reason: StringName) -> Dictionary:
+	rope.cancel_pending_throw()
+	if rope != null and rope.active:
+		rope.detach()
+	clear_mana_charge()
+	direction = Vector2.ZERO
+	velocity.x = 0.0
+	return {"accepted": true, "reason": ""}
+
+
 func take_damage(
 	amount: float,
 	damage_source_position: Vector2 = Vector2.ZERO,
@@ -577,6 +645,8 @@ func _defeat() -> void:
 		return
 
 	dead = true
+	if rope != null:
+		rope.cancel_pending_throw()
 	velocity = Vector2.ZERO
 	knockback_timer = 0.0
 	set_physics_process(false)
@@ -672,6 +742,8 @@ func enter_downed_state() -> void:
 		return
 
 	is_downed = true
+	if rope != null:
+		rope.cancel_pending_throw()
 	knockback_timer = 0.0
 	velocity.x = 0.0
 	var downed_state := $States.get_node_or_null("Downed") as PlayerState

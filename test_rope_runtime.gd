@@ -32,6 +32,10 @@ func _initialize() -> void:
 	_test_immovable_anchor_preserves_a_swing()
 	_test_grounded_tension_does_not_add_lift()
 	_test_passive_swing_settles_toward_the_anchor()
+	_test_active_swing_input_builds_momentum_with_leverage()
+	_test_tap_and_hold_throw_states()
+	_test_throw_arc_widens_with_charge()
+	await _test_charged_throw_attaches_and_adjusts_terrain_rope()
 	_test_drag_speed_scales_with_weight()
 	_test_elastic_give_is_smooth_and_never_moves_positions_directly()
 	_test_closest_target_uses_the_attachment_point()
@@ -249,7 +253,6 @@ func _test_passive_swing_settles_toward_the_anchor() -> void:
 	get_root().add_child(anchor)
 	_fixture_nodes.append(anchor)
 	var rope := _make_rope(actor, anchor, 4.0, 80.0)
-	rope.passive_swing_damping = 0.8
 	actor.position = Vector2(83.2, 62.4)
 
 	var starting_horizontal_offset := absf(actor.position.x)
@@ -294,6 +297,300 @@ func _test_passive_swing_settles_toward_the_anchor() -> void:
 		"the passive swing remains inside the configured give margin"
 	)
 	rope.detach()
+	_clear_fixture()
+
+
+func _test_active_swing_input_builds_momentum_with_leverage() -> void:
+	var actor := _make_body(Vector2(0.0, 100.0), 1.0)
+	var anchor := StaticBody2D.new()
+	anchor.position = Vector2.ZERO
+	get_root().add_child(anchor)
+	_fixture_nodes.append(anchor)
+	var rope := _make_rope(actor, anchor, 4.0, 80.0)
+	actor.position = Vector2(0.0, 104.0)
+
+	var assisted_velocity := rope.apply_anchored_swing_control(
+		actor,
+		Vector2(260.0, 0.0),
+		Vector2(400.0, 0.0),
+		1.0,
+		STEP
+	)
+	_expect(
+		assisted_velocity.x >= 400.0,
+		"same-direction swing input never overwrites momentum with a slower speed"
+	)
+
+	var starting_velocity := rope.apply_anchored_swing_control(
+		actor,
+		Vector2(260.0, 0.0),
+		Vector2.ZERO,
+		1.0,
+		STEP
+	)
+	_expect(
+		starting_velocity.x > 0.0 and starting_velocity.x < 260.0,
+		"swing input builds momentum through acceleration instead of instant speed"
+	)
+
+	actor.position = Vector2(73.54, 73.54)
+	var diagonal_tangent := Vector2(-1.0, 1.0).normalized()
+	var diagonal_before := -diagonal_tangent * 400.0
+	var diagonal_active := rope.apply_anchored_swing_control(
+		actor,
+		Vector2(260.0, diagonal_before.y),
+		diagonal_before,
+		1.0,
+		STEP
+	)
+	var diagonal_neutral := rope.apply_anchored_swing_control(
+		actor,
+		Vector2(0.0, diagonal_before.y),
+		diagonal_before,
+		0.0,
+		STEP
+	)
+	_expect(
+		absf(diagonal_active.dot(diagonal_tangent)) >= 400.0
+		and (
+			absf(diagonal_active.dot(diagonal_tangent))
+			> absf(diagonal_neutral.dot(diagonal_tangent))
+		),
+		"matching input adds momentum on the arc instead of slowing the swing"
+	)
+
+	actor.position = Vector2(104.0, 0.0)
+	var gravity_velocity := Vector2(0.0, 25.0)
+	var side_velocity := rope.apply_anchored_swing_control(
+		actor,
+		Vector2(260.0, 25.0),
+		gravity_velocity,
+		1.0,
+		STEP
+	)
+	var constrained_side_velocity := Rope.constrain_attached_velocity(
+		actor,
+		side_velocity,
+		STEP
+	)
+	_expect_close(
+		side_velocity.y,
+		gravity_velocity.y,
+		0.001,
+		"horizontal input has no tangential leverage at a horizontal rope angle"
+	)
+	_expect(
+		constrained_side_velocity.y > 0.0,
+		"gravity pulls a side-held player back down instead of allowing floating"
+	)
+	rope.detach()
+	_clear_fixture()
+
+	var movable_actor := _make_body(Vector2.ZERO, 1.0)
+	var movable_target := _make_body(Vector2(100.0, 0.0), 2.0)
+	var movable_rope := _make_rope(movable_actor, movable_target, 4.0, 80.0)
+	movable_target.position.x = 104.0
+	var normal_air_velocity := Vector2(260.0, 15.0)
+	var movable_result := movable_rope.apply_anchored_swing_control(
+		movable_actor,
+		normal_air_velocity,
+		Vector2(400.0, 15.0),
+		1.0,
+		STEP
+	)
+	_expect_vector_close(
+		movable_result,
+		normal_air_velocity,
+		0.001,
+		"anchored swing input never changes movable-object dragging controls"
+	)
+	movable_rope.detach()
+	_clear_fixture()
+
+
+func _test_tap_and_hold_throw_states() -> void:
+	var actor := _make_body(Vector2.ZERO, 1.0)
+	var nearby := _make_body(Vector2(40.0, 0.0), 2.0)
+	nearby.add_to_group(&"rope_attachable")
+	var rope := _make_unattached_rope(actor)
+	rope.track_attachable(nearby)
+
+	_expect(
+		rope.begin_throw_charge(1.0),
+		"an inactive rope starts a pending X gesture"
+	)
+	rope._physics_process(rope.quick_attach_seconds * 0.5)
+	_expect(
+		rope.is_quick_throw_release(),
+		"a short X hold remains the original quick attachment gesture"
+	)
+	rope.cancel_pending_throw()
+	_expect(
+		rope.toggle_closest() and rope.end_body == nearby,
+		"a quick release still attaches the closest nearby object"
+	)
+	rope.detach()
+
+	var nearby_position := nearby.position
+	var nearby_velocity := nearby.velocity
+	_expect(
+		rope.begin_throw_charge(1.0),
+		"a detached rope can begin a charged throw"
+	)
+	rope._physics_process(rope.quick_attach_seconds + 0.05)
+	_expect(
+		rope.is_throw_spinning() and not rope.active,
+		"holding X crosses into a visual-only spin without attaching"
+	)
+	_expect_vector_close(
+		nearby.position,
+		nearby_position,
+		0.0,
+		"the charge animation never moves a nearby object"
+	)
+	_expect_vector_close(
+		nearby.velocity,
+		nearby_velocity,
+		0.0,
+		"the charge animation never changes a nearby object's velocity"
+	)
+	rope.cancel_pending_throw()
+
+	_expect(rope.begin_throw_charge(1.0), "a missed terrain throw begins")
+	rope._physics_process(rope.full_charge_seconds)
+	_expect(
+		rope.release_throw_charge(),
+		"a charged release still animates when no terrain is in its path"
+	)
+	rope._physics_process(2.0)
+	_expect(
+		not rope.active and not rope.has_pending_throw(),
+		"a missed terrain throw returns to an inactive clean state"
+	)
+	_clear_fixture()
+
+
+func _test_throw_arc_widens_with_charge() -> void:
+	var short_arc := Rope.sample_ballistic_throw_arc(
+		Vector2.ZERO,
+		1.0,
+		260.0,
+		48.0,
+		900.0,
+		0.9,
+		600.0,
+		28
+	)
+	var full_arc := Rope.sample_ballistic_throw_arc(
+		Vector2.ZERO,
+		1.0,
+		930.0,
+		48.0,
+		900.0,
+		0.9,
+		600.0,
+		28
+	)
+	var short_reach := short_arc[short_arc.size() - 1].length()
+	var full_reach := full_arc[full_arc.size() - 1].length()
+	_expect(
+		full_reach > short_reach + 200.0,
+		"the displayed throw arc grows substantially with charge"
+	)
+	_expect(
+		full_reach <= 600.001,
+		"the charged throw preview never exceeds maximum rope length"
+	)
+
+
+func _test_charged_throw_attaches_and_adjusts_terrain_rope() -> void:
+	var actor := _make_body(Vector2.ZERO, 1.0)
+	var rope := _make_unattached_rope(actor)
+	rope.pay_out_speed = 180.0
+	_expect_close(
+		rope.reel_in_speed,
+		75.0,
+		0.001,
+		"terrain rope uses the slower default reel-in rate"
+	)
+
+	var movable_decoy := CharacterBody2D.new()
+	movable_decoy.position = Vector2(105.0, 0.0)
+	movable_decoy.collision_layer = 1
+	movable_decoy.collision_mask = 0
+	var decoy_shape := CollisionShape2D.new()
+	var decoy_rectangle := RectangleShape2D.new()
+	decoy_rectangle.size = Vector2(12.0, 800.0)
+	decoy_shape.shape = decoy_rectangle
+	movable_decoy.add_child(decoy_shape)
+	get_root().add_child(movable_decoy)
+	_fixture_nodes.append(movable_decoy)
+
+	var wall := StaticBody2D.new()
+	wall.position = Vector2(210.0, 0.0)
+	wall.collision_layer = 1
+	wall.collision_mask = 0
+	var wall_shape := CollisionShape2D.new()
+	var rectangle := RectangleShape2D.new()
+	rectangle.size = Vector2(20.0, 800.0)
+	wall_shape.shape = rectangle
+	wall.add_child(wall_shape)
+	get_root().add_child(wall)
+	_fixture_nodes.append(wall)
+	await physics_frame
+
+	_expect(rope.begin_throw_charge(1.0), "terrain throw begins")
+	rope._physics_process(rope.full_charge_seconds)
+	_expect(
+		rope.release_throw_charge(),
+		"a charged X release launches the visual endpoint"
+	)
+	rope._physics_process(2.0)
+	_expect(
+		rope.active and rope.has_terrain_anchor() and rope.end_body == wall,
+		"the first immovable terrain hit becomes the anchor, never a movable body"
+	)
+
+	var actor_position := actor.position
+	var wall_position := wall.position
+	var original_length := rope.get_rest_length()
+	rope.adjust_terrain_length(true, false, 0.25)
+	_expect_close(
+		rope.get_rest_length(),
+		maxf(rope.minimum_rope_length, original_length - 18.75),
+		0.001,
+		"Space-style pull shortens terrain rope at its configured rate"
+	)
+	rope.adjust_terrain_length(false, true, 0.25)
+	_expect_close(
+		rope.get_rest_length(),
+		minf(rope.max_length, maxf(
+			rope.minimum_rope_length,
+			original_length - 18.75
+		) + 45.0),
+		0.001,
+		"Down-style payout extends terrain rope at its configured rate"
+	)
+	_expect_vector_close(
+		actor.position,
+		actor_position,
+		0.0,
+		"length controls never snap the player position"
+	)
+	_expect_vector_close(
+		wall.position,
+		wall_position,
+		0.0,
+		"length controls never move terrain"
+	)
+
+	var anchor_point := rope.end_visual_point
+	rope.detach()
+	await process_frame
+	_expect(
+		not is_instance_valid(anchor_point),
+		"detaching removes the rope-owned terrain anchor"
+	)
 	_clear_fixture()
 
 
@@ -536,6 +833,23 @@ func _make_rope(
 	get_root().add_child(rope)
 	_fixture_nodes.append(rope)
 	_expect(rope.attach(start, end), "test rope attaches to valid endpoints")
+	return rope
+
+
+func _make_unattached_rope(actor: Node2D) -> Rope:
+	var rope := Rope.new()
+	var line := Line2D.new()
+	line.name = "Line2D"
+	rope.add_child(line)
+	var preview := Line2D.new()
+	preview.name = "ThrowPreview"
+	rope.add_child(preview)
+	var throw_end := Polygon2D.new()
+	throw_end.name = "ThrowEnd"
+	rope.add_child(throw_end)
+	get_root().add_child(rope)
+	_fixture_nodes.append(rope)
+	rope.configure(actor, actor, null)
 	return rope
 
 

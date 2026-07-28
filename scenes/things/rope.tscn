@@ -7,3 +7,14 @@ script = ExtResource("1_uj3le")
 
 [node name="Line2D" type="Line2D" parent="." unique_id=1230043011]
 width = 2.0
+
+[node name="ThrowPreview" type="Line2D" parent="."]
+visible = false
+modulate = Color(0.85, 0.92, 1, 0.65)
+width = 1.5
+joint_mode = 2
+
+[node name="ThrowEnd" type="Polygon2D" parent="."]
+visible = false
+polygon = PackedVector2Array(-5, 0, 0, -5, 5, 0, 0, 5)
+color = Color(0.82, 0.72, 0.48, 1)

@@ -8,6 +8,7 @@ const MEAL_OWNER_PREP := "prep"
 const MEAL_OWNER_FOOD := "food"
 const MEAL_OWNER_CLEANUP := "cleanup"
 const MEAL_CYCLE_EPSILON := 0.001
+const MEAL_SCHEMA_VERSION := 1
 
 
 static func get_meal_cycle_state(runtime, spot_id: StringName) -> Dictionary:
@@ -21,6 +22,79 @@ static func get_meal_cycle_state(runtime, spot_id: StringName) -> Dictionary:
 	return state_dictionary.duplicate(true)
 
 
+static func supply_meal_cycle_recipe_batches(
+	runtime,
+	controller_spot_id: StringName,
+	source_inventory: InventoryModel,
+	requested_batches: int
+) -> InventoryResult:
+	if source_inventory == null:
+		return InventoryResult.failed(
+			InventoryResult.Code.INVALID_SAVE_DATA,
+			"A source inventory is required."
+		)
+	if requested_batches <= 0:
+		return InventoryResult.failed(
+			InventoryResult.Code.INVALID_QUANTITY,
+			"Requested meal recipe batches must be positive.",
+			&"",
+			requested_batches
+		)
+	var controller := runtime.spot_definitions.get(controller_spot_id, null) as NpcSpotDefinition
+	if controller == null or not _definition_is_meal_cycle_controller(controller):
+		return InventoryResult.failed(
+			InventoryResult.Code.INVALID_SAVE_DATA,
+			"Meal-cycle controller '%s' was not found." % String(controller_spot_id)
+		)
+	var recipe := _get_valid_meal_cycle_recipe(runtime, controller)
+	if recipe == null:
+		return InventoryResult.failed(
+			InventoryResult.Code.INVALID_SAVE_DATA,
+			"Meal-cycle controller '%s' has no valid configured recipe."
+			% String(controller_spot_id)
+		)
+	var state := _get_meal_cycle_controller_state(runtime, controller_spot_id)
+	if state.is_empty():
+		return InventoryResult.failed(
+			InventoryResult.Code.INVALID_SAVE_DATA,
+			"Meal-cycle controller '%s' has no runtime state." % String(controller_spot_id)
+		)
+	if String(state.get("stage", "")) == MEAL_STAGE_FOOD:
+		return InventoryResult.failed(
+			InventoryResult.Code.INVALID_SAVE_DATA,
+			"Ingredients cannot be supplied while communal food is being served."
+		)
+
+	var requested_inputs := _get_recipe_inputs_for_batches(recipe, requested_batches)
+	if requested_inputs.is_empty():
+		return InventoryResult.failed(
+			InventoryResult.Code.INVALID_SAVE_DATA,
+			"The configured meal recipe has no valid inputs."
+		)
+	var ingredient_inventory := _load_meal_ingredient_inventory(runtime, controller, state)
+	var transfer_result := InventoryTransactionService.transfer_items(
+		source_inventory,
+		ingredient_inventory,
+		requested_inputs
+	)
+	if not transfer_result.success:
+		return transfer_result
+
+	state["ingredient_inventory"] = ingredient_inventory.get_save_data()
+	if (
+		String(state.get("stage", "")) == MEAL_STAGE_PREP_WORK
+		and bool(state.get("waiting_for_ingredients", false))
+	):
+		_attempt_activate_recipe_preparation(runtime, controller, state)
+	_set_meal_cycle_controller_state(runtime, controller, state)
+	return InventoryResult.succeeded(
+		"Supplied %d meal recipe batch%s." % [
+			requested_batches,
+			"" if requested_batches == 1 else "es",
+		]
+	)
+
+
 static func _initialize_meal_cycle_runtime_states(runtime) -> void:
 	var current_total_hours: float = runtime._get_current_total_hours()
 	for controller in _get_meal_cycle_controller_definitions(runtime):
@@ -31,10 +105,23 @@ static func _initialize_meal_cycle_runtime_states(runtime) -> void:
 
 		var lower := minf(controller.spot_value_minimum, controller.spot_value_maximum)
 		var upper := maxf(controller.spot_value_minimum, controller.spot_value_maximum)
+		var previous_schema_version := int(state.get("meal_schema_version", 0))
+		var previous_stage := _normalize_meal_cycle_stage(String(
+			state.get("stage", MEAL_STAGE_PREP_WORK)
+		))
+		var food_spot_id := _get_meal_cycle_food_spot_id(controller)
+		var existing_food_state = runtime.spot_runtime_states.get(String(food_spot_id), {})
+		var legacy_food_value := 0.0
+		var legacy_food_limit := 0.0
+		if existing_food_state is Dictionary:
+			legacy_food_value = float(existing_food_state.get("value", 0.0))
+			legacy_food_limit = float(existing_food_state.get("maximum", legacy_food_value))
+
 		state["kind"] = "meal_cycle"
 		state["meal_cycle_enabled"] = true
 		state["meal_cycle_id"] = String(controller.meal_cycle_id)
-		state["food_spot_id"] = String(_get_meal_cycle_food_spot_id(controller))
+		state["food_spot_id"] = String(food_spot_id)
+		state["meal_schema_version"] = MEAL_SCHEMA_VERSION
 		state["minimum"] = lower
 		state["maximum"] = upper
 		state["done_threshold"] = controller.spot_value_done_threshold
@@ -44,10 +131,19 @@ static func _initialize_meal_cycle_runtime_states(runtime) -> void:
 			lower,
 			upper
 		)
-		state["stage"] = _normalize_meal_cycle_stage(String(state.get("stage", MEAL_STAGE_PREP_WORK)))
+		state["stage"] = previous_stage
 		state["meal"] = String(state.get("meal", ""))
 		state["work_call_active"] = bool(state.get("work_call_active", false))
 		state["meal_called"] = bool(state.get("meal_called", false))
+		state["meal_window_open"] = bool(state.get(
+			"meal_window_open",
+			state.get("meal_called", false)
+		))
+		if (
+			bool(state["meal_window_open"])
+			and String(state.get("last_food_call_meal", "")).is_empty()
+		):
+			state["last_food_call_meal"] = String(state["meal"])
 		state["food_available"] = bool(state.get("food_available", false))
 		state["food_ready_total_hours"] = float(state.get("food_ready_total_hours", -1.0))
 		state["last_schedule_total_hours"] = float(state.get(
@@ -74,6 +170,69 @@ static func _initialize_meal_cycle_runtime_states(runtime) -> void:
 		if not (owner_meal_data is Dictionary):
 			owner_meal_data = {}
 		state["owner_meal_data"] = owner_meal_data
+
+		var ingredient_inventory := _load_meal_ingredient_inventory(runtime, controller, state)
+		state["ingredient_inventory"] = ingredient_inventory.get_save_data()
+		state["ingredient_reservation_id"] = String(state.get(
+			"ingredient_reservation_id",
+			_make_meal_ingredient_reservation_id(controller.spot_id)
+		))
+		state["reserved_recipe_batches"] = maxi(
+			int(state.get("reserved_recipe_batches", 0)),
+			0
+		)
+		state["waiting_for_ingredients"] = bool(state.get("waiting_for_ingredients", false))
+
+		var configured_recipe := _get_valid_meal_cycle_recipe(runtime, controller)
+		var batch_remaining := maxf(float(state.get("meal_batch_remaining_points", 0.0)), 0.0)
+		var batch_total := maxf(float(state.get("meal_batch_total_points", 0.0)), batch_remaining)
+		if previous_stage == MEAL_STAGE_FOOD and bool(state.get("food_available", false)):
+			if previous_schema_version <= 0 or batch_remaining <= 0.0:
+				batch_remaining = maxf(
+					float(state.get("food_value", legacy_food_value)),
+					legacy_food_value
+				)
+				batch_total = maxf(
+					float(state.get("food_limit", legacy_food_limit)),
+					batch_remaining
+				)
+		else:
+			batch_remaining = 0.0
+			batch_total = 0.0
+		state["meal_batch_remaining_points"] = batch_remaining
+		state["meal_batch_total_points"] = batch_total
+
+		if configured_recipe != null and previous_stage == MEAL_STAGE_PREP_WORK:
+			var reservation_is_valid := _recipe_preparation_reservation_is_valid(
+				ingredient_inventory,
+				configured_recipe,
+				StringName(String(state["ingredient_reservation_id"])),
+				int(state["reserved_recipe_batches"])
+			)
+			if reservation_is_valid:
+				state["work_call_active"] = true
+				state["waiting_for_ingredients"] = false
+			elif not String(state.get("meal", "")).is_empty():
+				_release_recipe_preparation_reservation(runtime, controller, state)
+				state["value"] = _get_meal_cycle_reset_work_value(controller)
+				state["work_call_active"] = false
+				state["waiting_for_ingredients"] = true
+				state.erase("pending_work_completion_total_hours")
+				_warn_meal_cycle_once(
+					runtime,
+					"legacy_prep_%s" % String(controller.spot_id),
+					(
+						"Meal cycle '%s' restored active preparation without a valid "
+						+ "ingredient reservation; it was reset to wait for ingredients."
+					) % String(controller.spot_id)
+				)
+		elif controller.meal_cycle_recipe == null:
+			state["waiting_for_ingredients"] = false
+			state["reserved_recipe_batches"] = 0
+		elif configured_recipe == null:
+			state["work_call_active"] = false
+			state["waiting_for_ingredients"] = true
+			state.erase("pending_work_completion_total_hours")
 
 		runtime.spot_runtime_states[state_key] = state
 		_sync_meal_cycle_food_state(runtime, controller, state)
@@ -233,18 +392,29 @@ static func _start_meal_cycle_prep(
 		return
 
 	CrashBreadcrumbs.mark("meal_cycle:prep", "%s %s" % [String(controller.spot_id), meal])
+	_release_recipe_preparation_reservation(runtime, controller, state)
 	state["stage"] = MEAL_STAGE_PREP_WORK
 	state["meal"] = meal
 	state["value"] = _get_meal_cycle_reset_work_value(controller)
-	state["work_call_active"] = true
+	state["meal_window_open"] = false
 	state["meal_called"] = false
 	state["food_available"] = false
+	state["meal_batch_total_points"] = 0.0
+	state["meal_batch_remaining_points"] = 0.0
 	state["food_ready_total_hours"] = -1.0
 	state["stage_started_total_hours"] = event_total_hours
 	state["cleanup_work_multiplier"] = controller.get_meal_cycle_work_multiplier_for_stage(
 		MEAL_STAGE_CLEANUP_WORK
 	)
 	state.erase("pending_work_completion_total_hours")
+	if controller.meal_cycle_recipe == null:
+		state["work_call_active"] = true
+		state["waiting_for_ingredients"] = false
+	else:
+		state["work_call_active"] = false
+		state["waiting_for_ingredients"] = true
+		_attempt_activate_recipe_preparation(runtime, controller, state)
+	_refresh_meal_call_state(runtime, controller, state)
 	_set_meal_cycle_controller_state(runtime, controller, state)
 
 
@@ -259,18 +429,12 @@ static func _call_meal_cycle_food(
 		return
 
 	CrashBreadcrumbs.mark("meal_cycle:call_food", "%s %s" % [String(controller.spot_id), meal])
-	var ready_total_hours := float(state.get("food_ready_total_hours", event_total_hours))
-	var can_call := (
-		String(state.get("stage", "")) == MEAL_STAGE_FOOD
-		and String(state.get("meal", "")) == meal
-		and bool(state.get("food_available", false))
-		and ready_total_hours <= event_total_hours + MEAL_CYCLE_EPSILON
-	)
-	state["meal_called"] = can_call
 	state["last_food_call_total_hours"] = event_total_hours
 	state["last_food_call_meal"] = meal
-	if can_call:
-		_record_meal_owner_call_flags(state, meal)
+	state["meal_call_instance_id"] = "%s@%.6f" % [meal, event_total_hours]
+	if String(state.get("meal", "")) == meal:
+		state["meal_window_open"] = true
+	_refresh_meal_call_state(runtime, controller, state)
 
 	_set_meal_cycle_controller_state(runtime, controller, state)
 
@@ -291,15 +455,19 @@ static func _start_meal_cycle_cleanup(
 		return
 
 	CrashBreadcrumbs.mark("meal_cycle:cleanup", "%s %s" % [String(controller.spot_id), meal])
+	_release_recipe_preparation_reservation(runtime, controller, state)
 	state["stage"] = MEAL_STAGE_CLEANUP_WORK
 	state["meal"] = meal
 	state["value"] = _get_meal_cycle_reset_work_value(controller)
 	state["work_call_active"] = true
-	state["meal_called"] = false
+	state["meal_window_open"] = false
 	state["food_available"] = false
+	state["meal_batch_total_points"] = 0.0
+	state["meal_batch_remaining_points"] = 0.0
 	state["food_ready_total_hours"] = -1.0
 	state["stage_started_total_hours"] = event_total_hours
 	state.erase("pending_work_completion_total_hours")
+	_refresh_meal_call_state(runtime, controller, state)
 	_set_meal_cycle_controller_state(runtime, controller, state)
 
 
@@ -320,13 +488,24 @@ static func _advance_meal_cycle_work_complete(runtime, controller_spot_id: Strin
 
 	var stage := String(state.get("stage", MEAL_STAGE_PREP_WORK))
 	if stage == MEAL_STAGE_PREP_WORK:
+		if controller.meal_cycle_recipe != null:
+			if not _complete_recipe_preparation(
+				runtime,
+				controller,
+				state,
+				completed_total_hours
+			):
+				_set_meal_cycle_controller_state(runtime, controller, state)
+			return
 		state["stage"] = MEAL_STAGE_FOOD
 		state["value"] = float(state.get("done_threshold", controller.spot_value_done_threshold))
 		state["work_call_active"] = false
 		state["food_available"] = true
-		state["meal_called"] = false
+		state["meal_batch_total_points"] = 0.0
+		state["meal_batch_remaining_points"] = 0.0
 		state["food_ready_total_hours"] = completed_total_hours
 		state["stage_started_total_hours"] = completed_total_hours
+		_refresh_meal_call_state(runtime, controller, state)
 		_set_meal_cycle_controller_state(runtime, controller, state)
 		return
 
@@ -335,10 +514,14 @@ static func _advance_meal_cycle_work_complete(runtime, controller_spot_id: Strin
 		state["meal"] = ""
 		state["value"] = _get_meal_cycle_reset_work_value(controller)
 		state["work_call_active"] = false
-		state["meal_called"] = false
+		state["waiting_for_ingredients"] = false
+		state["meal_window_open"] = false
 		state["food_available"] = false
+		state["meal_batch_total_points"] = 0.0
+		state["meal_batch_remaining_points"] = 0.0
 		state["food_ready_total_hours"] = -1.0
 		state["stage_started_total_hours"] = completed_total_hours
+		_refresh_meal_call_state(runtime, controller, state)
 		_set_meal_cycle_controller_state(runtime, controller, state)
 		return
 
@@ -357,6 +540,14 @@ static func _apply_meal_cycle_work_progress(
 
 	var previous_value := float(state.get("value", definition.spot_value_initial))
 	var stage := String(state.get("stage", MEAL_STAGE_PREP_WORK))
+	if (
+		stage == MEAL_STAGE_PREP_WORK
+		and definition.meal_cycle_recipe != null
+		and not _active_recipe_preparation_is_valid(runtime, definition, state)
+	):
+		_set_recipe_preparation_waiting(runtime, definition, state)
+		_set_meal_cycle_controller_state(runtime, definition, state)
+		return
 	var requested_delta := (
 		definition.spot_value_delta_per_game_hour
 		* game_hours
@@ -394,6 +585,29 @@ static func _set_meal_cycle_controller_state(
 	_notify_meal_cycle_state(runtime, controller.spot_id)
 
 
+static func _refresh_meal_call_state(
+	runtime,
+	controller: NpcSpotDefinition,
+	state: Dictionary
+) -> void:
+	var was_called := bool(state.get("meal_called", false))
+	var current_meal := String(state.get("meal", ""))
+	var should_call := (
+		String(state.get("stage", "")) == MEAL_STAGE_FOOD
+		and bool(state.get("food_available", false))
+		and bool(state.get("meal_window_open", false))
+		and not current_meal.is_empty()
+		and String(state.get("last_food_call_meal", "")) == current_meal
+	)
+	state["meal_called"] = should_call
+	if should_call and not was_called:
+		_record_meal_owner_call_flags(
+			state,
+			current_meal,
+			String(state.get("meal_call_instance_id", ""))
+		)
+
+
 static func _sync_meal_cycle_food_state(
 	runtime,
 	controller: NpcSpotDefinition,
@@ -417,36 +631,56 @@ static func _sync_meal_cycle_food_state(
 		upper = maxf(food_definition.spot_value_minimum, food_definition.spot_value_maximum)
 		done_threshold = food_definition.spot_value_done_threshold
 
-	var food_is_available := (
+	var food_is_available: bool = (
 		String(controller_state.get("stage", "")) == MEAL_STAGE_FOOD
 		and bool(controller_state.get("food_available", false))
 	)
-	var stage_started_total_hours := float(controller_state.get("stage_started_total_hours", -1.0))
-	var previous_stage_started_total_hours := float(food_state.get(
-		"meal_cycle_stage_started_total_hours",
-		-1.0
-	))
-	var previous_active := bool(food_state.get("meal_cycle_food_active", false))
-	var should_reset_food := (
-		food_is_available
-		and (
-			not previous_active
-			or not is_equal_approx(previous_stage_started_total_hours, stage_started_total_hours)
-		)
+	var stage_started_total_hours := float(
+		controller_state.get("stage_started_total_hours", -1.0)
 	)
 	var next_value := lower
+	var dynamic_upper := upper
+	if controller.meal_cycle_recipe != null:
+		dynamic_upper = maxf(
+			float(controller_state.get("meal_batch_total_points", 0.0)),
+			lower
+		)
+		next_value = clampf(
+			float(controller_state.get("meal_batch_remaining_points", 0.0)),
+			lower,
+			dynamic_upper
+		)
+	else:
+		var previous_stage_started_total_hours := float(food_state.get(
+			"meal_cycle_stage_started_total_hours",
+			-1.0
+		))
+		var previous_active := bool(food_state.get("meal_cycle_food_active", false))
+		var should_reset_food := (
+			food_is_available
+			and (
+				not previous_active
+				or not is_equal_approx(
+					previous_stage_started_total_hours,
+					stage_started_total_hours
+				)
+			)
+		)
+		if food_is_available:
+			if should_reset_food:
+				next_value = upper
+			else:
+				next_value = clampf(float(food_state.get("value", upper)), lower, upper)
 	if food_is_available:
-		if should_reset_food:
-			next_value = upper
-		else:
-			next_value = clampf(float(food_state.get("value", upper)), lower, upper)
 		food_is_available = next_value > done_threshold
+	if not food_is_available:
+		next_value = lower
 
 	food_state["kind"] = "food_available"
 	food_state["meal_cycle_controller_id"] = String(controller.spot_id)
 	food_state["meal_cycle_id"] = String(controller.meal_cycle_id)
 	food_state["minimum"] = lower
-	food_state["maximum"] = upper
+	food_state["maximum"] = dynamic_upper
 	food_state["done_threshold"] = done_threshold
 	food_state["daily_growth"] = 0.0
 	food_state["value"] = next_value
@@ -454,7 +688,10 @@ static func _sync_meal_cycle_food_state(
 	food_state["meal_cycle_stage_started_total_hours"] = stage_started_total_hours
 	controller_state["food_available"] = food_is_available
 	controller_state["food_value"] = next_value
-	controller_state["food_limit"] = upper
+	controller_state["food_limit"] = dynamic_upper
+	if controller.meal_cycle_recipe != null:
+		controller_state["meal_batch_remaining_points"] = next_value
+	_refresh_meal_call_state(runtime, controller, controller_state)
 	runtime.spot_runtime_states[String(controller.spot_id)] = controller_state
 	runtime.spot_runtime_states[food_key] = food_state
 	runtime._notify_live_spot_value(food_spot_id, float(food_state["value"]))
@@ -474,17 +711,49 @@ static func _deplete_meal_cycle_food(runtime, food_spot_id: StringName) -> void:
 	if String(state.get("stage", "")) != MEAL_STAGE_FOOD:
 		return
 
+	_release_recipe_preparation_reservation(runtime, controller, state)
 	state["stage"] = MEAL_STAGE_CLEANUP_WORK
 	state["value"] = _get_meal_cycle_reset_work_value(controller)
 	state["work_call_active"] = true
-	state["meal_called"] = false
+	state["meal_window_open"] = false
 	state["food_available"] = false
+	state["meal_batch_total_points"] = 0.0
+	state["meal_batch_remaining_points"] = 0.0
 	state["food_ready_total_hours"] = -1.0
 	state["stage_started_total_hours"] = runtime._get_current_total_hours()
 	state["cleanup_work_multiplier"] = controller.get_meal_cycle_work_multiplier_for_stage(
 		MEAL_STAGE_CLEANUP_WORK
 	)
 	state.erase("pending_work_completion_total_hours")
+	_refresh_meal_call_state(runtime, controller, state)
+	_set_meal_cycle_controller_state(runtime, controller, state)
+
+
+static func _apply_meal_cycle_food_value_changed(
+	runtime,
+	food_spot_id: StringName,
+	remaining_points: float
+) -> void:
+	var controller_id := _get_meal_cycle_controller_id_for_spot(runtime, food_spot_id)
+	if controller_id == &"":
+		return
+	var controller := runtime.spot_definitions.get(controller_id, null) as NpcSpotDefinition
+	if controller == null:
+		return
+	var state := _get_meal_cycle_controller_state(runtime, controller_id)
+	if state.is_empty() or String(state.get("stage", "")) != MEAL_STAGE_FOOD:
+		return
+	var food_definition := runtime.spot_definitions.get(food_spot_id, null) as NpcSpotDefinition
+	var done_threshold := (
+		food_definition.spot_value_done_threshold if food_definition != null else 0.0
+	)
+	state["meal_batch_remaining_points"] = maxf(remaining_points, 0.0)
+	state["food_value"] = maxf(remaining_points, 0.0)
+	state["food_available"] = remaining_points > done_threshold
+	_refresh_meal_call_state(runtime, controller, state)
+	if not bool(state["food_available"]):
+		_deplete_meal_cycle_food(runtime, food_spot_id)
+		return
 	_set_meal_cycle_controller_state(runtime, controller, state)
 
 
@@ -562,6 +831,7 @@ static func _meal_cycle_definition_is_available(runtime, definition: NpcSpotDefi
 		return (
 			String(state.get("stage", "")) == MEAL_STAGE_FOOD
 			and bool(state.get("food_available", false))
+			and bool(state.get("meal_window_open", false))
 			and bool(state.get("meal_called", false))
 			and food_value > definition.spot_value_done_threshold
 		)
@@ -597,12 +867,22 @@ static func _get_meal_cycle_state_with_food_value(
 	if food_definition != null:
 		fallback_limit = maxf(food_definition.spot_value_minimum, food_definition.spot_value_maximum)
 		done_threshold = food_definition.spot_value_done_threshold
-	var food_value := fallback_limit if bool(enriched_state.get("food_available", false)) else 0.0
+	var food_limit := maxf(float(
+		enriched_state.get("meal_batch_total_points", fallback_limit)
+	), 0.0)
+	if food_limit <= 0.0:
+		food_limit = fallback_limit
+	var food_value := (
+		float(enriched_state.get("meal_batch_remaining_points", food_limit))
+		if bool(enriched_state.get("food_available", false))
+		else 0.0
+	)
 	if food_state is Dictionary:
 		food_value = float(food_state.get("value", food_value))
+		food_limit = float(food_state.get("maximum", food_limit))
 
 	enriched_state["food_value"] = food_value
-	enriched_state["food_limit"] = fallback_limit
+	enriched_state["food_limit"] = food_limit
 	enriched_state["food_available"] = (
 		bool(enriched_state.get("food_available", false))
 		and food_value > done_threshold
@@ -659,7 +939,11 @@ static func _record_breakfast_owner_flags(state: Dictionary) -> void:
 	_record_meal_owner_call_flags(state, "breakfast")
 
 
-static func _record_meal_owner_call_flags(state: Dictionary, meal: String) -> void:
+static func _record_meal_owner_call_flags(
+	state: Dictionary,
+	meal: String,
+	call_instance_id: String = ""
+) -> void:
 	if meal.is_empty():
 		return
 
@@ -672,9 +956,16 @@ static func _record_meal_owner_call_flags(state: Dictionary, meal: String) -> vo
 		var meal_data = owner_data.get(owner_key, {})
 		if not (meal_data is Dictionary):
 			meal_data = {}
+		if (
+			not call_instance_id.is_empty()
+			and String(meal_data.get("meal_call_instance_id", "")) == call_instance_id
+		):
+			continue
 		meal_data[_get_has_had_meal_key(meal)] = false
 		meal_data[_get_needs_meal_key(meal)] = true
 		meal_data["called_for_meal"] = meal
+		if not call_instance_id.is_empty():
+			meal_data["meal_call_instance_id"] = call_instance_id
 		owner_data[owner_key] = meal_data
 
 	state["owner_meal_data"] = owner_data
@@ -725,6 +1016,324 @@ static func _get_has_had_meal_key(meal: String) -> String:
 
 static func _get_needs_meal_key(meal: String) -> String:
 	return "needs_%s" % meal.to_snake_case()
+
+
+static func _get_valid_meal_cycle_recipe(
+	runtime,
+	controller: NpcSpotDefinition
+) -> ProcessingRecipeDefinition:
+	if controller == null or controller.meal_cycle_recipe == null:
+		return null
+	var catalog := ItemCatalog.new()
+	if not catalog.load_definitions():
+		_warn_meal_cycle_once(
+			runtime,
+			"catalog_%s" % String(controller.spot_id),
+			"Meal cycle '%s' cannot use its recipe because the item catalog is invalid: %s"
+			% [
+				String(controller.spot_id),
+				"; ".join(catalog.get_validation_errors()),
+			]
+		)
+		return null
+	var errors := controller.meal_cycle_recipe.validate(catalog)
+	var edible_output_found := false
+	for raw_item_id: Variant in controller.meal_cycle_recipe.output_items:
+		var item_id := StringName(String(raw_item_id).strip_edges())
+		var raw_quantity: Variant = controller.meal_cycle_recipe.output_items[raw_item_id]
+		if (
+			typeof(raw_quantity) == TYPE_INT
+			and int(raw_quantity) > 0
+			and catalog.get_food_value(item_id) > 0.0
+		):
+			edible_output_found = true
+			break
+	if not edible_output_found:
+		errors.append("Recipe must produce edible output with a positive hunger value.")
+	if not errors.is_empty():
+		_warn_meal_cycle_once(
+			runtime,
+			"recipe_%s" % String(controller.spot_id),
+			"Meal cycle '%s' has an invalid recipe and was disabled: %s"
+			% [String(controller.spot_id), "; ".join(errors)]
+		)
+		return null
+	return controller.meal_cycle_recipe
+
+
+static func _load_meal_ingredient_inventory(
+	runtime,
+	controller: NpcSpotDefinition,
+	state: Dictionary
+) -> InventoryModel:
+	var inventory := InventoryModel.new()
+	var save_value = state.get("ingredient_inventory", InventoryModel.get_empty_save_data())
+	if not (save_value is Dictionary):
+		save_value = InventoryModel.get_empty_save_data()
+	var result := inventory.apply_save_data(save_value)
+	if result.success:
+		return inventory
+	_warn_meal_cycle_once(
+		runtime,
+		"pantry_%s" % String(controller.spot_id),
+		"Meal cycle '%s' had invalid ingredient inventory data; an empty pantry was restored: %s"
+		% [String(controller.spot_id), result.message]
+	)
+	inventory.apply_save_data(InventoryModel.get_empty_save_data())
+	return inventory
+
+
+static func _make_meal_ingredient_reservation_id(controller_spot_id: StringName) -> StringName:
+	return StringName("meal_cycle_prep:%s" % String(controller_spot_id))
+
+
+static func _get_recipe_inputs_for_batches(
+	recipe: ProcessingRecipeDefinition,
+	batch_count: int
+) -> Dictionary:
+	if recipe == null or batch_count <= 0:
+		return {}
+	var requested: Dictionary = {}
+	for raw_item_id: Variant in recipe.input_items:
+		var item_key := String(raw_item_id).strip_edges()
+		var raw_quantity: Variant = recipe.input_items[raw_item_id]
+		if item_key.is_empty() or typeof(raw_quantity) != TYPE_INT or int(raw_quantity) <= 0:
+			return {}
+		var per_batch := int(raw_quantity)
+		if batch_count > 9223372036854775807 / per_batch:
+			return {}
+		requested[item_key] = per_batch * batch_count
+	return requested
+
+
+static func _recipe_preparation_reservation_is_valid(
+	inventory: InventoryModel,
+	recipe: ProcessingRecipeDefinition,
+	reservation_id: StringName,
+	batch_count: int
+) -> bool:
+	if (
+		inventory == null
+		or recipe == null
+		or reservation_id == &""
+		or batch_count <= 0
+		or not inventory.has_reservation(reservation_id)
+	):
+		return false
+	var expected := _get_recipe_inputs_for_batches(recipe, batch_count)
+	if expected.is_empty():
+		return false
+	var actual := inventory.get_reservation(reservation_id)
+	if actual.size() != expected.size():
+		return false
+	for item_key: String in expected:
+		if int(actual.get(item_key, 0)) != int(expected[item_key]):
+			return false
+	return true
+
+
+static func _active_recipe_preparation_is_valid(
+	runtime,
+	controller: NpcSpotDefinition,
+	state: Dictionary
+) -> bool:
+	if not bool(state.get("work_call_active", false)):
+		return false
+	var recipe := _get_valid_meal_cycle_recipe(runtime, controller)
+	if recipe == null:
+		return false
+	var inventory := _load_meal_ingredient_inventory(runtime, controller, state)
+	return _recipe_preparation_reservation_is_valid(
+		inventory,
+		recipe,
+		StringName(String(state.get("ingredient_reservation_id", ""))),
+		int(state.get("reserved_recipe_batches", 0))
+	)
+
+
+static func _release_recipe_preparation_reservation(
+	runtime,
+	controller: NpcSpotDefinition,
+	state: Dictionary
+) -> void:
+	if controller == null or controller.meal_cycle_recipe == null:
+		state["reserved_recipe_batches"] = 0
+		return
+	var inventory := _load_meal_ingredient_inventory(runtime, controller, state)
+	var configured_id := _make_meal_ingredient_reservation_id(controller.spot_id)
+	var stored_id := StringName(String(state.get("ingredient_reservation_id", configured_id)))
+	for reservation_id: StringName in [stored_id, configured_id]:
+		if reservation_id != &"" and inventory.has_reservation(reservation_id):
+			inventory.release_reservation(reservation_id)
+	state["ingredient_inventory"] = inventory.get_save_data()
+	state["ingredient_reservation_id"] = String(configured_id)
+	state["reserved_recipe_batches"] = 0
+
+
+static func _attempt_activate_recipe_preparation(
+	runtime,
+	controller: NpcSpotDefinition,
+	state: Dictionary
+) -> bool:
+	if controller == null or controller.meal_cycle_recipe == null:
+		return false
+	var recipe := _get_valid_meal_cycle_recipe(runtime, controller)
+	if recipe == null:
+		state["work_call_active"] = false
+		state["waiting_for_ingredients"] = true
+		return false
+	var inventory := _load_meal_ingredient_inventory(runtime, controller, state)
+	var reservation_id := _make_meal_ingredient_reservation_id(controller.spot_id)
+	var stored_id := StringName(String(state.get("ingredient_reservation_id", reservation_id)))
+	if inventory.has_reservation(stored_id):
+		inventory.release_reservation(stored_id)
+	if stored_id != reservation_id and inventory.has_reservation(reservation_id):
+		inventory.release_reservation(reservation_id)
+	var processing_service := InventoryProcessingService.new()
+	var batch_count := processing_service.get_maximum_batches(inventory, recipe)
+	state["ingredient_reservation_id"] = String(reservation_id)
+	state["reserved_recipe_batches"] = 0
+	state["ingredient_inventory"] = inventory.get_save_data()
+	if batch_count <= 0:
+		state["work_call_active"] = false
+		state["waiting_for_ingredients"] = true
+		return false
+	var requested_inputs := _get_recipe_inputs_for_batches(recipe, batch_count)
+	var reserve_result := inventory.reserve_items(reservation_id, requested_inputs)
+	if not reserve_result.success:
+		_warn_meal_cycle_once(
+			runtime,
+			"reserve_%s" % String(controller.spot_id),
+			"Meal cycle '%s' could not reserve preparation ingredients: %s"
+			% [String(controller.spot_id), reserve_result.message]
+		)
+		state["work_call_active"] = false
+		state["waiting_for_ingredients"] = true
+		state["ingredient_inventory"] = inventory.get_save_data()
+		return false
+	state["ingredient_inventory"] = inventory.get_save_data()
+	state["reserved_recipe_batches"] = batch_count
+	state["work_call_active"] = true
+	state["waiting_for_ingredients"] = false
+	return true
+
+
+static func _set_recipe_preparation_waiting(
+	runtime,
+	controller: NpcSpotDefinition,
+	state: Dictionary
+) -> void:
+	_release_recipe_preparation_reservation(runtime, controller, state)
+	state["stage"] = MEAL_STAGE_PREP_WORK
+	state["value"] = _get_meal_cycle_reset_work_value(controller)
+	state["work_call_active"] = false
+	state["waiting_for_ingredients"] = true
+	state.erase("pending_work_completion_total_hours")
+
+
+static func _get_recipe_meal_points(
+	runtime,
+	controller: NpcSpotDefinition,
+	recipe: ProcessingRecipeDefinition,
+	batch_count: int
+) -> float:
+	if recipe == null or batch_count <= 0:
+		return 0.0
+	var catalog := ItemCatalog.new()
+	if not catalog.load_definitions():
+		return 0.0
+	var total_points := 0.0
+	for raw_item_id: Variant in recipe.output_items:
+		var item_id := StringName(String(raw_item_id).strip_edges())
+		var raw_quantity: Variant = recipe.output_items[raw_item_id]
+		if typeof(raw_quantity) != TYPE_INT or int(raw_quantity) <= 0:
+			continue
+		total_points += (
+			catalog.get_food_value(item_id)
+			* float(int(raw_quantity))
+			* float(batch_count)
+		)
+	if total_points <= 0.0:
+		_warn_meal_cycle_once(
+			runtime,
+			"points_%s" % String(controller.spot_id),
+			"Meal cycle '%s' recipe completion produced no edible meal points."
+			% String(controller.spot_id)
+		)
+	return total_points
+
+
+static func _complete_recipe_preparation(
+	runtime,
+	controller: NpcSpotDefinition,
+	state: Dictionary,
+	completed_total_hours: float
+) -> bool:
+	var recipe := _get_valid_meal_cycle_recipe(runtime, controller)
+	var inventory := _load_meal_ingredient_inventory(runtime, controller, state)
+	var reservation_id := StringName(String(state.get("ingredient_reservation_id", "")))
+	var batch_count := int(state.get("reserved_recipe_batches", 0))
+	if (
+		recipe == null
+		or not _recipe_preparation_reservation_is_valid(
+			inventory,
+			recipe,
+			reservation_id,
+			batch_count
+		)
+	):
+		_warn_meal_cycle_once(
+			runtime,
+			"complete_reservation_%s" % String(controller.spot_id),
+			(
+				"Meal cycle '%s' preparation completed without a valid ingredient "
+				+ "reservation; no food was created."
+			) % String(controller.spot_id)
+		)
+		_set_recipe_preparation_waiting(runtime, controller, state)
+		return false
+	var meal_points := _get_recipe_meal_points(
+		runtime,
+		controller,
+		recipe,
+		batch_count
+	)
+	if meal_points <= 0.0:
+		_set_recipe_preparation_waiting(runtime, controller, state)
+		return false
+	var consume_result := inventory.consume_reservation(reservation_id)
+	if not consume_result.success:
+		_warn_meal_cycle_once(
+			runtime,
+			"consume_%s" % String(controller.spot_id),
+			"Meal cycle '%s' could not consume its ingredient reservation: %s"
+			% [String(controller.spot_id), consume_result.message]
+		)
+		state["ingredient_inventory"] = inventory.get_save_data()
+		_set_recipe_preparation_waiting(runtime, controller, state)
+		return false
+
+	state["ingredient_inventory"] = inventory.get_save_data()
+	state["reserved_recipe_batches"] = 0
+	state["stage"] = MEAL_STAGE_FOOD
+	state["value"] = float(state.get("done_threshold", controller.spot_value_done_threshold))
+	state["work_call_active"] = false
+	state["waiting_for_ingredients"] = false
+	state["food_available"] = true
+	state["meal_batch_total_points"] = meal_points
+	state["meal_batch_remaining_points"] = meal_points
+	state["food_ready_total_hours"] = completed_total_hours
+	state["stage_started_total_hours"] = completed_total_hours
+	_refresh_meal_call_state(runtime, controller, state)
+	_set_meal_cycle_controller_state(runtime, controller, state)
+	return true
+
+
+static func _warn_meal_cycle_once(runtime, key: String, message: String) -> void:
+	if runtime != null and runtime.has_method("_warn_reservation_once"):
+		runtime.call("_warn_reservation_once", "meal_cycle:%s" % key, message)
+		return
+	push_warning(message)
 
 
 static func _get_meal_cycle_controller_definitions(runtime) -> Array[NpcSpotDefinition]:

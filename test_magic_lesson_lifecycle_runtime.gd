@@ -8,9 +8,13 @@ const TEST_SCENE_PATH := "res://magic_lesson_lifecycle_test.tscn"
 const LESSON_SCENE_PATH := "res://scenes/testscenes/realhometest.tscn"
 const CLASS_POSITION := Vector2(320.0, 144.0)
 const SAVED_ORIGIN_POSITION := Vector2(-640.0, -360.0)
+const MANA_BALANCE_DEFINITION := preload(
+	"res://data/interactive_activities/mana_balance.tres"
+)
 
 var _failures: Array[String] = []
 var _cancellation_count: int = 0
+var _interactive_claim_release_count: int = 0
 
 
 class TestMom:
@@ -33,12 +37,54 @@ class TestPlayer:
 
 	var begin_count: int = 0
 	var end_count: int = 0
+	var external_prepare_count: int = 0
+	var external_prepare_accepted: bool = true
+	var mutate_phase_during_prepare: String = ""
+	var phase_seen_during_prepare: String = ""
+	var last_prompt_id: StringName = &""
 
 	func begin_spot_action(_owner: Node, _action: StringName) -> void:
 		begin_count += 1
 
 	func end_spot_action(_owner: Node, _action: StringName, _completed: bool) -> void:
 		end_count += 1
+
+	func can_accept_player_control_claim(control_mode: StringName) -> Dictionary:
+		if control_mode != &"ui_only":
+			return {"accepted": false, "reason": "unknown_control_mode"}
+		return {"accepted": true, "reason": ""}
+
+	func prepare_for_external_activity(_reason: StringName) -> Dictionary:
+		external_prepare_count += 1
+		var locations := get_node_or_null("/root/NpcLocations")
+		if locations != null:
+			var record: Dictionary = locations.call("get_record_snapshot", TEST_NPC_ID)
+			var activity = record.get("activity", {})
+			if activity is Dictionary:
+				phase_seen_during_prepare = String(activity.get("lesson_phase", ""))
+				if not mutate_phase_during_prepare.is_empty():
+					var changed_record := record.duplicate(true)
+					var changed_activity: Dictionary = activity.duplicate(true)
+					changed_activity["lesson_phase"] = mutate_phase_during_prepare
+					changed_record["activity"] = changed_activity
+					locations.npc_records[TEST_NPC_ID] = changed_record
+		return {
+			"accepted": external_prepare_accepted,
+			"reason": "" if external_prepare_accepted else "test_player_prepare_rejected",
+		}
+
+	func show_npc_prompt(
+		_mom: Node2D,
+		prompt_id: StringName,
+		_title: String,
+		_options: PackedStringArray,
+		_callback_owner: Object,
+		_accept_method: StringName,
+		_decline_method: StringName,
+		_timeout_seconds: float
+	) -> bool:
+		last_prompt_id = prompt_id
+		return true
 
 
 class TestRemoteInvitation:
@@ -65,7 +111,8 @@ func _initialize() -> void:
 	await process_frame
 	var locations := root.get_node_or_null("NpcLocations")
 	var simulator := root.get_node_or_null("NpcWorldSimulation")
-	if locations == null or simulator == null:
+	var gameplay_flow := root.get_node_or_null("GameplayFlow")
+	if locations == null or simulator == null or gameplay_flow == null:
 		push_error("Magic lesson lifecycle test requires NPC autoloads.")
 		quit(1)
 		return
@@ -97,6 +144,10 @@ func _initialize() -> void:
 	player.name = "LessonPlayer"
 	player.add_to_group("player")
 	test_scene.add_child(player)
+	var player_claim_callback := Callable(
+		self, "_on_interactive_player_claim_changed"
+	).bind(player)
+	gameplay_flow.player_control_claim_changed.connect(player_claim_callback)
 	var lesson_spot := MagicLessonSpot.new()
 	lesson_spot.name = "LessonSpot"
 	lesson_spot.spot_id = TEST_SPOT_ID
@@ -109,6 +160,7 @@ func _initialize() -> void:
 
 	simulator.spot_reservations.clear()
 	simulator.call("_sync_spot_claim_count_cache")
+	simulator.call("set_spot_value", TEST_SPOT_ID, 1.0, false)
 	var claim: Dictionary = simulator.call(
 		"try_claim_spot",
 		StringName(TEST_NPC_ID),
@@ -441,6 +493,356 @@ func _initialize() -> void:
 		"rejected transfer has no activity side effects"
 	)
 
+	var mana_definition := MANA_BALANCE_DEFINITION as InteractiveActivityDefinition
+	_expect(
+		mana_definition != null
+		and mana_definition.is_valid_definition()
+		and mana_definition.module_config is ManaBalanceConfig,
+		"Mana Balance definition is valid and carries typed module configuration"
+	)
+	_expect(
+		_real_home_has_mana_balance_assignment(),
+		"real Mom magic lesson scene assigns the Mana Balance definition"
+	)
+	lesson_spot.interactive_activity_definitions = [mana_definition]
+	lesson_spot.interactive_activity_launch_options = _make_magic_training_launch_options()
+
+	var prepare_failure_session := "interactive-prepare-failure"
+	_install_lesson_session(
+		locations,
+		simulator,
+		local_machine,
+		lesson_spot,
+		activity,
+		prepare_failure_session,
+		"handoff"
+	)
+	player.external_prepare_accepted = false
+	var prepare_failure := lesson_spot.start_lesson(
+		local_mom, player, prepare_failure_session
+	)
+	_expect(
+		not bool(prepare_failure.get("accepted", false)),
+		"failed interactive runner preparation rejects lesson startup"
+	)
+	var prepare_failure_record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	_expect(
+		String((prepare_failure_record.get("activity", {}) as Dictionary).get(
+			"lesson_phase", ""
+		)) == "handoff",
+		"failed runner preparation does not persist running"
+	)
+	_expect(
+		not gameplay_flow.is_player_control_claimed(player)
+		and lesson_spot.get_interactive_activity_runner().get_player_claim_token() == 0,
+		"failed runner preparation releases its partial player claim"
+	)
+	player.external_prepare_accepted = true
+
+	var transition_failure_session := "interactive-transition-failure"
+	_install_lesson_session(
+		locations,
+		simulator,
+		local_machine,
+		lesson_spot,
+		activity,
+		transition_failure_session,
+		"handoff"
+	)
+	player.mutate_phase_during_prepare = "invalid_after_prepare"
+	var transition_failure := lesson_spot.start_lesson(
+		local_mom, player, transition_failure_session
+	)
+	_expect(
+		not bool(transition_failure.get("accepted", false)),
+		"persistent transition rejection aborts interactive startup"
+	)
+	var transition_failure_record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	_expect(
+		String((transition_failure_record.get("activity", {}) as Dictionary).get(
+			"lesson_phase", ""
+		)) == "invalid_after_prepare",
+		"runner preparation occurs before the attempted persistent running transition"
+	)
+	_expect(
+		not gameplay_flow.is_player_control_claimed(player)
+		and lesson_spot.get_interactive_activity_runner().get_presentation_host() == null,
+		"failed persistent transition cleans the prepared runner and visible host"
+	)
+	player.mutate_phase_during_prepare = ""
+
+	var interactive_completion_session := "interactive-lesson-completion"
+	_install_lesson_session(
+		locations,
+		simulator,
+		local_machine,
+		lesson_spot,
+		activity,
+		interactive_completion_session,
+		"handoff"
+	)
+	player.phase_seen_during_prepare = ""
+	var begin_count_before_interactive := player.begin_count
+	var interactive_start := lesson_spot.start_lesson(
+		local_mom, player, interactive_completion_session
+	)
+	_expect(bool(interactive_start.get("accepted", false)), "interactive lesson starts")
+	_expect(
+		player.phase_seen_during_prepare == "handoff",
+		"interactive runner prepares before persistent phase becomes running"
+	)
+	_expect(
+		player.begin_count == begin_count_before_interactive,
+		"interactive startup does not begin the legacy player spot action"
+	)
+	var interactive_runner := lesson_spot.get_interactive_activity_runner()
+	var interactive_host := interactive_runner.get_presentation_host()
+	_expect(
+		interactive_runner.is_active()
+		and interactive_runner.get_player_claim_token() != 0,
+		"interactive lesson owns a live ui-only runner claim"
+	)
+	_expect(
+		not gameplay_flow.is_world_progression_locked(),
+		"interactive lesson does not lock WorldTime progression"
+	)
+	_expect(
+		interactive_host != null
+		and interactive_host.get_parent() == test_scene
+		and not lesson_spot.is_ancestor_of(interactive_host),
+		"interactive lesson host uses the visible scene root rather than the lesson spot"
+	)
+	_expect(
+		interactive_host.is_selecting()
+		and interactive_host.get_active_module() == null
+		and interactive_host.get_launch_options().selection_policy
+			== InteractiveActivityLaunchOptions.SelectionPolicy.ALWAYS_SHOW,
+		"Mom's accepted lesson opens ALWAYS_SHOW selection before Mana Balance"
+	)
+	_expect(
+		String(interactive_host.title_label.text) == "Magic Training"
+		and String(interactive_host.options_label.text).contains("Choose what to train")
+		and String(interactive_host.options_label.text).contains("> Mana Balance")
+		and String(interactive_host.help_label.text) == "Z: Begin",
+		"training menu clearly distinguishes selection from invitation consent"
+	)
+	var selection_progress_before := lesson_spot.get_lesson_progress()
+	lesson_spot._process(0.05)
+	_expect(
+		lesson_spot.get_lesson_state() == &"running"
+		and lesson_spot.get_lesson_progress() > selection_progress_before,
+		"selection time counts as authoritative class progress"
+	)
+	var lesson_activity_input := interactive_runner.get_input_source()
+	lesson_activity_input._input(_action_event(&"attack", true))
+	interactive_host._process(0.0)
+	_expect(
+		interactive_host.get_active_module() is ManaBalanceModule
+		and interactive_host.get_active_module().is_running()
+		and not interactive_host.is_selecting(),
+		"Z confirmation starts Mana Balance exactly once"
+	)
+	var selected_mana_module := interactive_host.get_active_module()
+	lesson_activity_input.clear_one_frame_states()
+	lesson_activity_input._input(_action_event(&"attack", true))
+	interactive_host._process(0.0)
+	_expect(
+		interactive_host.get_active_module() == selected_mana_module,
+		"repeated lesson confirmation cannot duplicate Mana Balance"
+	)
+	lesson_activity_input._input(_action_event(&"attack", false))
+	interactive_host.get_active_module().publish_result({
+		"score": 9.0,
+		"details": {"lesson_mana_balance_update": true},
+	})
+	_expect(
+		lesson_spot.complete_lesson(interactive_completion_session),
+		"interactive lesson completion succeeds"
+	)
+	var merged_result := lesson_spot.get_last_lesson_result()
+	var merged_activity: Dictionary = merged_result.get("interactive_activity", {})
+	_expect(
+		String(merged_activity.get("activity_id", "")) == "mana_balance"
+		and String(merged_activity.get("session_id", "")) == interactive_completion_session
+		and String(merged_activity.get("status", "")) == "completed",
+		"lesson completion collects the standardized Mana Balance result"
+	)
+	_expect(
+		not gameplay_flow.is_player_control_claimed(player),
+		"interactive lesson completion releases its local player claim"
+	)
+	_expect(
+		is_instance_valid(local_mom)
+		and local_mom.get_parent() == test_scene
+		and local_mom.position.is_equal_approx(CLASS_POSITION),
+		"Mom remains valid in the lesson scene after interactive completion"
+	)
+
+	var interactive_cancel_session := "interactive-lesson-cancel"
+	_install_lesson_session(
+		locations,
+		simulator,
+		local_machine,
+		lesson_spot,
+		activity,
+		interactive_cancel_session,
+		"handoff"
+	)
+	var cancellation_releases_before := _interactive_claim_release_count
+	var interactive_cancel_start := lesson_spot.start_lesson(
+		local_mom, player, interactive_cancel_session
+	)
+	_expect(bool(interactive_cancel_start.get("accepted", false)), "interactive cancellation fixture starts")
+	_expect(
+		lesson_spot.cancel_lesson(&"interactive_test_cancel", interactive_cancel_session),
+		"interactive lesson cancellation succeeds"
+	)
+	_expect(
+		_interactive_claim_release_count == cancellation_releases_before + 1,
+		"interactive cancellation releases its runner claim exactly once"
+	)
+	lesson_spot.cancel_lesson(&"interactive_repeat_cancel", interactive_cancel_session)
+	_expect(
+		_interactive_claim_release_count == cancellation_releases_before + 1,
+		"repeated interactive cancellation is harmless"
+	)
+
+	var same_scene_spot_id := &"magic_lesson_same_scene_test_spot"
+	var same_scene_spot := _make_interactive_lesson_spot(
+		"SameSceneLessonSpot",
+		same_scene_spot_id,
+		test_scene,
+		mana_definition
+	)
+	var same_scene_session := "same-scene-invitation-session"
+	_install_lesson_session(
+		locations,
+		simulator,
+		local_machine,
+		same_scene_spot,
+		activity,
+		same_scene_session,
+		"inviting",
+		same_scene_spot_id
+	)
+	_expect(
+		same_scene_spot.begin_invitation(local_mom, player),
+		"same-scene invitation displays"
+	)
+	_expect(
+		same_scene_spot.accept_lesson(local_mom, player),
+		"same-scene acceptance starts the accepted lesson"
+	)
+	var same_scene_runner := same_scene_spot.get_interactive_activity_runner()
+	var same_scene_host := same_scene_runner.get_presentation_host()
+	_expect(
+		same_scene_host != null
+		and same_scene_host.is_selecting()
+		and same_scene_host.get_active_module() == null,
+		"same-scene acceptance opens activity selection"
+	)
+	var same_scene_releases_before := _interactive_claim_release_count
+	_expect(
+		same_scene_spot.cancel_lesson(&"selection_menu_cancel", same_scene_session),
+		"selection-menu cancellation ends the accepted local lesson"
+	)
+	_expect(
+		_interactive_claim_release_count == same_scene_releases_before + 1
+		and not gameplay_flow.is_player_control_claimed(player),
+		"selection-menu cancellation removes the host and releases one claim"
+	)
+	same_scene_spot.queue_free()
+	await process_frame
+
+	var resumable_session := "interactive-lesson-resumable"
+	var resumable_reservation_id := _install_lesson_session(
+		locations,
+		simulator,
+		local_machine,
+		lesson_spot,
+		activity,
+		resumable_session,
+		"running"
+	)
+	var resumable_start := lesson_spot.start_lesson(
+		local_mom, player, resumable_session
+	)
+	_expect(
+		bool(resumable_start.get("accepted", false)),
+		"persistent running lesson reconstructs its local interactive presentation"
+	)
+	var resumable_runner := lesson_spot.get_interactive_activity_runner()
+	var resumable_host := resumable_runner.get_presentation_host()
+	_expect(
+		resumable_host != null
+		and resumable_host.is_selecting()
+		and resumable_host.get_active_module() == null,
+		"running-session reload reconstructs the activity selection presentation"
+	)
+	_expect(
+		gameplay_flow.is_player_control_claimed(player)
+		and resumable_runner.get_player_claim_token() != 0,
+		"reloaded presentation owns one exact player-control claim"
+	)
+	var unload_releases_before := _interactive_claim_release_count
+	lesson_spot.queue_free()
+	await process_frame
+	await process_frame
+	var resumable_record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	_expect(
+		String((resumable_record.get("activity", {}) as Dictionary).get(
+			"lesson_phase", ""
+		)) == "running",
+		"scene-local shutdown preserves the persistent running lesson"
+	)
+	_expect(
+		simulator.spot_reservations.has(resumable_reservation_id),
+		"scene-local shutdown preserves the scheduled lesson reservation"
+	)
+	_expect(
+		not gameplay_flow.is_player_control_claimed(player)
+		and _interactive_claim_release_count == unload_releases_before + 1,
+		"scene-local shutdown releases only the local runner claim once"
+	)
+
+	var decline_spot_id := &"magic_lesson_decline_test_spot"
+	var decline_spot := _make_interactive_lesson_spot(
+		"DeclineLessonSpot",
+		decline_spot_id,
+		test_scene,
+		mana_definition
+	)
+	var decline_session := "declined-invitation-session"
+	var decline_base_activity := activity.duplicate(true)
+	decline_base_activity["return_scene_path"] = LESSON_SCENE_PATH
+	decline_base_activity["return_position"] = local_mom.global_position
+	_install_lesson_session(
+		locations,
+		simulator,
+		local_machine,
+		decline_spot,
+		decline_base_activity,
+		decline_session,
+		"inviting",
+		decline_spot_id
+	)
+	var player_position_before_decline := player.global_position
+	_expect(
+		decline_spot.begin_invitation(local_mom, player),
+		"decline fixture displays its first invitation"
+	)
+	decline_spot.decline_lesson(local_mom, player)
+	var declined_record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	_expect(
+		player.global_position == player_position_before_decline,
+		"decline does not transport the player"
+	)
+	_expect(
+		(declined_record.get("activity", {}) as Dictionary).is_empty()
+		and not decline_spot.is_interactive_lesson_active()
+		and decline_spot.get_interactive_activity_runner() == null,
+		"decline creates neither a handoff nor a destination activity menu"
+	)
 	locations.npc_records = original_records
 	locations.live_npcs = original_live_npcs
 	locations.active_scene_path = original_active_scene_path
@@ -448,6 +850,7 @@ func _initialize() -> void:
 	simulator.live_spots = original_live_spots
 	simulator.call("_sync_spot_claim_count_cache")
 	simulator.set_process(simulator_was_processing)
+	gameplay_flow.player_control_claim_changed.disconnect(player_claim_callback)
 	current_scene = original_scene
 	test_scene.queue_free()
 	await process_frame
@@ -464,3 +867,139 @@ func _initialize() -> void:
 func _expect(condition: bool, message: String) -> void:
 	if not condition:
 		_failures.append(message)
+
+
+func _real_home_has_mana_balance_assignment() -> bool:
+	var packed_scene := load(LESSON_SCENE_PATH) as PackedScene
+	if packed_scene == null:
+		return false
+	var scene_state := packed_scene.get_state()
+	for node_index in scene_state.get_node_count():
+		if String(scene_state.get_node_name(node_index)) != "MomMagicLessonSpot":
+			continue
+		var has_mana_balance := false
+		var has_always_show := false
+		for property_index in scene_state.get_node_property_count(node_index):
+			var property_name := String(
+				scene_state.get_node_property_name(node_index, property_index)
+			)
+			var assigned = scene_state.get_node_property_value(node_index, property_index)
+			if property_name == "interactive_activity_definitions":
+				if assigned is Array and assigned.size() == 1:
+					var definition := assigned[0] as InteractiveActivityDefinition
+					has_mana_balance = (
+						definition != null and definition.id == &"mana_balance"
+					)
+			elif property_name == "interactive_activity_launch_options":
+				var options := assigned as InteractiveActivityLaunchOptions
+				has_always_show = (
+					options != null
+					and options.selection_policy
+						== InteractiveActivityLaunchOptions.SelectionPolicy.ALWAYS_SHOW
+					and options.get_menu_title() == "Magic Training"
+					and options.menu_prompt == "Choose what to train"
+				)
+		return has_mana_balance and has_always_show
+	return false
+
+
+func _make_magic_training_launch_options() -> InteractiveActivityLaunchOptions:
+	var options := InteractiveActivityLaunchOptions.new()
+	options.selection_policy = (
+		InteractiveActivityLaunchOptions.SelectionPolicy.ALWAYS_SHOW
+	)
+	options.menu_title = "Magic Training"
+	options.menu_prompt = "Choose what to train"
+	options.confirm_text = "Z: Begin"
+	return options
+
+
+func _make_interactive_lesson_spot(
+	node_name: String,
+	target_spot_id: StringName,
+	parent: Node2D,
+	definition: InteractiveActivityDefinition
+) -> MagicLessonSpot:
+	var spot := MagicLessonSpot.new()
+	spot.name = node_name
+	spot.spot_id = target_spot_id
+	spot.require_player_in_lesson_zone = false
+	spot.interactive_activity_definitions = [definition]
+	spot.interactive_activity_launch_options = _make_magic_training_launch_options()
+	var marker := Marker2D.new()
+	marker.name = "MomLessonPosition"
+	marker.position = CLASS_POSITION
+	spot.add_child(marker)
+	parent.add_child(spot)
+	return spot
+
+
+func _action_event(action: StringName, pressed: bool) -> InputEventAction:
+	var event := InputEventAction.new()
+	event.action = action
+	event.pressed = pressed
+	return event
+
+
+func _install_lesson_session(
+	locations: Node,
+	simulator: Node,
+	machine: NpcStateMachine,
+	lesson_spot: MagicLessonSpot,
+	base_activity: Dictionary,
+	session_id: String,
+	lesson_phase: String,
+	target_spot_id: StringName = TEST_SPOT_ID
+) -> String:
+	simulator.call(
+		"release_scheduled_activity_claim",
+		target_spot_id,
+		"interactive_test_fixture_reset"
+	)
+	var claim: Dictionary = simulator.call(
+		"try_claim_spot",
+		StringName(TEST_NPC_ID),
+		session_id,
+		target_spot_id,
+		&"activity"
+	)
+	var reservation_id := String(claim.get("reservation_id", ""))
+	var installed_activity := base_activity.duplicate(true)
+	installed_activity["session_id"] = session_id
+	installed_activity["action_session_id"] = session_id
+	installed_activity["activity_id"] = session_id
+	installed_activity["spot_id"] = String(target_spot_id)
+	installed_activity["lesson_phase"] = lesson_phase
+	installed_activity["target_scene_path"] = LESSON_SCENE_PATH
+	installed_activity["target_position"] = CLASS_POSITION
+	installed_activity["return_scene_path"] = TEST_SCENE_PATH
+	installed_activity["return_position"] = SAVED_ORIGIN_POSITION
+	installed_activity["reservation_ids"] = [reservation_id]
+	var action := NpcActionSession.create(
+		TEST_NPC_ID,
+		&"InvitePlayer",
+		&"schedule",
+		lesson_spot,
+		installed_activity
+	)
+	action.status = NpcActionSession.Status.ACTIVE
+	action.phase = &"executing"
+	machine.active_action = action
+	var record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	record["scene_path"] = LESSON_SCENE_PATH
+	record["last_position"] = CLASS_POSITION
+	record["activity"] = installed_activity
+	record["action"] = action.to_descriptor()
+	record["pending_travel"] = {}
+	locations.npc_records[TEST_NPC_ID] = record
+	return reservation_id
+
+
+func _on_interactive_player_claim_changed(
+	claimed_player: Node,
+	claimed: bool,
+	_token_id: int,
+	expected_player: Node
+) -> void:
+	if claimed_player == expected_player and not claimed:
+		_interactive_claim_release_count += 1

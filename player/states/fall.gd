@@ -83,7 +83,11 @@ func physics_update_before_move(_delta: float) -> void:
 
 func physics_update_after_move(_delta: float) -> PlayerState:
 	#player on the floor, is idle:
-	if player.is_on_floor() and Input.is_action_pressed("crouch"):
+	if (
+		player.is_on_floor()
+		and Input.is_action_pressed("crouch")
+		and not player.is_terrain_rope_length_control_active()
+	):
 		return crouch
 	elif player.is_on_floor():
 		if not player.ongrounddetection.is_colliding():

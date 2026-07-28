@@ -1,0 +1,50 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/activities/interactive_activity_host.gd" id="1_host"]
+
+[node name="InteractiveActivityHost" type="Node"]
+script = ExtResource("1_host")
+
+[node name="WorldMount" type="Node2D" parent="."]
+
+[node name="HudLayer" type="CanvasLayer" parent="."]
+layer = 40
+
+[node name="HudMount" type="Control" parent="HudLayer"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="SelectionPanel" type="PanelContainer" parent="HudLayer/HudMount"]
+layout_mode = 0
+offset_left = 24.0
+offset_top = 24.0
+offset_right = 344.0
+offset_bottom = 208.0
+
+[node name="Margin" type="MarginContainer" parent="HudLayer/HudMount/SelectionPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 12
+
+[node name="VBox" type="VBoxContainer" parent="HudLayer/HudMount/SelectionPanel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Title" type="Label" parent="HudLayer/HudMount/SelectionPanel/Margin/VBox"]
+layout_mode = 2
+text = "Choose an activity"
+
+[node name="Options" type="Label" parent="HudLayer/HudMount/SelectionPanel/Margin/VBox"]
+layout_mode = 2
+text = "Activity"
+
+[node name="Help" type="Label" parent="HudLayer/HudMount/SelectionPanel/Margin/VBox"]
+layout_mode = 2
+text = "Up / Down: select    Attack: confirm"

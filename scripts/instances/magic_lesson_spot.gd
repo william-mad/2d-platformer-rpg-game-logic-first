@@ -44,6 +44,14 @@ const STATE_FAILED := &"failed"
 	"boredom": -8.0,
 }
 @export var mark_spot_unavailable_after_attempt: bool = true
+@export_group("Interactive Activity")
+@export var interactive_activity_definitions: Array[InteractiveActivityDefinition] = []
+@export var interactive_activity_launch_options: InteractiveActivityLaunchOptions
+@export var interactive_activity_host_scene: PackedScene = preload(
+	"res://scenes/activities/interactive_activity_host.tscn"
+)
+@export var interactive_presentation_parent_path: NodePath
+@export var interactive_world_anchor_path: NodePath
 
 var state: StringName = STATE_IDLE
 var active_mom: Node2D
@@ -58,6 +66,8 @@ var active_action_session_id: String = ""
 var active_mom_id: String = ""
 var completed_day: int = -1
 var skipped_day: int = -1
+var interactive_activity_runner: InteractiveActivityRunner
+var interactive_activity_active: bool = false
 var zone_visual: Polygon2D
 var label: Label
 
@@ -88,6 +98,7 @@ func _exit_tree() -> void:
 		print("Magic lesson controller unloaded resumably: npc=%s session=%s phase=running" % [
 			active_mom_id, active_action_session_id
 		])
+	_shutdown_interactive_activity_local(&"lesson_scene_unloaded")
 	_unlock_participants()
 	_unregister_live_spot()
 
@@ -261,6 +272,24 @@ func start_lesson(
 		return {"accepted": true, "reason": "already_running"}
 	active_mom_id = _get_npc_id(mom)
 	active_action_session_id = expected_session_id
+	var valid_activity_definitions := _get_valid_interactive_activity_definitions()
+	var interactive_prepared := false
+	if not valid_activity_definitions.is_empty():
+		var prepare_result := _prepare_interactive_activity(
+			mom,
+			player,
+			expected_session_id,
+			valid_activity_definitions
+		)
+		if not bool(prepare_result.get("accepted", false)):
+			var prepare_reason := String(prepare_result.get(
+				"reason", "interactive_activity_prepare_rejected"
+			))
+			_log_lesson_transition(
+				_get_persistent_lesson_phase(), "running", false, prepare_reason
+			)
+			return {"accepted": false, "reason": prepare_reason}
+		interactive_prepared = true
 	var previous_phase := _get_persistent_lesson_phase()
 	var transition_result := _transition_activity({
 		"expected_lesson_phases": ["handoff", "accepted", "running"],
@@ -268,6 +297,8 @@ func start_lesson(
 		"last_total_hours": _get_current_total_hours(),
 	})
 	if not bool(transition_result.get("accepted", false)):
+		if interactive_prepared:
+			_shutdown_interactive_activity_local(&"persistent_running_transition_rejected")
 		var transition_reason := String(transition_result.get("reason", "running_transition_rejected"))
 		_log_lesson_transition(previous_phase, "running", false, transition_reason)
 		return {"accepted": false, "reason": transition_reason}
@@ -278,8 +309,20 @@ func start_lesson(
 	last_lesson_result = {}
 	lesson_progress = _get_lesson_progress_floor()
 	lesson_timer = _get_lesson_real_seconds()
+	interactive_activity_active = interactive_prepared
 	_place_participants()
-	_lock_participants()
+	if interactive_activity_active:
+		if (
+			interactive_activity_runner == null
+			or not interactive_activity_runner.commit_activity()
+		):
+			cancel_lesson(&"interactive_activity_commit_rejected", expected_session_id)
+			return {
+				"accepted": false,
+				"reason": "interactive_activity_commit_rejected",
+			}
+	else:
+		_lock_participants()
 	_update_visual()
 	lesson_started.emit(mom, player)
 	_log_lesson_transition(previous_phase, "running", true, "local_start_accepted")
@@ -296,7 +339,8 @@ func complete_lesson(expected_session_id: String = "") -> bool:
 
 	var completed_mom := active_mom
 	var completed_player := active_player
-	_finalize_lesson_score(completed_mom, completed_player)
+	var interactive_result := _finish_interactive_activity(&"lesson_completed")
+	_finalize_lesson_score(completed_mom, completed_player, interactive_result)
 	if not _finish_local_lesson_activity(expected_session, true):
 		return false
 	_apply_reward_once()
@@ -319,6 +363,7 @@ func cancel_lesson(reason: StringName, expected_session_id: String = "") -> bool
 	if not _terminal_session_is_current(expected_session):
 		_log_lesson_transition(String(state), "cancelled", false, "stale_terminal_session")
 		return false
+	_cancel_interactive_activity(reason)
 	var lesson_was_running := state == STATE_RUNNING
 	var activity_finished := (
 		_finish_local_lesson_activity(expected_session, false)
@@ -450,7 +495,11 @@ func _apply_reward_once() -> void:
 				machine.call("apply_value_delta", mom_reward_delta, active_player)
 
 
-func _finalize_lesson_score(mom: Node2D, player: Node2D) -> void:
+func _finalize_lesson_score(
+	mom: Node2D,
+	player: Node2D,
+	interactive_result: Dictionary = {}
+) -> void:
 	last_lesson_result = {
 		"lesson_id": String(lesson_id),
 		"spot_id": String(spot_id),
@@ -459,6 +508,8 @@ func _finalize_lesson_score(mom: Node2D, player: Node2D) -> void:
 		"completed_total_hours": _get_current_total_hours(),
 		"progress_multiplier": _get_lesson_progress_multiplier(),
 	}
+	if not interactive_result.is_empty():
+		last_lesson_result["interactive_activity"] = interactive_result.duplicate(true)
 	if player != null and is_instance_valid(player):
 		player.set_meta("last_magic_lesson_score", lesson_progress)
 		player.set_meta("last_magic_lesson_result", last_lesson_result.duplicate(true))
@@ -618,6 +669,103 @@ func _finish_scheduled_activity_to_saved_origin(expected_session_id: String) -> 
 		return_position,
 		expected_session_id
 	))
+
+
+func get_interactive_activity_runner() -> InteractiveActivityRunner:
+	return interactive_activity_runner
+
+
+func is_interactive_lesson_active() -> bool:
+	return (
+		interactive_activity_active
+		and interactive_activity_runner != null
+		and interactive_activity_runner.is_active()
+	)
+
+
+func _get_valid_interactive_activity_definitions() -> Array[InteractiveActivityDefinition]:
+	var valid: Array[InteractiveActivityDefinition] = []
+	for definition in interactive_activity_definitions:
+		if definition != null and definition.is_valid_definition():
+			valid.append(definition)
+	return valid
+
+
+func _prepare_interactive_activity(
+	mom: Node2D,
+	player: Node2D,
+	expected_session_id: String,
+	definitions: Array[InteractiveActivityDefinition]
+) -> Dictionary:
+	var runner := _get_or_create_interactive_activity_runner()
+	if runner == null:
+		return {"accepted": false, "reason": "interactive_activity_runner_missing"}
+	var context := {
+		"session_id": expected_session_id,
+		"owner_kind": "magic_lesson",
+		"lesson_id": String(lesson_id),
+		"spot_id": String(spot_id),
+		"npc_id": _get_npc_id(mom),
+		"scene_path": _get_current_scene_path(),
+	}
+	return runner.prepare_activity(
+		player,
+		definitions,
+		context,
+		_get_interactive_presentation_parent(),
+		_get_interactive_world_anchor(),
+		interactive_activity_launch_options
+	)
+
+
+func _get_or_create_interactive_activity_runner() -> InteractiveActivityRunner:
+	if (
+		interactive_activity_runner != null
+		and is_instance_valid(interactive_activity_runner)
+	):
+		interactive_activity_runner.host_scene = interactive_activity_host_scene
+		return interactive_activity_runner
+	interactive_activity_runner = InteractiveActivityRunner.new()
+	interactive_activity_runner.name = "InteractiveActivityRunner"
+	interactive_activity_runner.host_scene = interactive_activity_host_scene
+	add_child(interactive_activity_runner)
+	return interactive_activity_runner
+
+
+func _get_interactive_presentation_parent() -> Node:
+	var configured_parent := get_node_or_null(interactive_presentation_parent_path)
+	if (
+		configured_parent != null
+		and configured_parent != self
+		and not is_ancestor_of(configured_parent)
+	):
+		return configured_parent
+	return get_tree().current_scene
+
+
+func _get_interactive_world_anchor() -> Vector2:
+	var anchor := get_node_or_null(interactive_world_anchor_path) as Node2D
+	return anchor.global_position if anchor != null else global_position
+
+
+func _finish_interactive_activity(reason: StringName) -> Dictionary:
+	if not interactive_activity_active or interactive_activity_runner == null:
+		return {}
+	return interactive_activity_runner.finish_activity(reason)
+
+
+func _cancel_interactive_activity(reason: StringName) -> void:
+	if not interactive_activity_active or interactive_activity_runner == null:
+		return
+	interactive_activity_runner.cancel_activity(reason)
+
+
+func _shutdown_interactive_activity_local(reason: StringName) -> void:
+	if interactive_activity_runner == null or not is_instance_valid(interactive_activity_runner):
+		interactive_activity_active = false
+		return
+	interactive_activity_runner.shutdown_local(reason)
+	interactive_activity_active = false
 
 
 func _register_live_spot() -> void:
@@ -813,6 +961,7 @@ func _clear_participants() -> void:
 	active_mom = null
 	active_player = null
 	lesson_timer = 0.0
+	interactive_activity_active = false
 
 
 func _attempt_already_used_today() -> bool:

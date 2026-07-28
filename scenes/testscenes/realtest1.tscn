@@ -265,7 +265,7 @@ route_edge = ExtResource("34_yard_home_route")
 owner_ids = Array[StringName]([&"mom", &"player"])
 
 [node name="PlayerSpawnFromHome" type="Marker2D" parent="." unique_id=1165842368]
-position = Vector2(-240, 367)
+position = Vector2(-318, 367)
 script = ExtResource("27_player_spawn")
 spawn_id = &"from_realhometest"
 

@@ -49,8 +49,11 @@ var meal_cycle_enabled: bool = false
 var meal_cycle_stage: String = MEAL_STAGE_PREP_WORK
 var meal_cycle_meal: String = ""
 var meal_cycle_food_available: bool = false
+var meal_cycle_meal_window_open: bool = false
 var meal_cycle_meal_called: bool = false
 var meal_cycle_work_call_active: bool = false
+var meal_cycle_waiting_for_ingredients: bool = false
+var meal_cycle_food_limit: float = 100.0
 var meal_cycle_prep_owner_ids: Array[StringName] = []
 var meal_cycle_food_owner_ids: Array[StringName] = []
 var meal_cycle_cleanup_owner_ids: Array[StringName] = []
@@ -58,6 +61,7 @@ var meal_cycle_owner_meal_data: Dictionary = {}
 var debug_meal_spot_disabled_logged: bool = false
 var debug_work_spot_disabled_logged: bool = false
 var debug_last_meal_cycle_label: String = ""
+var _meal_processing_service := InventoryProcessingService.new()
 
 
 func _ready() -> void:
@@ -309,20 +313,25 @@ func can_interact(actor: Node) -> bool:
 		or not nearby_players.has(player)
 		or active_player_action != &""
 		or player_work_cooldown > 0.0
-		or not allow_player_work
 	):
 		return false
-	return can_player_work(player) or (has_food_available() and _player_can_eat(player))
+	return (
+		(has_food_available() and _player_can_eat(player))
+		or can_player_work(player)
+		or _player_can_supply_meal_ingredients(player)
+	)
 
 
 func interact(actor: Node) -> bool:
 	if not can_interact(actor):
 		return false
 	var player := actor as Node2D
-	if can_player_work(player):
+	if has_food_available() and _player_can_eat(player):
+		_start_player_action(player, &"eat", player_eat_duration_seconds)
+	elif can_player_work(player):
 		_start_player_action(player, &"work", 0.0)
 	else:
-		_start_player_action(player, &"eat", player_eat_duration_seconds)
+		return _supply_all_player_meal_ingredients(player)
 	return true
 
 
@@ -332,7 +341,13 @@ func get_interaction_priority(_actor: Node) -> int:
 
 func get_interaction_prompt(actor: Node) -> String:
 	var player := actor as Node2D
-	return "Work" if player != null and can_player_work(player) else "Eat"
+	if player != null and has_food_available() and _player_can_eat(player):
+		return "Eat"
+	if player != null and can_player_work(player):
+		return "Work"
+	if player != null and _player_can_supply_meal_ingredients(player):
+		return "Supply Ingredients"
+	return ""
 
 
 func _player_can_eat(player: Node2D) -> bool:
@@ -347,11 +362,71 @@ func _player_can_eat(player: Node2D) -> bool:
 		return false
 	if not has_food_available():
 		return false
-	if meal_cycle_enabled and not meal_cycle_meal_called:
-		return false
 	if player.has_method("can_eat") and not bool(player.call("can_eat")):
 		return false
 
+	return true
+
+
+func _player_can_supply_meal_ingredients(player: Node2D) -> bool:
+	if (
+		not meal_cycle_enabled
+		or meal_cycle_stage != MEAL_STAGE_PREP_WORK
+		or not meal_cycle_waiting_for_ingredients
+		or meal_cycle_food_available
+		or world_definition == null
+		or world_definition.meal_cycle_recipe == null
+		or player == null
+		or not is_instance_valid(player)
+		or not player.is_in_group(String(player_group))
+		or not player.has_method("get_inventory")
+	):
+		return false
+	var inventory := player.call("get_inventory") as InventoryModel
+	return (
+		inventory != null
+		and _meal_processing_service.get_maximum_batches(
+			inventory,
+			world_definition.meal_cycle_recipe
+		) > 0
+	)
+
+
+func _supply_all_player_meal_ingredients(player: Node2D) -> bool:
+	if not _player_can_supply_meal_ingredients(player):
+		return false
+	var source_inventory := player.call("get_inventory") as InventoryModel
+	var batch_count := _meal_processing_service.get_maximum_batches(
+		source_inventory,
+		world_definition.meal_cycle_recipe
+	)
+	if batch_count <= 0:
+		return false
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if (
+		simulator == null
+		or not simulator.has_method("supply_meal_cycle_recipe_batches")
+	):
+		return false
+	var result := simulator.call(
+		"supply_meal_cycle_recipe_batches",
+		spot_id,
+		source_inventory,
+		batch_count
+	) as InventoryResult
+	if result == null or not result.success:
+		if result != null:
+			_breadcrumb(
+				"work_spot:meal_supply_reject",
+				"%s %s" % [name, result.message]
+			)
+		return false
+	player_work_cooldown = player_work_cooldown_seconds
+	_sync_meal_cycle_state_from_world()
+	_breadcrumb(
+		"work_spot:meal_supply",
+		"%s batches=%d" % [name, batch_count]
+	)
 	return true
 
 
@@ -374,8 +449,8 @@ func apply_world_spot_value(changed_spot_id: StringName, new_value: float) -> vo
 
 	food_available = clampf(
 		new_value,
-		minf(eat_world_definition.spot_value_minimum, eat_world_definition.spot_value_maximum),
-		maxf(eat_world_definition.spot_value_minimum, eat_world_definition.spot_value_maximum)
+		_get_food_floor(),
+		_get_food_ceiling()
 	)
 	_sync_meal_cycle_state_from_world()
 	_queue_visual_update()
@@ -769,8 +844,10 @@ func _sync_meal_cycle_state_from_world() -> void:
 		_log_debug_disabled_once()
 		meal_cycle_enabled = false
 		meal_cycle_food_available = false
+		meal_cycle_meal_window_open = false
 		meal_cycle_meal_called = false
 		meal_cycle_work_call_active = false
+		meal_cycle_waiting_for_ingredients = false
 		food_available = 0.0
 		return
 	if world_definition == null or world_definition.meal_cycle_id == &"":
@@ -790,8 +867,10 @@ func _apply_meal_cycle_state(state: Dictionary) -> void:
 		_log_debug_disabled_once()
 		meal_cycle_enabled = false
 		meal_cycle_food_available = false
+		meal_cycle_meal_window_open = false
 		meal_cycle_meal_called = false
 		meal_cycle_work_call_active = false
+		meal_cycle_waiting_for_ingredients = false
 		food_available = 0.0
 		_queue_visual_update()
 		return
@@ -803,14 +882,20 @@ func _apply_meal_cycle_state(state: Dictionary) -> void:
 	meal_cycle_stage = String(state.get("stage", MEAL_STAGE_PREP_WORK))
 	meal_cycle_meal = String(state.get("meal", ""))
 	meal_cycle_food_available = bool(state.get("food_available", false))
+	meal_cycle_meal_window_open = bool(state.get("meal_window_open", false))
 	meal_cycle_meal_called = bool(state.get("meal_called", false))
 	meal_cycle_work_call_active = bool(state.get("work_call_active", false))
+	meal_cycle_waiting_for_ingredients = bool(state.get("waiting_for_ingredients", false))
 	meal_cycle_prep_owner_ids = _variant_owner_ids_to_string_names(state.get("prep_owner_ids", []))
 	meal_cycle_food_owner_ids = _variant_owner_ids_to_string_names(state.get("food_owner_ids", []))
 	meal_cycle_cleanup_owner_ids = _variant_owner_ids_to_string_names(state.get("cleanup_owner_ids", []))
 	var owner_meal_data = state.get("owner_meal_data", {})
 	meal_cycle_owner_meal_data = owner_meal_data.duplicate(true) if owner_meal_data is Dictionary else {}
 	var fallback_food_value := food_available if meal_cycle_stage == MEAL_STAGE_FOOD else 0.0
+	meal_cycle_food_limit = maxf(
+		float(state.get("food_limit", _get_food_definition_ceiling())),
+		_get_food_floor()
+	)
 	food_available = clampf(
 		float(state.get("food_value", fallback_food_value)),
 		_get_food_floor(),
@@ -827,10 +912,11 @@ func _apply_meal_cycle_state(state: Dictionary) -> void:
 	if not is_equal_approx(previous_work_needed, work_needed):
 		work_needed_changed.emit(work_needed, work_needed - previous_work_needed)
 
-	var state_label := "%s %s food=%s called=%s work=%s value=%.2f" % [
+	var state_label := "%s %s food=%s window=%s called=%s work=%s value=%.2f" % [
 		meal_cycle_stage,
 		meal_cycle_meal,
 		"%.2f" % food_available,
+		str(meal_cycle_meal_window_open),
 		str(meal_cycle_meal_called),
 		str(meal_cycle_work_call_active),
 		work_needed,
@@ -904,7 +990,8 @@ func _can_serve_eat_phase(npc_node: Node2D, requested_value_name: StringName) ->
 	if meal_cycle_enabled:
 		var npc_id := _get_npc_id(npc_node)
 		var accepted := (
-			meal_cycle_meal_called
+			meal_cycle_meal_window_open
+			and meal_cycle_meal_called
 			and _meal_cycle_owner_allows(MEAL_OWNER_FOOD, npc_id)
 			and not _meal_cycle_owner_has_had_current_meal(npc_id)
 			and _npc_has_required_tags(npc_node)
@@ -1121,6 +1208,7 @@ func _start_local_meal_cycle_cleanup_if_food_depleted() -> void:
 
 	meal_cycle_stage = MEAL_STAGE_CLEANUP_WORK
 	meal_cycle_food_available = false
+	meal_cycle_meal_window_open = false
 	meal_cycle_meal_called = false
 	meal_cycle_work_call_active = true
 	work_needed = _get_work_needed_ceiling()
@@ -1281,6 +1369,12 @@ func _get_food_floor() -> float:
 
 
 func _get_food_ceiling() -> float:
+	if meal_cycle_enabled:
+		return maxf(meal_cycle_food_limit, _get_food_floor())
+	return _get_food_definition_ceiling()
+
+
+func _get_food_definition_ceiling() -> float:
 	if eat_world_definition == null:
 		return 100.0
 

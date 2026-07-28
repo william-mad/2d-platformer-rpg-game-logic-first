@@ -9,6 +9,13 @@ const DEFAULT_NPC_WEIGHT: float = 2.0
 const NETWORK_SOLVER_ITERATIONS: int = 12
 const NETWORK_RELAXATION: float = 0.85
 
+enum ThrowState {
+	READY,
+	TAP_PENDING,
+	SPINNING,
+	FLYING,
+}
+
 @export_category("Rope Feel")
 ## Upper bound for the rope's resting length.
 @export_range(1.0, 2000.0, 1.0, "suffix:px") var max_length: float = 600.0
@@ -20,7 +27,33 @@ const NETWORK_RELAXATION: float = 0.85
 @export_range(0.0, 1000.0, 1.0, "suffix:px/s") var elastic_return_speed: float = 80.0
 @export_range(0.0, 2000.0, 1.0, "suffix:px/s") var overstretch_recovery_speed: float = 240.0
 ## Rate at which airborne swing momentum settles after horizontal input is released.
-@export_range(0.0, 10.0, 0.05, "suffix:1/s") var passive_swing_damping: float = 0.8
+@export_range(0.0, 10.0, 0.05, "suffix:1/s") var passive_swing_damping: float = 0.5
+## Horizontal air-control force projected onto a taut anchored rope's tangent.
+@export_range(0.0, 3000.0, 10.0, "suffix:px/s²") var swing_input_acceleration: float = 900.0
+## Input cannot add tangential speed beyond this; gravity may still carry it faster.
+@export_range(0.0, 3000.0, 10.0, "suffix:px/s") var swing_input_speed_limit: float = 1100.0
+
+@export_category("Terrain Throw")
+## Releases shorter than this keep the original nearest-object attachment.
+@export_range(0.05, 0.75, 0.01, "suffix:s") var quick_attach_seconds: float = 0.2
+## Time at which the terrain throw reaches full range.
+@export_range(0.1, 3.0, 0.05, "suffix:s") var full_charge_seconds: float = 1.0
+@export_range(50.0, 2000.0, 10.0, "suffix:px/s") var minimum_throw_speed: float = 260.0
+@export_range(50.0, 2500.0, 10.0, "suffix:px/s") var maximum_throw_speed: float = 930.0
+@export_range(5.0, 85.0, 1.0, "suffix:deg") var throw_angle_degrees: float = 48.0
+@export_range(0.0, 3000.0, 10.0, "suffix:px/s²") var throw_gravity: float = 900.0
+@export_range(0.1, 2.0, 0.05, "suffix:s") var throw_flight_seconds: float = 0.9
+@export_range(1.0, 5.0, 0.05) var throw_visual_speed_scale: float = 1.35
+@export_range(4, 64, 1) var throw_preview_points: int = 28
+@export_flags_2d_physics var terrain_collision_mask: int = 1
+@export_range(4.0, 100.0, 1.0, "suffix:px") var spin_minimum_radius: float = 20.0
+@export_range(4.0, 150.0, 1.0, "suffix:px") var spin_maximum_radius: float = 42.0
+@export_range(0.0, 40.0, 0.5, "suffix:rad/s") var spin_angular_speed: float = 14.0
+
+@export_category("Terrain Rope Length")
+@export_range(1.0, 1000.0, 1.0, "suffix:px") var minimum_rope_length: float = 56.0
+@export_range(0.0, 1000.0, 1.0, "suffix:px/s") var reel_in_speed: float = 75.0
+@export_range(0.0, 1000.0, 1.0, "suffix:px/s") var pay_out_speed: float = 220.0
 
 @export_category("Visuals")
 @export var use_sag: bool = true
@@ -41,14 +74,32 @@ var _nearby_attachables: Array[Node2D] = []
 var _constraint_length: float = 1.0
 var _requested_velocities: Dictionary = {}
 var _requested_velocity_frames: Dictionary = {}
+var _throw_state: ThrowState = ThrowState.READY
+var _throw_facing: float = 1.0
+var _throw_charge_elapsed: float = 0.0
+var _throw_charge_started_msec: int = 0
+var _throw_spin_angle: float = 0.0
+var _throw_flight_points: PackedVector2Array = PackedVector2Array()
+var _throw_flight_elapsed: float = 0.0
+var _throw_flight_duration: float = 0.0
+var _throw_hit_body: Node2D
+var _throw_hit_position: Vector2 = Vector2.ZERO
+var _terrain_anchor_point: Marker2D
+var _terrain_anchor_body: Node2D
 
 @onready var line: Line2D = get_node_or_null("Line2D") as Line2D
+@onready var throw_preview: Line2D = get_node_or_null("ThrowPreview") as Line2D
+@onready var throw_end: Polygon2D = get_node_or_null("ThrowEnd") as Polygon2D
 
 
 func _ready() -> void:
 	if line != null:
 		line.width = rope_width
 		line.visible = active
+	if throw_preview != null:
+		throw_preview.visible = false
+	if throw_end != null:
+		throw_end.visible = false
 	set_physics_process(active)
 
 
@@ -58,6 +109,12 @@ func _exit_tree() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if is_throw_charging():
+		_advance_throw_charge(delta)
+		return
+	if is_throw_in_flight():
+		_advance_throw_flight(delta)
+		return
 	if not active:
 		return
 
@@ -118,11 +175,166 @@ func toggle_closest() -> bool:
 	)
 
 
+func begin_throw_charge(facing_direction: float) -> bool:
+	if (
+		active
+		or has_pending_throw()
+		or not _node_is_valid(_configured_start_body)
+	):
+		return false
+
+	_throw_state = ThrowState.TAP_PENDING
+	_throw_facing = -1.0 if facing_direction < 0.0 else 1.0
+	_throw_charge_elapsed = 0.0
+	_throw_charge_started_msec = Time.get_ticks_msec()
+	_throw_spin_angle = 0.0
+	_clear_throw_flight()
+	_hide_throw_visuals()
+	set_physics_process(true)
+	return true
+
+
+func set_throw_facing(facing_direction: float) -> void:
+	if not is_throw_charging() or is_zero_approx(facing_direction):
+		return
+	_throw_facing = -1.0 if facing_direction < 0.0 else 1.0
+
+
+func release_throw_charge() -> bool:
+	if not is_throw_charging() or is_quick_throw_release():
+		return false
+
+	_throw_charge_elapsed = get_throw_hold_seconds()
+	var path_result := _build_throw_path(get_throw_charge_ratio(), true)
+	var points: PackedVector2Array = path_result.get(
+		"points",
+		PackedVector2Array()
+	)
+	if points.size() < 2:
+		cancel_pending_throw()
+		return false
+
+	_throw_state = ThrowState.FLYING
+	_throw_flight_points = points
+	_throw_flight_elapsed = 0.0
+	_throw_flight_duration = maxf(
+		float(path_result.get("duration", throw_flight_seconds))
+		/ maxf(throw_visual_speed_scale, 0.01),
+		0.05
+	)
+	_throw_hit_body = path_result.get("hit_body") as Node2D
+	_throw_hit_position = path_result.get(
+		"hit_position",
+		points[points.size() - 1]
+	)
+	if throw_preview != null:
+		throw_preview.visible = false
+		throw_preview.clear_points()
+	if line != null:
+		line.visible = true
+	if throw_end != null:
+		throw_end.visible = true
+	_set_throw_end_world_position(points[0])
+	_set_line_world_points(PackedVector2Array([
+		_get_configured_start_position(),
+		points[0],
+	]))
+	set_physics_process(true)
+	return true
+
+
+func cancel_pending_throw() -> void:
+	if not has_pending_throw():
+		return
+	_throw_state = ThrowState.READY
+	_throw_charge_elapsed = 0.0
+	_throw_charge_started_msec = 0
+	_clear_throw_flight()
+	_hide_throw_visuals()
+	set_physics_process(active)
+
+
+func has_pending_throw() -> bool:
+	return _throw_state != ThrowState.READY
+
+
+func is_throw_charging() -> bool:
+	return (
+		_throw_state == ThrowState.TAP_PENDING
+		or _throw_state == ThrowState.SPINNING
+	)
+
+
+func is_throw_spinning() -> bool:
+	return _throw_state == ThrowState.SPINNING
+
+
+func is_throw_in_flight() -> bool:
+	return _throw_state == ThrowState.FLYING
+
+
+func get_throw_hold_seconds() -> float:
+	if not is_throw_charging():
+		return _throw_charge_elapsed
+	var wall_clock_seconds := (
+		float(Time.get_ticks_msec() - _throw_charge_started_msec) / 1000.0
+	)
+	return maxf(_throw_charge_elapsed, wall_clock_seconds)
+
+
+func is_quick_throw_release() -> bool:
+	return get_throw_hold_seconds() < maxf(quick_attach_seconds, 0.0)
+
+
+func get_throw_charge_ratio() -> float:
+	var charge_start := maxf(quick_attach_seconds, 0.0)
+	var charge_end := maxf(full_charge_seconds, charge_start + 0.001)
+	return clampf(
+		(get_throw_hold_seconds() - charge_start) / (charge_end - charge_start),
+		0.0,
+		1.0
+	)
+
+
+func has_terrain_anchor() -> bool:
+	return (
+		active
+		and _node_is_valid(_terrain_anchor_point)
+		and _node_is_valid(_terrain_anchor_body)
+		and end_visual_point == _terrain_anchor_point
+	)
+
+
+func adjust_terrain_length(
+	pull_in: bool,
+	pay_out: bool,
+	delta: float
+) -> void:
+	if (
+		not has_terrain_anchor()
+		or delta <= 0.0
+		or pull_in == pay_out
+	):
+		return
+
+	if pull_in:
+		_constraint_length = maxf(
+			minf(minimum_rope_length, max_length),
+			_constraint_length - maxf(reel_in_speed, 0.0) * delta
+		)
+	else:
+		_constraint_length = minf(
+			maxf(max_length, 1.0),
+			_constraint_length + maxf(pay_out_speed, 0.0) * delta
+		)
+
+
 func attach(
 	new_start_body: Node2D,
 	new_end_body: Node2D,
 	new_start_visual_point: Node2D = null,
-	new_end_visual_point: Node2D = null
+	new_end_visual_point: Node2D = null,
+	rest_length_override: float = -1.0
 ) -> bool:
 	if (
 		not _node_is_valid(new_start_body)
@@ -131,6 +343,7 @@ func attach(
 	):
 		return false
 
+	cancel_pending_throw()
 	if active:
 		detach()
 
@@ -144,8 +357,13 @@ func attach(
 	)
 
 	var initial_distance := _get_start_position().distance_to(_get_end_position())
+	var requested_rest_length := (
+		rest_length_override
+		if rest_length_override > 0.0
+		else initial_distance + maxf(extra_length, 0.0)
+	)
 	_constraint_length = clampf(
-		initial_distance + maxf(extra_length, 0.0),
+		requested_rest_length,
 		1.0,
 		maxf(max_length, 1.0)
 	)
@@ -165,8 +383,12 @@ func attach(
 
 
 func detach() -> void:
+	cancel_pending_throw()
 	_unregister_from_body(start_body)
 	_unregister_from_body(end_body)
+	var anchor_to_free := _terrain_anchor_point
+	_terrain_anchor_point = null
+	_terrain_anchor_body = null
 	active = false
 	set_physics_process(false)
 	if line != null:
@@ -180,6 +402,8 @@ func detach() -> void:
 	_constraint_length = 1.0
 	_requested_velocities.clear()
 	_requested_velocity_frames.clear()
+	if _node_is_valid(anchor_to_free):
+		anchor_to_free.queue_free()
 
 
 func track_attachable(attachable: Node2D) -> void:
@@ -239,6 +463,296 @@ func find_closest_attachable() -> Node2D:
 	return closest
 
 
+func _advance_throw_charge(delta: float) -> void:
+	_throw_charge_elapsed = minf(
+		_throw_charge_elapsed + maxf(delta, 0.0),
+		maxf(full_charge_seconds, quick_attach_seconds)
+	)
+	set_throw_facing(_throw_facing)
+	if get_throw_hold_seconds() < maxf(quick_attach_seconds, 0.0):
+		return
+
+	_throw_state = ThrowState.SPINNING
+	_throw_spin_angle = fposmod(
+		_throw_spin_angle + maxf(spin_angular_speed, 0.0) * delta,
+		TAU
+	)
+	var charge_ratio := get_throw_charge_ratio()
+	var path_result := _build_throw_path(charge_ratio, true)
+	var preview_points: PackedVector2Array = path_result.get(
+		"points",
+		PackedVector2Array()
+	)
+	_set_preview_world_points(preview_points)
+
+	var origin := _get_configured_start_position()
+	var spin_radius := lerpf(
+		maxf(spin_minimum_radius, 0.0),
+		maxf(spin_maximum_radius, spin_minimum_radius),
+		smoothstep(0.0, 1.0, charge_ratio)
+	)
+	var spin_offset := Vector2(
+		cos(_throw_spin_angle) * _throw_facing,
+		sin(_throw_spin_angle)
+	) * spin_radius
+	var spinning_end_position := origin + spin_offset
+	_set_throw_end_world_position(spinning_end_position)
+	_set_line_world_points(PackedVector2Array([
+		origin,
+		spinning_end_position,
+	]))
+	if line != null:
+		line.visible = true
+	if throw_end != null:
+		throw_end.visible = true
+
+
+func _advance_throw_flight(delta: float) -> void:
+	if _throw_flight_points.size() < 2:
+		cancel_pending_throw()
+		return
+
+	_throw_flight_elapsed += maxf(delta, 0.0)
+	var progress := clampf(
+		_throw_flight_elapsed / maxf(_throw_flight_duration, 0.001),
+		0.0,
+		1.0
+	)
+	var scaled_index := progress * float(_throw_flight_points.size() - 1)
+	var point_index := mini(
+		int(floor(scaled_index)),
+		_throw_flight_points.size() - 2
+	)
+	var segment_progress := scaled_index - float(point_index)
+	var end_position := _throw_flight_points[point_index].lerp(
+		_throw_flight_points[point_index + 1],
+		segment_progress
+	)
+	_set_throw_end_world_position(end_position)
+	_set_line_world_points(PackedVector2Array([
+		_get_configured_start_position(),
+		end_position,
+	]))
+
+	if progress >= 1.0:
+		_complete_throw_flight()
+
+
+func _complete_throw_flight() -> void:
+	var hit_body := _throw_hit_body
+	var hit_position := _throw_hit_position
+	_throw_state = ThrowState.READY
+	_throw_charge_elapsed = 0.0
+	_throw_charge_started_msec = 0
+	_clear_throw_flight()
+	_hide_throw_visuals()
+
+	if (
+		not _node_is_valid(hit_body)
+		or not _node_is_valid(_configured_start_body)
+	):
+		set_physics_process(false)
+		return
+
+	var anchor_point := Marker2D.new()
+	anchor_point.name = "TerrainRopeAnchor"
+	anchor_point.top_level = true
+	add_child(anchor_point)
+	anchor_point.global_position = hit_position
+	_terrain_anchor_point = anchor_point
+	_terrain_anchor_body = hit_body
+
+	var start_position := _get_configured_start_position()
+	var terrain_rest_length := clampf(
+		maxf(
+			start_position.distance_to(hit_position),
+			minf(minimum_rope_length, max_length)
+		),
+		1.0,
+		maxf(max_length, 1.0)
+	)
+	var attached := attach(
+		_configured_start_body,
+		hit_body,
+		_configured_start_visual_point,
+		anchor_point,
+		terrain_rest_length
+	)
+	if attached:
+		return
+
+	_terrain_anchor_point = null
+	_terrain_anchor_body = null
+	anchor_point.queue_free()
+	set_physics_process(false)
+
+
+func _build_throw_path(
+	charge_ratio: float,
+	check_terrain: bool
+) -> Dictionary:
+	var origin := _get_configured_start_position()
+	var eased_charge := smoothstep(0.0, 1.0, clampf(charge_ratio, 0.0, 1.0))
+	var speed := lerpf(
+		maxf(minimum_throw_speed, 0.0),
+		maxf(maximum_throw_speed, minimum_throw_speed),
+		eased_charge
+	)
+	var points := sample_ballistic_throw_arc(
+		origin,
+		_throw_facing,
+		speed,
+		throw_angle_degrees,
+		throw_gravity,
+		throw_flight_seconds,
+		max_length,
+		throw_preview_points
+	)
+	var result := {
+		"points": points,
+		"duration": maxf(throw_flight_seconds, 0.05),
+		"hit_body": null,
+		"hit_position": points[points.size() - 1] if not points.is_empty() else origin,
+	}
+	if not check_terrain or points.size() < 2 or not is_inside_tree():
+		return result
+
+	var space_state := get_world_2d().direct_space_state
+	if space_state == null:
+		return result
+
+	var excluded_rids: Array[RID] = []
+	if _configured_start_body is CollisionObject2D:
+		excluded_rids.append(
+			(_configured_start_body as CollisionObject2D).get_rid()
+		)
+
+	for index in range(1, points.size()):
+		while true:
+			var query := PhysicsRayQueryParameters2D.create(
+				points[index - 1],
+				points[index],
+				terrain_collision_mask,
+				excluded_rids
+			)
+			query.collide_with_areas = false
+			query.collide_with_bodies = true
+			var hit := space_state.intersect_ray(query)
+			if hit.is_empty():
+				break
+
+			var hit_body := hit.get("collider") as Node2D
+			if not _node_is_valid(hit_body):
+				break
+			if not _is_rope_immovable(hit_body):
+				if hit_body is CollisionObject2D:
+					excluded_rids.append(
+						(hit_body as CollisionObject2D).get_rid()
+					)
+					continue
+				break
+
+			var hit_position: Vector2 = hit.get("position", points[index])
+			points.resize(index)
+			points.append(hit_position)
+			result["points"] = points
+			result["duration"] = (
+				maxf(throw_flight_seconds, 0.05)
+				* float(index) / float(maxi(throw_preview_points - 1, 1))
+			)
+			result["hit_body"] = hit_body
+			result["hit_position"] = hit_position
+			return result
+
+	return result
+
+
+static func sample_ballistic_throw_arc(
+	origin: Vector2,
+	facing_direction: float,
+	speed: float,
+	angle_degrees: float,
+	gravity: float,
+	flight_seconds: float,
+	maximum_reach: float,
+	point_count: int
+) -> PackedVector2Array:
+	var points := PackedVector2Array()
+	var samples := maxi(point_count, 2)
+	var facing := -1.0 if facing_direction < 0.0 else 1.0
+	var angle := deg_to_rad(clampf(angle_degrees, 0.0, 89.0))
+	var launch_velocity := Vector2(
+		cos(angle) * facing,
+		-sin(angle)
+	) * maxf(speed, 0.0)
+	var duration := maxf(flight_seconds, 0.001)
+	var reach := maxf(maximum_reach, 1.0)
+	points.append(origin)
+
+	for index in range(1, samples):
+		var time := duration * float(index) / float(samples - 1)
+		var point := (
+			origin
+			+ launch_velocity * time
+			+ Vector2.DOWN * 0.5 * maxf(gravity, 0.0) * time * time
+		)
+		var offset := point - origin
+		if offset.length() >= reach:
+			points.append(origin + offset.normalized() * reach)
+			break
+		points.append(point)
+
+	return points
+
+
+func _get_configured_start_position() -> Vector2:
+	return _get_visual_position(
+		_configured_start_visual_point,
+		_configured_start_body
+	)
+
+
+func _set_preview_world_points(points: PackedVector2Array) -> void:
+	if throw_preview == null:
+		return
+	throw_preview.clear_points()
+	for point in points:
+		throw_preview.add_point(throw_preview.to_local(point))
+	throw_preview.visible = points.size() >= 2
+
+
+func _set_line_world_points(points: PackedVector2Array) -> void:
+	if line == null:
+		return
+	line.clear_points()
+	for point in points:
+		line.add_point(line.to_local(point))
+
+
+func _set_throw_end_world_position(world_position: Vector2) -> void:
+	if throw_end != null:
+		throw_end.global_position = world_position
+
+
+func _hide_throw_visuals() -> void:
+	if throw_preview != null:
+		throw_preview.visible = false
+		throw_preview.clear_points()
+	if throw_end != null:
+		throw_end.visible = false
+	if line != null and not active:
+		line.visible = false
+		line.clear_points()
+
+
+func _clear_throw_flight() -> void:
+	_throw_flight_points = PackedVector2Array()
+	_throw_flight_elapsed = 0.0
+	_throw_flight_duration = 0.0
+	_throw_hit_body = null
+	_throw_hit_position = Vector2.ZERO
+
+
 func get_rest_length() -> float:
 	return _constraint_length
 
@@ -251,10 +765,11 @@ func is_attached_to(body: Node2D) -> bool:
 	return active and (body == start_body or body == end_body)
 
 
-func preserve_passive_swing_velocity(
+func apply_anchored_swing_control(
 	body: Node2D,
 	proposed_velocity: Vector2,
 	velocity_before_air_control: Vector2,
+	horizontal_input: float,
 	delta: float
 ) -> Vector2:
 	if (
@@ -291,15 +806,72 @@ func preserve_passive_swing_velocity(
 		return proposed_velocity
 
 	var tangent := Vector2(-radial_direction.y, radial_direction.x)
-	var damping := exp(-maxf(passive_swing_damping, 0.0) * delta)
-	var retained_tangent_speed := (
-		velocity_before_air_control.dot(tangent) * damping
-	)
-	var overwritten_tangent_speed := proposed_velocity.dot(tangent)
+	var radial_speed := velocity_before_air_control.dot(radial_direction)
+	var tangent_speed := velocity_before_air_control.dot(tangent)
+	var clamped_input := clampf(horizontal_input, -1.0, 1.0)
+	if is_zero_approx(clamped_input):
+		var damping := exp(-maxf(passive_swing_damping, 0.0) * delta)
+		tangent_speed *= damping
+	else:
+		var tangential_acceleration := (
+			clamped_input
+			* maxf(swing_input_acceleration, 0.0)
+			* tangent.x
+		)
+		tangent_speed = _add_bounded_swing_input(
+			tangent_speed,
+			tangential_acceleration,
+			swing_input_speed_limit,
+			delta
+		)
+
 	return (
-		proposed_velocity
-		+ tangent * (retained_tangent_speed - overwritten_tangent_speed)
+		radial_direction * radial_speed
+		+ tangent * tangent_speed
 	)
+
+
+func preserve_passive_swing_velocity(
+	body: Node2D,
+	proposed_velocity: Vector2,
+	velocity_before_air_control: Vector2,
+	delta: float
+) -> Vector2:
+	return apply_anchored_swing_control(
+		body,
+		proposed_velocity,
+		velocity_before_air_control,
+		0.0,
+		delta
+	)
+
+
+static func _add_bounded_swing_input(
+	tangent_speed: float,
+	tangential_acceleration: float,
+	speed_limit: float,
+	delta: float
+) -> float:
+	if delta <= 0.0 or is_zero_approx(tangential_acceleration):
+		return tangent_speed
+
+	var speed_change := tangential_acceleration * delta
+	var limit := maxf(speed_limit, 0.0)
+	if limit <= 0.0:
+		return tangent_speed
+
+	if absf(tangent_speed) > limit:
+		if tangent_speed * speed_change >= 0.0:
+			return tangent_speed
+		var slowed_speed := tangent_speed + speed_change
+		if (
+			signf(slowed_speed) == signf(tangent_speed)
+			and absf(slowed_speed) > limit
+		):
+			return slowed_speed
+		return clampf(slowed_speed, -limit, limit)
+
+	return clampf(tangent_speed + speed_change, -limit, limit)
 
 
 static func constrain_attached_velocity(
