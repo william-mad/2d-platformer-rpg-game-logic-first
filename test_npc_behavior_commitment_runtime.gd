@@ -601,6 +601,9 @@ func _make_fixture() -> Dictionary:
 
 
 func _free_fixture(fixture: Dictionary) -> void:
+	var machine: NpcStateMachine = fixture.get("machine")
+	if machine != null and machine.active_action != null:
+		machine._cancel_and_clear_active_action("test_cleanup")
 	var simulator := root.get_node_or_null("NpcWorldSimulation")
 	if simulator != null:
 		simulator.call(

@@ -3,6 +3,9 @@ extends SceneTree
 const SOURCE_SCENE := "res://scenes/testscenes/realtest1.tscn"
 const DESTINATION_SCENE := "res://scenes/testscenes/realhometest.tscn"
 const FAILED_DESTINATION := "res://companion_transition_expected_failure.tscn"
+const MemoryPolicy = preload(
+	"res://scripts/systems/npc_behavior/npc_memory_policy.gd"
+)
 
 var _failures: Array[String] = []
 
@@ -33,6 +36,33 @@ func _initialize() -> void:
 	if player == null or source_mom == null:
 		_finish()
 		return
+
+	var transition_memory_id := ""
+	var source_memory := source_mom.get_node_or_null(
+		"NpcStateMachine/NpcShortTermMemory"
+	) as NpcShortTermMemory
+	_expect(source_memory != null, "source Mom has short-term memory")
+	if source_memory != null:
+		var memory_result := source_memory.remember_event(
+			MemoryPolicy.EVENT_ACTION_FAILED,
+			{
+				"source": "scene_transition_test",
+				"reason_code": "continuity_probe",
+				"subject_id": "mom",
+				"target_id": "transition_probe",
+				"logical_action": "Travel",
+			}
+		)
+		transition_memory_id = String(
+			(memory_result.get("memory", {}) as Dictionary).get(
+				"memory_id",
+				""
+			)
+		)
+		_expect(
+			not transition_memory_id.is_empty(),
+			"source Mom records a continuity memory"
+		)
 
 	var travel_component := source_mom.get_node_or_null("TravelCompanion") as TravelCompanionComponent
 	_expect(travel_component != null, "Mom has her travel policy component")
@@ -114,6 +144,31 @@ func _initialize() -> void:
 	_expect(destination_mom != source_mom, "destination uses a fresh Mom instance")
 	if destination_mom != null:
 		var destination_machine := destination_mom.get_node_or_null("NpcStateMachine") as NpcStateMachine
+		var destination_memory := destination_mom.get_node_or_null(
+			"NpcStateMachine/NpcShortTermMemory"
+		) as NpcShortTermMemory
+		_expect(
+			destination_memory != null
+			and destination_memory.get_memory_by_id(transition_memory_id) != null,
+			"fresh destination Mom preserves source short-term memory"
+		)
+		_expect(
+			destination_memory != null
+			and destination_memory.get_recent_memories().size() == 1,
+			"scene replacement creates no additional failure memory"
+		)
+		var destination_feedback := destination_mom.get_node_or_null(
+			"NpcStateMachine/NpcFeedbackPresenter"
+		)
+		_expect(
+			destination_feedback != null
+			and (
+				destination_feedback.call(
+					"get_current_cue_descriptor"
+				) as Dictionary
+			).is_empty(),
+			"restored companion memory does not replay a historical visual cue"
+		)
 		var destination_traversal := destination_mom.get_node_or_null(
 			"NpcPlatformTraversal"
 		) as NpcPlatformTraversal

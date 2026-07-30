@@ -118,7 +118,11 @@ func can_exit_to(new_state: NpcState, request_priority: int) -> bool:
 
 
 func can_start_fight_with(candidate: Node2D) -> bool:
-	return not _should_stop_for_low_health() and _can_target_for_fight(candidate)
+	return can_start_fight() and _can_target_for_fight(candidate)
+
+
+func can_start_fight() -> bool:
+	return not _should_stop_for_low_health()
 
 
 func _update_target(delta: float) -> void:

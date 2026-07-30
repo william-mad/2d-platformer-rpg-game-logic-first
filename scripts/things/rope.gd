@@ -1,6 +1,8 @@
 extends Node2D
 class_name Rope
 
+signal rope_snapped(world_midpoint: Vector2, tension: float)
+
 const ATTACHED_ROPES_META: StringName = &"_attached_rope_constraints"
 const RIGID_SOLVED_FRAME_META: StringName = &"_rope_rigid_solved_frame"
 const MIN_WEIGHT: float = 0.001
@@ -13,14 +15,17 @@ const END_S: StringName = &"s"
 const RopeThrowControllerScript = preload(
 	"res://scripts/things/rope_throw_controller.gd"
 )
+const RopeTensionControllerScript = preload(
+	"res://scripts/things/rope_tension_controller.gd"
+)
 
 @export_category("Rope Feel")
 ## Upper bound for the rope's resting length.
 @export_range(1.0, 2000.0, 1.0, "suffix:px") var max_length: float = 600.0
 ## Free length added to the distance between endpoints when the rope attaches.
 @export_range(0.0, 300.0, 0.5, "suffix:px") var extra_length: float = 60.0
-## Additional elastic stretch allowed after the resting length.
-@export_range(0.1, 100.0, 0.5, "suffix:px") var stretch_margin: float = 18.0
+## Elastic stretch available after the resting length. Higher values give more.
+@export_range(0.1, 200.0, 0.5, "suffix:px") var elasticity: float = 18.0
 ## Speed at which elastic stretch settles back toward the resting length.
 @export_range(0.0, 1000.0, 1.0, "suffix:px/s") var elastic_return_speed: float = 80.0
 @export_range(0.0, 2000.0, 1.0, "suffix:px/s") var overstretch_recovery_speed: float = 240.0
@@ -30,6 +35,18 @@ const RopeThrowControllerScript = preload(
 @export_range(0.0, 3000.0, 10.0, "suffix:px/s²") var swing_input_acceleration: float = 900.0
 ## Input cannot add tangential speed beyond this; gravity may still carry it faster.
 @export_range(0.0, 3000.0, 10.0, "suffix:px/s") var swing_input_speed_limit: float = 1100.0
+
+@export_category("Rope Tension")
+## Normalized strain at which the rope snaps. 1.0 is one full elasticity range.
+@export_range(0.05, 20.0, 0.05) var maximum_tension: float = 3.0
+@export var tension_green: Color = Color(0.28, 0.55, 0.32, 1.0)
+@export var tension_yellow: Color = Color(0.96, 0.82, 0.18, 1.0)
+@export var tension_red: Color = Color(0.94, 0.18, 0.14, 1.0)
+@export var tension_purple: Color = Color(0.78, 0.18, 1.0, 1.0)
+@export_range(2.0, 24.0, 0.5, "suffix:px") var snap_flash_size: float = 8.0
+@export_range(0.05, 1.0, 0.01, "suffix:s") var snap_flash_seconds: float = 0.18
+## Optional sound slot. The rope_snapped signal is the animation/audio hook.
+@export var snap_sound: AudioStream
 
 @export_category("Rope Throw")
 ## Releases shorter than this keep the original nearest-object attachment.
@@ -84,6 +101,7 @@ var _x_attached_visual_point: Node2D
 var _terrain_anchor_point: Marker2D
 var _terrain_anchor_body: Node2D
 var _throw_controller = RopeThrowControllerScript.new()
+var _tension_controller = RopeTensionControllerScript.new()
 
 @onready var line: Line2D = get_node_or_null("Line2D") as Line2D
 @onready var throw_preview: Line2D = get_node_or_null("ThrowPreview") as Line2D
@@ -92,9 +110,11 @@ var _throw_controller = RopeThrowControllerScript.new()
 
 func _ready() -> void:
 	_throw_controller.setup(self)
+	_tension_controller.setup(self)
 	if line != null:
 		line.width = rope_width
 		line.visible = active
+	_tension_controller.reset()
 	if throw_preview != null:
 		throw_preview.visible = false
 	if throw_end != null:
@@ -121,6 +141,9 @@ func _physics_process(delta: float) -> void:
 			return
 	if not _endpoints_are_valid():
 		detach()
+		return
+
+	if _tension_controller.update(delta):
 		return
 
 	_constrain_rigid_endpoint_once(start_body, delta)
@@ -476,13 +499,7 @@ func detach() -> void:
 
 static func detach_all_from_body(body: Node2D) -> void:
 	for rope in _get_attached_ropes(body):
-		if rope._endpoint_controlled:
-			if rope._s_attached_body == body:
-				rope.detach_endpoint(END_S)
-			if rope._x_attached_body == body:
-				rope.detach_endpoint(END_X)
-		else:
-			rope.detach()
+		rope.detach()
 
 
 func track_attachable(attachable: Node2D) -> void:
@@ -694,6 +711,7 @@ func _bind_constraint(
 		)
 
 	active = true
+	_tension_controller.reset()
 	_requested_velocities.clear()
 	_requested_velocity_frames.clear()
 	_record_requested_velocity(start_body, _read_body_velocity(start_body))
@@ -715,6 +733,7 @@ func _deactivate_constraint() -> void:
 	start_visual_point = null
 	end_visual_point = null
 	_constraint_length = 1.0
+	_tension_controller.reset()
 	_requested_velocities.clear()
 	_requested_velocity_frames.clear()
 	if line != null:
@@ -802,7 +821,19 @@ func get_rest_length() -> float:
 
 
 func get_hard_length() -> float:
-	return _constraint_length + maxf(stretch_margin, 0.1)
+	return _constraint_length + maxf(elasticity, 0.1)
+
+
+func get_current_tension() -> float:
+	return _tension_controller.get_current()
+
+
+func get_tension_ratio() -> float:
+	return _tension_controller.get_ratio()
+
+
+func get_tension_color(tension_ratio: float = -1.0) -> Color:
+	return _tension_controller.get_color(tension_ratio)
 
 
 func is_attached_to(body: Node2D) -> bool:
@@ -1086,7 +1117,7 @@ func _calculate_constraint_response(
 
 	var direction := offset / distance
 	var relative_speed := (end_velocity - start_velocity).dot(direction)
-	var give := maxf(stretch_margin, 0.1)
+	var give := maxf(elasticity, 0.1)
 	var hard_length := _constraint_length + give
 	var projected_distance := distance + maxf(relative_speed, 0.0) * delta
 	var response_distance := maxf(distance, projected_distance)
@@ -1419,6 +1450,7 @@ func _update_rope_visual() -> void:
 	var sag := sag_amount * (1.0 - taut_ratio) if use_sag else 0.0
 
 	line.width = rope_width
+	line.default_color = get_tension_color()
 	line.clear_points()
 	var point_count := maxi(rope_points, 2)
 	for index in range(point_count):

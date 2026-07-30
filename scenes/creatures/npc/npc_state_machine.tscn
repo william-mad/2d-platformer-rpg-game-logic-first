@@ -24,6 +24,9 @@
 [ext_resource type="Script" path="res://scripts/systems/npc_behavior/npc_behavior_controller.gd" id="22_behavior"]
 [ext_resource type="Script" path="res://scripts/systems/npc_behavior/npc_short_term_memory.gd" id="23_memory"]
 [ext_resource type="Script" path="res://scripts/systems/npc_behavior/npc_memory_observer.gd" id="24_memory_observer"]
+[ext_resource type="Script" path="res://scripts/systems/npc_behavior/npc_memory_runtime_binding.gd" id="25_memory_runtime_binding"]
+[ext_resource type="Script" path="res://scripts/systems/npc_behavior/feedback/npc_feedback_presenter.gd" id="26_feedback_presenter"]
+[ext_resource type="Script" path="res://scripts/systems/npc_behavior/feedback/npc_feedback_adapter.gd" id="27_feedback_adapter"]
 
 [node name="NpcStateMachine" type="Node"]
 script = ExtResource("1_machine")
@@ -36,6 +39,15 @@ script = ExtResource("23_memory")
 
 [node name="NpcMemoryObserver" type="Node" parent="."]
 script = ExtResource("24_memory_observer")
+
+[node name="NpcMemoryRuntimeBinding" type="Node" parent="."]
+script = ExtResource("25_memory_runtime_binding")
+
+[node name="NpcFeedbackPresenter" type="Node" parent="."]
+script = ExtResource("26_feedback_presenter")
+
+[node name="NpcFeedbackAdapter" type="Node" parent="."]
+script = ExtResource("27_feedback_adapter")
 
 [node name="Idle" type="Node" parent="."]
 unique_name_in_owner = true

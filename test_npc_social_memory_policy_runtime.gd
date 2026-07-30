@@ -571,6 +571,115 @@ func test_live_seen_target_rule_filters_npcs_but_not_player() -> void:
 	)
 
 
+func test_world_retry_descriptor_never_bypasses_candidate_rediscovery() -> void:
+	var fixture := _full_npc_fixture(&"child")
+	fixture.machine.active = true
+	var memory := fixture.memory as NpcShortTermMemory
+	_remember(
+		memory,
+		MemoryPolicy.EVENT_CONVERSATION_REFUSED,
+		&"mom",
+		10.0
+	)
+	var locations := add_child_autofree(LocalLocations.new()) as LocalLocations
+	locations.live_npcs["child"] = fixture.npc
+	var seeker := _record()
+	var records := {
+		"child": seeker,
+		"mom": _record(),
+	}
+	var world := add_child_autofree(WorldSimulation.new()) as Node
+	var planner: NpcSocialPlanner = world.get("_social_planner")
+	planner.begin_simulation_pass()
+	assert_false(
+		bool(world.call(
+			"_try_start_social_seek",
+			&"child",
+			seeker,
+			records,
+			locations,
+			-1
+		)),
+		"the refusing-only pool is all-suppressed"
+	)
+	var first_descriptor: Dictionary = world.call(
+		"get_social_selection_debug_descriptor",
+		&"child"
+	)
+	assert_true(
+		bool(first_descriptor.all_candidates_suppressed),
+		"the first pass publishes its retry descriptor"
+	)
+
+	var removed_records := {"child": seeker}
+	assert_false(
+		bool(world.call(
+			"_try_start_social_seek",
+			&"child",
+			seeker,
+			removed_records,
+			locations,
+			-1
+		)),
+		"removing the old partner still produces no session"
+	)
+	var removed_descriptor: Dictionary = world.call(
+		"get_social_selection_debug_descriptor",
+		&"child"
+	)
+	assert_eq(
+		removed_descriptor.get("candidates_considered", -1),
+		0,
+		"removed partner is absent from the newly enumerated pool"
+	)
+	assert_false(
+		bool(removed_descriptor.get("all_candidates_suppressed", false)),
+		"an obsolete retry descriptor is not reused"
+	)
+
+	var changed_records := {
+		"child": seeker,
+		"mom": _record(),
+		"dad": _record(),
+	}
+	assert_false(
+		bool(world.call(
+			"_try_start_social_seek",
+			&"child",
+			seeker,
+			changed_records,
+			locations,
+			-1
+		)),
+		"the synthetic fixture has no live Dad to execute the selected request"
+	)
+	var changed_descriptor: Dictionary = world.call(
+		"get_social_selection_debug_descriptor",
+		&"child"
+	)
+	assert_eq(
+		changed_descriptor.selected_candidate_id,
+		"dad",
+		"a newly available alternative is discovered before Mom's retry"
+	)
+	assert_eq(
+		int(changed_descriptor.suppressed_by_refusal_count),
+		1,
+		"the refusal policy still blocks only Mom"
+	)
+	assert_null(
+		fixture.machine.active_action,
+		"candidate checking creates no live action session"
+	)
+	var participant_reservations: Dictionary = planner.get(
+		"_participant_reservations"
+	)
+	assert_true(
+		participant_reservations.is_empty(),
+		"the rejected synthetic execution leaves no social reservation"
+	)
+
+
 func _memory() -> NpcShortTermMemory:
 	var memory := NpcShortTermMemory.new()
 	add_child_autofree(memory)

@@ -32,6 +32,11 @@ func _ready() -> void:
 func _on_start_button_pressed() -> void:
 	if has_node("/root/SaveSystem"):
 		SaveSystem.clear_runtime_values()
+	var memory_repository := get_node_or_null(
+		"/root/NpcMemoryRuntimeRepository"
+	)
+	if memory_repository != null:
+		memory_repository.call("clear_all_runtime_memory", &"new_game")
 
 	load_scene(start_scene_path)
 

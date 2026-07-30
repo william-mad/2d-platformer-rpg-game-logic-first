@@ -7,6 +7,7 @@ script = ExtResource("1_uj3le")
 
 [node name="Line2D" type="Line2D" parent="." unique_id=1230043011]
 width = 2.0
+default_color = Color(0.28, 0.55, 0.32, 1)
 
 [node name="ThrowPreview" type="Line2D" parent="."]
 visible = false

@@ -135,6 +135,16 @@ func _resolve_rest_target() -> Node2D:
 			return configured_target
 
 	machine.set_action_target(&"Rest", null, action_session_id)
+	if (
+		machine.active_action != null
+		and machine.active_action.session_id == action_session_id
+		and bool(machine.active_action.metadata.get(
+			"autonomous_in_place_target",
+			false
+		))
+	):
+		_breadcrumb("npc_rest:target_in_place", _npc_label())
+		return null
 	if choice_rng.randf() < clampf(rest_in_place_chance, 0.0, 1.0):
 		_breadcrumb("npc_rest:target_in_place", _npc_label())
 		return null

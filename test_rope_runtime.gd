@@ -40,6 +40,7 @@ func _initialize() -> void:
 	_test_either_endpoint_input_undoes_a_two_end_rope()
 	_test_second_end_is_tap_only()
 	_test_active_rope_updates_during_second_end_hold()
+	await _test_slime_death_undoes_the_whole_rope()
 	await _test_freed_endpoint_preserves_other_attachment()
 	_test_rope_input_map_contract()
 	await _test_s_throw_targets_movable_attachables_only()
@@ -47,6 +48,8 @@ func _initialize() -> void:
 	_test_payload_hoist_and_impulse_policy()
 	_test_drag_speed_scales_with_weight()
 	_test_elastic_give_is_smooth_and_never_moves_positions_directly()
+	_test_tension_color_progression_and_reset()
+	await _test_maximum_tension_snaps_cleanly_with_feedback()
 	_test_closest_target_uses_the_attachment_point()
 	_test_npc_default_weight_and_scene_contract()
 
@@ -670,6 +673,45 @@ func _test_active_rope_updates_during_second_end_hold() -> void:
 	_clear_fixture()
 
 
+func _test_slime_death_undoes_the_whole_rope() -> void:
+	var player := _make_body(Vector2.ZERO, 1.0)
+	var anchor := StaticBody2D.new()
+	anchor.position = Vector2(160.0, 0.0)
+	get_root().add_child(anchor)
+	_fixture_nodes.append(anchor)
+
+	var slime_scene := load("res://scenes/monsters/slime.tscn") as PackedScene
+	var slime := slime_scene.instantiate() as Slime
+	slime.position = Vector2(80.0, 0.0)
+	slime.death_fade_delay_seconds = 0.0
+	slime.death_fade_seconds = 0.05
+	get_root().add_child(slime)
+	_fixture_nodes.append(slime)
+
+	var rope := _make_unattached_rope(player)
+	_expect(
+		rope.complete_thrown_end(Rope.END_X, anchor, anchor.position),
+		"the death regression establishes a terrain endpoint"
+	)
+	rope.track_attachable(slime)
+	_expect(
+		rope.toggle_closest_endpoint(Rope.END_S)
+		and not rope.is_player_endpoint(),
+		"the death regression attaches the slime as the external S endpoint"
+	)
+
+	slime.die()
+	_expect(
+		not rope.active
+		and rope.get_attached_endpoint_count() == 0
+		and not rope.is_attached_to(player),
+		"a dying attached slime undoes the whole rope instead of substituting the player"
+	)
+	await create_timer(0.1).timeout
+	await process_frame
+	_clear_fixture()
+
+
 func _test_freed_endpoint_preserves_other_attachment() -> void:
 	var player := _make_body(Vector2.ZERO, 1.0)
 	var x_target := _make_body(Vector2(40.0, 0.0), 2.0)
@@ -1110,6 +1152,12 @@ func _test_elastic_give_is_smooth_and_never_moves_positions_directly() -> void:
 		var start := _make_body(Vector2.ZERO, 1.0)
 		var end := _make_body(Vector2(100.0, 0.0), 1.0)
 		var rope := _make_rope(start, end, 20.0, 0.0)
+		_expect_close(
+			rope.get_hard_length() - rope.get_rest_length(),
+			rope.elasticity,
+			0.001,
+			"editable elasticity is the rope's available give distance"
+		)
 		end.position.x = distance
 		var solved_end := Rope.constrain_attached_velocity(
 			end,
@@ -1181,6 +1229,208 @@ func _test_elastic_give_is_smooth_and_never_moves_positions_directly() -> void:
 		"high speed is capped before it can cross the give boundary"
 	)
 	rope.detach()
+	_clear_fixture()
+
+	var stiff_start := _make_body(Vector2.ZERO, 1.0)
+	var stiff_end := _make_body(Vector2(100.0, 0.0), 1.0)
+	var stiff_rope := _make_rope(stiff_start, stiff_end, 10.0, 60.0)
+	stiff_rope.maximum_tension = 100.0
+	stiff_end.position.x = 108.0
+	stiff_rope._physics_process(STEP)
+	var stiff_tension := stiff_rope.get_current_tension()
+	var still_tension := stiff_tension
+	stiff_end.velocity = Vector2(240.0, 0.0)
+	stiff_rope._physics_process(STEP)
+	var moving_tension := stiff_rope.get_current_tension()
+	stiff_rope.detach()
+	_clear_fixture()
+
+	var elastic_start := _make_body(Vector2.ZERO, 1.0)
+	var elastic_end := _make_body(Vector2(100.0, 0.0), 1.0)
+	var elastic_rope := _make_rope(elastic_start, elastic_end, 40.0, 60.0)
+	elastic_rope.maximum_tension = 100.0
+	elastic_end.position.x = 108.0
+	elastic_rope._physics_process(STEP)
+	var elastic_tension := elastic_rope.get_current_tension()
+	_expect(
+		stiff_tension > elastic_tension,
+		"less elasticity produces more tension at the same extension"
+	)
+	_expect(
+		moving_tension > still_tension,
+		"outward speed raises projected rope tension before the next step"
+	)
+	elastic_rope.detach()
+	_clear_fixture()
+
+
+func _test_tension_color_progression_and_reset() -> void:
+	var start := _make_body(Vector2.ZERO, 1.0)
+	var end := _make_body(Vector2(100.0, 0.0), 1.0)
+	var rope := _make_rope(start, end, 20.0, 60.0)
+	rope.maximum_tension = 10.0
+
+	_expect_color_close(
+		rope.get_tension_color(0.0),
+		rope.tension_green,
+		0.001,
+		"zero tension uses muted green"
+	)
+	_expect_color_close(
+		rope.get_tension_color(0.4),
+		rope.tension_yellow,
+		0.001,
+		"the first urgency stop is yellow"
+	)
+	_expect_color_close(
+		rope.get_tension_color(0.7),
+		rope.tension_red,
+		0.001,
+		"the second urgency stop is red"
+	)
+	_expect_color_close(
+		rope.get_tension_color(1.0),
+		rope.tension_purple,
+		0.001,
+		"maximum visible urgency is vibrant purple"
+	)
+
+	end.position.x = 115.0
+	rope._physics_process(STEP)
+	_expect_color_close(
+		rope.line.default_color,
+		rope.get_tension_color(),
+		0.001,
+		"the visible rope line receives its live tension color"
+	)
+	rope.detach()
+	_expect_close(
+		rope.get_current_tension(),
+		0.0,
+		0.001,
+		"detaching clears measured rope tension"
+	)
+	_expect_color_close(
+		rope.line.default_color,
+		rope.tension_green,
+		0.001,
+		"detaching resets the reused rope line to muted green"
+	)
+	_expect(
+		rope.attach(start, end),
+		"a detached rope can rebind after its tension color resets"
+	)
+	_expect_color_close(
+		rope.line.default_color,
+		rope.tension_green,
+		0.001,
+		"rebinding starts from the safe green color"
+	)
+	rope.detach()
+	_clear_fixture()
+
+
+func _test_maximum_tension_snaps_cleanly_with_feedback() -> void:
+	var player := _make_body(Vector2.ZERO, 1.0)
+	var payload := _make_body(Vector2(80.0, 0.0), 2.0)
+	payload.add_to_group(&"rope_attachable")
+	var anchor := StaticBody2D.new()
+	anchor.position = Vector2(160.0, 0.0)
+	get_root().add_child(anchor)
+	_fixture_nodes.append(anchor)
+	var rope := _make_unattached_rope(player)
+	rope.track_attachable(payload)
+	var snap_events: Array[Dictionary] = []
+	rope.rope_snapped.connect(
+		func(world_midpoint: Vector2, tension: float) -> void:
+			snap_events.append({
+				"midpoint": world_midpoint,
+				"tension": tension,
+			})
+	)
+
+	rope.complete_thrown_end(Rope.END_X, anchor, anchor.position)
+	rope.toggle_closest_endpoint(Rope.END_S)
+	rope.detach()
+	_expect(
+		snap_events.is_empty(),
+		"ordinary detachment never emits the tension snap hook"
+	)
+
+	rope.complete_thrown_end(Rope.END_X, anchor, anchor.position)
+	rope.toggle_closest_endpoint(Rope.END_S)
+	rope.elasticity = 20.0
+	rope.maximum_tension = 0.25
+	rope.snap_flash_seconds = 0.05
+	payload.position.x = -5.0
+	rope._physics_process(STEP)
+	_expect(
+		rope.active,
+		"the rope remains attached while tension is exactly at its maximum"
+	)
+	_expect_color_close(
+		rope.line.default_color,
+		rope.tension_purple,
+		0.001,
+		"the rope reaches full purple before an overload snaps it"
+	)
+
+	payload.position.x = -10.0
+	var player_position := player.position
+	var payload_position := payload.position
+	var anchor_position := anchor.position
+	var expected_midpoint := (payload.position + anchor.position) * 0.5
+
+	rope._physics_process(STEP)
+	_expect(
+		not rope.active
+		and rope.get_attached_endpoint_count() == 0
+		and not rope.is_attached_to(player),
+		"exceeding maximum tension undoes both ends without substituting the player"
+	)
+	_expect_vector_close(
+		player.position,
+		player_position,
+		0.0,
+		"snapping never moves the player"
+	)
+	_expect_vector_close(
+		payload.position,
+		payload_position,
+		0.0,
+		"snapping never moves the payload"
+	)
+	_expect_vector_close(
+		anchor.position,
+		anchor_position,
+		0.0,
+		"snapping never moves the anchor"
+	)
+	_expect(
+		snap_events.size() == 1
+		and float(snap_events[0].get("tension", 0.0)) > rope.maximum_tension,
+		"an overload emits exactly one snap hook with the exceeded tension"
+	)
+	_expect_vector_close(
+		snap_events[0].get("midpoint", Vector2.ZERO),
+		expected_midpoint,
+		0.001,
+		"the snap hook is emitted at the rope midpoint"
+	)
+	var snap_flash := rope.get_node_or_null("RopeSnapFlash") as Node2D
+	_expect(
+		snap_flash != null and snap_flash.visible,
+		"a short snap indicator appears at the rope midpoint"
+	)
+	if snap_flash != null:
+		_expect_vector_close(
+			snap_flash.global_position,
+			expected_midpoint,
+			0.001,
+			"the snap indicator is centered on the broken rope"
+		)
+	await create_timer(0.1).timeout
+	await process_frame
 	_clear_fixture()
 
 
@@ -1302,7 +1552,7 @@ func _make_rope(
 	line.name = "Line2D"
 	rope.add_child(line)
 	rope.extra_length = 0.0
-	rope.stretch_margin = give
+	rope.elasticity = give
 	rope.elastic_return_speed = return_speed
 	rope.overstretch_recovery_speed = maxf(return_speed, 240.0)
 	get_root().add_child(rope)
@@ -1360,5 +1610,20 @@ func _expect_vector_close(
 ) -> void:
 	_expect(
 		actual.distance_to(expected) <= tolerance,
+		"%s (expected %s, got %s)" % [message, expected, actual]
+	)
+
+
+func _expect_color_close(
+	actual: Color,
+	expected: Color,
+	tolerance: float,
+	message: String
+) -> void:
+	_expect(
+		absf(actual.r - expected.r) <= tolerance
+		and absf(actual.g - expected.g) <= tolerance
+		and absf(actual.b - expected.b) <= tolerance
+		and absf(actual.a - expected.a) <= tolerance,
 		"%s (expected %s, got %s)" % [message, expected, actual]
 	)

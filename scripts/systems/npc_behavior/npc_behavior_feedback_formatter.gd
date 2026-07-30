@@ -40,6 +40,20 @@ static func format_label(
 			== "no_social_target_due_to_recent_refusal"
 	):
 		lines.append("social: waiting after refusal")
+	var target_selection = feedback.get("target_selection", {})
+	if (
+		target_selection is Dictionary
+		and bool(target_selection.get("all_suppressed", false))
+		and String(target_selection.get("reason_code", ""))
+			== "all_targets_recently_failed"
+	):
+		var target_action := String(
+			target_selection.get("logical_action", "")
+		).strip_edges()
+		lines.append(
+			"%s targets recently failed"
+			% (target_action if not target_action.is_empty() else "Activity")
+		)
 	var memory = feedback.get("memory", {})
 	if memory is Dictionary:
 		var recent = memory.get("recent", [])

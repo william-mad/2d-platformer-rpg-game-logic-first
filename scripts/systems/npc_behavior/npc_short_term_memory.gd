@@ -157,8 +157,23 @@ func find_recent(
 	target_id: StringName = &"",
 	logical_action: StringName = &""
 ) -> Array[NpcMemoryEvent]:
+	return find_recent_at(
+		event_type,
+		_get_current_game_hours(),
+		subject_id,
+		target_id,
+		logical_action
+	)
+
+
+func find_recent_at(
+	event_type: StringName,
+	now_game_hours: float,
+	subject_id: StringName = &"",
+	target_id: StringName = &"",
+	logical_action: StringName = &""
+) -> Array[NpcMemoryEvent]:
 	var results: Array[NpcMemoryEvent] = []
-	var now_game_hours := _get_current_game_hours()
 	for memory in _memories:
 		if memory.is_expired(now_game_hours) or memory.event_type != event_type:
 			continue
@@ -213,7 +228,11 @@ func export_snapshot(now_game_hours: float) -> Array[Dictionary]:
 	return snapshot
 
 
-func import_snapshot(snapshot: Array, now_game_hours: float) -> Dictionary:
+func import_snapshot(
+	snapshot: Array,
+	now_game_hours: float,
+	merge_existing: bool = false
+) -> Dictionary:
 	var imported: Array[NpcMemoryEvent] = []
 	var seen_ids: Dictionary = {}
 	var malformed_count := 0
@@ -236,7 +255,39 @@ func import_snapshot(snapshot: Array, now_game_hours: float) -> Dictionary:
 			continue
 		seen_ids[memory.memory_id] = true
 		imported.append(memory)
-	_memories = imported
+	var merged_count := 0
+	if merge_existing:
+		var combined_by_id: Dictionary = {}
+		for memory in imported:
+			combined_by_id[memory.memory_id] = memory
+		# The already-live component is authoritative when both sides contain the
+		# same exact memory. This avoids inflating occurrence counts during a
+		# duplicate-owner handoff.
+		for memory in _memories:
+			if memory.is_expired(now_game_hours):
+				continue
+			combined_by_id[memory.memory_id] = memory.duplicate_event()
+		var combined: Array[NpcMemoryEvent] = []
+		for memory in combined_by_id.values():
+			combined.append(memory)
+		combined.sort_custom(_snapshot_memory_before)
+		_memories = []
+		for memory in combined:
+			var equivalent := _find_merge_candidate(
+				memory,
+				memory.last_updated_game_hours
+			)
+			if equivalent != null:
+				_merge_event(
+					equivalent,
+					memory,
+					memory.last_updated_game_hours
+				)
+				merged_count += 1
+			else:
+				_memories.append(memory)
+	else:
+		_memories = imported
 	var evicted_count := _enforce_capacity(now_game_hours, false)
 	memory_changed.emit()
 	return {
@@ -244,6 +295,7 @@ func import_snapshot(snapshot: Array, now_game_hours: float) -> Dictionary:
 		"malformed_count": malformed_count,
 		"expired_count": expired_count,
 		"duplicate_id_count": duplicate_id_count,
+		"merged_count": merged_count,
 		"evicted_count": evicted_count,
 	}
 

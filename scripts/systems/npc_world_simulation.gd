@@ -52,7 +52,6 @@ var simulation_dirty_while_locked: bool = false
 var social_rng := RandomNumberGenerator.new()
 var _social_planner := NpcSocialPlanner.new()
 var _social_planning_suppressed: bool = false
-var _social_memory_retry_game_hours: Dictionary = {}
 var _social_selection_debug_by_npc: Dictionary = {}
 var _needs_simulator := NpcNeedsSimulator.new()
 var simulation_tick_skip_logged: bool = false
@@ -2433,37 +2432,10 @@ func _try_start_social_seek(
 	var clean_npc_id := String(npc_id)
 	var now_game_hours := _get_current_total_hours()
 	if short_term_memory == null:
-		_social_memory_retry_game_hours.erase(clean_npc_id)
 		_publish_social_selection_descriptor(npc_id, live_machine, {})
-	else:
-		var cached_retry_game_hours := float(
-			_social_memory_retry_game_hours.get(clean_npc_id, 0.0)
-		)
-		if cached_retry_game_hours > now_game_hours:
-			var cached_descriptor: Dictionary = _social_selection_debug_by_npc.get(
-				clean_npc_id,
-				{}
-			).duplicate(true)
-			cached_descriptor = _refresh_cached_social_memory_retry(
-				short_term_memory,
-				cached_descriptor,
-				now_game_hours
-			)
-			if not cached_descriptor.is_empty():
-				cached_retry_game_hours = float(cached_descriptor.get(
-					"earliest_retry_game_hours",
-					cached_retry_game_hours
-				))
-				_social_memory_retry_game_hours[clean_npc_id] = (
-					cached_retry_game_hours
-				)
-				_publish_social_selection_descriptor(
-					npc_id,
-					live_machine,
-					cached_descriptor
-				)
-				return false
-		_social_memory_retry_game_hours.erase(clean_npc_id)
+	# Refusal retry times describe partner eligibility, not the candidate pool.
+	# Re-enumerate at the normal social-planning cadence so a newly present or
+	# newly available alternative can be selected immediately.
 
 	var relationships := get_node_or_null("/root/Relationships")
 	var player := get_tree().get_first_node_in_group("player") as Node2D
@@ -2498,14 +2470,6 @@ func _try_start_social_seek(
 		selection_descriptor
 	)
 	if bool(selection_descriptor.get("all_candidates_suppressed", false)):
-		var earliest_retry_game_hours := float(selection_descriptor.get(
-			"earliest_retry_game_hours",
-			0.0
-		))
-		if earliest_retry_game_hours > now_game_hours:
-			_social_memory_retry_game_hours[clean_npc_id] = (
-				earliest_retry_game_hours
-			)
 		_log_social_plan_result(
 			npc_id,
 			"",
@@ -2517,7 +2481,6 @@ func _try_start_social_seek(
 			))
 		)
 		return false
-	_social_memory_retry_game_hours.erase(clean_npc_id)
 	if candidate.is_empty():
 		return false
 
@@ -2649,53 +2612,6 @@ func _publish_social_selection_descriptor(
 			"set_social_selection_feedback",
 			descriptor.duplicate(true)
 		)
-
-
-func _refresh_cached_social_memory_retry(
-	short_term_memory: NpcShortTermMemory,
-	descriptor: Dictionary,
-	now_game_hours: float
-) -> Dictionary:
-	if short_term_memory == null or descriptor.is_empty():
-		return {}
-	var earliest_retry_game_hours := 0.0
-	var active_suppression_count := 0
-	var decisions = descriptor.get("candidate_decisions", [])
-	if not (decisions is Array):
-		return {}
-	for decision in decisions:
-		if (
-			not (decision is Dictionary)
-			or bool(decision.get("allowed", true))
-			or String(decision.get("reason_code", ""))
-				!= "recent_conversation_refusal"
-		):
-			continue
-		var memory_id := String(decision.get("memory_id", ""))
-		var refusal := short_term_memory.get_memory_by_id(memory_id)
-		if refusal == null or refusal.resolved:
-			continue
-		var retry_game_hours := (
-			refusal.last_updated_game_hours
-			+ recent_refusal_retry_delay_game_hours
-		)
-		if retry_game_hours <= now_game_hours:
-			continue
-		active_suppression_count += 1
-		if (
-			earliest_retry_game_hours <= 0.0
-			or retry_game_hours < earliest_retry_game_hours
-		):
-			earliest_retry_game_hours = retry_game_hours
-	if active_suppression_count <= 0:
-		return {}
-	var refreshed := descriptor.duplicate(true)
-	refreshed["suppressed_by_refusal_count"] = active_suppression_count
-	refreshed["earliest_retry_game_hours"] = earliest_retry_game_hours
-	refreshed["remaining_retry_hours"] = (
-		earliest_retry_game_hours - now_game_hours
-	)
-	return refreshed
 
 
 func _record_has_pending_travel(record: Dictionary) -> bool:

@@ -22,6 +22,9 @@ foundation for later memory, not memory itself.
 - `NpcSocialMemoryPolicy` may reject a newly considered NPC conversation
   candidate before submission. It cannot modify priorities, commitments,
   reservations, targets, or action sessions.
+- `NpcTargetMemoryPolicy` may temporarily reject a newly considered ordinary
+  activity spot after a matching terminal target failure. It is read-only and
+  runs before the candidate becomes an intention or action session.
 
 An intent answers "what is this NPC trying to do?", a primary state answers
 "which implementation is running?", and an action session answers "which
@@ -86,6 +89,31 @@ candidates retain their existing order. If all eligible NPC partners are
 temporarily suppressed, normal non-social and scheduled fallbacks remain
 available. Established approaches and Talk sessions are not reevaluated by this
 policy; their existing action-session and pairing ownership stays authoritative.
+
+The world-simulation social boundary always performs lightweight candidate
+discovery at its normal cadence. The earliest refusal retry remains observable,
+but no longer acts as a requester-only early-return cache; newly present or
+newly available partners can be selected before another partner's delay expires.
+
+## Memory-informed activity eligibility
+
+Default live Eat, Rest, and Recreation need rules enumerate ordinary candidates
+before submitting an intent. The same adapter supports ordinary `need`-sourced
+Sleep and Work rules, although the project's current Sleep and Work producers
+are authoritative/manual rather than default need rules.
+`NpcTargetMemoryPolicy` skips only a candidate matched by unresolved, unexpired
+`target_unavailable`, `movement_failed`, or `intention_target_lost` evidence.
+
+The order is validity, read-only memory eligibility, commitment evaluation,
+session creation, reservation, target installation, and state entry. A
+suppressed target therefore cannot produce commitment rejection or restart the
+current intention. An allowed alternative proceeds through the existing
+pipeline once. If all candidates are suppressed, the current primary state,
+need, accepted intention, and action ownership remain unchanged; no fake Idle
+intent or failure memory is produced.
+
+Active sessions are never continuously filtered. Movement and arrival refresh
+the same accepted intention by session identity exactly as before.
 
 ## Developer feedback
 

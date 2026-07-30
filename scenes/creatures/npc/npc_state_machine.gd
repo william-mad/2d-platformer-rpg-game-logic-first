@@ -11,6 +11,9 @@ const NpcBehaviorFeedbackFormatter = preload(
 const NpcSocialMemoryPolicyModel = preload(
 	"res://scripts/systems/npc_behavior/npc_social_memory_policy.gd"
 )
+const NpcTargetMemoryPolicyModel = preload(
+	"res://scripts/systems/npc_behavior/npc_target_memory_policy.gd"
+)
 signal state_changed(state_name: StringName, previous_state_name: StringName)
 signal state_request_failed(state_name: StringName, reason: String)
 signal target_changed(target: Node2D)
@@ -18,6 +21,11 @@ signal values_changed(changed_values: Dictionary, actor: Node2D)
 signal values_replaced(values_snapshot: Dictionary, actor: Node2D)
 signal player_interaction_invalidated(reason: String)
 signal action_session_changed(descriptor: Dictionary)
+signal policy_feedback_changed(
+	policy_kind: StringName,
+	descriptor: Dictionary
+)
+signal activity_target_selection_committed(descriptor: Dictionary)
 
 const VALUE_ALIASES := {
 	"sleepiness": "sleep_need",
@@ -68,6 +76,14 @@ const ACTIVE_TRAVEL_BLOCKED_STATES := {
 	"InvitePlayer": true,
 	"Sleep": true,
 	"Rest": true,
+}
+
+const MEMORY_FILTERED_LIVE_ACTIVITY_ACTIONS := {
+	"Eat": true,
+	"Rest": true,
+	"Recreation": true,
+	"Sleep": true,
+	"Work": true,
 }
 
 enum MonsterSightReaction {
@@ -162,6 +178,11 @@ enum MonsterSightReaction {
 @export_range(0.0, 24.0, 0.01, "suffix:h") var recent_refusal_retry_delay_game_hours: float = 0.25
 @export_range(0, 1000, 1) var npc_talk_moving_task_priority_bonus: int = 15
 
+@export_group("Target Failure Memory")
+@export_range(0.0, 24.0, 0.001, "suffix:h") var target_unavailable_retry_game_hours: float = 0.25
+@export_range(0.0, 24.0, 0.001, "suffix:h") var movement_failed_retry_game_hours: float = 0.125
+@export_range(0.0, 24.0, 0.001, "suffix:h") var intention_target_lost_retry_game_hours: float = 0.25
+
 @export_group("Player Interaction")
 @export_range(0.0, 30.0, 0.1, "suffix:s") var default_player_interaction_hold_seconds: float = 5.0
 @export_range(0.0, 120.0, 0.1, "suffix:s") var default_player_interaction_cooldown_seconds: float = 20.0
@@ -183,6 +204,10 @@ enum MonsterSightReaction {
 @export var animation_player_path: NodePath
 @export var sprite_path: NodePath
 @export var debug_label_path: NodePath
+
+@export_group("Feedback Presentation")
+@export var player_feedback_enabled: bool = true
+@export var developer_state_label_enabled: bool = true
 
 @export_group("Values")
 @export var clamp_percent_values: bool = true
@@ -444,6 +469,7 @@ var _pending_stale_state_reconciliation: Dictionary = {}
 var _logged_stale_state_reconciliations: Dictionary = {}
 var _legacy_behavior_request_counts: Dictionary = {}
 var _logged_legacy_behavior_requests: Dictionary = {}
+var _last_activity_target_selection_commit_key: String = ""
 
 
 var previous_state: NpcState:
@@ -461,9 +487,14 @@ var _debug_label: Label
 var behavior_controller: NpcBehaviorController
 var short_term_memory: NpcShortTermMemory
 var memory_observer: NpcMemoryObserver
+var memory_runtime_binding: NpcMemoryRuntimeBinding
+var feedback_presenter: Node
+var feedback_adapter: Node
 var _behavior_action_replacement_in_progress: bool = false
 var _social_memory_policy := NpcSocialMemoryPolicyModel.new()
+var _target_memory_policy := NpcTargetMemoryPolicyModel.new()
 var _social_selection_feedback: Dictionary = {}
+var _target_selection_feedback: Dictionary = {}
 
 
 func _ready() -> void:
@@ -476,6 +507,7 @@ func _ready() -> void:
 	_cache_optional_nodes()
 	_cache_behavior_controller()
 	_cache_memory_components()
+	_cache_feedback_components()
 	initialize_states()
 	_bind_npc_control_claim_notifications()
 
@@ -605,6 +637,7 @@ func bind_npc(bound_npc: CharacterBody2D) -> void:
 	_cache_optional_nodes()
 	_cache_behavior_controller()
 	_cache_memory_components()
+	_cache_feedback_components()
 
 	for state in states:
 		state.npc = npc
@@ -2588,6 +2621,7 @@ func _consume_or_build_action_session(
 		"behavior_reason_code",
 		"behavior_feedback_text",
 		"behavior_origin_value",
+		"autonomous_in_place_target",
 	]:
 		if request_context.has(behavior_key):
 			behavior_metadata[behavior_key] = request_context[behavior_key]
@@ -2608,7 +2642,10 @@ func _consume_or_build_action_session(
 		elif arrival_state in [&"", &"MoveToTarget"]:
 			arrival_state = logical_kind if logical_kind != &"MoveToTarget" else &"Idle"
 		descriptor["arrival_state"] = String(arrival_state)
-	var target_id := NpcActionSessionModel.get_persistent_id(actor)
+	var target_id := String(request_context.get(
+		"target_persistent_id",
+		NpcActionSessionModel.get_persistent_id(actor)
+	)).strip_edges()
 	if not target_id.is_empty():
 		descriptor["target_persistent_id"] = target_id
 	return NpcActionSessionModel.create(
@@ -3099,14 +3136,21 @@ func _request_monster_fight(monster: Node2D, reason: String, request_priority: i
 	if seen_monster_fight_state_name == &"":
 		return false
 
-	var fight_state := get_state(seen_monster_fight_state_name)
+	if not can_start_fight_with(monster):
+		return false
+	if is_primary_state(&"Fight"):
+		return true
+
+	return request_state(seen_monster_fight_state_name, monster, reason, request_priority)
+
+
+func can_start_fight_with(candidate: Node2D) -> bool:
+	var fight_state := get_state(&"Fight")
 	if fight_state == null:
 		return false
 	if fight_state.has_method("can_start_fight_with"):
-		if not bool(fight_state.call("can_start_fight_with", monster)):
-			return false
-
-	return request_state(seen_monster_fight_state_name, monster, reason, request_priority)
+		return bool(fight_state.call("can_start_fight_with", candidate))
+	return true
 
 
 func is_monster_target(candidate: Node) -> bool:
@@ -3136,6 +3180,8 @@ func _maybe_fight_from_seen_target(seen_target: Node2D) -> bool:
 
 	var anger_fight_rule := _get_matching_anger_fight_rule(seen_target)
 	if not anger_fight_rule.is_empty():
+		if is_primary_state(&"Fight"):
+			return true
 		return request_state(
 			&"Fight",
 			seen_target,
@@ -3152,6 +3198,8 @@ func _maybe_fight_from_seen_target(seen_target: Node2D) -> bool:
 		var fight_priority := _get_anger_fight_priority()
 		if _higher_priority_value_reaction_blocks_combat(seen_target, fight_priority):
 			return false
+		if is_primary_state(&"Fight"):
+			return true
 
 		return request_state(
 			&"Fight",
@@ -3279,6 +3327,18 @@ func is_in_state(state_name: StringName) -> bool:
 
 func is_primary_state(state_name: StringName) -> bool:
 	return current_state != null and String(current_state.name) == String(state_name)
+
+
+func can_transition_to_state(
+	state_name: StringName,
+	request_priority: int = 0
+) -> bool:
+	var next_state := get_state(state_name)
+	if next_state == null or current_state == next_state:
+		return false
+	if current_state == null:
+		return true
+	return current_state.can_exit_to(next_state, request_priority)
 
 
 func get_pending_primary_state_name() -> StringName:
@@ -4329,6 +4389,8 @@ func _confirm_pending_player_talk_payout(actor: Node2D) -> void:
 
 func disable(reason: String = "disabled") -> void:
 	set_value(&"disabled", 1.0, null, false)
+	if is_primary_state(&"DisabledDead"):
+		return
 	request_state(&"DisabledDead", null, reason, 100)
 
 
@@ -4339,6 +4401,8 @@ func enable() -> void:
 
 func die() -> void:
 	set_value(&"hp", 0.0, null, false)
+	if is_primary_state(&"DisabledDead"):
+		return
 	request_state(&"DisabledDead", null, "dead", 100)
 
 
@@ -4532,6 +4596,7 @@ func evaluate_value_reactions(
 		"%s -> %s" % [_get_npc_label(), String(matching_rule.get("state", "none"))]
 	)
 	if matching_rule.is_empty():
+		set_target_selection_feedback({})
 		return false
 
 	var state_name := StringName(String(matching_rule.get("state", "")))
@@ -4539,17 +4604,52 @@ func evaluate_value_reactions(
 	var request_actor := _get_rule_request_actor(safe_actor, matching_rule)
 	if bool(matching_rule.get("requires_target", false)) and request_actor == null:
 		return false
+	if current_state == get_state(state_name):
+		set_target_selection_feedback({})
+		return true
+	var request_context: Dictionary = {}
+	var selection_descriptor: Dictionary = {}
+	var target_selection := _prepare_memory_informed_rule_target(
+		matching_rule,
+		state_name
+	)
+	if bool(target_selection.get("handled", false)):
+		selection_descriptor = target_selection.get(
+			"descriptor",
+			{}
+		)
+		set_target_selection_feedback(selection_descriptor)
+		if not bool(target_selection.get("selected", false)):
+			return false
+		request_actor = target_selection.get("target_node", null) as Node2D
+		var selected_target_id := String(selection_descriptor.get(
+			"selected_target_id",
+			""
+		)).strip_edges()
+		if not selected_target_id.is_empty():
+			request_context["target_persistent_id"] = selected_target_id
+		if bool(target_selection.get("in_place", false)):
+			request_context["autonomous_in_place_target"] = true
+	else:
+		set_target_selection_feedback({})
 
 	if (
 		matching_rule.has("behavior_source")
 		and matching_rule.has("behavior_reason_code")
 	):
-		return request_behavior_intent(
+		var accepted := request_behavior_intent(
 			_build_value_rule_behavior_intent(
 				matching_rule, state_name, priority, request_actor
 			),
-			request_actor
+			request_actor,
+			request_context
 		)
+		if accepted:
+			_emit_committed_activity_target_selection(
+				selection_descriptor,
+				request_actor
+			)
+		return accepted
 	return request_state(
 		state_name,
 		request_actor,
@@ -5132,6 +5232,8 @@ func _cache_optional_nodes() -> void:
 	_animation_player = _get_optional_npc_node(animation_player_path, "AnimationPlayer") as AnimationPlayer
 	_sprite_2d = _get_optional_npc_node(sprite_path, "Sprite2D") as Sprite2D
 	_debug_label = _get_optional_npc_node(debug_label_path, "Label") as Label
+	if _debug_label != null:
+		_debug_label.visible = developer_state_label_enabled
 
 
 func _cache_behavior_controller() -> void:
@@ -5179,6 +5281,9 @@ func _cache_behavior_controller() -> void:
 func _cache_memory_components() -> void:
 	short_term_memory = get_node_or_null("NpcShortTermMemory") as NpcShortTermMemory
 	memory_observer = get_node_or_null("NpcMemoryObserver") as NpcMemoryObserver
+	memory_runtime_binding = get_node_or_null(
+		"NpcMemoryRuntimeBinding"
+	) as NpcMemoryRuntimeBinding
 	if memory_observer != null:
 		memory_observer.bind(self, short_term_memory)
 	if (
@@ -5186,9 +5291,37 @@ func _cache_memory_components() -> void:
 		and not short_term_memory.memory_changed.is_connected(_on_memory_changed)
 	):
 		short_term_memory.memory_changed.connect(_on_memory_changed)
+	if memory_runtime_binding != null:
+		memory_runtime_binding.bind(self, short_term_memory)
+
+
+func _cache_feedback_components() -> void:
+	feedback_presenter = get_node_or_null(
+		"NpcFeedbackPresenter"
+	)
+	feedback_adapter = get_node_or_null(
+		"NpcFeedbackAdapter"
+	)
+	if feedback_presenter != null:
+		feedback_presenter.set(
+			"player_feedback_enabled",
+			player_feedback_enabled
+		)
+		feedback_presenter.call("bind_npc", npc)
+	if feedback_adapter != null:
+		feedback_adapter.call(
+			"bind",
+			self,
+			behavior_controller,
+			short_term_memory,
+			feedback_presenter
+		)
 
 
 func _on_memory_changed() -> void:
+	# A merge, resolution, removal, or expiry changes policy eligibility. Do not
+	# retain an all-suppressed descriptor across that revision.
+	_target_selection_feedback = {}
 	_update_debug_label()
 
 
@@ -5286,7 +5419,14 @@ func _find_best_matching_rule(changed_values: Dictionary, actor: Node2D = null) 
 			continue
 
 		var state_name := StringName(String(rule_dictionary.get("state", "")))
-		if state_name == &"" or get_state(state_name) == null:
+		var configured_state := get_state(state_name)
+		if state_name == &"" or configured_state == null:
+			continue
+		if (
+			state_name == &"Fight"
+			and configured_state.has_method("can_start_fight")
+			and not bool(configured_state.call("can_start_fight"))
+		):
 			continue
 		if (
 			state_name == &"LookForTalkTarget"
@@ -5366,6 +5506,456 @@ func _has_available_casual_spot(state_name: StringName) -> bool:
 			return true
 
 	return false
+
+
+func select_memory_informed_activity_target(
+	logical_action: StringName,
+	candidates: Array,
+	now_game_hours: float = -1.0,
+	context: Dictionary = {}
+) -> Dictionary:
+	var evaluated_at := (
+		_get_world_total_hours()
+		if now_game_hours < 0.0
+		else maxf(now_game_hours, 0.0)
+	)
+	var suppressed_candidates: Array[Dictionary] = []
+	var earliest_retry_game_hours := 0.0
+	var selected_target: Node2D
+	var selected_target_id := ""
+	var selected_in_place := false
+	var selected := false
+	var remembering_id := _get_action_owner_id()
+	var policy_context := {
+		"remembering_npc_id": remembering_id,
+		"target_unavailable_retry_hours": (
+			target_unavailable_retry_game_hours
+		),
+		"movement_failed_retry_hours": movement_failed_retry_game_hours,
+		"intention_target_lost_retry_hours": (
+			intention_target_lost_retry_game_hours
+		),
+	}
+	policy_context.merge(context, true)
+
+	for candidate_value in candidates:
+		var candidate: Dictionary = (
+			candidate_value
+			if candidate_value is Dictionary
+			else {"target_node": candidate_value}
+		)
+		var candidate_node = candidate.get("target_node", null) as Node2D
+		var candidate_id := String(candidate.get(
+			"target_id",
+			_get_stable_activity_target_id(candidate_node, logical_action)
+		)).strip_edges()
+		var candidate_place_id := String(candidate.get(
+			"place_id",
+			candidate_id
+		)).strip_edges()
+		var decision := _target_memory_policy.evaluate_candidate(
+			short_term_memory,
+			logical_action,
+			StringName(candidate_id),
+			StringName(candidate_place_id),
+			evaluated_at,
+			policy_context
+		)
+		if bool(decision.get("allowed", true)):
+			selected = true
+			selected_target = candidate_node
+			selected_target_id = candidate_id
+			selected_in_place = bool(candidate.get("in_place", false))
+			break
+		var retry_game_hours := float(decision.get(
+			"retry_game_hours",
+			evaluated_at
+		))
+		if (
+			earliest_retry_game_hours <= 0.0
+			or retry_game_hours < earliest_retry_game_hours
+		):
+			earliest_retry_game_hours = retry_game_hours
+		suppressed_candidates.append({
+			"target_id": StringName(candidate_id),
+			"reason_code": _target_suppression_reason_code(decision),
+			"memory_event_type": decision.get("memory_event_type", &""),
+			"remaining_retry_hours": float(decision.get(
+				"remaining_retry_hours",
+				0.0
+			)),
+		})
+
+	var descriptor := {
+		"logical_action": logical_action,
+		"candidate_count": candidates.size(),
+		"suppressed_count": suppressed_candidates.size(),
+		"selected_target_id": StringName(selected_target_id),
+		"all_suppressed": (
+			not selected
+			and not candidates.is_empty()
+			and suppressed_candidates.size() == candidates.size()
+		),
+		"earliest_retry_game_hours": earliest_retry_game_hours,
+		"remaining_retry_hours": maxf(
+			earliest_retry_game_hours - evaluated_at,
+			0.0
+		),
+		"reason_code": (
+			&"all_targets_recently_failed"
+			if (
+				not selected
+				and not candidates.is_empty()
+				and suppressed_candidates.size() == candidates.size()
+			)
+			else &""
+		),
+		"suppressed_candidates": suppressed_candidates,
+	}
+	return {
+		"selected": selected,
+		"target_node": selected_target,
+		"target_id": StringName(selected_target_id),
+		"in_place": selected_in_place,
+		"descriptor": descriptor,
+	}
+
+
+func _prepare_memory_informed_rule_target(
+	rule: Dictionary,
+	state_name: StringName
+) -> Dictionary:
+	if (
+		not MEMORY_FILTERED_LIVE_ACTIVITY_ACTIONS.has(String(state_name))
+		or StringName(String(rule.get("behavior_source", ""))) != &"need"
+	):
+		return {"handled": false}
+	var candidates := _enumerate_live_activity_candidates(state_name)
+	if candidates.is_empty():
+		return {"handled": false}
+	var selection := select_memory_informed_activity_target(
+		state_name,
+		candidates
+	)
+	selection["handled"] = true
+	return selection
+
+
+func _emit_committed_activity_target_selection(
+	selection_descriptor: Dictionary,
+	selected_target: Node2D
+) -> void:
+	if (
+		selection_descriptor.is_empty()
+		or int(selection_descriptor.get("suppressed_count", 0)) <= 0
+		or bool(selection_descriptor.get("all_suppressed", false))
+		or behavior_controller == null
+		or behavior_controller.current_intent == null
+		or active_action == null
+		or active_action.status != NpcActionSession.Status.ACTIVE
+	):
+		return
+	var selected_target_id := String(selection_descriptor.get(
+		"selected_target_id",
+		""
+	)).strip_edges()
+	var logical_action := StringName(String(selection_descriptor.get(
+		"logical_action",
+		""
+	)))
+	if (
+		selected_target_id.is_empty()
+		or not MEMORY_FILTERED_LIVE_ACTIVITY_ACTIONS.has(
+			String(logical_action)
+		)
+	):
+		return
+	var accepted_intent := behavior_controller.current_intent
+	if (
+		accepted_intent.lifecycle_only
+		or accepted_intent.source != NpcBehaviorIntentModel.SOURCE_NEED
+		or accepted_intent.logical_action_kind != logical_action
+		or accepted_intent.action_session_id.is_empty()
+		or accepted_intent.action_session_id != active_action.session_id
+		or accepted_intent.target_persistent_id != selected_target_id
+		or active_action.action_kind != logical_action
+		or active_action.source != NpcBehaviorIntentModel.SOURCE_NEED
+		or active_action.target_persistent_id != selected_target_id
+		or active_action.get_live_target() != selected_target
+	):
+		return
+	var commit_key := "%s|%s|%s" % [
+		accepted_intent.action_session_id,
+		String(logical_action),
+		selected_target_id,
+	]
+	if commit_key == _last_activity_target_selection_commit_key:
+		return
+	_last_activity_target_selection_commit_key = commit_key
+	var committed := selection_descriptor.duplicate(true)
+	committed["reason_code"] = &"alternative_target_selected"
+	committed["logical_action"] = logical_action
+	committed["selected_target_id"] = StringName(selected_target_id)
+	committed["action_session_id"] = accepted_intent.action_session_id
+	committed["intent_id"] = accepted_intent.intent_id
+	activity_target_selection_committed.emit(committed)
+
+
+func _enumerate_live_activity_candidates(
+	logical_action: StringName
+) -> Array[Dictionary]:
+	var ordered: Array[Dictionary] = []
+	var seen_instances: Dictionary = {}
+	var assigned := get_action_target(logical_action)
+	_append_activity_candidate(
+		ordered,
+		seen_instances,
+		assigned,
+		logical_action
+	)
+	var state := get_state(logical_action)
+	var configured_path := _get_activity_configured_target_path(
+		state,
+		logical_action
+	)
+	if String(configured_path) != "" and npc != null:
+		_append_activity_candidate(
+			ordered,
+			seen_instances,
+			npc.get_node_or_null(configured_path) as Node2D,
+			logical_action
+		)
+
+	if logical_action in [&"Rest", &"Recreation"]:
+		if logical_action == &"Rest":
+			var rest_state := state as NpcStateRest
+			if (
+				rest_state != null
+				and rest_state.choice_rng.randf()
+					< clampf(rest_state.rest_in_place_chance, 0.0, 1.0)
+			):
+				ordered.append({"target_node": null, "in_place": true})
+				return ordered
+		var casual_candidates := _get_weighted_casual_candidate_order(
+			logical_action,
+			state
+		)
+		for casual in casual_candidates:
+			_append_activity_candidate(
+				ordered,
+				seen_instances,
+				casual,
+				logical_action
+			)
+		if logical_action == &"Rest":
+			ordered.append({"target_node": null, "in_place": true})
+		return ordered
+
+	var value_name := _get_activity_value_name(state, logical_action)
+	var need_candidates: Array[Dictionary] = []
+	var source_index := 0
+	if npc != null and npc.is_inside_tree():
+		for candidate in npc.get_tree().get_nodes_in_group("npc_need_spot"):
+			var spot := candidate as Node2D
+			if not _activity_candidate_is_valid(
+				spot,
+				logical_action,
+				value_name
+			):
+				continue
+			need_candidates.append({
+				"target_node": spot,
+				"distance": npc.global_position.distance_to(
+					spot.global_position
+				),
+				"source_index": source_index,
+			})
+			source_index += 1
+	need_candidates.sort_custom(
+		func(a: Dictionary, b: Dictionary) -> bool:
+			var a_distance := float(a.get("distance", INF))
+			var b_distance := float(b.get("distance", INF))
+			if not is_equal_approx(a_distance, b_distance):
+				return a_distance < b_distance
+			return int(a.get("source_index", 0)) < int(
+				b.get("source_index", 0)
+			)
+	)
+	for candidate in need_candidates:
+		_append_activity_candidate(
+			ordered,
+			seen_instances,
+			candidate.get("target_node", null) as Node2D,
+			logical_action
+		)
+	if (
+		logical_action == &"Eat"
+		and npc != null
+		and npc.has_method("has_available_inventory_food")
+		and bool(npc.call("has_available_inventory_food"))
+	):
+		ordered.append({"target_node": npc})
+	return ordered
+
+
+func _append_activity_candidate(
+	ordered: Array[Dictionary],
+	seen_instances: Dictionary,
+	candidate: Node2D,
+	logical_action: StringName
+) -> void:
+	if not _activity_candidate_is_valid(
+		candidate,
+		logical_action,
+		_get_activity_value_name(get_state(logical_action), logical_action)
+	):
+		return
+	var instance_key := candidate.get_instance_id()
+	if seen_instances.has(instance_key):
+		return
+	seen_instances[instance_key] = true
+	var target_id := _get_stable_activity_target_id(
+		candidate,
+		logical_action
+	)
+	ordered.append({
+		"target_node": candidate,
+		"target_id": target_id,
+		"place_id": target_id,
+	})
+
+
+func _activity_candidate_is_valid(
+	candidate: Node2D,
+	logical_action: StringName,
+	value_name: StringName
+) -> bool:
+	if candidate == null or not is_instance_valid(candidate):
+		return false
+	if logical_action == &"Eat" and candidate == npc:
+		return true
+	if logical_action in [&"Rest", &"Recreation"]:
+		return (
+			candidate.has_method("can_serve_npc_casual_activity")
+			and bool(candidate.call(
+				"can_serve_npc_casual_activity",
+				npc,
+				logical_action
+			))
+		)
+	return (
+		candidate.has_method("can_serve_npc_need")
+		and bool(candidate.call(
+			"can_serve_npc_need",
+			npc,
+			logical_action,
+			value_name
+		))
+	)
+
+
+func _get_weighted_casual_candidate_order(
+	logical_action: StringName,
+	state: NpcState
+) -> Array[Node2D]:
+	var candidates: Array[Node2D] = []
+	var weights: Array[float] = []
+	if npc == null or not npc.is_inside_tree():
+		return candidates
+	for candidate in npc.get_tree().get_nodes_in_group("npc_casual_spot"):
+		var spot := candidate as Node2D
+		if not _activity_candidate_is_valid(spot, logical_action, &""):
+			continue
+		var weight := 1.0
+		if spot.has_method("get_npc_preference_weight"):
+			weight = maxf(float(spot.call(
+				"get_npc_preference_weight",
+				npc
+			)), 0.0)
+		if weight <= 0.0:
+			continue
+		candidates.append(spot)
+		weights.append(weight)
+	var rng: RandomNumberGenerator
+	if state is NpcStateRest:
+		rng = (state as NpcStateRest).choice_rng
+	elif state is NpcStateRecreation:
+		rng = (state as NpcStateRecreation).choice_rng
+	if rng == null:
+		return candidates
+	var ordered: Array[Node2D] = []
+	while not candidates.is_empty():
+		var total_weight := 0.0
+		for weight in weights:
+			total_weight += weight
+		var roll := rng.randf_range(0.0, total_weight)
+		var selected_index := weights.size() - 1
+		for index in weights.size():
+			roll -= weights[index]
+			if roll <= 0.0:
+				selected_index = index
+				break
+		ordered.append(candidates[selected_index])
+		candidates.remove_at(selected_index)
+		weights.remove_at(selected_index)
+	return ordered
+
+
+func _get_activity_configured_target_path(
+	state: NpcState,
+	logical_action: StringName
+) -> NodePath:
+	match logical_action:
+		&"Eat":
+			return (state as NpcStateEat).eat_target_path if state is NpcStateEat else NodePath()
+		&"Rest":
+			return (state as NpcStateRest).rest_target_path if state is NpcStateRest else NodePath()
+		&"Recreation":
+			return (state as NpcStateRecreation).recreation_target_path if state is NpcStateRecreation else NodePath()
+		&"Sleep":
+			return (state as NpcStateSleep).sleep_target_path if state is NpcStateSleep else NodePath()
+		&"Work":
+			return (state as NpcStateWork).work_target_path if state is NpcStateWork else NodePath()
+	return NodePath()
+
+
+func _get_activity_value_name(
+	state: NpcState,
+	logical_action: StringName
+) -> StringName:
+	match logical_action:
+		&"Eat":
+			return (state as NpcStateEat).eat_value_name if state is NpcStateEat else &"hunger"
+		&"Rest":
+			return (state as NpcStateRest).rest_value_name if state is NpcStateRest else &"tired"
+		&"Recreation":
+			return (state as NpcStateRecreation).recreation_value_name if state is NpcStateRecreation else &"boredom"
+		&"Sleep":
+			return (state as NpcStateSleep).sleep_value_name if state is NpcStateSleep else &"sleep_need"
+		&"Work":
+			return (state as NpcStateWork).work_value_name if state is NpcStateWork else &"boredom"
+	return &""
+
+
+func _get_stable_activity_target_id(
+	candidate: Node,
+	logical_action: StringName
+) -> String:
+	return NpcActivityIdentity.get_persistent_spot_id(
+		candidate,
+		logical_action
+	).strip_edges()
+
+
+func _target_suppression_reason_code(decision: Dictionary) -> StringName:
+	match StringName(String(decision.get("memory_event_type", ""))):
+		&"target_unavailable":
+			return &"recent_target_unavailable"
+		&"movement_failed":
+			return &"recent_movement_failure"
+		&"intention_target_lost":
+			return &"recent_intention_target_lost"
+	return &"recent_target_failure"
 
 
 func _can_start_look_for_talk_target() -> bool:
@@ -5870,6 +6460,9 @@ func _get_npc_property_if_exists(property_name: StringName, fallback):
 func _update_debug_label() -> void:
 	if _debug_label == null or current_state == null:
 		return
+	_debug_label.visible = developer_state_label_enabled
+	if not developer_state_label_enabled:
+		return
 
 	var formatted := _format_debug_label_text()
 	if _debug_label.text != formatted:
@@ -5900,7 +6493,44 @@ func get_feedback_descriptor() -> Dictionary:
 	var social_selection := _get_active_social_selection_feedback()
 	if not social_selection.is_empty():
 		feedback["social_selection"] = social_selection
+	var target_selection := _get_active_target_selection_feedback()
+	if not target_selection.is_empty():
+		feedback["target_selection"] = target_selection
 	return feedback
+
+
+func set_target_selection_feedback(descriptor: Dictionary) -> void:
+	var next_feedback: Dictionary = {}
+	if (
+		bool(descriptor.get("all_suppressed", false))
+		and String(descriptor.get("reason_code", ""))
+			== "all_targets_recently_failed"
+	):
+		next_feedback = descriptor.duplicate(true)
+	if _target_selection_feedback == next_feedback:
+		return
+	_target_selection_feedback = next_feedback
+	policy_feedback_changed.emit(&"target", next_feedback.duplicate(true))
+	_update_debug_label()
+
+
+func get_target_selection_debug_descriptor() -> Dictionary:
+	return _get_active_target_selection_feedback()
+
+
+func _get_active_target_selection_feedback() -> Dictionary:
+	if _target_selection_feedback.is_empty():
+		return {}
+	var retry_game_hours := float(_target_selection_feedback.get(
+		"earliest_retry_game_hours",
+		0.0
+	))
+	var remaining_retry_hours := retry_game_hours - _get_world_total_hours()
+	if remaining_retry_hours <= 0.0:
+		return {}
+	var active_feedback := _target_selection_feedback.duplicate(true)
+	active_feedback["remaining_retry_hours"] = remaining_retry_hours
+	return active_feedback
 
 
 func set_social_selection_feedback(descriptor: Dictionary) -> void:
@@ -5914,6 +6544,7 @@ func set_social_selection_feedback(descriptor: Dictionary) -> void:
 	if _social_selection_feedback == next_feedback:
 		return
 	_social_selection_feedback = next_feedback
+	policy_feedback_changed.emit(&"social", next_feedback.duplicate(true))
 	_update_debug_label()
 
 

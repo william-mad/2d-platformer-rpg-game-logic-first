@@ -377,8 +377,12 @@ func take_damage(
 		)
 		if (
 			npc_state_machine != null
+			and get_hp() > 0.0
 			and relationship_anger_delta > 0.0
 			and relationship_anger >= npc_relationship_fight_anger_threshold
+			and not npc_state_machine.is_primary_state(&"Fight")
+			and npc_state_machine.can_start_fight_with(damage_actor)
+			and npc_state_machine.can_transition_to_state(&"Fight", 94)
 		):
 			npc_state_machine.request_state(
 				&"Fight",
@@ -393,9 +397,12 @@ func take_damage(
 		)
 		if (
 			npc_state_machine != null
+			and get_hp() > 0.0
 			and relationship_fear_delta > 0.0
 			and relationship_fear >= npc_relationship_flee_fear_threshold
 			and relationship_anger < npc_relationship_fight_anger_threshold
+			and not npc_state_machine.is_primary_state(&"Flee")
+			and npc_state_machine.can_transition_to_state(&"Flee", 90)
 		):
 			npc_state_machine.request_state(
 				&"Flee",
