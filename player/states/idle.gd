@@ -27,7 +27,7 @@ func handle_input( _event : InputEvent) -> PlayerState:
 	if requested_dash != null:
 		return requested_dash
 
-	if _event.is_action_pressed("up") and can_hide():
+	if _event.is_action_pressed("charm") and can_hide():
 		return hidden
 
 	if _event.is_action_released("attack"):

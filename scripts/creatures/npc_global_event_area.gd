@@ -1,7 +1,7 @@
 class_name NpcGlobalEventArea extends Area2D
 
 @export var target_npc_paths: Array[NodePath] = []
-@export var interaction_action: StringName = &"up"
+@export var interaction_action: StringName = &"charm"
 @export var default_stat_delta: Dictionary = {
 	"favor": 5.0
 }
@@ -52,6 +52,10 @@ func interact(actor: Node) -> bool:
 	if not can_interact(actor):
 		return false
 	return _try_apply_to_player(actor as Node2D)
+
+
+func get_interaction_action(_actor: Node) -> StringName:
+	return interaction_action
 
 
 func get_interaction_priority(_actor: Node) -> int:

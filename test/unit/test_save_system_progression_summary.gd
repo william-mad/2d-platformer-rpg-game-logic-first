@@ -1,4 +1,4 @@
-extends GutTest
+extends "res://test/native_scene_tree_test.gd"
 
 var SaveSystemClass := preload("res://scripts/systems/save_system.gd")
 const AVAILABILITY_TEST_SLOT := "save_availability_test"

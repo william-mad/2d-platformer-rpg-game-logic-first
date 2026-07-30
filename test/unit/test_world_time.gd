@@ -1,4 +1,4 @@
-extends GutTest
+extends "res://test/native_scene_tree_test.gd"
 # Unit tests for WorldTimeSystem's pure time math: daylight, periods, hours, wraparound.
 # WorldTime is an autoload in the game, but these tests instantiate the script fresh so
 # the math can be verified in isolation without touching the running clock.
@@ -52,7 +52,7 @@ func test_daylight_progress_zero_at_sunrise() -> void:
 	var clock := _make_clock()
 	clock.set_time(0, 6.0) # exactly sunrise
 	assert_true(clock.is_daylight(), "sunrise should count as daylight start")
-	var progress := clock.get_daylight_progress()
+	var progress: float = clock.get_daylight_progress()
 	assert_true(is_equal_approx(progress, 0.0), "daylight progress should start at 0 at sunrise")
 
 
@@ -81,6 +81,6 @@ func test_reset_time_zeros_day_and_hour() -> void:
 func test_snapshot_contains_required_keys() -> void:
 	var clock := _make_clock()
 	clock.set_time(1, 9.0)
-	var snapshot := clock.get_snapshot()
+	var snapshot: Dictionary = clock.get_snapshot()
 	for required_key in ["day", "time_of_day_hours", "total_hours", "period", "hour", "minute", "is_daylight"]:
 		assert_true(snapshot.has(required_key), "snapshot must include %s" % required_key)

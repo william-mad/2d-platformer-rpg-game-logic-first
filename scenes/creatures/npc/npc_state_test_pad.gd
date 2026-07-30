@@ -14,7 +14,7 @@ class_name NpcStateTestPad extends Area2D
 @export var request_talk_to_player: bool = false
 
 @export_group("Interaction")
-@export var interaction_action: StringName = &"up"
+@export var interaction_action: StringName = &"charm"
 @export var requires_interaction: bool = true
 @export var cooldown_seconds: float = 0.35
 @export var interaction_priority: int = 20
@@ -67,6 +67,10 @@ func interact(actor: Node) -> bool:
 	_apply_to_target(actor as Node2D)
 	cooldown = cooldown_seconds
 	return true
+
+
+func get_interaction_action(_actor: Node) -> StringName:
+	return interaction_action
 
 
 func get_interaction_priority(_actor: Node) -> int:

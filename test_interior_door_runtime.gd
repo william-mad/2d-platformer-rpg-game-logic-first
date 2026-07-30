@@ -57,6 +57,10 @@ func _validate_scene_structure_and_vertical_slice() -> void:
 	_expect(door.get_node_or_null("ClearanceArea/CollisionShape2D") is CollisionShape2D, "clearance area has a shape")
 	_expect(door.get_node_or_null("VisualRoot") is Node2D, "door has a visual root")
 	_expect(door.get_node_or_null("AnimationPlayer") is AnimationPlayer, "door has an animation player")
+	_expect(
+		door.get_interaction_action(null) == &"up",
+		"InteriorDoor remains explicitly bound to Up"
+	)
 
 	var barrier := door.get_node("DoorBarrier") as StaticBody2D
 	var request := door.get_node("RequestArea") as Area2D
@@ -326,7 +330,7 @@ func _validate_realhometest_player_slice() -> void:
 	_expect(door.request_area.overlaps_body(player), "realhometest player starts inside the InteriorDoor request area")
 	_expect(not outside_door.overlaps_body(player), "InteriorDoor start position does not overlap the outside transition door")
 	_expect(not stove.overlaps_body(player), "InteriorDoor start position does not overlap the stove interaction")
-	_expect(not _collision_rect(door.get_node("RequestArea/CollisionShape2D")).intersects(_collision_rect(stove.get_node("CollisionShape2D"))), "Bathroom door and stove Up boxes do not intersect")
+	_expect(not _collision_rect(door.get_node("RequestArea/CollisionShape2D")).intersects(_collision_rect(stove.get_node("CollisionShape2D"))), "Bathroom door and stove interaction boxes do not intersect")
 	_expect(not _collision_rect(door.get_node("RequestArea/CollisionShape2D")).intersects(_collision_rect(outside_door.get_node("CollisionShape2D"))), "Bathroom and outside-door Up boxes do not intersect")
 	_expect(not _collision_rect(door.get_node("RequestArea/CollisionShape2D")).intersects(_collision_rect(shower_spot.get_node("CollisionShape2D"))), "Bathroom door and shower interaction boxes do not intersect")
 	_expect(not _collision_rect(bedroom_door.get_node("RequestArea/CollisionShape2D")).intersects(_collision_rect(sleep_spot.get_node("CollisionShape2D"))), "Bedroom door and sleep interaction boxes do not intersect")
@@ -382,7 +386,10 @@ func _validate_realhometest_player_slice() -> void:
 	await physics_frame
 	_expect(door.request_area.overlaps_body(player), "Hall approach enters the InteriorDoor request zone")
 	_expect(not outside_door.overlaps_body(player), "Interior and outside Up interaction zones do not overlap")
-	_expect(not stove.overlaps_body(player), "Interior door and stove Up interactions remain separate")
+	_expect(
+		not stove.overlaps_body(player),
+		"Interior door Up and stove Charm interactions remain separate"
+	)
 	await _press_interact()
 	_expect(door.is_actor_granted(player), "pressing Up while pushing against the door grants reliably")
 	for _frame in range(120):

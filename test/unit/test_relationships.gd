@@ -1,4 +1,4 @@
-extends GutTest
+extends "res://test/native_scene_tree_test.gd"
 # Unit tests for the Relationships autoload's favor clamping and save round-trip.
 # Most public favor methods need live Node arguments, so these tests focus on the
 # pure save/restore path (apply_save_data / get_save_data) where favor clamping and
@@ -34,7 +34,7 @@ func test_loaded_favor_is_clamped_to_max() -> void:
 		}
 	}
 	relationships.apply_save_data({"relationships": saved})
-	var restored := relationships.get_relationship_by_id("npc_a", "npc_b")
+	var restored: Dictionary = relationships.get_relationship_by_id("npc_a", "npc_b")
 	assert_eq(float(restored.get("favor", -1.0)), 100.0, "favor above max clamps to 100")
 
 
@@ -47,7 +47,7 @@ func test_loaded_favor_is_clamped_to_min() -> void:
 		}
 	}
 	relationships.apply_save_data({"relationships": saved})
-	var restored := relationships.get_relationship_by_id("npc_a", "npc_b")
+	var restored: Dictionary = relationships.get_relationship_by_id("npc_a", "npc_b")
 	assert_eq(float(restored.get("favor", -1.0)), 0.0, "favor below min clamps to 0")
 
 
@@ -55,15 +55,15 @@ func test_loaded_relationship_defaults_missing_favor() -> void:
 	# A relationship entry with no favor field should fall back to default_favor.
 	var saved := {"npc_a": {"npc_b": {"met": true}}}
 	relationships.apply_save_data({"relationships": saved})
-	var restored := relationships.get_relationship_by_id("npc_a", "npc_b")
+	var restored: Dictionary = relationships.get_relationship_by_id("npc_a", "npc_b")
 	assert_eq(float(restored.get("favor", -1.0)), 50.0, "missing favor falls back to default 50")
 
 
 func test_save_round_trip_preserves_favor() -> void:
 	var saved := {"npc_a": {"npc_b": {"favor": 73.0, "met": true, "meet_count": 3}}}
 	relationships.apply_save_data({"relationships": saved})
-	var round_tripped := relationships.get_save_data()
-	var restored := round_tripped["relationships"]["npc_a"]["npc_b"]
+	var round_tripped: Dictionary = relationships.get_save_data()
+	var restored: Dictionary = round_tripped["relationships"]["npc_a"]["npc_b"]
 	assert_eq(float(restored["favor"]), 73.0, "favor survives a save round-trip")
 	assert_eq(int(restored["meet_count"]), 3, "meet_count survives a save round-trip")
 
@@ -77,7 +77,7 @@ func test_empty_other_id_is_skipped() -> void:
 
 
 func test_get_relationship_for_unknown_ids_is_empty() -> void:
-	var restored := relationships.get_relationship_by_id("nobody", "noone")
+	var restored: Dictionary = relationships.get_relationship_by_id("nobody", "noone")
 	assert_true(restored.is_empty(), "unknown id pair returns empty dict")
 
 

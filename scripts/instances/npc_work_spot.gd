@@ -23,7 +23,7 @@ const MEAL_OWNER_CLEANUP := "cleanup"
 @export var allow_player_work: bool = true
 @export var player_group: StringName = &"player"
 @export var player_owner_id: StringName = &"player"
-@export var player_work_action: StringName = &"up"
+@export var player_work_action: StringName = &"charm"
 @export_range(0.1, 100.0, 0.1) var player_work_per_interaction: float = 25.0
 @export_range(0.05, 30.0, 0.05, "suffix:s") var player_work_duration_seconds: float = 2.0
 @export_range(0.0, 10.0, 0.05, "suffix:s") var player_work_cooldown_seconds: float = 0.35
@@ -333,6 +333,10 @@ func interact(actor: Node) -> bool:
 	else:
 		return _supply_all_player_meal_ingredients(player)
 	return true
+
+
+func get_interaction_action(_actor: Node) -> StringName:
+	return player_work_action
 
 
 func get_interaction_priority(_actor: Node) -> int:

@@ -12,7 +12,7 @@ const MENU_NPC_PROMPT := &"npc_prompt"
 const DEFAULT_DIALOGUE_METADATA := &"default_dialogue_definition"
 
 @export_group("Interaction")
-@export var interaction_action: StringName = &"up"
+@export var interaction_action: StringName = &"charm"
 @export var interaction_id: StringName = &"talk"
 @export var cooldown_seconds: float = 0.35
 @export var max_distance: float = 120.0
@@ -160,6 +160,10 @@ func interact(actor: Node) -> bool:
 	return _try_open_interaction_menu()
 
 
+func get_interaction_action(_actor: Node) -> StringName:
+	return interaction_action
+
+
 func get_interaction_priority(_actor: Node) -> int:
 	return interaction_priority
 
@@ -304,7 +308,7 @@ func _show_gossip_menu(feedback: String = "") -> void:
 	var page_count := _get_gossip_page_count()
 	var page_feedback := feedback
 	if page_count > 1:
-		var page_text := "Up: next page %d/%d" % [gossip_page_index + 1, page_count]
+		var page_text := "C: next page %d/%d" % [gossip_page_index + 1, page_count]
 		page_feedback = page_text if page_feedback.is_empty() else "%s | %s" % [page_feedback, page_text]
 
 	_show_menu("Gossip about: %s" % npc_label, options, page_feedback)

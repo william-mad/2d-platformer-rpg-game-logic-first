@@ -1,7 +1,7 @@
 class_name TravelReturnPoint
 extends Area2D
 
-@export var interaction_action: StringName = &"up"
+@export var interaction_action: StringName = &"charm"
 @export var option_actions: Array[StringName] = [&"option1", &"option2", &"option3", &"option4", &"option5"]
 @export var preset_hours: Array[float] = [7.0, 13.0, 18.0, 22.0]
 @export var interaction_priority: int = 90
@@ -41,6 +41,10 @@ func interact(actor: Node) -> bool:
 	if not can_interact(actor):
 		return false
 	return _open_menu(actor as Node2D)
+
+
+func get_interaction_action(_actor: Node) -> StringName:
+	return interaction_action
 
 
 func get_interaction_priority(_actor: Node) -> int:
@@ -103,7 +107,7 @@ func _menu_text(current: float) -> String:
 		var elapsed := _targets[index] - current
 		var label := "Return now" if index == 0 else "Return at %02d:00" % int(preset_hours[index - 1])
 		lines.append("%d. %s  (+%.1f hours)" % [index + 1, label, elapsed])
-	lines.append("Up: close")
+	lines.append("C: close")
 	return "\n".join(lines)
 
 

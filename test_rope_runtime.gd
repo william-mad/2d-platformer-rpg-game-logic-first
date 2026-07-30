@@ -36,6 +36,15 @@ func _initialize() -> void:
 	_test_tap_and_hold_throw_states()
 	_test_throw_arc_widens_with_charge()
 	await _test_charged_throw_attaches_and_adjusts_terrain_rope()
+	_test_two_end_attachment_and_length_rules()
+	_test_either_endpoint_input_undoes_a_two_end_rope()
+	_test_second_end_is_tap_only()
+	_test_active_rope_updates_during_second_end_hold()
+	await _test_freed_endpoint_preserves_other_attachment()
+	_test_rope_input_map_contract()
+	await _test_s_throw_targets_movable_attachables_only()
+	_test_player_free_npc_swing()
+	_test_payload_hoist_and_impulse_policy()
 	_test_drag_speed_scales_with_weight()
 	_test_elastic_give_is_smooth_and_never_moves_positions_directly()
 	_test_closest_target_uses_the_attachment_point()
@@ -416,17 +425,13 @@ func _test_tap_and_hold_throw_states() -> void:
 	rope.track_attachable(nearby)
 
 	_expect(
-		rope.begin_throw_charge(1.0),
+		rope.begin_endpoint_gesture(Rope.END_X, 1.0),
 		"an inactive rope starts a pending X gesture"
 	)
 	rope._physics_process(rope.quick_attach_seconds * 0.5)
 	_expect(
-		rope.is_quick_throw_release(),
-		"a short X hold remains the original quick attachment gesture"
-	)
-	rope.cancel_pending_throw()
-	_expect(
-		rope.toggle_closest() and rope.end_body == nearby,
+		rope.release_endpoint_gesture(Rope.END_X)
+		and rope.end_body == nearby,
 		"a quick release still attaches the closest nearby object"
 	)
 	rope.detach()
@@ -434,7 +439,7 @@ func _test_tap_and_hold_throw_states() -> void:
 	var nearby_position := nearby.position
 	var nearby_velocity := nearby.velocity
 	_expect(
-		rope.begin_throw_charge(1.0),
+		rope.begin_endpoint_gesture(Rope.END_X, 1.0),
 		"a detached rope can begin a charged throw"
 	)
 	rope._physics_process(rope.quick_attach_seconds + 0.05)
@@ -456,10 +461,13 @@ func _test_tap_and_hold_throw_states() -> void:
 	)
 	rope.cancel_pending_throw()
 
-	_expect(rope.begin_throw_charge(1.0), "a missed terrain throw begins")
+	_expect(
+		rope.begin_endpoint_gesture(Rope.END_X, 1.0),
+		"a missed terrain throw begins"
+	)
 	rope._physics_process(rope.full_charge_seconds)
 	_expect(
-		rope.release_throw_charge(),
+		rope.release_endpoint_gesture(Rope.END_X),
 		"a charged release still animates when no terrain is in its path"
 	)
 	rope._physics_process(2.0)
@@ -467,6 +475,469 @@ func _test_tap_and_hold_throw_states() -> void:
 		not rope.active and not rope.has_pending_throw(),
 		"a missed terrain throw returns to an inactive clean state"
 	)
+	_clear_fixture()
+
+
+func _test_two_end_attachment_and_length_rules() -> void:
+	var player := _make_body(Vector2.ZERO, 1.0)
+	var x_target := _make_body(Vector2(40.0, 0.0), 2.0)
+	var s_target := _make_body(Vector2(70.0, 0.0), 2.0)
+	x_target.add_to_group(&"rope_attachable")
+	s_target.add_to_group(&"rope_attachable")
+	var rope := _make_unattached_rope(player)
+	rope.track_attachable(x_target)
+	rope.track_attachable(s_target)
+
+	_expect(
+		rope.toggle_closest_endpoint(Rope.END_X),
+		"quick X attaches its named endpoint"
+	)
+	_expect(
+		rope.start_body == player
+		and rope.end_body == x_target
+		and rope.is_player_endpoint(),
+		"with only X attached the player physically holds S"
+	)
+	var one_end_length := rope.get_rest_length()
+	var player_position := player.position
+	var x_position := x_target.position
+	var s_position := s_target.position
+
+	_expect(
+		rope.toggle_closest_endpoint(Rope.END_S),
+		"quick S attaches the remaining endpoint"
+	)
+	_expect(
+		rope.start_body == s_target
+		and rope.end_body == x_target
+		and not rope.is_player_endpoint(),
+		"both attached ends remove the player from the constraint"
+	)
+	_expect_close(
+		rope.get_rest_length(),
+		one_end_length,
+		0.001,
+		"attaching the second end preserves the existing rope length"
+	)
+
+	rope.adjust_length(false, true, 0.5)
+	_expect_close(
+		rope.get_rest_length(),
+		one_end_length,
+		0.001,
+		"Down cannot extend a rope whose two ends are externally attached"
+	)
+	rope.adjust_length(true, true, 0.25)
+	var shortened_length := maxf(
+		rope.minimum_rope_length,
+		one_end_length - rope.reel_in_speed * 0.25
+	)
+	_expect_close(
+		rope.get_rest_length(),
+		shortened_length,
+		0.001,
+		"Up still shortens a fully attached rope while ignored Down is held"
+	)
+	_expect_vector_close(
+		player.position,
+		player_position,
+		0.0,
+		"endpoint rebinding never snaps the player"
+	)
+	_expect_vector_close(
+		x_target.position,
+		x_position,
+		0.0,
+		"endpoint rebinding never snaps the X target"
+	)
+	_expect_vector_close(
+		s_target.position,
+		s_position,
+		0.0,
+		"endpoint rebinding never snaps the S target"
+	)
+
+	_expect(
+		rope.detach_endpoint(Rope.END_S)
+		and rope.start_body == player
+		and rope.end_body == x_target
+		and rope.is_player_endpoint(),
+		"detaching S returns only S to the player"
+	)
+	_expect_close(
+		rope.get_rest_length(),
+		shortened_length,
+		0.001,
+		"detaching one end preserves the rope length"
+	)
+	_expect(
+		rope.detach_endpoint(Rope.END_X) and not rope.active,
+		"detaching the final external end deactivates the constraint"
+	)
+	_clear_fixture()
+
+
+func _test_either_endpoint_input_undoes_a_two_end_rope() -> void:
+	for pressed_end in [Rope.END_X, Rope.END_S]:
+		var player := _make_body(Vector2.ZERO, 1.0)
+		var x_target := _make_body(Vector2(40.0, 0.0), 2.0)
+		var s_target := _make_body(Vector2(70.0, 0.0), 2.0)
+		x_target.add_to_group(&"rope_attachable")
+		s_target.add_to_group(&"rope_attachable")
+		var rope := _make_unattached_rope(player)
+		rope.track_attachable(x_target)
+		rope.track_attachable(s_target)
+		rope.toggle_closest_endpoint(Rope.END_X)
+		rope.toggle_closest_endpoint(Rope.END_S)
+		var x_position := x_target.position
+		var s_position := s_target.position
+
+		_expect(
+			rope.undo_from_endpoint_input(pressed_end),
+			"pressing either attached endpoint accepts the undo command"
+		)
+		_expect(
+			not rope.active
+			and rope.get_attached_endpoint_count() == 0
+			and not rope.is_player_endpoint(),
+			"pressing X or S with both ends deployed undoes the whole rope"
+		)
+		_expect_vector_close(
+			x_target.position,
+			x_position,
+			0.0,
+			"undoing a two-end rope does not move its X target"
+		)
+		_expect_vector_close(
+			s_target.position,
+			s_position,
+			0.0,
+			"undoing a two-end rope does not move its S target"
+		)
+		_clear_fixture()
+
+
+func _test_second_end_is_tap_only() -> void:
+	var player := _make_body(Vector2.ZERO, 1.0)
+	var nearby := _make_body(Vector2(40.0, 0.0), 2.0)
+	nearby.add_to_group(&"rope_attachable")
+	var rope := _make_unattached_rope(player)
+	rope.track_attachable(nearby)
+	_expect(
+		rope.toggle_closest_endpoint(Rope.END_X),
+		"the first endpoint can attach before the second gesture"
+	)
+	_expect(
+		rope.begin_endpoint_gesture(Rope.END_S, 1.0),
+		"the remaining endpoint accepts an S gesture"
+	)
+	rope._physics_process(rope.full_charge_seconds + 0.1)
+	_expect(
+		not rope.is_throw_spinning(),
+		"once one end is attached, the remaining end cannot be thrown"
+	)
+	rope.cancel_pending_throw()
+	rope.detach()
+	_clear_fixture()
+
+
+func _test_active_rope_updates_during_second_end_hold() -> void:
+	var player := _make_body(Vector2.ZERO, 1.0)
+	var rigid_target := RigidBody2D.new()
+	rigid_target.position = Vector2(40.0, 0.0)
+	rigid_target.mass = 2.0
+	rigid_target.add_to_group(&"rope_attachable")
+	get_root().add_child(rigid_target)
+	_fixture_nodes.append(rigid_target)
+	var rope := _make_unattached_rope(player)
+	rope.track_attachable(rigid_target)
+	rope.toggle_closest_endpoint(Rope.END_X)
+
+	rigid_target.position.x = rope.get_hard_length() + 30.0
+	rigid_target.linear_velocity = Vector2(200.0, 0.0)
+	rope.begin_endpoint_gesture(Rope.END_S, 1.0)
+	rope._physics_process(STEP)
+	_expect(
+		rigid_target.linear_velocity.x < 200.0,
+		"holding the tap-only second end does not freeze rigid rope physics"
+	)
+	_expect(
+		rope.line != null and rope.line.get_point_count() >= 2,
+		"holding the tap-only second end keeps the active rope visual updated"
+	)
+	rope.cancel_pending_throw()
+	rope.detach()
+	_clear_fixture()
+
+
+func _test_freed_endpoint_preserves_other_attachment() -> void:
+	var player := _make_body(Vector2.ZERO, 1.0)
+	var x_target := _make_body(Vector2(40.0, 0.0), 2.0)
+	var s_target := _make_body(Vector2(70.0, 0.0), 2.0)
+	x_target.add_to_group(&"rope_attachable")
+	s_target.add_to_group(&"rope_attachable")
+	var rope := _make_unattached_rope(player)
+	rope.track_attachable(x_target)
+	rope.track_attachable(s_target)
+	rope.toggle_closest_endpoint(Rope.END_X)
+	rope.toggle_closest_endpoint(Rope.END_S)
+	var preserved_length := rope.get_rest_length()
+
+	s_target.queue_free()
+	await process_frame
+	rope._physics_process(STEP)
+	_expect(
+		rope.active
+		and rope.start_body == player
+		and rope.end_body == x_target,
+		"a freed S target returns only S to the player"
+	)
+	_expect_close(
+		rope.get_rest_length(),
+		preserved_length,
+		0.001,
+		"a surviving endpoint keeps its rope length when the other target is freed"
+	)
+	rope.detach()
+	_clear_fixture()
+
+
+func _test_rope_input_map_contract() -> void:
+	_expect(
+		InputMap.has_action(&"attach_rope_npc"),
+		"the second rope endpoint has its own input action"
+	)
+	var s_is_second_endpoint := false
+	for event in InputMap.action_get_events(&"attach_rope_npc"):
+		var key_event := event as InputEventKey
+		if key_event != null and key_event.physical_keycode == KEY_S:
+			s_is_second_endpoint = true
+			break
+	_expect(s_is_second_endpoint, "S controls the movable/NPC rope endpoint")
+
+	var s_still_crouches := false
+	for event in InputMap.action_get_events(&"crouch"):
+		var key_event := event as InputEventKey
+		if key_event != null and key_event.physical_keycode == KEY_S:
+			s_still_crouches = true
+			break
+	_expect(
+		not s_still_crouches,
+		"S no longer crouches or pays rope out"
+	)
+
+
+func _test_s_throw_targets_movable_attachables_only() -> void:
+	var player := _make_body(Vector2.ZERO, 1.0)
+	var rope := _make_unattached_rope(player)
+
+	var terrain := StaticBody2D.new()
+	terrain.position = Vector2(320.0, 0.0)
+	terrain.collision_layer = 1
+	var terrain_shape := CollisionShape2D.new()
+	var terrain_rectangle := RectangleShape2D.new()
+	terrain_rectangle.size = Vector2(12.0, 800.0)
+	terrain_shape.shape = terrain_rectangle
+	terrain.add_child(terrain_shape)
+	get_root().add_child(terrain)
+	_fixture_nodes.append(terrain)
+
+	var npc := TestBody.new(2.0)
+	npc.position = Vector2(220.0, 0.0)
+	npc.add_to_group(&"rope_attachable")
+	npc.collision_layer = 4
+	npc.collision_mask = 0
+	var npc_shape := CollisionShape2D.new()
+	var npc_rectangle := RectangleShape2D.new()
+	npc_rectangle.size = Vector2(16.0, 800.0)
+	npc_shape.shape = npc_rectangle
+	npc.add_child(npc_shape)
+	get_root().add_child(npc)
+	_fixture_nodes.append(npc)
+	await physics_frame
+
+	_expect(
+		not rope.is_valid_throw_target(Rope.END_S, terrain),
+		"S throws reject immovable terrain"
+	)
+	_expect(
+		not rope.is_valid_throw_target(Rope.END_X, npc),
+		"X throws reject movable attachables"
+	)
+	_expect(
+		rope.is_valid_throw_target(Rope.END_S, npc),
+		"S recognizes a movable rope attachable"
+	)
+	_expect(
+		rope.begin_endpoint_gesture(Rope.END_S, 1.0),
+		"an unattached S endpoint begins a charged throw"
+	)
+	rope._physics_process(rope.full_charge_seconds)
+	_expect(
+		rope.release_endpoint_gesture(Rope.END_S),
+		"a charged S release launches its endpoint"
+	)
+	rope._physics_process(2.0)
+	_expect(
+		rope.active
+		and rope.start_body == npc
+		and rope.end_body == player
+		and not rope.has_terrain_anchor(),
+		"S attaches to the movable NPC and never to terrain"
+	)
+	rope.detach()
+
+	terrain.position = Vector2(120.0, 0.0)
+	await physics_frame
+	rope.begin_endpoint_gesture(Rope.END_S, 1.0)
+	rope._physics_process(rope.full_charge_seconds)
+	rope.release_endpoint_gesture(Rope.END_S)
+	rope._physics_process(2.0)
+	_expect(
+		not rope.active,
+		"terrain blocks an S throw as a miss instead of becoming transparent"
+	)
+	_clear_fixture()
+
+
+func _test_player_free_npc_swing() -> void:
+	var player := _make_body(Vector2(80.0, 60.0), 1.0)
+	var npc := _make_body(Vector2(80.0, 60.0), 2.0)
+	npc.add_to_group(&"rope_attachable")
+	var anchor := StaticBody2D.new()
+	anchor.position = Vector2.ZERO
+	get_root().add_child(anchor)
+	_fixture_nodes.append(anchor)
+	var rope := _make_unattached_rope(player)
+	rope.track_attachable(npc)
+
+	_expect(
+		rope.complete_thrown_end(Rope.END_X, anchor, anchor.position),
+		"X can establish the terrain endpoint"
+	)
+	_expect(
+		rope.toggle_closest_endpoint(Rope.END_S),
+		"S can replace the player with an NPC endpoint"
+	)
+	_expect(
+		rope.start_body == npc
+		and rope.end_body == anchor
+		and not rope.is_attached_to(player),
+		"terrain-to-NPC rope physics is independent of player movement"
+	)
+
+	npc.position = Vector2(83.2, 62.4)
+	var player_position := player.position
+	var starting_horizontal_offset := absf(npc.position.x)
+	var minimum_horizontal_offset := starting_horizontal_offset
+	var maximum_distance := 0.0
+	for _frame in range(240):
+		npc.velocity += Vector2(0.0, 240.0) * STEP
+		var velocity_after_gravity := npc.velocity
+		var ai_velocity := Vector2(0.0, npc.velocity.y)
+		npc.velocity = Rope.finalize_attached_body_velocity(
+			npc,
+			ai_velocity,
+			velocity_after_gravity,
+			STEP
+		)
+		npc.position += npc.velocity * STEP
+		minimum_horizontal_offset = minf(
+			minimum_horizontal_offset,
+			absf(npc.position.x)
+		)
+		maximum_distance = maxf(
+			maximum_distance,
+			npc.position.distance_to(anchor.position)
+		)
+
+	_expect(
+		minimum_horizontal_offset < starting_horizontal_offset * 0.2,
+		"an AI-controlled NPC swings beneath the terrain anchor"
+	)
+	_expect(
+		maximum_distance <= rope.get_hard_length() + 0.5,
+		"the independent NPC swing respects rope give"
+	)
+	_expect_vector_close(
+		player.position,
+		player_position,
+		0.0,
+		"the independent rope never changes player movement"
+	)
+	rope.detach()
+	_clear_fixture()
+
+
+func _test_payload_hoist_and_impulse_policy() -> void:
+	var player := _make_body(Vector2(0.0, 100.0), 1.0)
+	var npc := _make_body(Vector2(0.0, 100.0), 2.0)
+	npc.add_to_group(&"rope_attachable")
+	var anchor := StaticBody2D.new()
+	anchor.position = Vector2.ZERO
+	get_root().add_child(anchor)
+	_fixture_nodes.append(anchor)
+	var rope := _make_unattached_rope(player)
+	rope.track_attachable(npc)
+	rope.complete_thrown_end(Rope.END_X, anchor, anchor.position)
+	_expect(
+		Rope._body_has_grounded_lift_protection(player, [rope]),
+		"a player-held endpoint keeps grounded lift protection"
+	)
+	rope.toggle_closest_endpoint(Rope.END_S)
+	_expect(
+		not Rope._body_has_grounded_lift_protection(npc, [rope]),
+		"an external NPC payload is allowed to leave the floor"
+	)
+	rope.adjust_length(true, false, 1.0)
+	var hoist_velocity := Rope.constrain_attached_velocity(
+		npc,
+		Vector2.ZERO,
+		STEP
+	)
+	_expect(
+		hoist_velocity.y < 0.0,
+		"shortening a terrain-to-NPC rope produces smooth upward hoist velocity"
+	)
+	rope.detach()
+	_clear_fixture()
+
+	var airborne_npc := _make_body(Vector2(0.0, 100.0), 2.0)
+	var impulse_anchor := StaticBody2D.new()
+	impulse_anchor.position = Vector2.ZERO
+	get_root().add_child(impulse_anchor)
+	_fixture_nodes.append(impulse_anchor)
+	var impulse_rope := _make_rope(
+		airborne_npc,
+		impulse_anchor,
+		4.0,
+		80.0
+	)
+	airborne_npc.position.y = 104.0
+	var jump_velocity := Rope.finalize_attached_body_velocity(
+		airborne_npc,
+		Vector2(-300.0, -400.0),
+		Vector2(120.0, 50.0),
+		STEP
+	)
+	_expect_vector_close(
+		jump_velocity,
+		Vector2(-300.0, -400.0),
+		0.001,
+		"an intentional vertical jump or knockback is not erased by swing preservation"
+	)
+	var horizontal_intent_velocity := Rope.finalize_attached_body_velocity(
+		airborne_npc,
+		Vector2(-300.0, 0.0),
+		Vector2.ZERO,
+		STEP
+	)
+	_expect(
+		horizontal_intent_velocity.x < 0.0
+		and horizontal_intent_velocity.x > -300.0,
+		"horizontal NPC intent builds pendulum momentum without an instant speed snap"
+	)
+	impulse_rope.detach()
 	_clear_fixture()
 
 
@@ -539,10 +1010,13 @@ func _test_charged_throw_attaches_and_adjusts_terrain_rope() -> void:
 	_fixture_nodes.append(wall)
 	await physics_frame
 
-	_expect(rope.begin_throw_charge(1.0), "terrain throw begins")
+	_expect(
+		rope.begin_endpoint_gesture(Rope.END_X, 1.0),
+		"terrain throw begins"
+	)
 	rope._physics_process(rope.full_charge_seconds)
 	_expect(
-		rope.release_throw_charge(),
+		rope.release_endpoint_gesture(Rope.END_X),
 		"a charged X release launches the visual endpoint"
 	)
 	rope._physics_process(2.0)
@@ -554,14 +1028,14 @@ func _test_charged_throw_attaches_and_adjusts_terrain_rope() -> void:
 	var actor_position := actor.position
 	var wall_position := wall.position
 	var original_length := rope.get_rest_length()
-	rope.adjust_terrain_length(true, false, 0.25)
+	rope.adjust_length(true, false, 0.25)
 	_expect_close(
 		rope.get_rest_length(),
 		maxf(rope.minimum_rope_length, original_length - 18.75),
 		0.001,
-		"Space-style pull shortens terrain rope at its configured rate"
+		"Up-style pull shortens terrain rope at its configured rate"
 	)
-	rope.adjust_terrain_length(false, true, 0.25)
+	rope.adjust_length(false, true, 0.25)
 	_expect_close(
 		rope.get_rest_length(),
 		minf(rope.max_length, maxf(
@@ -774,11 +1248,12 @@ func _test_npc_default_weight_and_scene_contract() -> void:
 	rope.detach()
 	_clear_fixture()
 
-	var npc_scene_paths := [
+	var attachable_scene_paths := [
 		"res://scenes/creatures/mom_npc.tscn",
 		"res://scenes/creatures/npc/stateful_social_npc.tscn",
+		"res://scenes/monsters/slime.tscn",
 	]
-	for scene_path in npc_scene_paths:
+	for scene_path in attachable_scene_paths:
 		var packed_scene := load(scene_path) as PackedScene
 		_expect(packed_scene != null, "%s loads" % scene_path)
 		if packed_scene == null:

@@ -102,6 +102,10 @@ func interact(actor: Node) -> bool:
 	return load_target_scene()
 
 
+func get_interaction_action(_actor: Node) -> StringName:
+	return interaction_action
+
+
 func get_interaction_priority(_actor: Node) -> int:
 	return interaction_priority
 

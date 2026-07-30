@@ -4,7 +4,7 @@ signal focused_interactable_changed(previous: Node, current: Node)
 signal interaction_dispatched(interactable: Node, consumed: bool)
 
 @export var enabled: bool = true
-@export var interaction_action: StringName = &"up"
+@export var interaction_action: StringName = &"charm"
 @export_range(0.05, 1.0, 0.05, "suffix:s") var focus_refresh_seconds: float = 0.15
 @export_range(0.0, 128.0, 1.0, "suffix:px") var focus_switch_distance_margin: float = 16.0
 
@@ -15,7 +15,9 @@ var _refresh_timer: float = 0.0
 var _last_block_reason: StringName = &""
 var _last_interaction_consumed: bool = false
 var _last_interactable: WeakRef
-var _interaction_action_pressed: bool = false
+var _last_interaction_action: StringName = &""
+var _held_actions: Dictionary = {}
+var _held_candidates: Dictionary = {}
 
 
 func _ready() -> void:
@@ -24,13 +26,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if (
-		_interaction_action_pressed
-		and interaction_action != &""
-		and InputMap.has_action(interaction_action)
-		and not Input.is_action_pressed(interaction_action)
-	):
-		_interaction_action_pressed = false
+	_sync_held_actions()
 	if _candidates.is_empty():
 		set_process(false)
 		return
@@ -44,7 +40,7 @@ func _process(delta: float) -> void:
 func set_interaction_enabled(should_enable: bool) -> void:
 	enabled = should_enable
 	if not enabled:
-		_interaction_action_pressed = false
+		_clear_held_actions()
 		_set_focused_interactable(null)
 		set_process(false)
 	else:
@@ -74,6 +70,11 @@ func unregister_candidate(candidate: Node) -> void:
 	if candidate_ref == null or candidate_ref.get_ref() != candidate:
 		return
 	_candidates.erase(candidate_id)
+	_forget_candidate_holds(candidate)
+	if _get_last_interactable() == candidate:
+		_last_interactable = null
+		_last_interaction_action = &""
+		_last_interaction_consumed = false
 	if not is_inside_tree():
 		_focused_interactable = null
 		set_process(false)
@@ -96,55 +97,82 @@ func notify_candidate_changed(candidate: Node = null) -> void:
 
 
 func route_input(event: InputEvent) -> bool:
-	if not is_inside_tree() or interaction_action == &"":
+	if not is_inside_tree():
 		return false
-	if event.is_action_released(interaction_action):
-		_interaction_action_pressed = (
-			Input.is_action_pressed(interaction_action)
-			if InputMap.has_action(interaction_action)
-			else false
-		)
+	var matching_actions := _get_matching_event_actions(event)
+	if matching_actions.is_empty():
 		return false
+
+	var released_action := false
+	for action in matching_actions:
+		if not event.is_action_released(action):
+			continue
+		_clear_held_action(action)
+		released_action = true
+	if released_action:
+		return false
+
 	if not enabled:
-		return false
-	if not event.is_action_pressed(interaction_action):
 		return false
 	var key_event := event as InputEventKey
 	if key_event != null and key_event.echo:
 		return false
-	if _interaction_action_pressed:
-		return true
-	_interaction_action_pressed = true
+	for action in matching_actions:
+		if event.is_action_pressed(action):
+			return _route_action_press(action)
+	return false
 
-	_last_interaction_consumed = false
-	_last_interactable = null
+
+func _route_action_press(action: StringName) -> bool:
+	var focused_for_action := _find_best_candidate(-2147483648, action)
+	var owned_candidate := _get_last_interactable()
+	var has_owned_context := (
+		owned_candidate != null
+		and _last_interaction_action == action
+		and _candidate_is_registered(owned_candidate)
+	)
+	if focused_for_action == null and not has_owned_context:
+		_last_block_reason = &"no_eligible_candidate_for_action"
+		return false
+	if bool(_held_actions.get(action, false)):
+		return true
+
+	var hold_candidate := focused_for_action if focused_for_action != null else owned_candidate
+	_held_actions[action] = true
+	_held_candidates[action] = weakref(hold_candidate) if hold_candidate != null else null
+
 	if (
-		_actor.has_method("consume_owned_interaction_input")
+		has_owned_context
+		and _actor.has_method("consume_owned_interaction_input")
 		and bool(_actor.call("consume_owned_interaction_input"))
 	):
 		_last_block_reason = &"interaction_input_owned"
 		_set_focused_interactable(null)
 		return true
+
+	if focused_for_action == null:
+		_last_block_reason = &"no_eligible_candidate_for_action"
+		return false
+
 	_last_block_reason = _get_world_interaction_block_reason()
 	if not _last_block_reason.is_empty():
 		_set_focused_interactable(null)
 		return true
 
-	refresh_focus()
-	var focused := _get_focused_interactable_without_refresh()
-	if focused == null:
-		_last_block_reason = &"no_eligible_candidate"
-		return false
+	_last_interaction_consumed = false
+	_last_interactable = null
+	_last_interaction_action = &""
 
 	# A selected candidate gets the press exactly once. If it rejects at execution
 	# time, no lower-priority fallback runs until the player's next press.
-	_last_interactable = weakref(focused)
-	var interaction_result = focused.call("interact", _actor)
+	_set_focused_interactable(focused_for_action)
+	_last_interactable = weakref(focused_for_action)
+	_last_interaction_action = action
+	_held_candidates[action] = weakref(focused_for_action)
+	var interaction_result = focused_for_action.call("interact", _actor)
 	_last_interaction_consumed = interaction_result is bool and bool(interaction_result)
 	_last_block_reason = &"" if _last_interaction_consumed else &"candidate_rejected"
-	var dispatched_candidate := (
-		_last_interactable.get_ref() as Node if _last_interactable != null else null
-	)
+	var dispatched_candidate := _get_last_interactable()
 	if is_inside_tree() and not _get_world_interaction_block_reason().is_empty():
 		_set_focused_interactable(null)
 	interaction_dispatched.emit(dispatched_candidate, _last_interaction_consumed)
@@ -197,8 +225,23 @@ func get_interaction_prompt() -> String:
 	return String(focused.call("get_interaction_prompt", _actor))
 
 
-func is_interaction_action_pressed() -> bool:
-	return _interaction_action_pressed
+func is_interaction_action_pressed(candidate: Node = null) -> bool:
+	var expected_candidate := candidate if candidate != null else _get_last_interactable()
+	if expected_candidate == null:
+		return false
+	var expected_action := (
+		_get_candidate_action(expected_candidate)
+		if candidate != null
+		else _last_interaction_action
+	)
+	if expected_action == &"" or not bool(_held_actions.get(expected_action, false)):
+		return false
+	var held_candidate_ref := _held_candidates.get(expected_action) as WeakRef
+	return held_candidate_ref != null and held_candidate_ref.get_ref() == expected_candidate
+
+
+func is_interaction_action_held(action: StringName) -> bool:
+	return bool(_held_actions.get(action, false))
 
 
 func get_debug_snapshot() -> Dictionary:
@@ -212,9 +255,11 @@ func get_debug_snapshot() -> Dictionary:
 		"focused_interactable": focused,
 		"focused_prompt": get_interaction_prompt() if focused != null else "",
 		"candidate_count": _candidates.size(),
-		"interaction_action_pressed": _interaction_action_pressed,
+		"interaction_action_pressed": is_interaction_action_pressed(),
+		"held_interaction_actions": _get_held_action_names(),
 		"last_block_reason": _last_block_reason,
 		"last_interactable": last_interactable,
+		"last_interaction_action": _last_interaction_action,
 		"last_interaction_consumed": _last_interaction_consumed,
 	}
 
@@ -230,7 +275,10 @@ func get_debug_description() -> String:
 	]
 
 
-func _find_best_candidate(minimum_priority: int = -2147483648) -> Node:
+func _find_best_candidate(
+	minimum_priority: int = -2147483648,
+	required_action: StringName = &""
+) -> Node:
 	var best_candidate: Node
 	var best_priority := -2147483648
 	var best_distance := INF
@@ -239,6 +287,8 @@ func _find_best_candidate(minimum_priority: int = -2147483648) -> Node:
 		var candidate_ref := candidate_ref_value as WeakRef
 		var candidate := candidate_ref.get_ref() as Node if candidate_ref != null else null
 		if not _candidate_is_eligible(candidate):
+			continue
+		if required_action != &"" and _get_candidate_action(candidate) != required_action:
 			continue
 		var priority := _get_candidate_priority(candidate)
 		if priority < minimum_priority:
@@ -271,6 +321,15 @@ func _candidate_has_contract(candidate: Node) -> bool:
 	)
 
 
+func _candidate_is_registered(candidate: Node) -> bool:
+	if candidate == null or not is_instance_valid(candidate):
+		return false
+	var candidate_ref := _candidates.get(
+		int(candidate.get_instance_id())
+	) as WeakRef
+	return candidate_ref != null and candidate_ref.get_ref() == candidate
+
+
 func _candidate_is_eligible(candidate: Node) -> bool:
 	if not _candidate_has_contract(candidate):
 		return false
@@ -293,6 +352,12 @@ func _get_candidate_priority(candidate: Node) -> int:
 	if candidate.has_method("get_interaction_priority"):
 		return int(candidate.call("get_interaction_priority", _actor))
 	return 0
+
+
+func _get_candidate_action(candidate: Node) -> StringName:
+	if candidate != null and candidate.has_method("get_interaction_action"):
+		return StringName(String(candidate.call("get_interaction_action", _actor)))
+	return interaction_action
 
 
 func _get_candidate_distance_squared(candidate: Node) -> float:
@@ -320,6 +385,93 @@ func _cleanup_invalid_candidates() -> void:
 		var candidate := candidate_ref.get_ref() as Node if candidate_ref != null else null
 		if candidate == null or not is_instance_valid(candidate) or candidate.is_queued_for_deletion():
 			_candidates.erase(candidate_id)
+			_forget_candidate_holds(candidate)
+	_prune_invalid_holds()
+
+
+func _get_matching_event_actions(event: InputEvent) -> Array[StringName]:
+	var matching_actions: Array[StringName] = []
+	for action in _get_routable_actions():
+		if event.is_action_pressed(action) or event.is_action_released(action):
+			matching_actions.append(action)
+	return matching_actions
+
+
+func _get_routable_actions() -> Array[StringName]:
+	var actions: Array[StringName] = []
+	_append_unique_action(actions, _last_interaction_action)
+	var focused := _get_focused_interactable_without_refresh()
+	if focused != null:
+		_append_unique_action(actions, _get_candidate_action(focused))
+	_append_unique_action(actions, interaction_action)
+	for candidate_ref_value in _candidates.values():
+		var candidate_ref := candidate_ref_value as WeakRef
+		var candidate := candidate_ref.get_ref() as Node if candidate_ref != null else null
+		if _candidate_has_contract(candidate):
+			_append_unique_action(actions, _get_candidate_action(candidate))
+	for action_value in _held_actions.keys():
+		_append_unique_action(actions, StringName(String(action_value)))
+	return actions
+
+
+func _append_unique_action(actions: Array[StringName], action: StringName) -> void:
+	if action != &"" and not actions.has(action):
+		actions.append(action)
+
+
+func _sync_held_actions() -> void:
+	for action_value in _held_actions.keys():
+		var action := StringName(String(action_value))
+		if (
+			not InputMap.has_action(action)
+			or not Input.is_action_pressed(action)
+		):
+			_clear_held_action(action)
+
+
+func _clear_held_action(action: StringName) -> void:
+	_held_actions.erase(action)
+	_held_candidates.erase(action)
+
+
+func _clear_held_actions() -> void:
+	_held_actions.clear()
+	_held_candidates.clear()
+
+
+func _forget_candidate_holds(candidate: Node) -> void:
+	if candidate == null:
+		return
+	for action_value in _held_candidates.keys():
+		var candidate_ref := _held_candidates.get(action_value) as WeakRef
+		if candidate_ref != null and candidate_ref.get_ref() == candidate:
+			_clear_held_action(StringName(String(action_value)))
+
+
+func _prune_invalid_holds() -> void:
+	for action_value in _held_candidates.keys():
+		var candidate_ref := _held_candidates.get(action_value) as WeakRef
+		var candidate := candidate_ref.get_ref() as Node if candidate_ref != null else null
+		if candidate == null or not is_instance_valid(candidate) or candidate.is_queued_for_deletion():
+			_clear_held_action(StringName(String(action_value)))
+
+
+func _get_held_action_names() -> PackedStringArray:
+	var names := PackedStringArray()
+	for action_value in _held_actions.keys():
+		if bool(_held_actions.get(action_value, false)):
+			names.append(String(action_value))
+	names.sort()
+	return names
+
+
+func _get_last_interactable() -> Node:
+	if _last_interactable == null:
+		return null
+	var candidate := _last_interactable.get_ref() as Node
+	if candidate == null or not is_instance_valid(candidate) or candidate.is_queued_for_deletion():
+		return null
+	return candidate
 
 
 func _get_focused_interactable_without_refresh() -> Node:

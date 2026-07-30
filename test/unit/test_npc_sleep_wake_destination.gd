@@ -1,4 +1,4 @@
-extends GutTest
+extends "res://test/native_scene_tree_test.gd"
 
 var NpcWorldSimulationClass := preload("res://scripts/systems/npc_world_simulation.gd")
 var NpcSpotDefinitionClass := preload("res://scripts/resources/npc_spot_definition.gd")
@@ -111,12 +111,6 @@ func test_sleep_skip_can_wake_at_sleep_activity_spot() -> void:
 
 func test_sleep_skip_without_home_position_falls_back_to_activity_return() -> void:
 	var simulator := _make_simulator()
-	simulator.spot_definitions[&"bed"] = _make_spot(
-		&"bed",
-		&"Sleep",
-		"res://bedroom.tscn",
-		Vector2(20.0, 30.0)
-	)
 
 	var record := {
 		"home_scene_path": "",
@@ -226,7 +220,9 @@ func test_sleep_skip_routes_to_sleep_spot_when_sleep_window_was_skipped() -> voi
 		"pending_travel": {},
 	}
 
-	var slept := simulator._apply_sleep_skip_body_values("mom", record, 20.0, 10.0, 30.0, {})
+	var slept: bool = simulator._apply_sleep_skip_body_values(
+		"mom", record, 20.0, 10.0, 30.0, {}
+	)
 
 	assert_true(slept, "skipping over the sleep window counts as overnight sleep")
 	assert_eq(record["scene_path"], "res://bedroom.tscn", "skipped sleep window routes to the sleep room")

@@ -3,6 +3,12 @@ extends RefCounted
 
 
 const PLAYER_SOCIAL_TARGET_ID := "__player__"
+const SocialMemoryPolicy = preload(
+	"res://scripts/systems/npc_behavior/npc_social_memory_policy.gd"
+)
+const SOCIAL_SEEK_REASON_CODE := &"social_need_high"
+const SOCIAL_SEEK_FEEDBACK_TEXT := "Looking for someone to talk to"
+const SOCIAL_SEEK_ORIGIN_VALUE := &"talk_need"
 const ACTIVE_CONVERSATION_STATES := ["Talk", "LookForTalkTarget"]
 const INTERRUPTIBLE_SIMULATED_ACTIVITY_STATES := [
 	"Idle",
@@ -18,6 +24,8 @@ var _participant_reservations: Dictionary = {}
 var _sessions: Dictionary = {}
 var _used_participants: Dictionary = {}
 var _session_serial: int = 0
+var _social_memory_policy := SocialMemoryPolicy.new()
+var _last_selection_descriptor: Dictionary = {}
 
 
 func begin_simulation_pass() -> void:
@@ -181,8 +189,12 @@ func choose_candidate(
 	relationships: Node,
 	player: Node2D,
 	rng: RandomNumberGenerator,
-	candidate_evaluated: Callable = Callable()
+	candidate_evaluated: Callable = Callable(),
+	short_term_memory: NpcShortTermMemory = null,
+	now_game_hours: float = 0.0,
+	selection_context: Dictionary = {}
 ) -> Dictionary:
+	_last_selection_descriptor = _new_selection_descriptor(npc_id)
 	var seek_priority := int(settings.get("priority", 60))
 	var seeker_gate := get_participant_availability(
 		String(npc_id),
@@ -194,6 +206,7 @@ func choose_candidate(
 		records
 	)
 	if not bool(seeker_gate.get("accepted", false)):
+		_last_selection_descriptor["reason_code"] = &"seeker_unavailable"
 		return {}
 	var seeker_scene_path := String(record.get("scene_path", ""))
 	var candidates: Array[Dictionary] = []
@@ -208,12 +221,12 @@ func choose_candidate(
 	)
 	if bool(player_gate.get("accepted", false)):
 		var player_scene_path := String(locations.call("get_current_scene_path"))
-		_add_same_scene_candidate({
+		_consider_candidate({
 			"target_id": PLAYER_SOCIAL_TARGET_ID,
 			"scene_path": player_scene_path,
 			"position": player.global_position,
 			"is_player": true,
-		}, seeker_scene_path, candidates)
+		}, seeker_scene_path, candidates, null, now_game_hours, selection_context)
 
 	var owner_id := _get_record_relationship_id(npc_id, record)
 	var minimum_favor := float(settings.get("minimum_npc_favor", 10.0))
@@ -260,21 +273,45 @@ func choose_candidate(
 			var target_live := locations.call("get_live_npc", target_id) as Node2D
 			if target_live != null:
 				target_position = target_live.global_position
-		_add_same_scene_candidate({
+		_consider_candidate({
 			"target_id": target_id,
 			"scene_path": String(target_record.get("scene_path", "")),
 			"position": target_position,
 			"is_player": false,
-		}, seeker_scene_path, candidates)
+		}, seeker_scene_path, candidates, short_term_memory, now_game_hours, selection_context)
 
 	if candidates.is_empty():
+		if (
+			int(_last_selection_descriptor.get("candidates_considered", 0)) > 0
+			and int(_last_selection_descriptor.get("suppressed_by_refusal_count", 0))
+				== int(_last_selection_descriptor.get("candidates_considered", 0))
+		):
+			_last_selection_descriptor["all_candidates_suppressed"] = true
+			_last_selection_descriptor["reason_code"] = (
+				&"no_social_target_due_to_recent_refusal"
+			)
+			_last_selection_descriptor["remaining_retry_hours"] = maxf(
+				float(_last_selection_descriptor.get(
+					"earliest_retry_game_hours",
+					now_game_hours
+				)) - now_game_hours,
+				0.0
+			)
+		else:
+			_last_selection_descriptor["reason_code"] = &"no_social_target"
 		return {}
 	var preferred_target_id := String(record.get("social_visit_target_id", ""))
 	for candidate in candidates:
 		if not preferred_target_id.is_empty() and String(candidate.get("target_id", "")) == preferred_target_id:
-			return candidate
+			return _record_selected_candidate(candidate)
 
-	return candidates[rng.randi_range(0, candidates.size() - 1)]
+	return _record_selected_candidate(
+		candidates[rng.randi_range(0, candidates.size() - 1)]
+	)
+
+
+func get_last_selection_descriptor() -> Dictionary:
+	return _last_selection_descriptor.duplicate(true)
 
 
 func _get_cached_favor(
@@ -295,15 +332,84 @@ func _get_cached_favor(
 	return favor
 
 
-func _add_same_scene_candidate(
+func _consider_candidate(
 	candidate: Dictionary,
 	seeker_scene_path: String,
-	candidates: Array[Dictionary]
+	candidates: Array[Dictionary],
+	short_term_memory: NpcShortTermMemory,
+	now_game_hours: float,
+	selection_context: Dictionary
 ) -> void:
 	var candidate_scene_path := String(candidate.get("scene_path", ""))
 	if candidate_scene_path.is_empty() or candidate_scene_path != seeker_scene_path:
 		return
+	_last_selection_descriptor["candidates_considered"] = (
+		int(_last_selection_descriptor.get("candidates_considered", 0)) + 1
+	)
+	var candidate_id := String(candidate.get("target_id", ""))
+	var decision := {
+		"candidate_id": candidate_id,
+		"allowed": true,
+		"reason_code": &"",
+		"remaining_retry_hours": 0.0,
+		"retry_game_hours": 0.0,
+	}
+	if not bool(candidate.get("is_player", false)) and short_term_memory != null:
+		decision.merge(
+			_social_memory_policy.evaluate_candidate(
+				short_term_memory,
+				StringName(candidate_id),
+				now_game_hours,
+				selection_context
+			),
+			true
+		)
+	decision["candidate_id"] = candidate_id
+	var candidate_decisions: Array = _last_selection_descriptor.get(
+		"candidate_decisions",
+		[]
+	)
+	candidate_decisions.append(decision)
+	_last_selection_descriptor["candidate_decisions"] = candidate_decisions
+	if not bool(decision.get("allowed", true)):
+		_last_selection_descriptor["suppressed_by_refusal_count"] = (
+			int(_last_selection_descriptor.get("suppressed_by_refusal_count", 0)) + 1
+		)
+		var retry_game_hours := float(decision.get("retry_game_hours", 0.0))
+		var earliest_retry := float(_last_selection_descriptor.get(
+			"earliest_retry_game_hours",
+			0.0
+		))
+		if earliest_retry <= 0.0 or retry_game_hours < earliest_retry:
+			_last_selection_descriptor["earliest_retry_game_hours"] = retry_game_hours
+		return
 	candidates.append(candidate)
+
+
+func _new_selection_descriptor(npc_id: StringName) -> Dictionary:
+	return {
+		"seeker_id": String(npc_id),
+		"candidates_considered": 0,
+		"suppressed_by_refusal_count": 0,
+		"selected_candidate_id": "",
+		"alternative_selected": false,
+		"all_candidates_suppressed": false,
+		"earliest_retry_game_hours": 0.0,
+		"remaining_retry_hours": 0.0,
+		"reason_code": &"",
+		"candidate_decisions": [],
+	}
+
+
+func _record_selected_candidate(candidate: Dictionary) -> Dictionary:
+	_last_selection_descriptor["selected_candidate_id"] = String(
+		candidate.get("target_id", "")
+	)
+	_last_selection_descriptor["alternative_selected"] = (
+		int(_last_selection_descriptor.get("suppressed_by_refusal_count", 0)) > 0
+	)
+	_last_selection_descriptor["reason_code"] = &""
+	return candidate
 
 
 func _get_record_relationship_id(npc_id: StringName, record: Dictionary) -> String:

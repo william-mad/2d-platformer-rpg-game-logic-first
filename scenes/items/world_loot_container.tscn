@@ -49,5 +49,5 @@ theme_override_colors/font_color = Color(0.94, 0.96, 1, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
 theme_override_constants/shadow_offset_x = 1
 theme_override_constants/shadow_offset_y = 1
-text = "UP: Collect loot"
+text = "Attracting loot"
 horizontal_alignment = 1

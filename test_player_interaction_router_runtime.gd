@@ -37,6 +37,7 @@ class TestCandidate:
 	var dispatch_count: int = 0
 	var prompt: String = "Test interaction"
 	var focused: bool = false
+	var action: StringName = &"charm"
 
 	func _init(candidate_priority: int = 0, candidate_position := Vector2.ZERO) -> void:
 		priority = candidate_priority
@@ -48,6 +49,9 @@ class TestCandidate:
 	func interact(_actor: Node) -> bool:
 		dispatch_count += 1
 		return consumes
+
+	func get_interaction_action(_actor: Node) -> StringName:
+		return action
 
 	func get_interaction_priority(_actor: Node) -> int:
 		return priority
@@ -67,6 +71,7 @@ func _initialize() -> void:
 	current_scene = world
 
 	await _validate_priority_and_duplicate_registration(world)
+	await _validate_action_specific_dispatch_and_hold(world)
 	await _validate_distance_stability_and_freed_focus(world)
 	await _validate_control_authority_blocks(world)
 	await _validate_real_interior_door(world)
@@ -117,6 +122,71 @@ func _validate_priority_and_duplicate_registration(world: Node2D) -> void:
 	actor.queue_free()
 	low.queue_free()
 	high.queue_free()
+	await process_frame
+
+
+func _validate_action_specific_dispatch_and_hold(world: Node2D) -> void:
+	var actor := _add_actor(world, "ActionActor")
+	var charm_candidate := _add_candidate(world, "CharmCandidate", 30, Vector2(12.0, 0.0))
+	var up_candidate := _add_candidate(world, "UpCandidate", 10, Vector2(16.0, 0.0))
+	up_candidate.action = &"up"
+	actor.register_interaction_candidate(charm_candidate)
+	actor.register_interaction_candidate(up_candidate)
+
+	_expect(_press(actor.interaction_router, &"up"), "Up routes when an Up-bound candidate is nearby")
+	_expect(up_candidate.dispatch_count == 1, "Up dispatches only the Up-bound candidate")
+	_expect(charm_candidate.dispatch_count == 0, "Up does not dispatch a Charm-bound candidate")
+	_release(actor.interaction_router, &"up")
+
+	actor.unregister_interaction_candidate(up_candidate)
+	_expect(
+		not _press(actor.interaction_router, &"up"),
+		"an unregistered Up owner does not retain a stale interaction context"
+	)
+	_expect(
+		not bool(actor.interaction_router.call("is_interaction_action_held", &"up")),
+		"Up remains available for rope reeling after its door candidate unregisters"
+	)
+	_release(actor.interaction_router, &"up")
+	actor.register_interaction_candidate(up_candidate)
+
+	_expect(_press(actor.interaction_router), "Charm routes when a Charm-bound candidate is nearby")
+	_expect(charm_candidate.dispatch_count == 1, "Charm dispatches only the Charm-bound candidate")
+	_expect(
+		bool(actor.interaction_router.call("is_interaction_action_pressed", charm_candidate)),
+		"held state is associated with the dispatched Charm candidate"
+	)
+	actor.world_interaction_block_reason = &"player_spot_action_active"
+	_expect(
+		_press(actor.interaction_router, &"up"),
+		"a blocked overlapping Up interaction still owns its event"
+	)
+	_expect(
+		bool(actor.interaction_router.call(
+			"is_interaction_action_pressed",
+			charm_candidate
+		)),
+		"a blocked Up candidate does not erase the held Charm owner"
+	)
+	_release(actor.interaction_router, &"up")
+	actor.world_interaction_block_reason = &""
+	_release(actor.interaction_router)
+	_expect(
+		not bool(actor.interaction_router.call("is_interaction_action_pressed", charm_candidate)),
+		"releasing Charm clears only that candidate's held state"
+	)
+
+	actor.unregister_interaction_candidate(up_candidate)
+	_expect(not _press(actor.interaction_router, &"up"), "Up is left free when no Up candidate exists")
+	_expect(
+		not bool(actor.interaction_router.call("is_interaction_action_pressed")),
+		"an Up press cannot sustain a released Charm interaction"
+	)
+	_release(actor.interaction_router, &"up")
+
+	actor.queue_free()
+	charm_candidate.queue_free()
+	up_candidate.queue_free()
 	await process_frame
 
 
@@ -252,8 +322,8 @@ func _validate_real_interior_door(world: Node2D) -> void:
 		actor.interaction_router.call("get_focused_interactable") == null,
 		"an inaccessible InteriorDoor is not focusable"
 	)
-	_expect(not _press(actor.interaction_router), "no candidate is dispatched through a denied door")
-	_release(actor.interaction_router)
+	_expect(not _press(actor.interaction_router, &"up"), "no candidate is dispatched through a denied door")
+	_release(actor.interaction_router, &"up")
 	_expect(not door.is_actor_granted(actor), "a denied InteriorDoor grants no passage")
 
 	door.allow_player = true
@@ -262,8 +332,9 @@ func _validate_real_interior_door(world: Node2D) -> void:
 		actor.interaction_router.call("get_focused_interactable") == door,
 		"an accessible InteriorDoor becomes the selected interactable"
 	)
-	_expect(_press(actor.interaction_router), "the real InteriorDoor interaction is routed")
-	_release(actor.interaction_router)
+	_expect(door.get_interaction_action(actor) == &"up", "InteriorDoor explicitly remains bound to Up")
+	_expect(_press(actor.interaction_router, &"up"), "the real InteriorDoor interaction is routed")
+	_release(actor.interaction_router, &"up")
 	_expect(door.is_actor_granted(actor), "the routed InteriorDoor interaction grants passage")
 	_expect(
 		bool(actor.interaction_router.call("get_debug_snapshot").get("last_interaction_consumed")),
@@ -304,16 +375,16 @@ func _add_candidate(
 	return candidate
 
 
-func _press(router: Node) -> bool:
+func _press(router: Node, action: StringName = &"charm") -> bool:
 	var event := InputEventAction.new()
-	event.action = &"up"
+	event.action = action
 	event.pressed = true
 	return bool(router.call("route_input", event))
 
 
-func _release(router: Node) -> void:
+func _release(router: Node, action: StringName = &"charm") -> void:
 	var event := InputEventAction.new()
-	event.action = &"up"
+	event.action = action
 	event.pressed = false
 	router.call("route_input", event)
 

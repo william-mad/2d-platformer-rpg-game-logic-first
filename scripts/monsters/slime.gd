@@ -87,6 +87,7 @@ func _physics_process(delta: float) -> void:
 		return
 
 	apply_gravity(delta, gravity)
+	var velocity_after_gravity := velocity
 	process_touch_damage(delta)
 	_process_hurt_stagger(delta)
 
@@ -95,6 +96,19 @@ func _physics_process(delta: float) -> void:
 		_update_state_from_proximity()
 		_process_hop_state(delta)
 
+	_move_and_slide_with_rope(delta, velocity_after_gravity)
+
+
+func _move_and_slide_with_rope(
+	delta: float,
+	velocity_after_gravity: Vector2
+) -> void:
+	velocity = Rope.finalize_attached_body_velocity(
+		self,
+		velocity,
+		velocity_after_gravity,
+		delta
+	)
 	move_and_slide()
 
 

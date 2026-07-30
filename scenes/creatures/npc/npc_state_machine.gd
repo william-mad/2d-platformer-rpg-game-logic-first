@@ -2,7 +2,15 @@ class_name NpcStateMachine extends Node
 
 const NpcActivityIdentity = preload("res://scripts/systems/npc_activity_identity.gd")
 const NpcActionSessionModel = preload("res://scripts/systems/npc_action_session.gd")
-
+const NpcBehaviorIntentModel = preload(
+	"res://scripts/systems/npc_behavior/npc_behavior_intent.gd"
+)
+const NpcBehaviorFeedbackFormatter = preload(
+	"res://scripts/systems/npc_behavior/npc_behavior_feedback_formatter.gd"
+)
+const NpcSocialMemoryPolicyModel = preload(
+	"res://scripts/systems/npc_behavior/npc_social_memory_policy.gd"
+)
 signal state_changed(state_name: StringName, previous_state_name: StringName)
 signal state_request_failed(state_name: StringName, reason: String)
 signal target_changed(target: Node2D)
@@ -151,6 +159,7 @@ enum MonsterSightReaction {
 @export_range(0, 1000, 1) var npc_talk_handshake_priority: int = 70
 @export var npc_talk_refuse_lower_priority_tasks: bool = true
 @export_range(0.0, 120.0, 0.1, "suffix:s") var npc_talk_refusal_cooldown_seconds: float = 8.0
+@export_range(0.0, 24.0, 0.01, "suffix:h") var recent_refusal_retry_delay_game_hours: float = 0.25
 @export_range(0, 1000, 1) var npc_talk_moving_task_priority_bonus: int = 15
 
 @export_group("Player Interaction")
@@ -206,38 +215,62 @@ enum MonsterSightReaction {
 		"value": "hp",
 		"state": "DisabledDead",
 		"at_most": 0.0,
-		"priority": 100
+		"priority": 100,
+		"behavior_source": "emergency",
+		"behavior_reason_code": "health_depleted",
+		"behavior_feedback_text": "Health depleted",
+		"behavior_origin_value": "hp",
 	},
 	"disabled": {
 		"value": "disabled",
 		"state": "DisabledDead",
 		"truthy": true,
-		"priority": 100
+		"priority": 100,
+		"behavior_source": "emergency",
+		"behavior_reason_code": "disabled",
+		"behavior_feedback_text": "Disabled",
+		"behavior_origin_value": "disabled",
 	},
 	"knockout_downed": {
 		"value": "knockout",
 		"state": "Downed",
 		"at_least": 100.0,
-		"priority": 99
+		"priority": 99,
+		"behavior_source": "emergency",
+		"behavior_reason_code": "knockout_high",
+		"behavior_feedback_text": "Knocked down",
+		"behavior_origin_value": "knockout",
 	},
 	"anger_fight": {
 		"value": "anger",
 		"state": "Fight",
 		"at_least": 100.0,
-		"priority": 94
+		"priority": 94,
+		"behavior_source": "event_reaction",
+		"behavior_reason_code": "anger_high",
+		"behavior_feedback_text": "Enraged",
+		"behavior_origin_value": "anger",
 	},
 	"sleep_collapse": {
 		"value": "sleep_need",
 		"state": "Collapse",
 		"at_least": 100.0,
-		"priority": 95
+		"priority": 95,
+		"behavior_source": "emergency",
+		"behavior_reason_code": "sleep_need_critical",
+		"behavior_feedback_text": "Collapsing from exhaustion",
+		"behavior_origin_value": "sleep_need",
 	},
 	"tired_rest": {
 		"value": "tired",
 		"state": "Rest",
 		"at_least": 50.0,
 		"requires_idle": true,
-		"priority": 15
+		"priority": 15,
+		"behavior_source": "need",
+		"behavior_reason_code": "tired_high",
+		"behavior_feedback_text": "Tired",
+		"behavior_origin_value": "tired",
 	},
 	"hungry": {
 		"value": "hunger",
@@ -245,7 +278,11 @@ enum MonsterSightReaction {
 		"at_least": 75.0,
 		"requires_idle": true,
 		"requires_need_spot": true,
-		"priority": 50
+		"priority": 50,
+		"behavior_source": "need",
+		"behavior_reason_code": "hunger_high",
+		"behavior_feedback_text": "Hungry",
+		"behavior_origin_value": "hunger",
 	},
 	"casual_recreation": {
 		"value": "boredom",
@@ -253,7 +290,11 @@ enum MonsterSightReaction {
 		"at_least": 50.0,
 		"requires_idle": true,
 		"requires_casual_spot": true,
-		"priority": 10
+		"priority": 10,
+		"behavior_source": "need",
+		"behavior_reason_code": "boredom_high",
+		"behavior_feedback_text": "Looking for recreation",
+		"behavior_origin_value": "boredom",
 	},
 	"talk_to_seen_target": {
 		"value": "talk_need",
@@ -262,20 +303,32 @@ enum MonsterSightReaction {
 		"requires_target": true,
 		"target_groups": [&"npc", &"player"],
 		"min_relationship_favor": 10.0,
-		"priority": 60
+		"priority": 60,
+		"behavior_source": "social_ai",
+		"behavior_reason_code": "social_need_high",
+		"behavior_feedback_text": "Wants to talk",
+		"behavior_origin_value": "talk_need",
 	},
 	"talk_search_for_people": {
 		"value": "talk_need",
 		"state": "LookForTalkTarget",
 		"at_least": 70.0,
 		"requires_idle": true,
-		"priority": 60
+		"priority": 60,
+		"behavior_source": "social_ai",
+		"behavior_reason_code": "social_need_high",
+		"behavior_feedback_text": "Looking for someone to talk to",
+		"behavior_origin_value": "talk_need",
 	},
 	"favor_dropped": {
 		"value": "favor",
 		"state": "ReactToEvent",
 		"delta_at_most": -1.0,
-		"priority": 35
+		"priority": 35,
+		"behavior_source": "event_reaction",
+		"behavior_reason_code": "favor_dropped",
+		"behavior_feedback_text": "Reacting to lost favor",
+		"behavior_origin_value": "favor",
 	}
 }
 
@@ -389,6 +442,8 @@ var _action_state_reconciliation_requested: bool = false
 var _action_state_reconciliation_force_reentry: bool = false
 var _pending_stale_state_reconciliation: Dictionary = {}
 var _logged_stale_state_reconciliations: Dictionary = {}
+var _legacy_behavior_request_counts: Dictionary = {}
+var _logged_legacy_behavior_requests: Dictionary = {}
 
 
 var previous_state: NpcState:
@@ -403,6 +458,12 @@ var _animation_controller: Node
 var _animation_player: AnimationPlayer
 var _sprite_2d: Sprite2D
 var _debug_label: Label
+var behavior_controller: NpcBehaviorController
+var short_term_memory: NpcShortTermMemory
+var memory_observer: NpcMemoryObserver
+var _behavior_action_replacement_in_progress: bool = false
+var _social_memory_policy := NpcSocialMemoryPolicyModel.new()
+var _social_selection_feedback: Dictionary = {}
 
 
 func _ready() -> void:
@@ -413,6 +474,8 @@ func _ready() -> void:
 		_resolve_npc()
 
 	_cache_optional_nodes()
+	_cache_behavior_controller()
+	_cache_memory_components()
 	initialize_states()
 	_bind_npc_control_claim_notifications()
 
@@ -429,23 +492,25 @@ func _physics_process(delta: float) -> void:
 	if not active or npc == null or current_state == null:
 		return
 
+	var velocity_after_gravity := npc.velocity
 	_update_player_interaction_timers(delta)
 	_update_talk_refusal_cooldowns(delta)
 	if _reconcile_requested_active_action_state():
 		_update_passive_needs(delta)
 		if auto_move_and_slide:
-			_move_npc_with_rope(delta)
+			_move_npc_with_rope(delta, velocity_after_gravity)
 		return
 	if _reconcile_current_state_action_session_if_needed():
 		_update_passive_needs(delta)
 		if auto_move_and_slide:
-			_move_npc_with_rope(delta)
+			_move_npc_with_rope(delta, velocity_after_gravity)
 		return
 	apply_gravity(delta)
+	velocity_after_gravity = npc.velocity
 	if _process_npc_damage_hop(delta):
 		_update_passive_needs(delta)
 		if auto_move_and_slide:
-			_move_npc_with_rope(delta)
+			_move_npc_with_rope(delta, velocity_after_gravity)
 		return
 
 	if _player_interaction_hold_is_active():
@@ -454,7 +519,7 @@ func _physics_process(delta: float) -> void:
 			_process_player_interaction_hold()
 			_update_passive_needs(delta)
 			if auto_move_and_slide:
-				_move_npc_with_rope(delta)
+				_move_npc_with_rope(delta, velocity_after_gravity)
 			return
 		_invalidate_player_interaction_hold(String(hold_gate.get("reason", "interaction_unavailable")))
 
@@ -462,7 +527,7 @@ func _physics_process(delta: float) -> void:
 		_process_interaction_overlay(delta)
 		_update_passive_needs(delta)
 		if auto_move_and_slide:
-			_move_npc_with_rope(delta)
+			_move_npc_with_rope(delta, velocity_after_gravity)
 		return
 
 	# Only the primary state runs per-frame behavior; value-rule decisions stay event-driven.
@@ -480,11 +545,19 @@ func _physics_process(delta: float) -> void:
 	_update_passive_needs(delta)
 
 	if auto_move_and_slide:
-		_move_npc_with_rope(delta)
+		_move_npc_with_rope(delta, velocity_after_gravity)
 
 
-func _move_npc_with_rope(delta: float) -> void:
-	npc.velocity = Rope.constrain_attached_velocity(npc, npc.velocity, delta)
+func _move_npc_with_rope(
+	delta: float,
+	velocity_after_gravity: Vector2
+) -> void:
+	npc.velocity = Rope.finalize_attached_body_velocity(
+		npc,
+		npc.velocity,
+		velocity_after_gravity,
+		delta
+	)
 	npc.move_and_slide()
 
 
@@ -530,6 +603,8 @@ func _process_npc_damage_hop(delta: float) -> bool:
 func bind_npc(bound_npc: CharacterBody2D) -> void:
 	npc = bound_npc
 	_cache_optional_nodes()
+	_cache_behavior_controller()
+	_cache_memory_components()
 
 	for state in states:
 		state.npc = npc
@@ -741,7 +816,11 @@ func _cancel_and_clear_active_action(reason: String) -> void:
 		NpcActionSession.Status.COMPLETED,
 		NpcActionSession.Status.FAILED,
 	]:
-		cancel_active_action(session_id, reason)
+		cancel_active_action(
+			session_id,
+			reason,
+			_classify_neutral_action_cancellation(StringName(reason))
+		)
 	if (
 		active_action != null
 		and active_action.session_id == session_id
@@ -981,7 +1060,10 @@ func change_state(
 			"cannot_exit_%s" % String(current_state.name)
 		)
 
-	return _commit_state_change(new_state, reason, request_priority)
+	var changed := _commit_state_change(new_state, reason, request_priority)
+	if changed:
+		_observe_internal_same_session_transition(new_state, reason)
+	return changed
 
 
 func _commit_state_change(
@@ -1063,6 +1145,41 @@ func request_state(
 	return _request_state_direct(state_name, actor, reason, request_priority)
 
 
+func request_behavior_intent(
+	intent: NpcBehaviorIntent,
+	live_target: Node2D = null,
+	request_context: Dictionary = {}
+) -> bool:
+	if intent == null or intent.requested_primary_state == &"":
+		return _reject_state_request(&"", "invalid_behavior_intent")
+	var submitted := intent.refreshed_copy()
+	var context := request_context.duplicate(true)
+	context["request_source"] = submitted.source
+	context["explicit_behavior_intent"] = true
+	context["behavior_source"] = submitted.source
+	context["behavior_reason_code"] = submitted.reason_code
+	context["behavior_feedback_text"] = submitted.feedback_text
+	context["behavior_origin_value"] = submitted.origin_value
+	if submitted.logical_action_kind != &"":
+		context["destination_action_kind"] = submitted.logical_action_kind
+	if not submitted.action_session_id.is_empty():
+		context["action_session_id"] = submitted.action_session_id
+		context["session_id"] = submitted.action_session_id
+	if submitted.lifecycle_only:
+		context["internal_lifecycle_transition"] = true
+	var request_reason := submitted.reason
+	if request_reason.is_empty():
+		request_reason = String(submitted.reason_code)
+	return _request_state_direct(
+		submitted.requested_primary_state,
+		live_target,
+		request_reason,
+		submitted.priority,
+		context,
+		submitted
+	)
+
+
 func _get_applied_state_priority(new_state: NpcState, request_priority: int) -> int:
 	var applied_priority := request_priority
 	if pending_state_priority >= 0:
@@ -1079,7 +1196,8 @@ func _request_state_direct(
 	actor: Node2D = null,
 	reason: String = "manual",
 	request_priority: int = 0,
-	request_context: Dictionary = {}
+	request_context: Dictionary = {},
+	explicit_behavior_intent: NpcBehaviorIntent = null
 ) -> bool:
 	# Resolve and validate first. Request-owned targets are committed only once change_state accepts.
 	if not _scripted_control_request_is_allowed(state_name, request_context):
@@ -1106,6 +1224,19 @@ func _request_state_direct(
 		if is_socially_engaged():
 			return _reject_state_request(state_name, "already_socially_engaged")
 		if _current_look_for_talk_target_matches(actor) and _proposed_action == null:
+			var matching_social_candidate := _build_behavior_candidate(
+				requested_state,
+				actor,
+				reason,
+				request_priority,
+				request_context,
+				explicit_behavior_intent
+			)
+			if not _evaluate_behavior_candidate(
+				matching_social_candidate, state_name
+			):
+				return false
+			_commit_behavior_candidate(matching_social_candidate)
 			last_state_request_failure_reason = ""
 			return true
 		if not _can_start_look_for_talk_target():
@@ -1122,6 +1253,17 @@ func _request_state_direct(
 			"Travel companion social/schedule activity disabled"
 		)
 
+	var behavior_candidate := _build_behavior_candidate(
+		transition_state,
+		actor,
+		reason,
+		request_priority,
+		request_context,
+		explicit_behavior_intent
+	)
+	if not _evaluate_behavior_candidate(behavior_candidate, state_name):
+		return false
+
 	if current_state == transition_state:
 		var request_descriptor := _get_state_request_activity_descriptor(
 			transition_state,
@@ -1137,8 +1279,15 @@ func _request_state_direct(
 					var adopted_session := _proposed_action
 					_proposed_action = null
 					replace_active_action(adopted_session, "adopt_existing_state")
-					return _commit_current_state_reentry(reason, request_priority)
+					var adopted := _commit_current_state_reentry(reason, request_priority)
+					if adopted:
+						behavior_candidate = _update_behavior_candidate_from_session(
+							behavior_candidate, adopted_session
+						)
+						_commit_behavior_candidate(behavior_candidate)
+					return adopted
 				last_state_request_failure_reason = ""
+				_commit_behavior_candidate(behavior_candidate)
 				return true
 			if not NpcActivityIdentity.has_target_identity(request_descriptor):
 				return _reject_state_request(state_name, "missing_activity_identity")
@@ -1160,7 +1309,13 @@ func _request_state_direct(
 					)
 				reentry_context["action_session"] = reentry_session
 			_commit_state_request_context(actor, reentry_context)
-			return _commit_current_state_reentry(reason, request_priority)
+			var reentered := _commit_current_state_reentry(reason, request_priority)
+			if reentered:
+				behavior_candidate = _update_behavior_candidate_from_session(
+					behavior_candidate, reentry_session
+				)
+				_commit_behavior_candidate(behavior_candidate)
+			return reentered
 		return _reject_state_request(state_name, "state_already_active")
 	if current_state != null and not current_state.can_exit_to(transition_state, request_priority):
 		return _reject_state_request(
@@ -1183,6 +1338,11 @@ func _request_state_direct(
 	_commit_state_request_context(actor, committed_context)
 
 	var accepted := _commit_state_change(transition_state, reason, request_priority)
+	if accepted:
+		behavior_candidate = _update_behavior_candidate_from_session(
+			behavior_candidate, action_session
+		)
+		_commit_behavior_candidate(behavior_candidate)
 	_breadcrumb(
 		"npc_state:request",
 		"%s %s %s" % [_get_npc_label(), String(state_name), "accept" if accepted else "reject"]
@@ -1233,6 +1393,268 @@ func _commit_state_request_context(actor: Node2D, request_context: Dictionary) -
 		target = actor
 		if action_session != null and String(action_session.action_kind) in ["Fight", "Flee", "LookForMonster"]:
 			select_combat_target(actor)
+
+
+func _build_behavior_candidate(
+	requested_state: NpcState,
+	actor: Node2D,
+	reason: String,
+	request_priority: int,
+	request_context: Dictionary,
+	explicit_behavior_intent: NpcBehaviorIntent = null
+) -> NpcBehaviorIntent:
+	if requested_state == null or behavior_controller == null:
+		return null
+
+	var primary_state := StringName(requested_state.name)
+	var logical_action := primary_state
+	if primary_state == &"MoveToTarget":
+		logical_action = StringName(String(request_context.get(
+			"destination_action_kind",
+			state_after_move if state_after_move != &"" else &"MoveToTarget"
+		)))
+	var actor_target_id := NpcActionSessionModel.get_persistent_id(actor)
+	if explicit_behavior_intent != null:
+		var explicit_target_id := explicit_behavior_intent.target_persistent_id
+		if explicit_target_id.is_empty():
+			explicit_target_id = actor_target_id
+		var explicit_metadata := explicit_behavior_intent.metadata.duplicate(true)
+		explicit_metadata["legacy_derived"] = false
+		var explicit_commitment := explicit_behavior_intent.minimum_commitment_seconds
+		var explicit_margin := explicit_behavior_intent.interrupt_priority_margin
+		if NpcBehaviorIntentModel.is_autonomous_source(explicit_behavior_intent.source):
+			if explicit_commitment <= 0.0:
+				explicit_commitment = behavior_controller.minimum_autonomous_commitment_seconds
+			if explicit_margin <= 0:
+				explicit_margin = behavior_controller.autonomous_interruption_margin
+		return explicit_behavior_intent.refreshed_copy({
+			"requested_primary_state": primary_state,
+			"logical_action_kind": (
+				explicit_behavior_intent.logical_action_kind
+				if explicit_behavior_intent.logical_action_kind != &""
+				else logical_action
+			),
+			"source": NpcBehaviorIntentModel.canonicalize_source(
+				explicit_behavior_intent.source
+			),
+			"priority": request_priority,
+			"target_persistent_id": explicit_target_id,
+			"minimum_commitment_seconds": explicit_commitment,
+			"interrupt_priority_margin": explicit_margin,
+			"lifecycle_only": (
+				explicit_behavior_intent.lifecycle_only
+				or _request_is_lifecycle_only(primary_state, reason, request_context)
+			),
+			"metadata": explicit_metadata,
+		})
+
+	var source := StringName(String(request_context.get("request_source", "")))
+	var target_id := actor_target_id
+	var session_id := ""
+	var reason_code := StringName(String(request_context.get("behavior_reason_code", "")))
+	var feedback_text := String(request_context.get("behavior_feedback_text", ""))
+	var origin_value := StringName(String(request_context.get("behavior_origin_value", "")))
+	var legacy_derived := false
+
+	if _proposed_action != null:
+		logical_action = _proposed_action.action_kind
+		source = _proposed_action.source
+		session_id = _proposed_action.session_id
+		target_id = _get_action_session_behavior_target_id(_proposed_action, target_id)
+		var session_behavior := _proposed_action.metadata
+		if session_behavior.has("behavior_source"):
+			source = StringName(String(session_behavior["behavior_source"]))
+		reason_code = StringName(String(session_behavior.get(
+			"behavior_reason_code", reason_code
+		)))
+		feedback_text = String(session_behavior.get(
+			"behavior_feedback_text", feedback_text
+		))
+		origin_value = StringName(String(session_behavior.get(
+			"behavior_origin_value", origin_value
+		)))
+	elif (
+		active_action != null
+		and active_action.status == NpcActionSession.Status.ACTIVE
+		and active_action.action_kind == logical_action
+		and (
+			target_id.is_empty()
+			or _get_action_session_behavior_target_id(active_action, "") == target_id
+		)
+	):
+		session_id = active_action.session_id
+		source = active_action.source
+		target_id = _get_action_session_behavior_target_id(active_action, target_id)
+
+	if source == &"":
+		source = _get_action_source(reason, actor, logical_action)
+		legacy_derived = true
+		_record_legacy_behavior_request(primary_state, logical_action, reason)
+	source = _canonical_behavior_source(source)
+	var autonomous := NpcBehaviorIntentModel.is_autonomous_source(source)
+	var commitment_seconds := (
+		behavior_controller.minimum_autonomous_commitment_seconds
+		if autonomous
+		else 0.0
+	)
+	var interrupt_margin := (
+		behavior_controller.autonomous_interruption_margin
+		if autonomous
+		else 0
+	)
+	var metadata := {
+		"legacy_derived": legacy_derived,
+	}
+	if request_context.has("arrival_state"):
+		metadata["arrival_state"] = String(request_context["arrival_state"])
+	return NpcBehaviorIntentModel.create(
+		primary_state,
+		logical_action,
+		source,
+		reason,
+		request_priority,
+		target_id,
+		session_id,
+		commitment_seconds,
+		interrupt_margin,
+		metadata,
+		reason_code,
+		feedback_text,
+		origin_value,
+		_request_is_lifecycle_only(primary_state, reason, request_context)
+	)
+
+
+func _evaluate_behavior_candidate(
+	candidate: NpcBehaviorIntent,
+	requested_state_name: StringName
+) -> bool:
+	if behavior_controller == null or candidate == null:
+		return true
+	var decision := behavior_controller.evaluate_candidate(candidate)
+	if bool(decision.get("accepted", false)):
+		return true
+	var rejection_reason := StringName(String(decision.get(
+		"reason", "behavior_commitment_active"
+	)))
+	behavior_controller.reject_candidate(candidate, rejection_reason)
+	return _reject_state_request(requested_state_name, String(rejection_reason))
+
+
+func _commit_behavior_candidate(candidate: NpcBehaviorIntent) -> void:
+	if behavior_controller == null or candidate == null:
+		return
+	behavior_controller.commit_candidate(candidate)
+
+
+func _update_behavior_candidate_from_session(
+	candidate: NpcBehaviorIntent,
+	session: NpcActionSession
+) -> NpcBehaviorIntent:
+	if candidate == null or session == null:
+		return candidate
+	return candidate.refreshed_copy({
+		"action_session_id": session.session_id,
+		"logical_action_kind": session.action_kind,
+		"target_persistent_id": _get_action_session_behavior_target_id(
+			session, candidate.target_persistent_id
+		),
+	})
+
+
+func _get_action_session_behavior_target_id(
+	session: NpcActionSession,
+	fallback: String
+) -> String:
+	if session == null:
+		return fallback.strip_edges()
+	if not session.target_persistent_id.strip_edges().is_empty():
+		return session.target_persistent_id.strip_edges()
+	if session.spot_id != &"":
+		return String(session.spot_id).strip_edges()
+	return fallback.strip_edges()
+
+
+func _canonical_behavior_source(source: StringName) -> StringName:
+	return NpcBehaviorIntentModel.canonicalize_source(source)
+
+
+func _request_is_lifecycle_only(
+	primary_state: StringName,
+	reason: String,
+	request_context: Dictionary
+) -> bool:
+	if bool(request_context.get("internal_lifecycle_transition", false)):
+		return true
+	if primary_state == &"Idle" and not bool(
+		request_context.get("explicit_goal_intent", false)
+	):
+		return true
+	return reason in [
+		"initial",
+		"state_tick",
+		"stale_action_session_reconcile",
+		"action_state_reconciliation",
+	]
+
+
+func _record_legacy_behavior_request(
+	primary_state: StringName,
+	logical_action: StringName,
+	reason: String
+) -> void:
+	var signature := "%s|%s|%s" % [
+		String(primary_state), String(logical_action), reason
+	]
+	_legacy_behavior_request_counts[signature] = int(
+		_legacy_behavior_request_counts.get(signature, 0)
+	) + 1
+	if (
+		not DebugToolsConfig.TROUBLESHOOTING_MODE
+		or _logged_legacy_behavior_requests.has(signature)
+	):
+		return
+	_logged_legacy_behavior_requests[signature] = true
+	push_warning("Legacy NPC behavior request lacks explicit intention metadata: %s" % signature)
+
+
+func get_legacy_behavior_request_diagnostics() -> Dictionary:
+	return _legacy_behavior_request_counts.duplicate(true)
+
+
+func _clear_behavior_intent_for_session(
+	session_id: String,
+	reason: StringName
+) -> bool:
+	if behavior_controller == null:
+		return false
+	return behavior_controller.clear_intent_for_session(session_id, reason)
+
+
+func _observe_internal_same_session_transition(
+	new_state: NpcState,
+	reason: String
+) -> void:
+	if (
+		behavior_controller == null
+		or behavior_controller.current_intent == null
+		or active_action == null
+		or active_action.status != NpcActionSession.Status.ACTIVE
+		or behavior_controller.current_intent.action_session_id
+			!= active_action.session_id
+	):
+		return
+	var current_intent := behavior_controller.current_intent
+	var refreshed_metadata := current_intent.metadata.duplicate(true)
+	if not reason.is_empty():
+		refreshed_metadata["latest_internal_transition_reason"] = reason
+	var refreshed := current_intent.refreshed_copy({
+		"requested_primary_state": StringName(new_state.name),
+		"metadata": refreshed_metadata,
+	})
+	behavior_controller.refresh_current_intent(
+		refreshed, active_action.session_id
+	)
 
 
 func request_action_from_descriptor(descriptor: Dictionary, live_target: Node2D = null) -> bool:
@@ -1383,7 +1805,9 @@ func replace_active_action(session: NpcActionSession, reason: String = "replaced
 		NpcActionSession.Status.ACTIVE,
 		NpcActionSession.Status.CANCELLING,
 	]:
-		cancel_active_action(active_action.session_id, reason)
+		_behavior_action_replacement_in_progress = true
+		cancel_active_action(active_action.session_id, reason, &"supersession")
+		_behavior_action_replacement_in_progress = false
 	active_action = session
 	active_action.status = NpcActionSession.Status.ACTIVE
 	if active_action.phase in [&"", &"proposed"]:
@@ -1397,18 +1821,36 @@ func replace_active_action(session: NpcActionSession, reason: String = "replaced
 	return true
 
 
-func cancel_active_action(session_id: String, reason: String = "cancelled") -> bool:
+func cancel_active_action(
+	session_id: String,
+	reason: String = "cancelled",
+	terminal_classification: StringName = &"neutral_cancellation"
+) -> bool:
 	if not _active_action_id_matches(session_id):
 		_log_stale_action_callback("cancel", session_id)
 		return false
+	var intent_descriptor := (
+		behavior_controller.get_current_intent_descriptor()
+		if behavior_controller != null
+		else {}
+	)
 	active_action.status = NpcActionSession.Status.CANCELLING
 	active_action.reason = reason
 	_release_active_action_reservations_once(reason)
 	last_terminal_action_session_id = active_action.session_id
 	active_action.status = NpcActionSession.Status.FAILED
 	_publish_active_action()
+	if memory_observer != null:
+		memory_observer.observe_action_terminal(
+			active_action.to_descriptor(),
+			intent_descriptor,
+			terminal_classification,
+			StringName(reason)
+		)
 	_action_state_reconciliation_requested = true
 	_action_state_reconciliation_force_reentry = false
+	if not _behavior_action_replacement_in_progress:
+		_clear_behavior_intent_for_session(session_id, StringName(reason))
 	_log_action_session("cancelled", reason)
 	return true
 
@@ -1424,6 +1866,7 @@ func complete_active_action(session_id: String, reason: String = "completed") ->
 	_publish_active_action()
 	_action_state_reconciliation_requested = true
 	_action_state_reconciliation_force_reentry = false
+	_clear_behavior_intent_for_session(session_id, StringName(reason))
 	_log_action_session("completed", reason)
 	return true
 
@@ -1466,7 +1909,26 @@ func complete_social_search_handoff(expected_session_id: String) -> bool:
 
 
 func fail_active_action(session_id: String, reason: String) -> bool:
-	return cancel_active_action(session_id, reason)
+	return cancel_active_action(
+		session_id,
+		reason,
+		_classify_action_failure_reason(StringName(reason))
+	)
+
+
+func _classify_action_failure_reason(reason: StringName) -> StringName:
+	match reason:
+		&"missing_action_target", &"movement_target_missing", &"scheduled_routine_spot_missing":
+			return &"target_unavailable"
+		&"movement_stuck":
+			return &"movement_failure"
+	return &"failure"
+
+
+func _classify_neutral_action_cancellation(reason: StringName) -> StringName:
+	if reason in [&"scene_exit", &"restore_terminal_action"]:
+		return &"lifecycle_cleanup"
+	return &"neutral_cancellation"
 
 
 func pause_active_action_movement_for_retry(
@@ -1545,7 +2007,11 @@ func restore_action_descriptor(descriptor: Dictionary) -> bool:
 		NpcActionSession.Status.FAILED,
 	]:
 		if active_action != null and active_action.session_id != session.session_id:
-			cancel_active_action(active_action.session_id, "restore_terminal_action")
+			cancel_active_action(
+				active_action.session_id,
+				"restore_terminal_action",
+				&"lifecycle_cleanup"
+			)
 		active_action = session
 		_mirror_active_action_to_legacy_fields()
 		_publish_active_action()
@@ -2008,6 +2474,7 @@ func request_active_action_approach(
 		{
 			"destination_action_kind": active_action.action_kind,
 			"arrival_state": active_action.arrival_state,
+			"internal_lifecycle_transition": true,
 		}
 	)
 
@@ -2102,17 +2569,34 @@ func _consume_or_build_action_session(
 			"destination_action_kind",
 			state_after_move if state_after_move != &"" else &"MoveToTarget"
 		)))
+	var session_source := StringName(String(request_context.get("request_source", "")))
+	if session_source == &"":
+		session_source = _get_action_source(reason, actor, logical_kind)
 	var descriptor := {
 		"priority": request_priority,
-		"source": String(request_context.get(
-			"request_source", _get_action_source(reason, actor, logical_kind)
-		)),
+		"source": String(session_source),
 		"start_world_time": _get_world_total_hours(),
 	}
+	var requested_session_id := String(request_context.get(
+		"action_session_id", request_context.get("session_id", "")
+	)).strip_edges()
+	if not requested_session_id.is_empty():
+		descriptor["session_id"] = requested_session_id
+	var behavior_metadata: Dictionary = {}
+	for behavior_key in [
+		"behavior_source",
+		"behavior_reason_code",
+		"behavior_feedback_text",
+		"behavior_origin_value",
+	]:
+		if request_context.has(behavior_key):
+			behavior_metadata[behavior_key] = request_context[behavior_key]
 	if request_context.has("scripted_claim_token"):
-		descriptor["metadata"] = {
-			"scripted_claim_token": int(request_context["scripted_claim_token"]),
-		}
+		behavior_metadata["scripted_claim_token"] = int(
+			request_context["scripted_claim_token"]
+		)
+	if not behavior_metadata.is_empty():
+		descriptor["metadata"] = behavior_metadata
 	if String(action_kind) == "MoveToTarget":
 		descriptor["phase"] = "moving_to_target"
 		var arrival_state := StringName(String(request_context.get(
@@ -2275,18 +2759,30 @@ func _get_persistent_activity_reservation_ids() -> PackedStringArray:
 func _get_action_source(reason: String, actor: Node2D, action_kind: StringName) -> StringName:
 	var lower_reason := reason.to_lower()
 	if String(action_kind) in ["Fight", "Flee", "Downed", "Collapse", "DisabledDead", "LookForMonster"]:
-		return &"emergency"
+		return NpcBehaviorIntentModel.SOURCE_EMERGENCY
 	if lower_reason.contains("world_activity") or lower_reason.contains("schedule"):
-		return &"schedule"
+		return NpcBehaviorIntentModel.SOURCE_SCHEDULE
 	if lower_reason.contains("social") or action_kind == &"LookForTalkTarget":
-		return &"social_ai"
+		return NpcBehaviorIntentModel.SOURCE_SOCIAL_AI
 	if action_kind == &"Talk":
-		return &"player" if actor != null and actor.is_in_group("player") else &"social_ai"
-	if lower_reason.contains("value") or lower_reason.contains("need") or String(action_kind) in ["Eat", "Rest", "Sleep"]:
-		return &"need"
+		return (
+			NpcBehaviorIntentModel.SOURCE_PLAYER
+			if actor != null and actor.is_in_group("player")
+			else NpcBehaviorIntentModel.SOURCE_SOCIAL_AI
+		)
+	if (
+		lower_reason.contains("value")
+		or lower_reason.contains("need")
+		or (
+			lower_reason.ends_with("_target")
+			and String(action_kind) in ["Work", "Eat", "Rest", "Recreation", "Sleep"]
+		)
+		or String(action_kind) in ["Eat", "Rest", "Sleep"]
+	):
+		return NpcBehaviorIntentModel.SOURCE_NEED
 	if actor != null and actor.is_in_group("player"):
-		return &"player"
-	return &"manual"
+		return NpcBehaviorIntentModel.SOURCE_PLAYER
+	return NpcBehaviorIntentModel.SOURCE_MANUAL
 
 
 func _get_action_owner_id() -> String:
@@ -2299,6 +2795,8 @@ func _get_action_owner_id() -> String:
 
 func _get_world_total_hours() -> float:
 	var world_time := get_node_or_null("/root/WorldTime")
+	if world_time != null and world_time.has_method("get_total_hours"):
+		return float(world_time.call("get_total_hours"))
 	if world_time != null and world_time.has_method("get_snapshot"):
 		var snapshot: Dictionary = world_time.call("get_snapshot")
 		return float(snapshot.get("total_hours", 0.0))
@@ -2721,7 +3219,21 @@ func notify_target_lost(lost_target: Node2D) -> void:
 	if current_state != null:
 		var requested_state := current_state.target_lost(lost_target)
 		if requested_state != null:
-			change_state(requested_state, "target_lost")
+			var action_descriptor := get_active_action_descriptor()
+			var intent_descriptor := (
+				behavior_controller.get_current_intent_descriptor()
+				if behavior_controller != null
+				else {}
+			)
+			if (
+				change_state(requested_state, "target_lost")
+				and memory_observer != null
+			):
+				memory_observer.observe_intention_target_lost(
+					action_descriptor,
+					intent_descriptor,
+					lost_target
+				)
 
 	perceived_targets.erase(lost_target)
 
@@ -3247,6 +3759,13 @@ func _request_talk_state(
 		_reject_state_request(&"Talk", "partner_refused_talk")
 		if partner_machine.has_signal(&"state_request_failed"):
 			partner_machine.state_request_failed.emit(&"Talk", "talk_refused")
+		if memory_observer != null:
+			memory_observer.observe_conversation_refused(
+				new_target,
+				_get_talk_request_session_id(talk_source),
+				&"partner_refused_talk",
+				talk_source
+			)
 		_start_talk_refusal_cooldown(new_target)
 		return false
 
@@ -3526,6 +4045,11 @@ func _remove_interaction_overlay(reason: String) -> void:
 	interaction_overlay = null
 	interaction_overlay_priority = 0
 	var removed_interaction_session := active_interaction_session
+	var removed_interaction_descriptor := (
+		removed_interaction_session.to_descriptor()
+		if removed_interaction_session != null
+		else {}
+	)
 	var removed_interaction_session_id := (
 		removed_interaction_session.session_id if removed_interaction_session != null else ""
 	)
@@ -3548,7 +4072,21 @@ func _remove_interaction_overlay(reason: String) -> void:
 		if reason in ["completed", "partner_completed"]:
 			complete_active_action(removed_interaction_session_id, reason)
 		else:
-			cancel_active_action(removed_interaction_session_id, reason)
+			cancel_active_action(
+				removed_interaction_session_id,
+				reason,
+				_classify_neutral_action_cancellation(StringName(reason))
+			)
+	if (
+		reason in ["completed", "partner_completed"]
+		and memory_observer != null
+		and removed_talk_partner != null
+		and is_instance_valid(removed_talk_partner)
+	):
+		memory_observer.observe_conversation_completed(
+			removed_talk_partner,
+			removed_interaction_descriptor
+		)
 	if current_state != null:
 		current_state.resume_presentation_after_talk_overlay()
 	_update_debug_label()
@@ -4002,11 +4540,61 @@ func evaluate_value_reactions(
 	if bool(matching_rule.get("requires_target", false)) and request_actor == null:
 		return false
 
+	if (
+		matching_rule.has("behavior_source")
+		and matching_rule.has("behavior_reason_code")
+	):
+		return request_behavior_intent(
+			_build_value_rule_behavior_intent(
+				matching_rule, state_name, priority, request_actor
+			),
+			request_actor
+		)
 	return request_state(
 		state_name,
 		request_actor,
 		String(matching_rule.get("reason", "value_rule")),
 		priority
+	)
+
+
+func _build_value_rule_behavior_intent(
+	rule: Dictionary,
+	state_name: StringName,
+	priority: int,
+	request_actor: Node2D
+) -> NpcBehaviorIntent:
+	var value_key := _canonical_value_key(rule.get(
+		"behavior_origin_value", rule.get("value", "")
+	))
+	var rule_key := String(rule.get("reason", "")).strip_edges()
+	var snapshots := {
+		"rule_key": rule_key,
+		"value_name": value_key,
+		"current_value": values.get(value_key, rule.get("default", 0.0)),
+		"requires_target": bool(rule.get("requires_target", false)),
+	}
+	for threshold_key in ["at_least", "at_most", "truthy", "delta_at_most", "delta_at_least"]:
+		if rule.has(threshold_key):
+			snapshots[threshold_key] = rule[threshold_key]
+	var target_id := NpcActionSessionModel.get_persistent_id(request_actor)
+	if not target_id.is_empty():
+		snapshots["target_persistent_id"] = target_id
+	return NpcBehaviorIntentModel.create(
+		state_name,
+		state_name,
+		StringName(String(rule.get("behavior_source", "manual"))),
+		rule_key,
+		priority,
+		target_id,
+		"",
+		0.0,
+		0,
+		snapshots,
+		StringName(String(rule.get("behavior_reason_code", rule_key))),
+		String(rule.get("behavior_feedback_text", "")),
+		StringName(String(rule.get("behavior_origin_value", value_key))),
+		false
 	)
 
 
@@ -4546,6 +5134,105 @@ func _cache_optional_nodes() -> void:
 	_debug_label = _get_optional_npc_node(debug_label_path, "Label") as Label
 
 
+func _cache_behavior_controller() -> void:
+	behavior_controller = get_node_or_null("NpcBehaviorController") as NpcBehaviorController
+	if behavior_controller == null:
+		return
+	if not behavior_controller.intention_accepted.is_connected(
+		_on_behavior_intention_accepted
+	):
+		behavior_controller.intention_accepted.connect(_on_behavior_intention_accepted)
+	if not behavior_controller.intention_replaced.is_connected(
+		_on_behavior_intention_replaced
+	):
+		behavior_controller.intention_replaced.connect(_on_behavior_intention_replaced)
+	if not behavior_controller.intention_refreshed.is_connected(
+		_on_behavior_intention_refreshed
+	):
+		behavior_controller.intention_refreshed.connect(_on_behavior_intention_refreshed)
+	if not behavior_controller.intention_cleared.is_connected(
+		_on_behavior_intention_cleared
+	):
+		behavior_controller.intention_cleared.connect(_on_behavior_intention_cleared)
+	if not behavior_controller.intention_rejected.is_connected(
+		_on_behavior_intention_rejected
+	):
+		behavior_controller.intention_rejected.connect(_on_behavior_intention_rejected)
+	if not behavior_controller.commitment_changed.is_connected(
+		_on_behavior_commitment_changed
+	):
+		behavior_controller.commitment_changed.connect(_on_behavior_commitment_changed)
+	if not behavior_controller.feedback_refresh_requested.is_connected(
+		_on_behavior_feedback_refresh_requested
+	):
+		behavior_controller.feedback_refresh_requested.connect(
+			_on_behavior_feedback_refresh_requested
+		)
+	if not behavior_controller.rejection_feedback_cleared.is_connected(
+		_on_behavior_rejection_feedback_cleared
+	):
+		behavior_controller.rejection_feedback_cleared.connect(
+			_on_behavior_rejection_feedback_cleared
+		)
+
+
+func _cache_memory_components() -> void:
+	short_term_memory = get_node_or_null("NpcShortTermMemory") as NpcShortTermMemory
+	memory_observer = get_node_or_null("NpcMemoryObserver") as NpcMemoryObserver
+	if memory_observer != null:
+		memory_observer.bind(self, short_term_memory)
+	if (
+		short_term_memory != null
+		and not short_term_memory.memory_changed.is_connected(_on_memory_changed)
+	):
+		short_term_memory.memory_changed.connect(_on_memory_changed)
+
+
+func _on_memory_changed() -> void:
+	_update_debug_label()
+
+
+func _on_behavior_intention_accepted(_intent: NpcBehaviorIntent) -> void:
+	_update_debug_label()
+
+
+func _on_behavior_intention_replaced(
+	_previous: NpcBehaviorIntent,
+	_current: NpcBehaviorIntent
+) -> void:
+	_update_debug_label()
+
+
+func _on_behavior_intention_refreshed(_intent: NpcBehaviorIntent) -> void:
+	_update_debug_label()
+
+
+func _on_behavior_intention_cleared(
+	_intent: NpcBehaviorIntent,
+	_reason: StringName
+) -> void:
+	_update_debug_label()
+
+
+func _on_behavior_intention_rejected(
+	_candidate: NpcBehaviorIntent,
+	_reason: StringName
+) -> void:
+	_update_debug_label()
+
+
+func _on_behavior_commitment_changed(_remaining_seconds: float) -> void:
+	_update_debug_label()
+
+
+func _on_behavior_feedback_refresh_requested() -> void:
+	_update_debug_label()
+
+
+func _on_behavior_rejection_feedback_cleared() -> void:
+	_update_debug_label()
+
+
 func _get_optional_npc_node(configured_path: NodePath, fallback_name: String) -> Node:
 	if npc == null:
 		return null
@@ -4722,6 +5409,23 @@ func _resolve_talk_initiating_source(
 	return &"manual"
 
 
+func _get_talk_request_session_id(talk_source: StringName) -> String:
+	if (
+		_proposed_action != null
+		and _proposed_action.action_kind in [&"Talk", &"LookForTalkTarget"]
+		and _proposed_action.source == talk_source
+	):
+		return _proposed_action.session_id
+	if (
+		active_action != null
+		and active_action.status == NpcActionSession.Status.ACTIVE
+		and active_action.action_kind in [&"Talk", &"LookForTalkTarget"]
+		and active_action.source == talk_source
+	):
+		return active_action.session_id
+	return ""
+
+
 func _has_available_autonomous_talk_target(rule: Dictionary) -> bool:
 	if npc == null or not npc.is_inside_tree():
 		return false
@@ -4859,11 +5563,17 @@ func _rule_allows_target(rule: Dictionary, candidate: Node2D) -> bool:
 
 	var allowed_groups = rule.get("target_groups", [])
 	if not (allowed_groups is Array) or allowed_groups.is_empty():
-		return _rule_allows_target_relationship(rule, candidate)
+		return (
+			_rule_allows_target_relationship(rule, candidate)
+			and _social_memory_allows_rule_target(rule, candidate)
+		)
 
 	for group_name in allowed_groups:
 		if candidate.is_in_group(String(group_name)):
-			return _rule_allows_target_relationship(rule, candidate)
+			return (
+				_rule_allows_target_relationship(rule, candidate)
+				and _social_memory_allows_rule_target(rule, candidate)
+			)
 
 	return false
 
@@ -4876,6 +5586,32 @@ func _rule_allows_target_relationship(rule: Dictionary, candidate: Node2D) -> bo
 		return true
 
 	return _get_relationship_favor_for_target(candidate) > _variant_to_float(rule["min_relationship_favor"])
+
+
+func _social_memory_allows_rule_target(
+	rule: Dictionary,
+	candidate: Node2D
+) -> bool:
+	if (
+		short_term_memory == null
+		or not candidate.is_in_group("npc")
+		or String(rule.get("behavior_source", "")) != "social_ai"
+		or String(rule.get("state", "")) != "Talk"
+	):
+		return true
+	var candidate_id := NpcActionSessionModel.get_persistent_id(candidate)
+	if candidate_id.is_empty():
+		return true
+	var decision := _social_memory_policy.evaluate_candidate(
+		short_term_memory,
+		StringName(candidate_id),
+		_get_world_total_hours(),
+		{
+			"remembering_npc_id": _get_action_owner_id(),
+			"retry_delay_game_hours": recent_refusal_retry_delay_game_hours,
+		}
+	)
+	return bool(decision.get("allowed", true))
 
 
 func _get_relationship_favor_for_target(candidate: Node) -> float:
@@ -5135,10 +5871,65 @@ func _update_debug_label() -> void:
 	if _debug_label == null or current_state == null:
 		return
 
-	if interaction_overlay != null:
-		_debug_label.text = "%s + %s" % [current_state.name, interaction_overlay.name]
+	var formatted := _format_debug_label_text()
+	if _debug_label.text != formatted:
+		_debug_label.text = formatted
+
+
+func _format_debug_label_text() -> String:
+	if current_state == null:
+		return ""
+	var feedback := get_feedback_descriptor()
+	return NpcBehaviorFeedbackFormatter.format_label(
+		StringName(current_state.name),
+		StringName(interaction_overlay.name) if interaction_overlay != null else &"",
+		feedback
+	)
+
+
+func get_feedback_descriptor() -> Dictionary:
+	var feedback := (
+		behavior_controller.get_feedback_descriptor()
+		if behavior_controller != null
+		else {}
+	)
+	if short_term_memory != null:
+		feedback["memory"] = short_term_memory.get_debug_descriptor(
+			_get_world_total_hours()
+		)
+	var social_selection := _get_active_social_selection_feedback()
+	if not social_selection.is_empty():
+		feedback["social_selection"] = social_selection
+	return feedback
+
+
+func set_social_selection_feedback(descriptor: Dictionary) -> void:
+	var next_feedback: Dictionary = {}
+	if (
+		bool(descriptor.get("all_candidates_suppressed", false))
+		and String(descriptor.get("reason_code", ""))
+			== "no_social_target_due_to_recent_refusal"
+	):
+		next_feedback = descriptor.duplicate(true)
+	if _social_selection_feedback == next_feedback:
 		return
-	_debug_label.text = current_state.name
+	_social_selection_feedback = next_feedback
+	_update_debug_label()
+
+
+func _get_active_social_selection_feedback() -> Dictionary:
+	if _social_selection_feedback.is_empty():
+		return {}
+	var retry_game_hours := float(_social_selection_feedback.get(
+		"earliest_retry_game_hours",
+		0.0
+	))
+	var remaining_retry_hours := retry_game_hours - _get_world_total_hours()
+	if remaining_retry_hours <= 0.0:
+		return {}
+	var active_feedback := _social_selection_feedback.duplicate(true)
+	active_feedback["remaining_retry_hours"] = remaining_retry_hours
+	return active_feedback
 
 
 func _value_reactions_enabled() -> bool:

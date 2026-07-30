@@ -23,6 +23,9 @@ const INVITE_PLAYER_STATE := &"InvitePlayer"
 const MagicLessonRemoteInvitationScene := preload("res://scripts/instances/magic_lesson_remote_invitation.gd")
 const NpcActivityIdentity = preload("res://scripts/systems/npc_activity_identity.gd")
 const NpcActionSessionModel = preload("res://scripts/systems/npc_action_session.gd")
+const NpcBehaviorIntentModel = preload(
+	"res://scripts/systems/npc_behavior/npc_behavior_intent.gd"
+)
 const NpcRouteBridge = preload("res://scripts/systems/npc_scene_route_bridge.gd")
 const NpcRouteLocationCoordinator = preload(
 	"res://scripts/systems/npc_route_location_coordinator.gd"
@@ -32,6 +35,7 @@ const NpcRouteLocationCoordinator = preload(
 @export var simulated_talk_need_drop: float = 40.0
 @export var simulated_partner_talk_need_drop: float = 25.0
 @export var simulated_talk_boredom_drop: float = 10.0
+@export_range(0.0, 24.0, 0.01, "suffix:h") var recent_refusal_retry_delay_game_hours: float = 0.25
 @export var performance_profiling_enabled: bool = false
 
 const PERFORMANCE_PROFILE_REPORT_WINDOW_CALLS := 30
@@ -48,6 +52,8 @@ var simulation_dirty_while_locked: bool = false
 var social_rng := RandomNumberGenerator.new()
 var _social_planner := NpcSocialPlanner.new()
 var _social_planning_suppressed: bool = false
+var _social_memory_retry_game_hours: Dictionary = {}
+var _social_selection_debug_by_npc: Dictionary = {}
 var _needs_simulator := NpcNeedsSimulator.new()
 var simulation_tick_skip_logged: bool = false
 var _performance_profile_call_count: int = 0
@@ -2406,10 +2412,12 @@ func _try_start_social_seek(
 	if _get_saved_stat(record, "talk_need") < float(settings.get("talk_need_threshold", 70.0)):
 		return false
 	var live_npc: Node2D
+	var live_machine: Node
+	var short_term_memory: NpcShortTermMemory
 	if locations.has_method("get_live_npc"):
 		live_npc = locations.call("get_live_npc", String(npc_id)) as Node2D
 	if live_npc != null:
-		var live_machine := live_npc.get_node_or_null("NpcStateMachine")
+		live_machine = live_npc.get_node_or_null("NpcStateMachine")
 		if (
 			live_machine != null
 			and live_machine.has_method("is_socially_engaged")
@@ -2417,6 +2425,45 @@ func _try_start_social_seek(
 		):
 			_log_social_plan_result(npc_id, "", "", false, "already_socially_engaged")
 			return false
+		if live_machine != null:
+			short_term_memory = live_machine.get_node_or_null(
+				"NpcShortTermMemory"
+			) as NpcShortTermMemory
+
+	var clean_npc_id := String(npc_id)
+	var now_game_hours := _get_current_total_hours()
+	if short_term_memory == null:
+		_social_memory_retry_game_hours.erase(clean_npc_id)
+		_publish_social_selection_descriptor(npc_id, live_machine, {})
+	else:
+		var cached_retry_game_hours := float(
+			_social_memory_retry_game_hours.get(clean_npc_id, 0.0)
+		)
+		if cached_retry_game_hours > now_game_hours:
+			var cached_descriptor: Dictionary = _social_selection_debug_by_npc.get(
+				clean_npc_id,
+				{}
+			).duplicate(true)
+			cached_descriptor = _refresh_cached_social_memory_retry(
+				short_term_memory,
+				cached_descriptor,
+				now_game_hours
+			)
+			if not cached_descriptor.is_empty():
+				cached_retry_game_hours = float(cached_descriptor.get(
+					"earliest_retry_game_hours",
+					cached_retry_game_hours
+				))
+				_social_memory_retry_game_hours[clean_npc_id] = (
+					cached_retry_game_hours
+				)
+				_publish_social_selection_descriptor(
+					npc_id,
+					live_machine,
+					cached_descriptor
+				)
+				return false
+		_social_memory_retry_game_hours.erase(clean_npc_id)
 
 	var relationships := get_node_or_null("/root/Relationships")
 	var player := get_tree().get_first_node_in_group("player") as Node2D
@@ -2432,8 +2479,45 @@ func _try_start_social_seek(
 		relationships,
 		player,
 		social_rng,
-		candidate_evaluated
+		candidate_evaluated,
+		short_term_memory,
+		now_game_hours,
+		{
+			"remembering_npc_id": (
+				NpcActionSessionModel.get_persistent_id(live_npc)
+				if live_npc != null
+				else clean_npc_id
+			),
+			"retry_delay_game_hours": recent_refusal_retry_delay_game_hours,
+		}
 	)
+	var selection_descriptor := _social_planner.get_last_selection_descriptor()
+	_publish_social_selection_descriptor(
+		npc_id,
+		live_machine,
+		selection_descriptor
+	)
+	if bool(selection_descriptor.get("all_candidates_suppressed", false)):
+		var earliest_retry_game_hours := float(selection_descriptor.get(
+			"earliest_retry_game_hours",
+			0.0
+		))
+		if earliest_retry_game_hours > now_game_hours:
+			_social_memory_retry_game_hours[clean_npc_id] = (
+				earliest_retry_game_hours
+			)
+		_log_social_plan_result(
+			npc_id,
+			"",
+			"",
+			false,
+			String(selection_descriptor.get(
+				"reason_code",
+				"no_social_target_due_to_recent_refusal"
+			))
+		)
+		return false
+	_social_memory_retry_game_hours.erase(clean_npc_id)
 	if candidate.is_empty():
 		return false
 
@@ -2519,6 +2603,99 @@ func _try_start_social_seek(
 		"" if accepted else rejection_reason
 	)
 	return accepted
+
+
+func get_social_selection_debug_descriptor(
+	npc_id: StringName = &""
+) -> Dictionary:
+	var clean_npc_id := String(npc_id)
+	if clean_npc_id.is_empty():
+		if _social_selection_debug_by_npc.size() != 1:
+			return {}
+		clean_npc_id = String(_social_selection_debug_by_npc.keys()[0])
+	var descriptor: Dictionary = _social_selection_debug_by_npc.get(
+		clean_npc_id,
+		{}
+	).duplicate(true)
+	if descriptor.is_empty():
+		return {}
+	var retry_game_hours := float(descriptor.get(
+		"earliest_retry_game_hours",
+		0.0
+	))
+	if retry_game_hours > 0.0:
+		var remaining_retry_hours := retry_game_hours - _get_current_total_hours()
+		if remaining_retry_hours <= 0.0:
+			return {}
+		descriptor["remaining_retry_hours"] = remaining_retry_hours
+	return descriptor
+
+
+func _publish_social_selection_descriptor(
+	npc_id: StringName,
+	live_machine: Node,
+	descriptor: Dictionary
+) -> void:
+	var clean_npc_id := String(npc_id)
+	if descriptor.is_empty():
+		_social_selection_debug_by_npc.erase(clean_npc_id)
+	else:
+		_social_selection_debug_by_npc[clean_npc_id] = descriptor.duplicate(true)
+	if (
+		live_machine != null
+		and live_machine.has_method("set_social_selection_feedback")
+	):
+		live_machine.call(
+			"set_social_selection_feedback",
+			descriptor.duplicate(true)
+		)
+
+
+func _refresh_cached_social_memory_retry(
+	short_term_memory: NpcShortTermMemory,
+	descriptor: Dictionary,
+	now_game_hours: float
+) -> Dictionary:
+	if short_term_memory == null or descriptor.is_empty():
+		return {}
+	var earliest_retry_game_hours := 0.0
+	var active_suppression_count := 0
+	var decisions = descriptor.get("candidate_decisions", [])
+	if not (decisions is Array):
+		return {}
+	for decision in decisions:
+		if (
+			not (decision is Dictionary)
+			or bool(decision.get("allowed", true))
+			or String(decision.get("reason_code", ""))
+				!= "recent_conversation_refusal"
+		):
+			continue
+		var memory_id := String(decision.get("memory_id", ""))
+		var refusal := short_term_memory.get_memory_by_id(memory_id)
+		if refusal == null or refusal.resolved:
+			continue
+		var retry_game_hours := (
+			refusal.last_updated_game_hours
+			+ recent_refusal_retry_delay_game_hours
+		)
+		if retry_game_hours <= now_game_hours:
+			continue
+		active_suppression_count += 1
+		if (
+			earliest_retry_game_hours <= 0.0
+			or retry_game_hours < earliest_retry_game_hours
+		):
+			earliest_retry_game_hours = retry_game_hours
+	if active_suppression_count <= 0:
+		return {}
+	var refreshed := descriptor.duplicate(true)
+	refreshed["suppressed_by_refusal_count"] = active_suppression_count
+	refreshed["earliest_retry_game_hours"] = earliest_retry_game_hours
+	refreshed["remaining_retry_hours"] = (
+		earliest_retry_game_hours - now_game_hours
+	)
+	return refreshed
 
 
 func _record_has_pending_travel(record: Dictionary) -> bool:
@@ -2608,6 +2785,32 @@ func _request_live_social_seek(
 			seek_descriptor
 		)):
 			return false
+	var social_metadata := {
+		"target_persistent_id": target_npc_id,
+		"social_session_id": session_id,
+	}
+	if machine.has_method("get_value"):
+		social_metadata["current_value"] = float(machine.call("get_value", &"talk_need"))
+	var social_intent := NpcBehaviorIntentModel.create(
+		&"LookForTalkTarget",
+		&"LookForTalkTarget",
+		NpcBehaviorIntentModel.SOURCE_SOCIAL_AI,
+		"live_social_seek",
+		seek_priority,
+		target_npc_id,
+		session_id,
+		0.0,
+		0,
+		social_metadata,
+		NpcSocialPlanner.SOCIAL_SEEK_REASON_CODE,
+		NpcSocialPlanner.SOCIAL_SEEK_FEEDBACK_TEXT,
+		NpcSocialPlanner.SOCIAL_SEEK_ORIGIN_VALUE,
+		false
+	)
+	if machine.has_method("request_behavior_intent"):
+		return bool(machine.call(
+			"request_behavior_intent", social_intent, target, {}
+		))
 	if machine.has_method("request_action_from_descriptor"):
 		return bool(machine.call("request_action_from_descriptor", {
 			"session_id": session_id,
@@ -2620,6 +2823,12 @@ func _request_live_social_seek(
 			"priority": seek_priority,
 			"status": "proposed",
 			"start_world_time": _get_current_total_hours(),
+			"metadata": {
+				"behavior_source": "social_ai",
+				"behavior_reason_code": String(NpcSocialPlanner.SOCIAL_SEEK_REASON_CODE),
+				"behavior_feedback_text": NpcSocialPlanner.SOCIAL_SEEK_FEEDBACK_TEXT,
+				"behavior_origin_value": String(NpcSocialPlanner.SOCIAL_SEEK_ORIGIN_VALUE),
+			},
 		}, target))
 	return bool(machine.call(
 		"request_state", &"LookForTalkTarget", target, "social_seek", seek_priority

@@ -1,4 +1,4 @@
-extends GutTest
+extends "res://test/native_scene_tree_test.gd"
 
 var ProgressionSystemClass := preload("res://scripts/progression/progression_system.gd")
 var ProgressionIds := preload("res://scripts/progression/progression_ids.gd")

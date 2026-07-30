@@ -64,7 +64,7 @@ func advance_real_seconds(delta: float) -> void:
 
 func set_time(new_day: int, new_time_of_day_hours: float) -> void:
 	day = max(new_day, 0)
-	time_of_day_hours = clampf(new_time_of_day_hours, 0.0, 24.0)
+	time_of_day_hours = maxf(new_time_of_day_hours, 0.0)
 
 	if time_of_day_hours >= 24.0:
 		day += int(floor(time_of_day_hours / 24.0))

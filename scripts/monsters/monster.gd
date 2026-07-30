@@ -23,6 +23,9 @@ signal death_drop_requested(monster)
 @export var request_item_drop_on_death: bool = false
 @export var progression_kill_reward_id: StringName = &""
 
+@export_group("Rope")
+@export_range(0.01, 1000.0, 0.01) var rope_weight: float = 2.0
+
 @onready var body_collision: CollisionShape2D = get_node_or_null("CollisionShape2D") as CollisionShape2D
 @onready var damage_area: Area2D = get_node_or_null("Damage_Area") as Area2D
 @onready var touch_damage_area: Area2D = get_node_or_null("TouchDamageArea") as Area2D
@@ -30,6 +33,7 @@ signal death_drop_requested(monster)
 @onready var inventory_component: NpcInventoryComponent = get_node_or_null("NpcInventory") as NpcInventoryComponent
 @onready var inventory_drop_component: NpcInventoryDropComponent = get_node_or_null("NpcInventoryDrop") as NpcInventoryDropComponent
 @onready var monster_loot_component: MonsterLootComponent = get_node_or_null("MonsterLoot") as MonsterLootComponent
+@onready var rope_attach_point: Marker2D = get_node_or_null("RopeAttachPoint") as Marker2D
 
 var hp: float = 0.0
 var dead: bool = false
@@ -80,6 +84,7 @@ func die() -> void:
 	if dead:
 		return
 
+	Rope.detach_all_from_body(self)
 	dead = true
 	hp = 0.0
 	velocity = Vector2.ZERO
@@ -131,6 +136,10 @@ func get_attack_aim_position() -> Vector2:
 		return body_collision.global_position
 
 	return global_position
+
+
+func get_rope_attach_point() -> Node2D:
+	return rope_attach_point if rope_attach_point != null else self
 
 
 func apply_knockback_from(damage_source_position: Vector2) -> void:

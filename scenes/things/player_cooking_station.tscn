@@ -38,5 +38,5 @@ theme_override_colors/font_color = Color(1, 0.86, 0.52, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
 theme_override_constants/shadow_offset_x = 1
 theme_override_constants/shadow_offset_y = 1
-text = "UP: Cook"
+text = "C: Cook"
 horizontal_alignment = 1

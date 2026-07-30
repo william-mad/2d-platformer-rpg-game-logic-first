@@ -196,12 +196,13 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_apply_gravity(delta)
+	var velocity_after_gravity := velocity
 	_process_knockout_recovery(delta)
 
 	if is_downed:
 		velocity.x = 0.0
 		_update_favor_bar_visibility()
-		_move_and_slide_with_rope(delta)
+		_move_and_slide_with_rope(delta, velocity_after_gravity)
 		return
 
 	if process_damage_hop(delta):
@@ -213,11 +214,19 @@ func _physics_process(delta: float) -> void:
 		_process_patrol()
 
 	_update_favor_bar_visibility()
-	_move_and_slide_with_rope(delta)
+	_move_and_slide_with_rope(delta, velocity_after_gravity)
 
 
-func _move_and_slide_with_rope(delta: float) -> void:
-	velocity = Rope.constrain_attached_velocity(self, velocity, delta)
+func _move_and_slide_with_rope(
+	delta: float,
+	velocity_after_gravity: Vector2
+) -> void:
+	velocity = Rope.finalize_attached_body_velocity(
+		self,
+		velocity,
+		velocity_after_gravity,
+		delta
+	)
 	move_and_slide()
 
 

@@ -10,7 +10,9 @@ const CLAIM_SUPPRESSED_ACTIONS: Array[StringName] = [
 	&"attack",
 	&"jump",
 	&"crouch",
+	&"charm",
 	&"attach_rope",
+	&"attach_rope_npc",
 ]
 
 #region //onready variables:
@@ -361,7 +363,7 @@ func _unhandled_input( event: InputEvent) -> void:
 	if is_downed or is_movement_locked():
 		return
 
-	if _consume_terrain_rope_length_input(event):
+	if _consume_rope_pay_out_input(event):
 		return
 	if _handle_rope_input(event):
 		return
@@ -431,10 +433,17 @@ func _physics_process(_delta: float) -> void:
 		_move_and_slide_with_rope(_delta)
 		return
 
-	if rope.has_terrain_anchor():
-		# Space keeps its jump behavior while reeling in; Down is reserved for payout.
-		rope.adjust_terrain_length(
-			Input.is_action_pressed("jump"),
+	if rope.active:
+		# Up always reels in. Down pays out only while the player holds one end.
+		var reel_input := Input.is_action_pressed("up")
+		if (
+			reel_input
+			and interaction_router != null
+			and interaction_router.is_interaction_action_held(&"up")
+		):
+			reel_input = false
+		rope.adjust_length(
+			reel_input,
 			Input.is_action_pressed("crouch"),
 			_delta
 		)
@@ -548,50 +557,68 @@ func _player_visual_is_hidden() -> bool:
 	return not states.is_empty() and current_state is PlayerStateHidden
 
 
-func toggle_rope() -> void:
-	if not rope.toggle_closest():
-		print("No rope target nearby.")
-
-
 func _handle_rope_input(event: InputEvent) -> bool:
+	var end_id: StringName = &""
 	if (
-		not event.is_action_pressed("attach_rope")
-		and not event.is_action_released("attach_rope")
+		event.is_action_pressed("attach_rope")
+		or event.is_action_released("attach_rope")
+	):
+		end_id = Rope.END_X
+	elif (
+		event.is_action_pressed("attach_rope_npc")
+		or event.is_action_released("attach_rope_npc")
+	):
+		end_id = Rope.END_S
+	else:
+		return false
+
+	if (
+		not event.is_action_pressed(
+			"attach_rope" if end_id == Rope.END_X else "attach_rope_npc"
+		)
+		and not event.is_action_released(
+			"attach_rope" if end_id == Rope.END_X else "attach_rope_npc"
+		)
 	):
 		return false
 	if event is InputEventKey and (event as InputEventKey).echo:
 		return true
+	if (
+		rope.has_pending_throw()
+		and rope.get_pending_endpoint() != end_id
+	):
+		return true
 
-	if event.is_action_pressed("attach_rope"):
-		if rope.active:
-			rope.detach()
+	var action_name := (
+		&"attach_rope" if end_id == Rope.END_X else &"attach_rope_npc"
+	)
+	if event.is_action_pressed(action_name):
+		if rope.endpoint_is_attached(end_id):
+			rope.undo_from_endpoint_input(end_id)
 		elif rope.has_pending_throw():
 			rope.cancel_pending_throw()
 		else:
-			rope.begin_throw_charge(_get_rope_facing_direction())
+			rope.begin_endpoint_gesture(
+				end_id,
+				_get_rope_facing_direction()
+			)
 		return true
 
-	if not rope.is_throw_charging():
-		return true
 	rope.set_throw_facing(_get_rope_facing_direction())
-	if rope.is_quick_throw_release():
-		rope.cancel_pending_throw()
-		toggle_rope()
-	else:
-		rope.release_throw_charge()
+	rope.release_endpoint_gesture(end_id)
 	return true
 
 
-func _consume_terrain_rope_length_input(event: InputEvent) -> bool:
+func _consume_rope_pay_out_input(event: InputEvent) -> bool:
 	return (
 		rope != null
-		and rope.has_terrain_anchor()
+		and rope.can_pay_out()
 		and event.is_action_pressed("crouch")
 	)
 
 
-func is_terrain_rope_length_control_active() -> bool:
-	return rope != null and rope.has_terrain_anchor()
+func is_rope_pay_out_control_active() -> bool:
+	return rope != null and rope.can_pay_out()
 
 
 func _get_rope_facing_direction() -> float:

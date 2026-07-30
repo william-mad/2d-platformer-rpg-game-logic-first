@@ -1,7 +1,7 @@
 class_name PlayerSleepSpot extends Area2D
 
 @export var player_group: StringName = &"player"
-@export var interaction_action: StringName = &"up"
+@export var interaction_action: StringName = &"charm"
 @export var interaction_priority: int = 100
 @export var interaction_prompt: String = "Sleep"
 @export_range(0.05, 30.0, 0.05, "suffix:s") var sleep_duration_seconds: float = 4.0
@@ -59,6 +59,10 @@ func interact(actor: Node) -> bool:
 		return false
 	_start_sleep(actor as Node2D)
 	return true
+
+
+func get_interaction_action(_actor: Node) -> StringName:
+	return interaction_action
 
 
 func get_interaction_priority(_actor: Node) -> int:

@@ -1,4 +1,4 @@
-extends GutTest
+extends "res://test/native_scene_tree_test.gd"
 # Unit tests for NpcStateMachine's rule engine. These are the most regression-prone
 # functions in the project: time windows, threshold/delta matching, alias resolution,
 # and one-shot threshold effects. They are private (_-prefixed) but callable directly,

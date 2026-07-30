@@ -41,8 +41,14 @@ func _physics_process(delta: float) -> void:
 	elif velocity.y > 0.0:
 		velocity.y = 0.0
 
+	var velocity_after_gravity := velocity
 	velocity.x = move_toward(velocity.x, target_velocity_x, acceleration * delta)
-	velocity = Rope.constrain_attached_velocity(self, velocity, delta)
+	velocity = Rope.finalize_attached_body_velocity(
+		self,
+		velocity,
+		velocity_after_gravity,
+		delta
+	)
 	move_and_slide()
 
 	hidden_control_active = false

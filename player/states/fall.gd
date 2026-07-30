@@ -86,7 +86,7 @@ func physics_update_after_move(_delta: float) -> PlayerState:
 	if (
 		player.is_on_floor()
 		and Input.is_action_pressed("crouch")
-		and not player.is_terrain_rope_length_control_active()
+		and not player.is_rope_pay_out_control_active()
 	):
 		return crouch
 	elif player.is_on_floor():

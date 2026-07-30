@@ -2,8 +2,8 @@ class_name SaveSpot extends Area2D
 
 @export var save_slot: String = "slot_1"
 @export var choose_slot_on_save: bool = true
-@export var save_action: StringName = &"up"
-@export var ready_text: String = "UP: SAVE"
+@export var save_action: StringName = &"charm"
+@export var ready_text: String = "C: SAVE"
 @export var saved_text: String = "SAVED"
 @export var missing_system_text: String = "No SaveSystem"
 @export var save_menu_title: String = "CHOOSE SAVE FILE"
@@ -62,6 +62,10 @@ func interact(actor: Node) -> bool:
 	if not can_interact(actor):
 		return false
 	return _save_here(actor as Node2D)
+
+
+func get_interaction_action(_actor: Node) -> StringName:
+	return save_action
 
 
 func get_interaction_priority(_actor: Node) -> int:

@@ -2,7 +2,7 @@ class_name PlayerCookingStation
 extends Area2D
 
 @export var recipe: ProcessingRecipeDefinition = preload("res://data/recipes/cook_slime_meat.tres")
-@export var interaction_action: StringName = &"up"
+@export var interaction_action: StringName = &"charm"
 @export var close_action: StringName = &"inventory"
 @export var player_group: StringName = &"player"
 @export var interaction_priority: int = 90
@@ -54,6 +54,10 @@ func interact(actor: Node) -> bool:
 	if not can_interact(actor):
 		return false
 	return open_panel(actor as Node2D)
+
+
+func get_interaction_action(_actor: Node) -> StringName:
+	return interaction_action
 
 
 func get_interaction_priority(_actor: Node) -> int:
@@ -252,7 +256,7 @@ func _on_body_exited(body: Node2D) -> void:
 func _update_prompt() -> void:
 	if prompt_label != null:
 		prompt_label.visible = _interaction_focused and _panel_layer == null
-		prompt_label.text = "UP: Cook"
+		prompt_label.text = "C: Cook"
 
 
 func set_interaction_focused(_actor: Node, focused: bool) -> void:

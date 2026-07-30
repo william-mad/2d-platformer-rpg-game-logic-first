@@ -44,7 +44,7 @@ func handle_input(_event: InputEvent) -> PlayerState:
 		clear_attack_charge()
 		return next_state
 
-	if _event.is_action_pressed("up") and player.is_on_floor():
+	if _event.is_action_pressed("charm") and player.is_on_floor():
 		return get_floor_exit_state()
 
 	return next_state

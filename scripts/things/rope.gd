@@ -8,13 +8,11 @@ const DEFAULT_BODY_WEIGHT: float = 1.0
 const DEFAULT_NPC_WEIGHT: float = 2.0
 const NETWORK_SOLVER_ITERATIONS: int = 12
 const NETWORK_RELAXATION: float = 0.85
-
-enum ThrowState {
-	READY,
-	TAP_PENDING,
-	SPINNING,
-	FLYING,
-}
+const END_X: StringName = &"x"
+const END_S: StringName = &"s"
+const RopeThrowControllerScript = preload(
+	"res://scripts/things/rope_throw_controller.gd"
+)
 
 @export_category("Rope Feel")
 ## Upper bound for the rope's resting length.
@@ -33,7 +31,7 @@ enum ThrowState {
 ## Input cannot add tangential speed beyond this; gravity may still carry it faster.
 @export_range(0.0, 3000.0, 10.0, "suffix:px/s") var swing_input_speed_limit: float = 1100.0
 
-@export_category("Terrain Throw")
+@export_category("Rope Throw")
 ## Releases shorter than this keep the original nearest-object attachment.
 @export_range(0.05, 0.75, 0.01, "suffix:s") var quick_attach_seconds: float = 0.2
 ## Time at which the terrain throw reaches full range.
@@ -46,11 +44,13 @@ enum ThrowState {
 @export_range(1.0, 5.0, 0.05) var throw_visual_speed_scale: float = 1.35
 @export_range(4, 64, 1) var throw_preview_points: int = 28
 @export_flags_2d_physics var terrain_collision_mask: int = 1
+## Collision layers searched by an S throw. Targets must also be movable rope attachables.
+@export_flags_2d_physics var attachable_collision_mask: int = 324
 @export_range(4.0, 100.0, 1.0, "suffix:px") var spin_minimum_radius: float = 20.0
 @export_range(4.0, 150.0, 1.0, "suffix:px") var spin_maximum_radius: float = 42.0
 @export_range(0.0, 40.0, 0.5, "suffix:rad/s") var spin_angular_speed: float = 14.0
 
-@export_category("Terrain Rope Length")
+@export_category("Rope Length")
 @export_range(1.0, 1000.0, 1.0, "suffix:px") var minimum_rope_length: float = 56.0
 @export_range(0.0, 1000.0, 1.0, "suffix:px/s") var reel_in_speed: float = 75.0
 @export_range(0.0, 1000.0, 1.0, "suffix:px/s") var pay_out_speed: float = 220.0
@@ -74,18 +74,16 @@ var _nearby_attachables: Array[Node2D] = []
 var _constraint_length: float = 1.0
 var _requested_velocities: Dictionary = {}
 var _requested_velocity_frames: Dictionary = {}
-var _throw_state: ThrowState = ThrowState.READY
-var _throw_facing: float = 1.0
-var _throw_charge_elapsed: float = 0.0
-var _throw_charge_started_msec: int = 0
-var _throw_spin_angle: float = 0.0
-var _throw_flight_points: PackedVector2Array = PackedVector2Array()
-var _throw_flight_elapsed: float = 0.0
-var _throw_flight_duration: float = 0.0
-var _throw_hit_body: Node2D
-var _throw_hit_position: Vector2 = Vector2.ZERO
+var _endpoint_controlled: bool = false
+var _s_has_attachment: bool = false
+var _s_attached_body: Node2D
+var _s_attached_visual_point: Node2D
+var _x_has_attachment: bool = false
+var _x_attached_body: Node2D
+var _x_attached_visual_point: Node2D
 var _terrain_anchor_point: Marker2D
 var _terrain_anchor_body: Node2D
+var _throw_controller = RopeThrowControllerScript.new()
 
 @onready var line: Line2D = get_node_or_null("Line2D") as Line2D
 @onready var throw_preview: Line2D = get_node_or_null("ThrowPreview") as Line2D
@@ -93,6 +91,7 @@ var _terrain_anchor_body: Node2D
 
 
 func _ready() -> void:
+	_throw_controller.setup(self)
 	if line != null:
 		line.width = rope_width
 		line.visible = active
@@ -109,15 +108,17 @@ func _exit_tree() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if is_throw_charging():
-		_advance_throw_charge(delta)
-		return
-	if is_throw_in_flight():
-		_advance_throw_flight(delta)
-		return
+	if has_pending_throw():
+		_throw_controller.advance(delta)
+		if not active:
+			return
 	if not active:
 		return
 
+	if _endpoint_controlled:
+		_repair_invalid_controlled_endpoints()
+		if not active:
+			return
 	if not _endpoints_are_valid():
 		detach()
 		return
@@ -155,165 +156,266 @@ func configure(
 			track_attachable(body as Node2D)
 
 
-func toggle_closest() -> bool:
-	if active:
-		detach()
-		return true
-
-	if not _node_is_valid(_configured_start_body):
-		return false
-
-	var target := find_closest_attachable()
-	if target == null:
-		return false
-
-	return attach(
-		_configured_start_body,
-		target,
-		_configured_start_visual_point,
-		_resolve_attach_point(target)
-	)
-
-
-func begin_throw_charge(facing_direction: float) -> bool:
-	if (
-		active
-		or has_pending_throw()
-		or not _node_is_valid(_configured_start_body)
-	):
-		return false
-
-	_throw_state = ThrowState.TAP_PENDING
-	_throw_facing = -1.0 if facing_direction < 0.0 else 1.0
-	_throw_charge_elapsed = 0.0
-	_throw_charge_started_msec = Time.get_ticks_msec()
-	_throw_spin_angle = 0.0
-	_clear_throw_flight()
-	_hide_throw_visuals()
-	set_physics_process(true)
-	return true
-
-
 func set_throw_facing(facing_direction: float) -> void:
-	if not is_throw_charging() or is_zero_approx(facing_direction):
-		return
-	_throw_facing = -1.0 if facing_direction < 0.0 else 1.0
-
-
-func release_throw_charge() -> bool:
-	if not is_throw_charging() or is_quick_throw_release():
-		return false
-
-	_throw_charge_elapsed = get_throw_hold_seconds()
-	var path_result := _build_throw_path(get_throw_charge_ratio(), true)
-	var points: PackedVector2Array = path_result.get(
-		"points",
-		PackedVector2Array()
-	)
-	if points.size() < 2:
-		cancel_pending_throw()
-		return false
-
-	_throw_state = ThrowState.FLYING
-	_throw_flight_points = points
-	_throw_flight_elapsed = 0.0
-	_throw_flight_duration = maxf(
-		float(path_result.get("duration", throw_flight_seconds))
-		/ maxf(throw_visual_speed_scale, 0.01),
-		0.05
-	)
-	_throw_hit_body = path_result.get("hit_body") as Node2D
-	_throw_hit_position = path_result.get(
-		"hit_position",
-		points[points.size() - 1]
-	)
-	if throw_preview != null:
-		throw_preview.visible = false
-		throw_preview.clear_points()
-	if line != null:
-		line.visible = true
-	if throw_end != null:
-		throw_end.visible = true
-	_set_throw_end_world_position(points[0])
-	_set_line_world_points(PackedVector2Array([
-		_get_configured_start_position(),
-		points[0],
-	]))
-	set_physics_process(true)
-	return true
+	_throw_controller.set_facing(facing_direction)
 
 
 func cancel_pending_throw() -> void:
-	if not has_pending_throw():
-		return
-	_throw_state = ThrowState.READY
-	_throw_charge_elapsed = 0.0
-	_throw_charge_started_msec = 0
-	_clear_throw_flight()
-	_hide_throw_visuals()
-	set_physics_process(active)
+	_throw_controller.cancel()
+	refresh_processing()
 
 
 func has_pending_throw() -> bool:
-	return _throw_state != ThrowState.READY
+	return _throw_controller.has_pending_throw()
+
+
+func get_pending_endpoint() -> StringName:
+	return _throw_controller.get_pending_end()
 
 
 func is_throw_charging() -> bool:
-	return (
-		_throw_state == ThrowState.TAP_PENDING
-		or _throw_state == ThrowState.SPINNING
-	)
+	return _throw_controller.is_charging()
 
 
 func is_throw_spinning() -> bool:
-	return _throw_state == ThrowState.SPINNING
-
-
-func is_throw_in_flight() -> bool:
-	return _throw_state == ThrowState.FLYING
-
-
-func get_throw_hold_seconds() -> float:
-	if not is_throw_charging():
-		return _throw_charge_elapsed
-	var wall_clock_seconds := (
-		float(Time.get_ticks_msec() - _throw_charge_started_msec) / 1000.0
-	)
-	return maxf(_throw_charge_elapsed, wall_clock_seconds)
-
-
-func is_quick_throw_release() -> bool:
-	return get_throw_hold_seconds() < maxf(quick_attach_seconds, 0.0)
-
-
-func get_throw_charge_ratio() -> float:
-	var charge_start := maxf(quick_attach_seconds, 0.0)
-	var charge_end := maxf(full_charge_seconds, charge_start + 0.001)
-	return clampf(
-		(get_throw_hold_seconds() - charge_start) / (charge_end - charge_start),
-		0.0,
-		1.0
-	)
+	return _throw_controller.is_spinning()
 
 
 func has_terrain_anchor() -> bool:
 	return (
 		active
+		and _endpoint_controlled
 		and _node_is_valid(_terrain_anchor_point)
 		and _node_is_valid(_terrain_anchor_body)
+		and _x_attached_body == _terrain_anchor_body
 		and end_visual_point == _terrain_anchor_point
 	)
 
 
-func adjust_terrain_length(
+func begin_endpoint_gesture(
+	end_id: StringName,
+	facing_direction: float
+) -> bool:
+	if (
+		not _is_valid_endpoint_id(end_id)
+		or endpoint_is_attached(end_id)
+		or has_pending_throw()
+		or not _node_is_valid(_configured_start_body)
+	):
+		return false
+
+	var charged_throw_allowed := get_attached_endpoint_count() == 0
+	var began := _throw_controller.begin(
+		end_id,
+		facing_direction,
+		charged_throw_allowed
+	)
+	if began:
+		set_physics_process(true)
+	return began
+
+
+func release_endpoint_gesture(end_id: StringName) -> bool:
+	if (
+		not is_throw_charging()
+		or _throw_controller.get_pending_end() != end_id
+	):
+		return false
+	if _throw_controller.should_quick_attach():
+		cancel_pending_throw()
+		toggle_closest_endpoint(end_id)
+		return true
+	var launched := _throw_controller.release()
+	refresh_processing()
+	return launched
+
+
+func toggle_closest_endpoint(end_id: StringName) -> bool:
+	if not _is_valid_endpoint_id(end_id):
+		return false
+	if endpoint_is_attached(end_id):
+		return detach_endpoint(end_id)
+	if not _node_is_valid(_configured_start_body):
+		return false
+
+	var target := find_closest_attachable(_get_other_endpoint_body(end_id))
+	if target == null:
+		return false
+	return _attach_controlled_endpoint(
+		end_id,
+		target,
+		_resolve_attach_point(target)
+	)
+
+
+func endpoint_is_attached(end_id: StringName) -> bool:
+	if end_id == END_X:
+		return _x_has_attachment and _node_is_valid(_x_attached_body)
+	if end_id == END_S:
+		return _s_has_attachment and _node_is_valid(_s_attached_body)
+	return false
+
+
+func get_attached_endpoint_count() -> int:
+	return int(_s_has_attachment) + int(_x_has_attachment)
+
+
+func is_player_endpoint() -> bool:
+	if (
+		not active
+		or not _endpoint_controlled
+		or not _node_is_valid(_configured_start_body)
+	):
+		return false
+	return start_body == _configured_start_body or end_body == _configured_start_body
+
+
+func can_pay_out() -> bool:
+	return active and is_player_endpoint()
+
+
+func undo_from_endpoint_input(end_id: StringName) -> bool:
+	if not endpoint_is_attached(end_id):
+		return false
+	if get_attached_endpoint_count() >= 2:
+		detach()
+		return true
+	return detach_endpoint(end_id)
+
+
+func detach_endpoint(end_id: StringName) -> bool:
+	if not _endpoint_has_attachment(end_id):
+		return false
+
+	cancel_pending_throw()
+	var anchor_to_free: Marker2D
+	if end_id == END_X:
+		if _x_attached_visual_point == _terrain_anchor_point:
+			anchor_to_free = _terrain_anchor_point
+			_terrain_anchor_point = null
+			_terrain_anchor_body = null
+		_x_has_attachment = false
+		_x_attached_body = null
+		_x_attached_visual_point = null
+	else:
+		_s_has_attachment = false
+		_s_attached_body = null
+		_s_attached_visual_point = null
+
+	if get_attached_endpoint_count() == 0:
+		_deactivate_constraint()
+	else:
+		_sync_controlled_constraint(true)
+
+	if _node_is_valid(anchor_to_free):
+		anchor_to_free.queue_free()
+	refresh_processing()
+	return true
+
+
+func complete_thrown_end(
+	end_id: StringName,
+	hit_body: Node2D,
+	hit_position: Vector2
+) -> bool:
+	if not is_valid_throw_target(end_id, hit_body):
+		refresh_processing()
+		return false
+
+	var attached := false
+	if end_id == END_X:
+		var anchor_point := Marker2D.new()
+		anchor_point.name = "TerrainRopeAnchor"
+		anchor_point.top_level = true
+		add_child(anchor_point)
+		anchor_point.global_position = hit_position
+		_terrain_anchor_point = anchor_point
+		_terrain_anchor_body = hit_body
+		var terrain_rest_length := clampf(
+			maxf(
+				get_throw_origin().distance_to(hit_position),
+				minf(minimum_rope_length, max_length)
+			),
+			1.0,
+			maxf(max_length, 1.0)
+		)
+		attached = _attach_controlled_endpoint(
+			END_X,
+			hit_body,
+			anchor_point,
+			terrain_rest_length
+		)
+		if not attached:
+			_terrain_anchor_point = null
+			_terrain_anchor_body = null
+			anchor_point.queue_free()
+	else:
+		attached = _attach_controlled_endpoint(
+			END_S,
+			hit_body,
+			_resolve_attach_point(hit_body)
+		)
+
+	refresh_processing()
+	return attached
+
+
+func is_valid_throw_target(end_id: StringName, candidate: Node2D) -> bool:
+	if (
+		not _node_is_valid(candidate)
+		or candidate == _configured_start_body
+		or candidate == _get_other_endpoint_body(end_id)
+	):
+		return false
+	if end_id == END_X:
+		return _is_rope_immovable(candidate)
+	if end_id == END_S:
+		return (
+			candidate.is_in_group(&"rope_attachable")
+			and not _is_rope_immovable(candidate)
+		)
+	return false
+
+
+func get_throw_origin() -> Vector2:
+	return _get_visual_position(
+		_configured_start_visual_point,
+		_configured_start_body
+	)
+
+
+func get_throw_excluded_rids() -> Array[RID]:
+	var excluded_rids: Array[RID] = []
+	if _configured_start_body is CollisionObject2D:
+		excluded_rids.append(
+			(_configured_start_body as CollisionObject2D).get_rid()
+		)
+	var other_body: Variant = _get_other_endpoint_body(
+		_throw_controller.get_pending_end()
+	)
+	if other_body is CollisionObject2D:
+		excluded_rids.append((other_body as CollisionObject2D).get_rid())
+	return excluded_rids
+
+
+func get_attachment_world_position(body: Node2D) -> Vector2:
+	return _get_visual_position(_resolve_attach_point(body), body)
+
+
+func refresh_processing() -> void:
+	set_physics_process(active or has_pending_throw())
+
+
+func adjust_length(
 	pull_in: bool,
 	pay_out: bool,
 	delta: float
 ) -> void:
+	var effective_pay_out := pay_out and can_pay_out()
 	if (
-		not has_terrain_anchor()
+		not active
 		or delta <= 0.0
-		or pull_in == pay_out
+		or pull_in == effective_pay_out
 	):
 		return
 
@@ -322,7 +424,7 @@ func adjust_terrain_length(
 			minf(minimum_rope_length, max_length),
 			_constraint_length - maxf(reel_in_speed, 0.0) * delta
 		)
-	else:
+	elif effective_pay_out:
 		_constraint_length = minf(
 			maxf(max_length, 1.0),
 			_constraint_length + maxf(pay_out_speed, 0.0) * delta
@@ -343,67 +445,44 @@ func attach(
 	):
 		return false
 
-	cancel_pending_throw()
-	if active:
-		detach()
-
-	start_body = new_start_body
-	end_body = new_end_body
-	start_visual_point = (
-		new_start_visual_point if _node_is_valid(new_start_visual_point) else new_start_body
-	)
-	end_visual_point = (
-		new_end_visual_point if _node_is_valid(new_end_visual_point) else new_end_body
-	)
-
-	var initial_distance := _get_start_position().distance_to(_get_end_position())
-	var requested_rest_length := (
+	detach()
+	_endpoint_controlled = false
+	return _bind_constraint(
+		new_start_body,
+		new_end_body,
+		new_start_visual_point,
+		new_end_visual_point,
+		false,
 		rest_length_override
-		if rest_length_override > 0.0
-		else initial_distance + maxf(extra_length, 0.0)
 	)
-	_constraint_length = clampf(
-		requested_rest_length,
-		1.0,
-		maxf(max_length, 1.0)
-	)
-
-	active = true
-	_requested_velocities.clear()
-	_requested_velocity_frames.clear()
-	_record_requested_velocity(start_body, _read_body_velocity(start_body))
-	_record_requested_velocity(end_body, _read_body_velocity(end_body))
-	_register_on_body(start_body)
-	_register_on_body(end_body)
-
-	if line != null:
-		line.visible = true
-	set_physics_process(true)
-	return true
 
 
 func detach() -> void:
 	cancel_pending_throw()
-	_unregister_from_body(start_body)
-	_unregister_from_body(end_body)
 	var anchor_to_free := _terrain_anchor_point
 	_terrain_anchor_point = null
 	_terrain_anchor_body = null
-	active = false
-	set_physics_process(false)
-	if line != null:
-		line.visible = false
-		line.clear_points()
-
-	start_body = null
-	end_body = null
-	start_visual_point = null
-	end_visual_point = null
-	_constraint_length = 1.0
-	_requested_velocities.clear()
-	_requested_velocity_frames.clear()
+	_s_has_attachment = false
+	_s_attached_body = null
+	_s_attached_visual_point = null
+	_x_has_attachment = false
+	_x_attached_body = null
+	_x_attached_visual_point = null
+	_endpoint_controlled = false
+	_deactivate_constraint()
 	if _node_is_valid(anchor_to_free):
 		anchor_to_free.queue_free()
+
+
+static func detach_all_from_body(body: Node2D) -> void:
+	for rope in _get_attached_ropes(body):
+		if rope._endpoint_controlled:
+			if rope._s_attached_body == body:
+				rope.detach_endpoint(END_S)
+			if rope._x_attached_body == body:
+				rope.detach_endpoint(END_X)
+		else:
+			rope.detach()
 
 
 func track_attachable(attachable: Node2D) -> void:
@@ -421,7 +500,7 @@ func untrack_attachable(attachable: Node2D) -> void:
 	_nearby_attachables.erase(attachable)
 
 
-func find_closest_attachable() -> Node2D:
+func find_closest_attachable(excluded_body = null) -> Node2D:
 	if not _node_is_valid(_configured_start_body):
 		return null
 
@@ -437,6 +516,7 @@ func find_closest_attachable() -> Node2D:
 		if (
 			not _node_is_valid(candidate)
 			or candidate == _configured_start_body
+			or candidate == excluded_body
 			or not candidate.is_in_group(&"rope_attachable")
 		):
 			continue
@@ -463,208 +543,236 @@ func find_closest_attachable() -> Node2D:
 	return closest
 
 
-func _advance_throw_charge(delta: float) -> void:
-	_throw_charge_elapsed = minf(
-		_throw_charge_elapsed + maxf(delta, 0.0),
-		maxf(full_charge_seconds, quick_attach_seconds)
-	)
-	set_throw_facing(_throw_facing)
-	if get_throw_hold_seconds() < maxf(quick_attach_seconds, 0.0):
-		return
-
-	_throw_state = ThrowState.SPINNING
-	_throw_spin_angle = fposmod(
-		_throw_spin_angle + maxf(spin_angular_speed, 0.0) * delta,
-		TAU
-	)
-	var charge_ratio := get_throw_charge_ratio()
-	var path_result := _build_throw_path(charge_ratio, true)
-	var preview_points: PackedVector2Array = path_result.get(
-		"points",
-		PackedVector2Array()
-	)
-	_set_preview_world_points(preview_points)
-
-	var origin := _get_configured_start_position()
-	var spin_radius := lerpf(
-		maxf(spin_minimum_radius, 0.0),
-		maxf(spin_maximum_radius, spin_minimum_radius),
-		smoothstep(0.0, 1.0, charge_ratio)
-	)
-	var spin_offset := Vector2(
-		cos(_throw_spin_angle) * _throw_facing,
-		sin(_throw_spin_angle)
-	) * spin_radius
-	var spinning_end_position := origin + spin_offset
-	_set_throw_end_world_position(spinning_end_position)
-	_set_line_world_points(PackedVector2Array([
-		origin,
-		spinning_end_position,
-	]))
-	if line != null:
-		line.visible = true
-	if throw_end != null:
-		throw_end.visible = true
-
-
-func _advance_throw_flight(delta: float) -> void:
-	if _throw_flight_points.size() < 2:
-		cancel_pending_throw()
-		return
-
-	_throw_flight_elapsed += maxf(delta, 0.0)
-	var progress := clampf(
-		_throw_flight_elapsed / maxf(_throw_flight_duration, 0.001),
-		0.0,
-		1.0
-	)
-	var scaled_index := progress * float(_throw_flight_points.size() - 1)
-	var point_index := mini(
-		int(floor(scaled_index)),
-		_throw_flight_points.size() - 2
-	)
-	var segment_progress := scaled_index - float(point_index)
-	var end_position := _throw_flight_points[point_index].lerp(
-		_throw_flight_points[point_index + 1],
-		segment_progress
-	)
-	_set_throw_end_world_position(end_position)
-	_set_line_world_points(PackedVector2Array([
-		_get_configured_start_position(),
-		end_position,
-	]))
-
-	if progress >= 1.0:
-		_complete_throw_flight()
-
-
-func _complete_throw_flight() -> void:
-	var hit_body := _throw_hit_body
-	var hit_position := _throw_hit_position
-	_throw_state = ThrowState.READY
-	_throw_charge_elapsed = 0.0
-	_throw_charge_started_msec = 0
-	_clear_throw_flight()
-	_hide_throw_visuals()
-
+func _attach_controlled_endpoint(
+	end_id: StringName,
+	target: Node2D,
+	target_visual_point: Node2D,
+	rest_length_override: float = -1.0
+) -> bool:
 	if (
-		not _node_is_valid(hit_body)
-		or not _node_is_valid(_configured_start_body)
+		not _is_valid_endpoint_id(end_id)
+		or _endpoint_has_attachment(end_id)
+		or not _node_is_valid(target)
+		or target == _configured_start_body
+		or target == _get_other_endpoint_body(end_id)
 	):
-		set_physics_process(false)
-		return
+		return false
 
-	var anchor_point := Marker2D.new()
-	anchor_point.name = "TerrainRopeAnchor"
-	anchor_point.top_level = true
-	add_child(anchor_point)
-	anchor_point.global_position = hit_position
-	_terrain_anchor_point = anchor_point
-	_terrain_anchor_body = hit_body
-
-	var start_position := _get_configured_start_position()
-	var terrain_rest_length := clampf(
-		maxf(
-			start_position.distance_to(hit_position),
-			minf(minimum_rope_length, max_length)
-		),
-		1.0,
-		maxf(max_length, 1.0)
-	)
-	var attached := attach(
-		_configured_start_body,
-		hit_body,
-		_configured_start_visual_point,
-		anchor_point,
-		terrain_rest_length
-	)
-	if attached:
-		return
-
-	_terrain_anchor_point = null
-	_terrain_anchor_body = null
-	anchor_point.queue_free()
-	set_physics_process(false)
-
-
-func _build_throw_path(
-	charge_ratio: float,
-	check_terrain: bool
-) -> Dictionary:
-	var origin := _get_configured_start_position()
-	var eased_charge := smoothstep(0.0, 1.0, clampf(charge_ratio, 0.0, 1.0))
-	var speed := lerpf(
-		maxf(minimum_throw_speed, 0.0),
-		maxf(maximum_throw_speed, minimum_throw_speed),
-		eased_charge
-	)
-	var points := sample_ballistic_throw_arc(
-		origin,
-		_throw_facing,
-		speed,
-		throw_angle_degrees,
-		throw_gravity,
-		throw_flight_seconds,
-		max_length,
-		throw_preview_points
-	)
-	var result := {
-		"points": points,
-		"duration": maxf(throw_flight_seconds, 0.05),
-		"hit_body": null,
-		"hit_position": points[points.size() - 1] if not points.is_empty() else origin,
-	}
-	if not check_terrain or points.size() < 2 or not is_inside_tree():
-		return result
-
-	var space_state := get_world_2d().direct_space_state
-	if space_state == null:
-		return result
-
-	var excluded_rids: Array[RID] = []
-	if _configured_start_body is CollisionObject2D:
-		excluded_rids.append(
-			(_configured_start_body as CollisionObject2D).get_rid()
+	var previous_count := get_attached_endpoint_count()
+	if end_id == END_X:
+		_x_has_attachment = true
+		_x_attached_body = target
+		_x_attached_visual_point = (
+			target_visual_point
+			if _node_is_valid(target_visual_point)
+			else target
+		)
+	else:
+		_s_has_attachment = true
+		_s_attached_body = target
+		_s_attached_visual_point = (
+			target_visual_point
+			if _node_is_valid(target_visual_point)
+			else target
 		)
 
-	for index in range(1, points.size()):
-		while true:
-			var query := PhysicsRayQueryParameters2D.create(
-				points[index - 1],
-				points[index],
-				terrain_collision_mask,
-				excluded_rids
-			)
-			query.collide_with_areas = false
-			query.collide_with_bodies = true
-			var hit := space_state.intersect_ray(query)
-			if hit.is_empty():
-				break
+	_endpoint_controlled = true
+	if _sync_controlled_constraint(
+		previous_count > 0,
+		rest_length_override
+	):
+		return true
 
-			var hit_body := hit.get("collider") as Node2D
-			if not _node_is_valid(hit_body):
-				break
-			if not _is_rope_immovable(hit_body):
-				if hit_body is CollisionObject2D:
-					excluded_rids.append(
-						(hit_body as CollisionObject2D).get_rid()
-					)
-					continue
-				break
+	if end_id == END_X:
+		_x_has_attachment = false
+		_x_attached_body = null
+		_x_attached_visual_point = null
+	else:
+		_s_has_attachment = false
+		_s_attached_body = null
+		_s_attached_visual_point = null
+	if previous_count == 0:
+		_endpoint_controlled = false
+	return false
 
-			var hit_position: Vector2 = hit.get("position", points[index])
-			points.resize(index)
-			points.append(hit_position)
-			result["points"] = points
-			result["duration"] = (
-				maxf(throw_flight_seconds, 0.05)
-				* float(index) / float(maxi(throw_preview_points - 1, 1))
-			)
-			result["hit_body"] = hit_body
-			result["hit_position"] = hit_position
-			return result
 
-	return result
+func _sync_controlled_constraint(
+	preserve_length: bool,
+	rest_length_override: float = -1.0
+) -> bool:
+	if (
+		not _endpoint_controlled
+		or not _node_is_valid(_configured_start_body)
+	):
+		return false
+	if get_attached_endpoint_count() == 0:
+		_deactivate_constraint()
+		return true
+
+	# Physical ordering stays S -> X so existing X behavior remains the end body.
+	var resolved_start_body := (
+		_s_attached_body
+		if endpoint_is_attached(END_S)
+		else _configured_start_body
+	)
+	var resolved_start_visual := (
+		_s_attached_visual_point
+		if endpoint_is_attached(END_S)
+		else _configured_start_visual_point
+	)
+	var resolved_end_body := (
+		_x_attached_body
+		if endpoint_is_attached(END_X)
+		else _configured_start_body
+	)
+	var resolved_end_visual := (
+		_x_attached_visual_point
+		if endpoint_is_attached(END_X)
+		else _configured_start_visual_point
+	)
+	return _bind_constraint(
+		resolved_start_body,
+		resolved_end_body,
+		resolved_start_visual,
+		resolved_end_visual,
+		preserve_length,
+		rest_length_override
+	)
+
+
+func _bind_constraint(
+	new_start_body: Node2D,
+	new_end_body: Node2D,
+	new_start_visual_point: Node2D,
+	new_end_visual_point: Node2D,
+	preserve_length: bool,
+	rest_length_override: float = -1.0
+) -> bool:
+	if (
+		not _node_is_valid(new_start_body)
+		or not _node_is_valid(new_end_body)
+		or new_start_body == new_end_body
+	):
+		return false
+
+	var previous_length := _constraint_length
+	_unregister_from_body(start_body)
+	_unregister_from_body(end_body)
+
+	start_body = new_start_body
+	end_body = new_end_body
+	start_visual_point = (
+		new_start_visual_point
+		if _node_is_valid(new_start_visual_point)
+		else new_start_body
+	)
+	end_visual_point = (
+		new_end_visual_point
+		if _node_is_valid(new_end_visual_point)
+		else new_end_body
+	)
+
+	if preserve_length and previous_length > 0.0:
+		_constraint_length = clampf(
+			previous_length,
+			1.0,
+			maxf(max_length, 1.0)
+		)
+	else:
+		var initial_distance := _get_start_position().distance_to(
+			_get_end_position()
+		)
+		var requested_rest_length := (
+			rest_length_override
+			if rest_length_override > 0.0
+			else initial_distance + maxf(extra_length, 0.0)
+		)
+		_constraint_length = clampf(
+			requested_rest_length,
+			1.0,
+			maxf(max_length, 1.0)
+		)
+
+	active = true
+	_requested_velocities.clear()
+	_requested_velocity_frames.clear()
+	_record_requested_velocity(start_body, _read_body_velocity(start_body))
+	_record_requested_velocity(end_body, _read_body_velocity(end_body))
+	_register_on_body(start_body)
+	_register_on_body(end_body)
+	if line != null:
+		line.visible = true
+	refresh_processing()
+	return true
+
+
+func _deactivate_constraint() -> void:
+	_unregister_from_body(start_body)
+	_unregister_from_body(end_body)
+	active = false
+	start_body = null
+	end_body = null
+	start_visual_point = null
+	end_visual_point = null
+	_constraint_length = 1.0
+	_requested_velocities.clear()
+	_requested_velocity_frames.clear()
+	if line != null:
+		line.visible = false
+		line.clear_points()
+	refresh_processing()
+
+
+func _repair_invalid_controlled_endpoints() -> void:
+	if not _node_is_valid(_configured_start_body):
+		detach()
+		return
+
+	var needs_rebind := false
+	var anchor_to_free: Marker2D
+	if _s_has_attachment and not _node_is_valid(_s_attached_body):
+		_s_has_attachment = false
+		_s_attached_body = null
+		_s_attached_visual_point = null
+		needs_rebind = true
+	if _x_has_attachment and not _node_is_valid(_x_attached_body):
+		if _x_attached_visual_point == _terrain_anchor_point:
+			anchor_to_free = _terrain_anchor_point
+			_terrain_anchor_point = null
+			_terrain_anchor_body = null
+		_x_has_attachment = false
+		_x_attached_body = null
+		_x_attached_visual_point = null
+		needs_rebind = true
+
+	if not needs_rebind:
+		return
+	if get_attached_endpoint_count() == 0:
+		_deactivate_constraint()
+	else:
+		_sync_controlled_constraint(true)
+	if _node_is_valid(anchor_to_free):
+		anchor_to_free.queue_free()
+
+
+func _get_other_endpoint_body(end_id: StringName):
+	if end_id == END_X:
+		return _s_attached_body
+	if end_id == END_S:
+		return _x_attached_body
+	return null
+
+
+func _endpoint_has_attachment(end_id: StringName) -> bool:
+	if end_id == END_X:
+		return _x_has_attachment
+	if end_id == END_S:
+		return _s_has_attachment
+	return false
+
+
+func _is_valid_endpoint_id(end_id: StringName) -> bool:
+	return end_id == END_X or end_id == END_S
 
 
 static func sample_ballistic_throw_arc(
@@ -677,80 +785,16 @@ static func sample_ballistic_throw_arc(
 	maximum_reach: float,
 	point_count: int
 ) -> PackedVector2Array:
-	var points := PackedVector2Array()
-	var samples := maxi(point_count, 2)
-	var facing := -1.0 if facing_direction < 0.0 else 1.0
-	var angle := deg_to_rad(clampf(angle_degrees, 0.0, 89.0))
-	var launch_velocity := Vector2(
-		cos(angle) * facing,
-		-sin(angle)
-	) * maxf(speed, 0.0)
-	var duration := maxf(flight_seconds, 0.001)
-	var reach := maxf(maximum_reach, 1.0)
-	points.append(origin)
-
-	for index in range(1, samples):
-		var time := duration * float(index) / float(samples - 1)
-		var point := (
-			origin
-			+ launch_velocity * time
-			+ Vector2.DOWN * 0.5 * maxf(gravity, 0.0) * time * time
-		)
-		var offset := point - origin
-		if offset.length() >= reach:
-			points.append(origin + offset.normalized() * reach)
-			break
-		points.append(point)
-
-	return points
-
-
-func _get_configured_start_position() -> Vector2:
-	return _get_visual_position(
-		_configured_start_visual_point,
-		_configured_start_body
+	return RopeThrowControllerScript.sample_ballistic_throw_arc(
+		origin,
+		facing_direction,
+		speed,
+		angle_degrees,
+		gravity,
+		flight_seconds,
+		maximum_reach,
+		point_count
 	)
-
-
-func _set_preview_world_points(points: PackedVector2Array) -> void:
-	if throw_preview == null:
-		return
-	throw_preview.clear_points()
-	for point in points:
-		throw_preview.add_point(throw_preview.to_local(point))
-	throw_preview.visible = points.size() >= 2
-
-
-func _set_line_world_points(points: PackedVector2Array) -> void:
-	if line == null:
-		return
-	line.clear_points()
-	for point in points:
-		line.add_point(line.to_local(point))
-
-
-func _set_throw_end_world_position(world_position: Vector2) -> void:
-	if throw_end != null:
-		throw_end.global_position = world_position
-
-
-func _hide_throw_visuals() -> void:
-	if throw_preview != null:
-		throw_preview.visible = false
-		throw_preview.clear_points()
-	if throw_end != null:
-		throw_end.visible = false
-	if line != null and not active:
-		line.visible = false
-		line.clear_points()
-
-
-func _clear_throw_flight() -> void:
-	_throw_flight_points = PackedVector2Array()
-	_throw_flight_elapsed = 0.0
-	_throw_flight_duration = 0.0
-	_throw_hit_body = null
-	_throw_hit_position = Vector2.ZERO
 
 
 func get_rest_length() -> float:
@@ -846,6 +890,37 @@ func preserve_passive_swing_velocity(
 	)
 
 
+static func finalize_attached_body_velocity(
+	body: Node2D,
+	proposed_velocity: Vector2,
+	velocity_after_gravity: Vector2,
+	delta: float
+) -> Vector2:
+	var swing_velocity := proposed_velocity
+	if is_equal_approx(
+		proposed_velocity.y,
+		velocity_after_gravity.y
+	):
+		var horizontal_intent := 0.0
+		if (
+			not is_equal_approx(
+				proposed_velocity.x,
+				velocity_after_gravity.x
+			)
+			and not is_zero_approx(proposed_velocity.x)
+		):
+			horizontal_intent = signf(proposed_velocity.x)
+		for rope in _get_attached_ropes(body):
+			swing_velocity = rope.apply_anchored_swing_control(
+				body,
+				swing_velocity,
+				velocity_after_gravity,
+				horizontal_intent,
+				delta
+			)
+	return constrain_attached_velocity(body, swing_velocity, delta)
+
+
 static func _add_bounded_swing_input(
 	tangent_speed: float,
 	tangential_acceleration: float,
@@ -907,15 +982,33 @@ static func constrain_attached_velocity(
 
 	var solved := _solve_network(intended_velocities, ropes, delta)
 	var solved_velocity: Vector2 = solved.get(body, proposed_velocity)
-	var body_is_grounded := (
+	var body_is_grounded_and_protected := (
 		body is CharacterBody2D
 		and (body as CharacterBody2D).is_on_floor()
+		and _body_has_grounded_lift_protection(body, direct_ropes)
 	)
 	return _limit_grounded_rope_lift(
 		proposed_velocity,
 		solved_velocity,
-		body_is_grounded
+		body_is_grounded_and_protected
 	)
+
+
+static func _body_has_grounded_lift_protection(
+	body: Node2D,
+	direct_ropes: Array[Rope]
+) -> bool:
+	for rope in direct_ropes:
+		if (
+			rope._configured_start_body == body
+			and rope.is_attached_to(body)
+			and (
+				not rope._endpoint_controlled
+				or rope.is_player_endpoint()
+			)
+		):
+			return true
+	return false
 
 
 static func _limit_grounded_rope_lift(
@@ -1207,7 +1300,7 @@ func _register_on_body(body: Node2D) -> void:
 	body.set_meta(ATTACHED_ROPES_META, references)
 
 
-func _unregister_from_body(body: Node2D) -> void:
+func _unregister_from_body(body) -> void:
 	if not _node_is_valid(body) or not body.has_meta(ATTACHED_ROPES_META):
 		return
 	var kept_references: Array = []
@@ -1296,7 +1389,7 @@ static func _has_property(object: Object, property_name: StringName) -> bool:
 	return false
 
 
-static func _node_is_valid(node: Node) -> bool:
+static func _node_is_valid(node) -> bool:
 	return (
 		node != null
 		and is_instance_valid(node)

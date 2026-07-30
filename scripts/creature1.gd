@@ -42,26 +42,35 @@ func _physics_process(delta: float) -> void:
 	if is_on_wall():
 		update_direction(-dir)
 	velocity += get_gravity() * delta
+	var velocity_after_gravity := velocity
 	process_knockout(delta)
 	process_passive_healing(delta)
 
 	if is_downed:
 		velocity.x = 0.0
-		_move_and_slide_with_rope(delta)
+		_move_and_slide_with_rope(delta, velocity_after_gravity)
 		return
 
 	if knockback_timer > 0.0:
 		knockback_timer -= delta
-		_move_and_slide_with_rope(delta)
+		_move_and_slide_with_rope(delta, velocity_after_gravity)
 		return
 
 	velocity.x = dir * move_speed
 
-	_move_and_slide_with_rope(delta)
+	_move_and_slide_with_rope(delta, velocity_after_gravity)
 
 
-func _move_and_slide_with_rope(delta: float) -> void:
-	velocity = Rope.constrain_attached_velocity(self, velocity, delta)
+func _move_and_slide_with_rope(
+	delta: float,
+	velocity_after_gravity: Vector2
+) -> void:
+	velocity = Rope.finalize_attached_body_velocity(
+		self,
+		velocity,
+		velocity_after_gravity,
+		delta
+	)
 	move_and_slide()
 	
 	

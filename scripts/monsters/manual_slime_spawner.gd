@@ -2,8 +2,8 @@ class_name ManualSlimeSpawner
 extends Area2D
 
 @export var slime_scene: PackedScene = preload("res://scenes/monsters/slime.tscn")
-@export var spawn_action: StringName = &"up"
-@export var ready_text: String = "UP: SLIME"
+@export var spawn_action: StringName = &"charm"
+@export var ready_text: String = "C: SLIME"
 @export var spawned_text: String = "SLIME!"
 @export var spawn_offset: Vector2 = Vector2(0.0, 0.0)
 @export_range(0.0, 3.0, 0.05, "suffix:s") var spawn_cooldown_seconds: float = 0.35
@@ -44,6 +44,10 @@ func _process(delta: float) -> void:
 
 func can_interact(actor: Node) -> bool:
 	return actor == active_player and player_inside and cooldown_timer <= 0.0 and slime_scene != null
+
+
+func get_interaction_action(_actor: Node) -> StringName:
+	return spawn_action
 
 
 func interact(actor: Node) -> bool:
