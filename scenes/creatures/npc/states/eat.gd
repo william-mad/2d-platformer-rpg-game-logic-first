@@ -1,5 +1,7 @@
 class_name NpcStateEat extends NpcState
 
+const NpcIdentity = preload("res://scripts/systems/npc_identity.gd")
+
 @export var eat_target_path: NodePath
 @export var eat_duration: float = -1.0
 @export var eat_value_name: StringName = &"hunger"
@@ -368,9 +370,10 @@ func _get_npc_inventory() -> InventoryModel:
 
 
 func _get_npc_id() -> String:
-	if npc != null and npc.has_method("get_npc_location_id"):
-		return String(npc.call("get_npc_location_id"))
-	return "instance:%s" % (npc.get_instance_id() if npc != null else get_instance_id())
+	var actor_id := NpcIdentity.get_actor_id(npc, true)
+	if not actor_id.is_empty():
+		return actor_id
+	return "instance:%s" % get_instance_id()
 
 
 func _apply_eat_progress(delta: float) -> bool:

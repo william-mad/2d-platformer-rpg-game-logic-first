@@ -2,6 +2,12 @@ extends Node
 
 signal activity_started(npc_id: StringName, spot_id: StringName)
 signal activity_finished(npc_id: StringName, spot_id: StringName)
+signal scheduled_activity_committed(npc_id: StringName, activity: Dictionary)
+signal scheduled_activity_entered_overtime(
+	npc_id: StringName,
+	activity: Dictionary,
+	continuation_decision: Dictionary
+)
 
 const SPOT_DATA_DIRECTORY := "res://data/npc_spots"
 const PLAYER_SOCIAL_TARGET_ID := "__player__"
@@ -22,20 +28,42 @@ const MEAL_CYCLE_EPSILON := 0.001
 const INVITE_PLAYER_STATE := &"InvitePlayer"
 const MagicLessonRemoteInvitationScene := preload("res://scripts/instances/magic_lesson_remote_invitation.gd")
 const NpcActivityIdentity = preload("res://scripts/systems/npc_activity_identity.gd")
+const NpcScheduleWindowPolicy = preload(
+	"res://scripts/systems/npc_schedule_window_policy.gd"
+)
 const NpcActionSessionModel = preload("res://scripts/systems/npc_action_session.gd")
 const NpcBehaviorIntentModel = preload(
 	"res://scripts/systems/npc_behavior/npc_behavior_intent.gd"
+)
+const NpcSocialConfigurationValidator = preload(
+	"res://scripts/systems/npc_behavior/npc_social_configuration_validator.gd"
 )
 const NpcRouteBridge = preload("res://scripts/systems/npc_scene_route_bridge.gd")
 const NpcRouteLocationCoordinator = preload(
 	"res://scripts/systems/npc_route_location_coordinator.gd"
 )
+const SCHEDULE_METADATA_KEYS := [
+	"schedule_phase",
+	"schedule_occurrence_key",
+	"schedule_window_index",
+	"schedule_window_start_total_hours",
+	"schedule_grace_end_total_hours",
+	"schedule_window_end_total_hours",
+	"schedule_lateness_game_hours",
+	"schedule_base_priority",
+	"schedule_effective_priority",
+	"schedule_completion_policy",
+	"schedule_maximum_overtime_game_hours",
+	"schedule_overtime_end_total_hours",
+]
 
 @export var simulation_interval_seconds: float = 10.0
 @export var simulated_talk_need_drop: float = 40.0
 @export var simulated_partner_talk_need_drop: float = 25.0
 @export var simulated_talk_boredom_drop: float = 10.0
 @export_range(0.0, 24.0, 0.01, "suffix:h") var recent_refusal_retry_delay_game_hours: float = 0.25
+@export_range(0.0, 24.0, 0.01, "suffix:h") var recent_harm_social_delay_game_hours: float = 0.5
+@export_range(0.0, 24.0, 0.001, "suffix:h") var recent_conversation_repeat_delay_game_hours: float = 0.125
 @export var performance_profiling_enabled: bool = false
 
 const PERFORMANCE_PROFILE_REPORT_WINDOW_CALLS := 30
@@ -52,7 +80,13 @@ var simulation_dirty_while_locked: bool = false
 var social_rng := RandomNumberGenerator.new()
 var _social_planner := NpcSocialPlanner.new()
 var _social_planning_suppressed: bool = false
+var _social_seek_preview_only: bool = false
 var _social_selection_debug_by_npc: Dictionary = {}
+var _social_planning_pass_id: int = 0
+var _schedule_decision_debug_by_npc: Dictionary = {}
+var _schedule_overtime_last_observed_by_session: Dictionary = {}
+var _schedule_overtime_last_observed_live_by_session: Dictionary = {}
+var _schedule_overtime_sessions_emitted: Dictionary = {}
 var _needs_simulator := NpcNeedsSimulator.new()
 var simulation_tick_skip_logged: bool = false
 var _performance_profile_call_count: int = 0
@@ -78,6 +112,8 @@ var _performance_profile_candidate_evaluations_in_pass: int = 0
 var _performance_profile_apply_usec_in_pass: int = 0
 var _performance_profile_records_applied_in_pass: int = 0
 var _logged_reservation_warnings: Dictionary = {}
+var _validated_social_world_profile_signatures: Dictionary = {}
+var _social_world_profile_validation_issues_by_npc: Dictionary = {}
 
 
 func _ready() -> void:
@@ -375,6 +411,7 @@ func simulate_now() -> void:
 	if _defer_simulation_while_world_progression_locked():
 		return
 	if _world_simulation_debug_disabled():
+		_clear_all_social_selection_descriptors()
 		_log_world_simulation_disabled("simulate_now")
 		return
 
@@ -417,7 +454,10 @@ func simulate_now() -> void:
 		profile_synchronize_usec = Time.get_ticks_usec() - profile_stage_start_usec
 		profile_stage_start_usec = Time.get_ticks_usec()
 	var records: Dictionary = locations.call("get_records_snapshot")
+	_prune_social_world_profile_validation(records)
+	_social_planning_pass_id += 1
 	_social_planner.begin_simulation_pass()
+	_prune_social_selection_descriptors(records, locations)
 	if profiling_enabled:
 		profile_snapshot_usec = Time.get_ticks_usec() - profile_stage_start_usec
 		profile_stage_start_usec = Time.get_ticks_usec()
@@ -426,19 +466,29 @@ func simulate_now() -> void:
 	if profiling_enabled:
 		profile_preparation_usec = Time.get_ticks_usec() - profile_stage_start_usec
 
+	var deferred_social_seekers: Array[Dictionary] = []
 	for npc_id_key in records.keys():
 		var npc_id := StringName(String(npc_id_key))
 		var player_runtime := get_node_or_null("/root/PlayerRuntime")
 		if player_runtime != null and player_runtime.has_method("is_active_companion") and bool(player_runtime.call("is_active_companion", String(npc_id))):
+			_clear_social_selection_descriptor(npc_id, locations)
 			continue
 		var record = records[npc_id_key]
 		if not (record is Dictionary):
+			_clear_social_selection_descriptor(npc_id, locations)
 			continue
 		if profiling_enabled:
 			profile_records_simulated += 1
 			if _record_is_disabled(record):
 				profile_disabled_records += 1
 		var record_dictionary: Dictionary = record
+		if profiling_enabled:
+			profile_stage_start_usec = Time.get_ticks_usec()
+		_validate_social_world_profile(npc_id, record_dictionary)
+		if profiling_enabled:
+			profile_preparation_usec += (
+				Time.get_ticks_usec() - profile_stage_start_usec
+			)
 		var activity_label := ""
 		var activity_value = record_dictionary.get("activity", {})
 		if activity_value is Dictionary:
@@ -469,7 +519,12 @@ func simulate_now() -> void:
 				paused_state_name = StringName(String(current_activity.get("state_name", "")))
 			if profiling_enabled:
 				profile_stage_start_usec = Time.get_ticks_usec()
-			_simulate_offscreen_passive_values(record, total_hours, paused_state_name)
+			_simulate_offscreen_passive_values(
+				record,
+				total_hours,
+				paused_state_name,
+				npc_id
+			)
 			if profiling_enabled:
 				profile_needs_usec += Time.get_ticks_usec() - profile_stage_start_usec
 			if locations.has_method("update_simulated_record"):
@@ -477,6 +532,7 @@ func simulate_now() -> void:
 
 		var pending_travel = record.get("pending_travel", {})
 		if pending_travel is Dictionary and not pending_travel.is_empty():
+			_clear_social_selection_descriptor(npc_id, locations)
 			if profiling_enabled:
 				profile_stage_start_usec = Time.get_ticks_usec()
 			_update_pending_travel(npc_id, record, pending_travel, hour, locations)
@@ -486,6 +542,7 @@ func simulate_now() -> void:
 
 		var activity = record.get("activity", {})
 		if activity is Dictionary and not activity.is_empty():
+			_clear_social_selection_descriptor(npc_id, locations)
 			if profiling_enabled:
 				profile_stage_start_usec = Time.get_ticks_usec()
 			_update_activity(npc_id, record, activity, total_hours, hour, locations)
@@ -493,12 +550,56 @@ func simulate_now() -> void:
 				profile_activity_usec += Time.get_ticks_usec() - profile_stage_start_usec
 		else:
 			if _consume_sleep_skip_wake_pause(npc_id, record, locations):
+				_clear_social_selection_descriptor(npc_id, locations)
 				continue
 			if profiling_enabled:
 				profile_stage_start_usec = Time.get_ticks_usec()
-			_try_start_activity(npc_id, record, total_hours, hour, locations, records)
+			var inline_social_usec_before := (
+				_performance_profile_social_usec_in_pass
+			)
+			_route_idle_activity_for_social_arbitration(
+				npc_id,
+				record,
+				total_hours,
+				hour,
+				locations,
+				records,
+				deferred_social_seekers
+			)
 			if profiling_enabled:
-				profile_schedule_usec += Time.get_ticks_usec() - profile_stage_start_usec
+				var inline_elapsed_usec := (
+					Time.get_ticks_usec() - profile_stage_start_usec
+				)
+				var inline_social_usec := maxi(
+					_performance_profile_social_usec_in_pass
+						- inline_social_usec_before,
+					0
+				)
+				profile_schedule_usec += maxi(
+					inline_elapsed_usec - inline_social_usec,
+					0
+				)
+	if profiling_enabled:
+		profile_stage_start_usec = Time.get_ticks_usec()
+	var deferred_social_usec_before := _performance_profile_social_usec_in_pass
+	_process_deferred_social_seekers(
+		deferred_social_seekers,
+		total_hours,
+		hour,
+		locations,
+		records
+	)
+	if profiling_enabled:
+		var deferred_elapsed_usec := Time.get_ticks_usec() - profile_stage_start_usec
+		var deferred_social_usec := maxi(
+			_performance_profile_social_usec_in_pass
+				- deferred_social_usec_before,
+			0
+		)
+		profile_schedule_usec += maxi(
+			deferred_elapsed_usec - deferred_social_usec,
+			0
+		)
 	_breadcrumb("npc_world:simulate_end", "hour=%.3f" % hour)
 	if profiling_enabled:
 		_record_performance_profile(
@@ -703,11 +804,13 @@ func simulate_companion_return_skip(
 	locations.call("synchronize_live_records")
 	var records: Dictionary = locations.call("get_records_snapshot")
 	_social_planning_suppressed = true
+	_social_planning_pass_id += 1
 	_social_planner.begin_simulation_pass()
 	var end_hour := fposmod(end_total_hours, 24.0)
 	for npc_key in records.keys():
 		var npc_id := String(npc_key)
 		var record: Dictionary = records[npc_key]
+		_clear_social_selection_descriptor(StringName(npc_id), locations)
 		if npc_id == companion_npc_id:
 			var multipliers := travel_policy.get_need_multipliers() if travel_policy != null else {}
 			_needs_simulator.advance_needs(record, elapsed_game_hours, &"", multipliers)
@@ -981,7 +1084,8 @@ func _prepare_live_npc_after_sleep_skip(live_npc: Node, machine: Node) -> void:
 func _simulate_offscreen_passive_values(
 	record: Dictionary,
 	total_hours: float,
-	paused_state_name: StringName
+	paused_state_name: StringName,
+	canonical_npc_id: StringName = &""
 ) -> void:
 	var last_total_hours := float(record.get("last_simulated_total_hours", total_hours))
 	var elapsed_game_hours := maxf(total_hours - last_total_hours, 0.0)
@@ -993,7 +1097,12 @@ func _simulate_offscreen_passive_values(
 	var profile = node_state.get("world_simulation_profile", {})
 	if not (profile is Dictionary):
 		profile = {}
-	_decay_offscreen_relationships(record, profile, elapsed_game_hours)
+	_decay_offscreen_relationships(
+		record,
+		profile,
+		elapsed_game_hours,
+		canonical_npc_id
+	)
 
 
 func _apply_full_sleep_health_restore(
@@ -1035,33 +1144,62 @@ func _consume_sleep_skip_wake_pause(
 func _decay_offscreen_relationships(
 	record: Dictionary,
 	profile: Dictionary,
-	game_hours: float
+	game_hours: float,
+	canonical_npc_id: StringName = &""
 ) -> void:
 	var node_state = record.get("node_state", {})
 	if not (node_state is Dictionary):
 		return
-	var owner_id := String(node_state.get("relationship_id", record.get("npc_id", "")))
+	var owner_id := String(canonical_npc_id).strip_edges()
 	if owner_id.is_empty():
-		owner_id = String(record.get("npc_id", ""))
+		owner_id = String(record.get("npc_id", "")).strip_edges()
+	var legacy_owner_id := String(node_state.get("relationship_id", "")).strip_edges()
+	if owner_id.is_empty():
+		# Compatibility for hand-built/legacy records that have not yet passed
+		# through NpcLocations, which supplies the canonical record key above.
+		owner_id = legacy_owner_id
 	if owner_id.is_empty():
 		return
 
 	var relationships := get_node_or_null("/root/Relationships")
 	if relationships == null:
 		return
+	var decay_owner_id := owner_id
+	if (
+		not legacy_owner_id.is_empty()
+		and legacy_owner_id != owner_id
+		and relationships.has_method("migrate_relationship_alias")
+	):
+		var migration_result = relationships.call(
+			"migrate_relationship_alias",
+			legacy_owner_id,
+			owner_id
+		)
+		if (
+			migration_result is Dictionary
+			and not bool(migration_result.get("accepted", false))
+		):
+			# Raw hand-built/legacy location records can still carry a transient
+			# key. When it cannot be canonicalized, decay the exact relationship
+			# owner already stored in the record instead of silently doing nothing.
+			decay_owner_id = legacy_owner_id
 
 	var anger_decay = profile.get("anger_decay", {})
 	if anger_decay is Dictionary and bool(anger_decay.get("enabled", false)):
 		var full_hours := maxf(float(anger_decay.get("full_decay_game_hours", 4.0)), 0.001)
 		if relationships.has_method("decay_anger_for_id"):
-			relationships.call("decay_anger_for_id", owner_id, (100.0 / full_hours) * game_hours)
+			relationships.call(
+				"decay_anger_for_id",
+				decay_owner_id,
+				(100.0 / full_hours) * game_hours
+			)
 
 	var fear_decay = profile.get("fear_decay", {})
 	if fear_decay is Dictionary and bool(fear_decay.get("enabled", false)):
 		if relationships.has_method("decay_fear_for_id"):
 			relationships.call(
 				"decay_fear_for_id",
-				owner_id,
+				decay_owner_id,
 				game_hours,
 				float(fear_decay.get("panic_floor", 90.0)),
 				float(fear_decay.get("panic_cooldown_game_hours", 1.0 / 6.0)),
@@ -1199,8 +1337,11 @@ func resume_live_activity(npc_id: StringName, npc: Node) -> void:
 		_breadcrumb("npc_world:resume_live_disabled_definition", "%s %s" % [String(npc_id), String(spot_id)])
 		_finish_activity(npc_id, record, activity, spot_id, locations)
 		return
-	var hour := _get_current_time_of_day_hours()
-	if not _activity_can_continue(npc_id, record, definition, hour):
+	var total_hours := _get_current_total_hours()
+	var hour := fposmod(total_hours, 24.0)
+	if not _activity_can_continue(
+		npc_id, record, definition, activity, total_hours, hour
+	):
 		_breadcrumb("npc_world:resume_live_finish_invalid", "%s %s" % [String(npc_id), String(spot_id)])
 		_finish_activity(npc_id, record, activity, spot_id, locations)
 		return
@@ -1223,7 +1364,7 @@ func resume_live_activity(npc_id: StringName, npc: Node) -> void:
 				"is_npc_available_for_scheduled_activity",
 				String(npc_id),
 				definition.state_name,
-				definition.priority,
+				int(activity.get("priority", definition.priority)),
 				activity_descriptor
 			)):
 				_breadcrumb("npc_world:resume_live_unavailable", "%s %s" % [String(npc_id), String(spot_id)])
@@ -1479,6 +1620,11 @@ func _get_activity_descriptor(
 	if not session_id.is_empty():
 		descriptor["session_id"] = session_id
 		descriptor["action_session_id"] = session_id
+	if activity.has("priority"):
+		descriptor["priority"] = int(activity["priority"])
+	for schedule_key in SCHEDULE_METADATA_KEYS:
+		if activity.has(schedule_key):
+			descriptor[schedule_key] = activity[schedule_key]
 	return descriptor
 
 
@@ -1601,7 +1747,7 @@ func accept_scheduled_activity_proposal(
 			"is_npc_available_for_scheduled_activity",
 			String(npc_id),
 			definition.state_name,
-			definition.priority,
+			int(activity.get("priority", definition.priority)),
 			descriptor
 		)):
 			return _reject_activity_proposal(
@@ -1637,6 +1783,17 @@ func accept_scheduled_activity_proposal(
 func confirm_scheduled_activity_proposal(npc_id: StringName, activity: Dictionary) -> void:
 	var spot_id := StringName(String(activity.get("spot_id", "")))
 	_log_activity_transaction(npc_id, activity, spot_id, "committed", "record_committed")
+	_clear_schedule_decision_debug(npc_id)
+	var session_id := NpcActionSessionModel._descriptor_session_id(activity)
+	if not session_id.is_empty():
+		_schedule_overtime_last_observed_by_session[session_id] = _get_current_total_hours()
+		var locations := get_node_or_null("/root/NpcLocations")
+		_schedule_overtime_last_observed_live_by_session[session_id] = (
+			locations != null
+			and locations.has_method("is_npc_live")
+			and bool(locations.call("is_npc_live", String(npc_id)))
+		)
+	scheduled_activity_committed.emit(npc_id, activity.duplicate(true))
 
 
 func release_scheduled_activity_claim(
@@ -1718,7 +1875,10 @@ func _request_live_activity_assignment(
 		var action_descriptor := activity.duplicate(true)
 		action_descriptor["action_kind"] = String(definition.state_name)
 		action_descriptor["source"] = String(activity.get("source", "schedule"))
-		action_descriptor["priority"] = definition.priority
+		action_descriptor["priority"] = int(activity.get(
+			"priority",
+			definition.priority
+		))
 		action_descriptor["status"] = "proposed"
 		action_descriptor["scene_path"] = String(activity.get(
 			"target_scene_path", definition.scene_path
@@ -1740,7 +1900,11 @@ func _request_live_activity_assignment(
 	if assignment_method != &"":
 		if not machine.has_method(assignment_method):
 			return {"accepted": false, "reason": "assignment_method_missing"}
-		accepted = bool(machine.call(assignment_method, spot, definition.priority))
+		accepted = bool(machine.call(
+			assignment_method,
+			spot,
+			int(activity.get("priority", definition.priority))
+		))
 	else:
 		if not machine.has_method("request_state"):
 			return {"accepted": false, "reason": "state_request_method_missing"}
@@ -1749,7 +1913,7 @@ func _request_live_activity_assignment(
 			definition.state_name,
 			spot,
 			"world_activity",
-			definition.priority
+			int(activity.get("priority", definition.priority))
 		))
 
 	if accepted:
@@ -1884,19 +2048,20 @@ func _activity_can_continue(
 	npc_id: StringName,
 	record: Dictionary,
 	definition: NpcSpotDefinition,
+	activity: Dictionary,
+	total_game_hours: float,
 	hour: float
 ) -> bool:
 	if definition == null:
 		return false
-	if not definition.is_active_at(hour):
-		return false
 	if not _spot_runtime_is_available(definition):
 		return false
-	if (
-		_definition_is_meal_cycle_managed(definition)
-		and not _meal_cycle_definition_can_start(definition, npc_id, hour)
-	):
-		return false
+	if _definition_is_meal_cycle_managed(definition):
+		if (
+			not definition.is_active_at(hour)
+			or not _meal_cycle_definition_can_start(definition, npc_id, hour)
+		):
+			return false
 
 	var value_name := String(definition.value_name)
 	if (
@@ -1907,7 +2072,26 @@ func _activity_can_continue(
 		_mark_meal_owner_sated_if_needed(definition, npc_id, StringName(value_name))
 		return false
 
-	return true
+	var continuation := NpcScheduleWindowPolicy.evaluate_active_activity(
+		definition,
+		activity,
+		total_game_hours
+	)
+	if StringName(String(continuation.get("reason_code", ""))) == &"invalid_occurrence":
+		var action_metadata_value: Variant = activity.get("metadata", {})
+		var has_occurrence_context: bool = (
+			activity.has("schedule_occurrence_key")
+			or (
+				action_metadata_value is Dictionary
+				and action_metadata_value.has("schedule_occurrence_key")
+			)
+		)
+		if not has_occurrence_context:
+			# Restored records created before occurrence metadata existed retain
+			# their legacy stop-at-window-end behavior.
+			return definition.is_active_at(hour)
+		return false
+	return bool(continuation.get("may_continue", false))
 
 
 func get_spot_definition(spot_id: StringName) -> NpcSpotDefinition:
@@ -2394,35 +2578,43 @@ func _try_start_social_seek(
 	locations: Node,
 	blocking_priority: int
 ) -> bool:
+	var live_npc: Node2D
+	var live_machine: Node
+	if locations != null and locations.has_method("get_live_npc"):
+		live_npc = locations.call("get_live_npc", String(npc_id)) as Node2D
+	if live_npc != null:
+		live_machine = live_npc.get_node_or_null("NpcStateMachine")
 	if _social_planning_suppressed:
+		_publish_social_selection_descriptor(npc_id, live_machine, {})
 		return false
 	if _record_has_pending_travel(record):
+		_publish_social_selection_descriptor(npc_id, live_machine, {})
 		return false
 	if DebugToolsConfig.TROUBLESHOOTING_MODE and DebugToolsConfig.DEBUG_DISABLE_TALK_SEARCH:
 		_breadcrumb("npc_world:social_seek_skip", String(npc_id))
+		_publish_social_selection_descriptor(npc_id, live_machine, {})
 		return false
 
 	var settings := _get_social_seek_settings(record)
 	if not bool(settings.get("enabled", true)):
+		_publish_social_selection_descriptor(npc_id, live_machine, {})
 		return false
 	var seek_priority := int(settings.get("priority", 60))
 	if blocking_priority > seek_priority:
+		_publish_social_selection_descriptor(npc_id, live_machine, {})
 		return false
 	if _get_saved_stat(record, "talk_need") < float(settings.get("talk_need_threshold", 70.0)):
+		_publish_social_selection_descriptor(npc_id, live_machine, {})
 		return false
-	var live_npc: Node2D
-	var live_machine: Node
 	var short_term_memory: NpcShortTermMemory
-	if locations.has_method("get_live_npc"):
-		live_npc = locations.call("get_live_npc", String(npc_id)) as Node2D
 	if live_npc != null:
-		live_machine = live_npc.get_node_or_null("NpcStateMachine")
 		if (
 			live_machine != null
 			and live_machine.has_method("is_socially_engaged")
 			and bool(live_machine.call("is_socially_engaged"))
 		):
 			_log_social_plan_result(npc_id, "", "", false, "already_socially_engaged")
+			_publish_social_selection_descriptor(npc_id, live_machine, {})
 			return false
 		if live_machine != null:
 			short_term_memory = live_machine.get_node_or_null(
@@ -2460,9 +2652,21 @@ func _try_start_social_seek(
 				if live_npc != null
 				else clean_npc_id
 			),
-			"retry_delay_game_hours": recent_refusal_retry_delay_game_hours,
+			"recent_refusal_retry_delay_game_hours": (
+				recent_refusal_retry_delay_game_hours
+			),
+			"recent_harm_social_delay_game_hours": (
+				recent_harm_social_delay_game_hours
+			),
+			"recent_conversation_repeat_delay_game_hours": (
+				recent_conversation_repeat_delay_game_hours
+			),
 		}
 	)
+	# A successful preview needs only the planner-owned candidate. Avoid copying
+	# the diagnostic array until the sorted arbitration actually evaluates it.
+	if _social_seek_preview_only and not candidate.is_empty():
+		return true
 	var selection_descriptor := _social_planner.get_last_selection_descriptor()
 	_publish_social_selection_descriptor(
 		npc_id,
@@ -2477,7 +2681,7 @@ func _try_start_social_seek(
 			false,
 			String(selection_descriptor.get(
 				"reason_code",
-				"no_social_target_due_to_recent_refusal"
+				"no_social_target_due_to_recent_memory"
 			))
 		)
 		return false
@@ -2568,6 +2772,32 @@ func _try_start_social_seek(
 	return accepted
 
 
+func _preview_social_seek(
+	npc_id: StringName,
+	record: Dictionary,
+	records: Dictionary,
+	locations: Node,
+	blocking_priority: int
+) -> bool:
+	_social_seek_preview_only = true
+	var social_planning_start_usec := (
+		Time.get_ticks_usec() if performance_profiling_enabled else 0
+	)
+	var viable := _try_start_social_seek(
+		npc_id,
+		record,
+		records,
+		locations,
+		blocking_priority
+	)
+	_social_seek_preview_only = false
+	if performance_profiling_enabled:
+		_performance_profile_social_usec_in_pass += (
+			Time.get_ticks_usec() - social_planning_start_usec
+		)
+	return viable
+
+
 func get_social_selection_debug_descriptor(
 	npc_id: StringName = &""
 ) -> Dictionary:
@@ -2603,15 +2833,60 @@ func _publish_social_selection_descriptor(
 	if descriptor.is_empty():
 		_social_selection_debug_by_npc.erase(clean_npc_id)
 	else:
-		_social_selection_debug_by_npc[clean_npc_id] = descriptor.duplicate(true)
+		# The planner's public getter already handed this component an owned deep
+		# copy. Stamp and retain that copy without cloning its candidate array again.
+		var published_descriptor := descriptor
+		if not published_descriptor.has("evaluated_game_hours"):
+			published_descriptor["evaluated_game_hours"] = _get_current_total_hours()
+		published_descriptor["simulation_pass_id"] = _social_planning_pass_id
+		published_descriptor["published_at_usec"] = Time.get_ticks_usec()
+		_social_selection_debug_by_npc[clean_npc_id] = published_descriptor
+		descriptor = published_descriptor
 	if (
 		live_machine != null
 		and live_machine.has_method("set_social_selection_feedback")
 	):
-		live_machine.call(
-			"set_social_selection_feedback",
-			descriptor.duplicate(true)
+		live_machine.call("set_social_selection_feedback", descriptor)
+
+
+func _clear_social_selection_descriptor(
+	npc_id: StringName,
+	locations: Node
+) -> void:
+	var live_machine: Node
+	if locations != null and locations.has_method("get_live_npc"):
+		var live_npc := locations.call("get_live_npc", String(npc_id)) as Node
+		if live_npc != null:
+			live_machine = live_npc.get_node_or_null("NpcStateMachine")
+	_publish_social_selection_descriptor(npc_id, live_machine, {})
+
+
+func _prune_social_selection_descriptors(records: Dictionary, locations: Node) -> void:
+	for cached_npc_id in _social_selection_debug_by_npc.keys():
+		if not records.has(cached_npc_id) and not records.has(StringName(String(cached_npc_id))):
+			_clear_social_selection_descriptor(
+				StringName(String(cached_npc_id)),
+				locations
+			)
+
+
+func _clear_all_social_selection_descriptors() -> void:
+	var locations := get_node_or_null("/root/NpcLocations")
+	for cached_npc_id in _social_selection_debug_by_npc.keys():
+		_clear_social_selection_descriptor(
+			StringName(String(cached_npc_id)),
+			locations
 		)
+
+
+static func _get_ordered_social_seeker_ids(seekers_by_npc_id: Dictionary) -> Array:
+	var ordered_ids: Array = seekers_by_npc_id.keys()
+	ordered_ids.sort_custom(_social_seeker_id_precedes)
+	return ordered_ids
+
+
+static func _social_seeker_id_precedes(first, second) -> bool:
+	return String(first) < String(second)
 
 
 func _record_has_pending_travel(record: Dictionary) -> bool:
@@ -2633,9 +2908,103 @@ func _get_social_seek_settings(record: Dictionary) -> Dictionary:
 			var settings = profile.get("social_seeking", {})
 			if settings is Dictionary and not settings.is_empty():
 				var merged := defaults.duplicate(true)
-				merged.merge(settings, true)
+				if settings.get("enabled", null) is bool:
+					merged["enabled"] = settings.enabled
+				_merge_valid_social_number(
+					merged, settings, "talk_need_threshold", 0.0, 100.0
+				)
+				_merge_valid_social_number(
+					merged, settings, "priority", 0.0, 1000.0
+				)
+				_merge_valid_social_number(
+					merged, settings, "minimum_npc_favor", 0.0, 100.0
+				)
 				return merged
 	return defaults
+
+
+static func _merge_valid_social_number(
+	destination: Dictionary,
+	source: Dictionary,
+	key: String,
+	minimum: float,
+	maximum: float
+) -> void:
+	var value = source.get(key, null)
+	if not (value is int or value is float):
+		return
+	var number := float(value)
+	if not is_finite(number) or number < minimum or number > maximum:
+		return
+	destination[key] = value
+
+
+func _validate_social_world_profile(
+	npc_id: StringName,
+	record: Dictionary
+) -> void:
+	var node_state = record.get("node_state", {})
+	var profile: Variant = (
+		node_state.get("world_simulation_profile", {})
+		if node_state is Dictionary
+		else {}
+	)
+	var social_profile_signature: Variant = profile
+	if profile is Dictionary:
+		var supplied_social_sections := {}
+		for section_name in [
+			"social_seeking",
+			"talk_handshake",
+			"social_acceptance",
+			"memory",
+		]:
+			if profile.has(section_name):
+				supplied_social_sections[section_name] = profile[section_name]
+		social_profile_signature = supplied_social_sections
+	var signature := "%s:%s" % [
+		typeof(profile),
+		JSON.stringify(social_profile_signature),
+	]
+	var cache_key := String(npc_id)
+	if String(_validated_social_world_profile_signatures.get(
+		cache_key, ""
+	)) == signature:
+		return
+	var issues := NpcSocialConfigurationValidator.validate_world_profile(
+		profile,
+		cache_key,
+		"npc.%s.world_simulation_profile" % cache_key
+	)
+	_validated_social_world_profile_signatures[cache_key] = signature
+	_social_world_profile_validation_issues_by_npc[cache_key] = issues.duplicate(true)
+	if not OS.is_debug_build():
+		return
+	for issue in issues:
+		push_warning("NPC world social configuration [%s] %s: %s" % [
+			String(issue.get("code", "invalid_configuration")),
+			String(issue.get("path", "world_simulation_profile")),
+			String(issue.get("message", "Invalid social configuration.")),
+		])
+
+
+func _prune_social_world_profile_validation(records: Dictionary) -> void:
+	for cached_npc_id in _validated_social_world_profile_signatures.keys():
+		if (
+			records.has(cached_npc_id)
+			or records.has(StringName(String(cached_npc_id)))
+		):
+			continue
+		_validated_social_world_profile_signatures.erase(cached_npc_id)
+		_social_world_profile_validation_issues_by_npc.erase(cached_npc_id)
+
+
+func get_social_world_profile_validation_issues(
+	npc_id: StringName
+) -> Array[Dictionary]:
+	var issues = _social_world_profile_validation_issues_by_npc.get(
+		String(npc_id), []
+	)
+	return issues.duplicate(true) if issues is Array else []
 
 
 func _record_social_candidate_evaluation() -> void:
@@ -2839,30 +3208,290 @@ func _try_start_activity(
 	locations: Node,
 	records: Dictionary
 ) -> void:
-	if _record_is_disabled(record):
+	var plan := _prepare_idle_activity_plan(npc_id, record, total_hours, locations)
+	if plan.is_empty():
 		return
+	var social_planning_start_usec := Time.get_ticks_usec() if performance_profiling_enabled else 0
+	var social_started := _try_start_social_seek(
+		npc_id,
+		record,
+		records,
+		locations,
+		int(plan.get("blocking_priority", -1))
+	)
+	if performance_profiling_enabled:
+		_performance_profile_social_usec_in_pass += Time.get_ticks_usec() - social_planning_start_usec
+	if social_started:
+		_clear_schedule_decision_debug(npc_id)
+		return
+	_start_planned_scheduled_activity(
+		npc_id,
+		record,
+		total_hours,
+		hour,
+		locations,
+		plan
+	)
+
+
+func _route_idle_activity_for_social_arbitration(
+	npc_id: StringName,
+	record: Dictionary,
+	total_hours: float,
+	hour: float,
+	locations: Node,
+	records: Dictionary,
+	deferred_social_seekers: Array[Dictionary]
+) -> void:
+	# Preserve the normal per-record schedule/travel interleaving. Only an NPC
+	# whose social need can actually compete with its current schedule is deferred
+	# into the deterministic global arbitration phase.
+	var plan := _prepare_idle_activity_plan(npc_id, record, total_hours, locations)
+	if plan.is_empty():
+		return
+	if not _record_enters_social_arbitration(record):
+		_clear_social_selection_descriptor(npc_id, locations)
+		_start_planned_scheduled_activity(
+			npc_id, record, total_hours, hour, locations, plan
+		)
+		if plan.get("definition", null) != null:
+			_refresh_working_record(npc_id, record, locations, records)
+		return
+	var settings := _get_social_seek_settings(record)
+	if int(plan.get("blocking_priority", -1)) > int(settings.get("priority", 60)):
+		# This schedule would have blocked social at the NPC's original position in
+		# the record loop. Commit it there so later activity/travel updates cannot
+		# scramble its primary/fallback choice.
+		_clear_social_selection_descriptor(npc_id, locations)
+		_start_planned_scheduled_activity(
+			npc_id, record, total_hours, hour, locations, plan
+		)
+		if plan.get("definition", null) != null:
+			_refresh_working_record(npc_id, record, locations, records)
+		return
+	if not _preview_social_seek(
+		npc_id,
+		record,
+		records,
+		locations,
+		int(plan.get("blocking_priority", -1))
+	):
+		# A seeker with no viable partner keeps the exact schedule position it had
+		# before global arbitration was introduced. Only actual contention enters
+		# the stable-ID sorted phase.
+		_clear_social_selection_descriptor(npc_id, locations)
+		_start_planned_scheduled_activity(
+			npc_id, record, total_hours, hour, locations, plan
+		)
+		if plan.get("definition", null) != null:
+			_refresh_working_record(npc_id, record, locations, records)
+		return
+	deferred_social_seekers.append({
+		"npc_id": npc_id,
+		"record": record,
+		"blocking_priority": int(plan.get("blocking_priority", -1)),
+	})
+
+
+func _process_deferred_social_seekers(
+	deferred_social_seekers: Array[Dictionary],
+	total_hours: float,
+	hour: float,
+	locations: Node,
+	records: Dictionary
+) -> void:
+	# Social allocation is a global contention problem. Eligible seekers are
+	# considered by stable ID, while failed seekers fall back to schedules in their
+	# original record order. Ordinary non-seekers were already handled inline.
+	var entries_by_npc_id: Dictionary = {}
+	for entry in deferred_social_seekers:
+		var npc_id := StringName(String(entry.get("npc_id", "")))
+		var record_value = entry.get("record", {})
+		if npc_id == &"" or not (record_value is Dictionary):
+			continue
+		entries_by_npc_id[String(npc_id)] = entry
+
+	var social_started_by_npc_id: Dictionary = {}
+	for ordered_npc_id in _get_ordered_social_seeker_ids(entries_by_npc_id):
+		var entry: Dictionary = entries_by_npc_id[ordered_npc_id]
+		var npc_id := StringName(String(entry.get("npc_id", "")))
+		var record: Dictionary = entry.get("record", {})
+		var social_planning_start_usec := Time.get_ticks_usec() if performance_profiling_enabled else 0
+		if _try_start_social_seek(
+			npc_id,
+			record,
+			records,
+			locations,
+			int(entry.get("blocking_priority", -1))
+		):
+			social_started_by_npc_id[String(npc_id)] = true
+		if performance_profiling_enabled:
+			_performance_profile_social_usec_in_pass += Time.get_ticks_usec() - social_planning_start_usec
+
+	for entry in deferred_social_seekers:
+		var npc_id := StringName(String(entry.get("npc_id", "")))
+		if social_started_by_npc_id.has(String(npc_id)):
+			# Keep the successful seeker's selected-target descriptor available to
+			# developer tooling. Live player feedback is filtered independently.
+			_clear_schedule_decision_debug(npc_id)
+			continue
+		if _social_participant_was_used_this_pass(npc_id):
+			# A deferred seeker that was consumed as somebody else's target did not
+			# make its own selection, so any earlier descriptor is stale.
+			_clear_schedule_decision_debug(npc_id)
+			_clear_social_selection_descriptor(npc_id, locations)
+			continue
+		var record_value = entry.get("record", {})
+		if npc_id == &"" or not (record_value is Dictionary):
+			continue
+		var record: Dictionary = record_value
+		var plan := _prepare_idle_activity_plan(
+			npc_id,
+			record,
+			total_hours,
+			locations
+		)
+		if plan.is_empty():
+			continue
+		_start_planned_scheduled_activity(
+			npc_id,
+			record,
+			total_hours,
+			hour,
+			locations,
+			plan
+		)
+		if plan.get("definition", null) != null:
+			_refresh_working_record(npc_id, record, locations, records)
+
+
+func _social_participant_was_used_this_pass(npc_id: StringName) -> bool:
+	return _social_planner.was_participant_used_this_pass(String(npc_id))
+
+
+func _refresh_working_record(
+	npc_id: StringName,
+	record: Dictionary,
+	locations: Node,
+	records: Dictionary
+) -> void:
+	if locations == null or not locations.has_method("get_record_snapshot"):
+		return
+	var authoritative_record = locations.call(
+		"get_record_snapshot", String(npc_id)
+	)
+	if not (authoritative_record is Dictionary) or authoritative_record.is_empty():
+		return
+	record.clear()
+	record.merge(authoritative_record, true)
+	records[String(npc_id)] = record
+
+
+func _record_enters_social_arbitration(record: Dictionary) -> bool:
+	if _social_planning_suppressed or _record_has_pending_travel(record):
+		return false
+	if DebugToolsConfig.TROUBLESHOOTING_MODE and DebugToolsConfig.DEBUG_DISABLE_TALK_SEARCH:
+		return false
+	var settings := _get_social_seek_settings(record)
+	return (
+		bool(settings.get("enabled", true))
+		and _get_saved_stat(record, "talk_need")
+			>= float(settings.get("talk_need_threshold", 70.0))
+	)
+
+
+func _prepare_idle_activity_plan(
+	npc_id: StringName,
+	record: Dictionary,
+	total_hours: float,
+	locations: Node
+) -> Dictionary:
+	if _record_is_disabled(record):
+		_clear_schedule_decision_debug(npc_id)
+		_clear_social_selection_descriptor(npc_id, locations)
+		return {}
 	if (
 		DebugToolsConfig.TROUBLESHOOTING_MODE
 		and DebugToolsConfig.DEBUG_DISABLE_NPC_SCHEDULED_ACTIVITY_STARTS
 	):
 		_breadcrumb("npc_world:start_activity_skip", String(npc_id))
-		return
+		_clear_schedule_decision_debug(npc_id)
+		_clear_social_selection_descriptor(npc_id, locations)
+		return {}
 
-	var definition := _find_best_definition(npc_id, record, hour)
+	var candidate := _find_best_candidate(npc_id, record, total_hours)
+	var definition := candidate.get("definition", null) as NpcSpotDefinition
+	var schedule_decision: Dictionary = candidate.get(
+		"schedule_decision",
+		{}
+	).duplicate(true)
 	if _debug_definition_disabled(definition):
 		_breadcrumb("npc_world:best_activity_disabled", "%s -> %s" % [String(npc_id), String(definition.spot_id)])
 		definition = null
+		candidate = {}
+		schedule_decision = {}
 	_breadcrumb(
 		"npc_world:best_activity",
 		"%s -> %s" % [String(npc_id), String(definition.spot_id) if definition != null else "none"]
 	)
-	var blocking_priority := definition.priority if definition != null else -1
-	var social_planning_start_usec := Time.get_ticks_usec() if performance_profiling_enabled else 0
-	var social_started := _try_start_social_seek(npc_id, record, records, locations, blocking_priority)
-	if performance_profiling_enabled:
-		_performance_profile_social_usec_in_pass += Time.get_ticks_usec() - social_planning_start_usec
-	if social_started:
-		return
+	if definition == null:
+		_clear_schedule_decision_debug(npc_id)
+	else:
+		_set_schedule_decision_debug(
+			npc_id,
+			definition,
+			schedule_decision,
+			locations,
+			false
+		)
+		if _should_defer_flexible_live_start(
+			npc_id,
+			definition,
+			schedule_decision,
+			locations
+		):
+			_set_schedule_decision_debug(
+				npc_id,
+				definition,
+				schedule_decision,
+				locations,
+				true
+			)
+			_clear_social_selection_descriptor(npc_id, locations)
+			return {}
+		if _live_schedule_start_has_protected_ownership(npc_id, locations):
+			if _live_schedule_start_is_emergency_or_scripted(npc_id, locations):
+				_clear_schedule_decision_debug(npc_id)
+			_clear_social_selection_descriptor(npc_id, locations)
+			return {}
+	var effective_priority := int(candidate.get(
+		"effective_priority",
+		definition.priority if definition != null else -1
+	))
+	return {
+		"candidate": candidate,
+		"definition": definition,
+		"schedule_decision": schedule_decision,
+		"effective_priority": effective_priority,
+		"blocking_priority": effective_priority if definition != null else -1,
+	}
+
+
+func _start_planned_scheduled_activity(
+	npc_id: StringName,
+	record: Dictionary,
+	total_hours: float,
+	hour: float,
+	locations: Node,
+	plan: Dictionary
+) -> void:
+	var candidate: Dictionary = plan.get("candidate", {})
+	var definition := plan.get("definition", null) as NpcSpotDefinition
+	var schedule_decision: Dictionary = plan.get("schedule_decision", {})
+	var effective_priority := int(plan.get(
+		"effective_priority",
+		definition.priority if definition != null else -1
+	))
 	if definition == null:
 		return
 	var action_session_id := NpcActionSessionModel.make_session_id(
@@ -2883,7 +3512,7 @@ func _try_start_activity(
 			"is_npc_available_for_scheduled_activity",
 			String(npc_id),
 			definition.state_name,
-			definition.priority,
+			effective_priority,
 			requested_activity
 		)):
 			return
@@ -2905,7 +3534,7 @@ func _try_start_activity(
 		"action_session_id": action_session_id,
 		"activity_id": action_session_id,
 		"source": "schedule",
-		"priority": definition.priority,
+		"priority": effective_priority,
 		"status": "proposed",
 		"start_world_time": total_hours,
 		"reservation_ids": [],
@@ -2918,6 +3547,12 @@ func _try_start_activity(
 		"return_scene_path": String(record.get("scene_path", "")),
 		"return_position": record.get("last_position", Vector2.ZERO),
 	}
+	_apply_schedule_metadata_to_activity(
+		activity,
+		definition,
+		schedule_decision,
+		effective_priority
+	)
 	if definition.state_name == INVITE_PLAYER_STATE:
 		activity["lesson_phase"] = "inviting"
 		activity["lesson_scene_path"] = definition.scene_path
@@ -2940,7 +3575,7 @@ func _try_start_activity(
 			"target_scene_path": target_scene_path,
 			"target_position": target_position,
 			"requested_state_name": String(definition.state_name),
-			"requested_priority": definition.priority,
+			"requested_priority": effective_priority,
 			"activity": activity,
 		}
 		var expected_route_edge_id := &""
@@ -3120,6 +3755,7 @@ func _update_pending_travel(
 	hour: float,
 	locations: Node
 ) -> void:
+	_clear_schedule_decision_debug(npc_id)
 	var mode := String(pending_travel.get("mode", "start"))
 	if mode == "start":
 		var pending_activity = pending_travel.get("activity", {})
@@ -3466,6 +4102,7 @@ func _update_activity(
 	hour: float,
 	locations: Node
 ) -> void:
+	_clear_schedule_decision_debug(npc_id)
 	var spot_id := StringName(String(activity.get("spot_id", "")))
 	_breadcrumb("npc_world:update_activity", "%s %s" % [String(npc_id), String(spot_id)])
 	if NpcRouteLocationCoordinator.record_has_finish_replan_marker(record, activity):
@@ -3477,14 +4114,44 @@ func _update_activity(
 		_breadcrumb("npc_world:update_disabled_definition", "%s %s" % [String(npc_id), String(spot_id)])
 		_finish_activity(npc_id, record, activity, spot_id, locations)
 		return
-	if not _activity_can_continue(npc_id, record, definition, hour):
+	var npc_is_live := (
+		locations.has_method("is_npc_live")
+		and bool(locations.call("is_npc_live", String(npc_id)))
+	)
+	var continuation := NpcScheduleWindowPolicy.evaluate_active_activity(
+		definition,
+		activity,
+		total_hours
+	)
+	var activity_can_continue := _activity_can_continue(
+		npc_id, record, definition, activity, total_hours, hour
+	)
+	if not activity_can_continue:
+		if not npc_is_live:
+			_apply_offscreen_progress_until_overtime_deadline(
+				npc_id,
+				record,
+				activity,
+				definition,
+				continuation,
+				locations
+			)
 		_finish_activity(npc_id, record, activity, spot_id, locations)
 		return
+	if not npc_is_live:
+		_observe_schedule_overtime_transition(
+			npc_id,
+			activity,
+			continuation,
+			total_hours,
+			false
+		)
 	var interrupt_definition := _find_invitation_interrupt_definition(
 		npc_id,
 		record,
-		hour,
-		definition
+		total_hours,
+		definition,
+		int(activity.get("priority", definition.priority))
 	)
 	if interrupt_definition != null:
 		_finish_activity(npc_id, record, activity, spot_id, locations)
@@ -3501,34 +4168,36 @@ func _update_activity(
 		_finish_activity(npc_id, record, activity, spot_id, locations)
 		return
 
-	if locations.has_method("is_npc_live") and bool(locations.call("is_npc_live", String(npc_id))):
+	if npc_is_live:
 		var live_npc: Node = null
 		if locations.has_method("get_live_npc"):
 			live_npc = locations.call("get_live_npc", String(npc_id)) as Node
 		if live_npc != null:
 			resume_live_activity(npc_id, live_npc)
+			var machine := live_npc.get_node_or_null("NpcStateMachine")
+			var session_id := NpcActionSessionModel._descriptor_session_id(activity)
+			if (
+				machine != null
+				and machine.has_method("get_active_action_session_id")
+				and String(machine.call("get_active_action_session_id")) == session_id
+			):
+				_observe_schedule_overtime_transition(
+					npc_id,
+					activity,
+					continuation,
+					total_hours,
+					true
+				)
 		return
 
-	var last_total_hours := float(activity.get("last_total_hours", total_hours))
-	var elapsed_game_hours := maxf(total_hours - last_total_hours, 0.0)
-	activity["last_total_hours"] = total_hours
-
-	if elapsed_game_hours > 0.0 and not value_name.is_empty():
-		if _definition_consumes_food_for_hunger(definition, value_name):
-			_apply_offscreen_food_eat_progress(record, definition, value_name, elapsed_game_hours)
-		else:
-			_set_saved_stat(
-				record,
-				value_name,
-				_get_saved_stat(record, value_name) + definition.value_delta_per_game_hour * elapsed_game_hours
-			)
-	if _activity_should_apply_spot_runtime_progress(npc_id, activity, definition, locations):
-		_apply_spot_runtime_progress(definition, elapsed_game_hours, total_hours)
-
-	record["activity"] = activity
-	record["last_position"] = _get_activity_simulated_position(activity, definition)
-	if locations.has_method("update_simulated_record"):
-		_apply_simulated_record_update(locations, String(npc_id), record)
+	_apply_offscreen_activity_progress(
+		npc_id,
+		record,
+		activity,
+		definition,
+		total_hours,
+		locations
+	)
 
 	var npc_value_sated := (
 		definition.finish_when_npc_value_sated
@@ -3539,6 +4208,126 @@ func _update_activity(
 		_mark_meal_owner_sated_if_needed(definition, npc_id, StringName(value_name))
 	if npc_value_sated or not _spot_runtime_is_available(definition):
 		_finish_activity(npc_id, record, activity, spot_id, locations)
+
+
+func _apply_offscreen_progress_until_overtime_deadline(
+	npc_id: StringName,
+	record: Dictionary,
+	activity: Dictionary,
+	definition: NpcSpotDefinition,
+	continuation: Dictionary,
+	locations: Node
+) -> void:
+	if StringName(String(continuation.get("reason_code", ""))) != &"overtime_expired":
+		return
+	if definition == null or not _spot_runtime_is_available(definition):
+		return
+	if _definition_is_meal_cycle_managed(definition):
+		return
+	var value_name := String(definition.value_name)
+	if (
+		definition.finish_when_npc_value_sated
+		and not value_name.is_empty()
+		and _get_saved_stat(record, value_name) <= 0.0
+	):
+		return
+	var overtime_end := float(continuation.get("overtime_end_total_hours", 0.0))
+	var last_total_hours := float(activity.get("last_total_hours", overtime_end))
+	if overtime_end <= last_total_hours:
+		return
+	_apply_offscreen_activity_progress(
+		npc_id,
+		record,
+		activity,
+		definition,
+		overtime_end,
+		locations
+	)
+
+
+func _apply_offscreen_activity_progress(
+	npc_id: StringName,
+	record: Dictionary,
+	activity: Dictionary,
+	definition: NpcSpotDefinition,
+	progress_end_total_hours: float,
+	locations: Node
+) -> void:
+	var last_total_hours := float(activity.get(
+		"last_total_hours",
+		progress_end_total_hours
+	))
+	var elapsed_game_hours := maxf(
+		progress_end_total_hours - last_total_hours,
+		0.0
+	)
+	activity["last_total_hours"] = progress_end_total_hours
+	var value_name := String(definition.value_name)
+	if elapsed_game_hours > 0.0 and not value_name.is_empty():
+		if _definition_consumes_food_for_hunger(definition, value_name):
+			_apply_offscreen_food_eat_progress(
+				record, definition, value_name, elapsed_game_hours
+			)
+		else:
+			_set_saved_stat(
+				record,
+				value_name,
+				_get_saved_stat(record, value_name)
+					+ definition.value_delta_per_game_hour * elapsed_game_hours
+			)
+	if _activity_should_apply_spot_runtime_progress(
+		npc_id, activity, definition, locations
+	):
+		_apply_spot_runtime_progress(
+			definition,
+			elapsed_game_hours,
+			progress_end_total_hours
+		)
+	record["activity"] = activity
+	record["last_position"] = _get_activity_simulated_position(activity, definition)
+	if locations.has_method("update_simulated_record"):
+		_apply_simulated_record_update(locations, String(npc_id), record)
+
+
+func _observe_schedule_overtime_transition(
+	npc_id: StringName,
+	activity: Dictionary,
+	continuation: Dictionary,
+	total_game_hours: float,
+	npc_is_live: bool
+) -> void:
+	var session_id := NpcActionSessionModel._descriptor_session_id(activity)
+	if session_id.is_empty():
+		return
+	var had_previous := _schedule_overtime_last_observed_by_session.has(session_id)
+	var previous_total_hours := float(
+		_schedule_overtime_last_observed_by_session.get(session_id, total_game_hours)
+	)
+	var previous_was_live := bool(
+		_schedule_overtime_last_observed_live_by_session.get(session_id, false)
+	)
+	_schedule_overtime_last_observed_by_session[session_id] = total_game_hours
+	_schedule_overtime_last_observed_live_by_session[session_id] = npc_is_live
+	if (
+		not had_previous
+		or not previous_was_live
+		or not npc_is_live
+		or _schedule_overtime_sessions_emitted.has(session_id)
+		or not bool(continuation.get("may_continue", false))
+		or not bool(continuation.get("in_overtime", false))
+		or StringName(String(continuation.get("completion_policy", "")))
+			!= NpcScheduleWindowPolicy.COMPLETION_POLICY_FINISH_CURRENT
+	):
+		return
+	var window_end := float(continuation.get("window_end_total_hours", 0.0))
+	if previous_total_hours >= window_end or total_game_hours < window_end:
+		return
+	_schedule_overtime_sessions_emitted[session_id] = true
+	scheduled_activity_entered_overtime.emit(
+		npc_id,
+		activity.duplicate(true),
+		continuation.duplicate(true)
+	)
 
 
 func _definition_consumes_food_for_hunger(
@@ -3807,6 +4596,10 @@ func _finish_activity(
 			NpcActionSessionModel._descriptor_session_id(activity)
 		)
 	if finished:
+		var session_id := NpcActionSessionModel._descriptor_session_id(activity)
+		_schedule_overtime_last_observed_by_session.erase(session_id)
+		_schedule_overtime_last_observed_live_by_session.erase(session_id)
+		_schedule_overtime_sessions_emitted.erase(session_id)
 		_detach_live_npc_from_finished_activity(live_npc, spot_id)
 		activity_finished.emit(npc_id, spot_id)
 
@@ -4049,18 +4842,275 @@ func _find_best_definition(
 	)
 
 
+func _find_best_candidate(
+	npc_id: StringName,
+	record: Dictionary,
+	total_game_hours: float
+) -> Dictionary:
+	return NpcActivitySelector.find_best_candidate(
+		spot_definitions,
+		npc_id,
+		record,
+		total_game_hours,
+		self
+	)
+
+
+func _apply_schedule_metadata_to_activity(
+	activity: Dictionary,
+	definition: NpcSpotDefinition,
+	decision: Dictionary,
+	effective_priority: int
+) -> void:
+	if activity.is_empty() or definition == null or decision.is_empty():
+		return
+	var metadata := {
+		"schedule_phase": String(decision.get("phase", "closed")),
+		"schedule_occurrence_key": String(decision.get("occurrence_key", "")),
+		"schedule_window_index": int(decision.get("window_index", -1)),
+		"schedule_window_start_total_hours": float(decision.get(
+			"window_start_total_hours",
+			0.0
+		)),
+		"schedule_grace_end_total_hours": float(decision.get(
+			"grace_end_total_hours",
+			0.0
+		)),
+		"schedule_window_end_total_hours": float(decision.get(
+			"window_end_total_hours",
+			0.0
+		)),
+		"schedule_lateness_game_hours": float(decision.get(
+			"lateness_game_hours",
+			0.0
+		)),
+		"schedule_base_priority": definition.priority,
+		"schedule_effective_priority": effective_priority,
+		"schedule_completion_policy": String(decision.get(
+			"completion_policy",
+			NpcScheduleWindowPolicy.COMPLETION_POLICY_STOP_AT_WINDOW_END
+		)),
+		"schedule_maximum_overtime_game_hours": float(decision.get(
+			"maximum_overtime_game_hours",
+			0.0
+		)),
+		"schedule_overtime_end_total_hours": float(decision.get(
+			"overtime_end_total_hours",
+			decision.get("window_end_total_hours", 0.0)
+		)),
+	}
+	for metadata_key in metadata:
+		activity[metadata_key] = metadata[metadata_key]
+	var action_metadata_value: Variant = activity.get("metadata", {})
+	var action_metadata: Dictionary = (
+		action_metadata_value.duplicate(true)
+		if action_metadata_value is Dictionary
+		else {}
+	)
+	action_metadata.merge(metadata, true)
+	activity["metadata"] = action_metadata
+
+
+func _should_defer_flexible_live_start(
+	npc_id: StringName,
+	definition: NpcSpotDefinition,
+	decision: Dictionary,
+	locations: Node
+) -> bool:
+	if (
+		definition == null
+		or StringName(String(decision.get("start_policy", "hard")))
+			!= NpcScheduleWindowPolicy.START_POLICY_FLEXIBLE
+		or StringName(String(decision.get("phase", "closed")))
+			!= NpcScheduleWindowPolicy.PHASE_ON_TIME
+		or bool(decision.get("may_interrupt_busy_live_npc", true))
+	):
+		return false
+	var live_npc := _get_live_schedule_npc(npc_id, locations)
+	if live_npc == null:
+		return false
+	var machine := live_npc.get_node_or_null("NpcStateMachine")
+	if machine == null:
+		return false
+	if machine.has_method("is_socially_engaged") and bool(
+		machine.call("is_socially_engaged")
+	):
+		return true
+	var current_state = machine.get("current_state")
+	if current_state == null or String(current_state.name) == "Idle":
+		return false
+	var spot := live_spots.get(definition.spot_id, null) as Node2D
+	if machine.has_method("is_following_activity_descriptor"):
+		var continuation_descriptor := _get_activity_descriptor(
+			definition,
+			spot,
+			{
+				"spot_id": String(definition.spot_id),
+				"state_name": String(definition.state_name),
+				"target_scene_path": definition.scene_path,
+			}
+		)
+		if bool(machine.call(
+			"is_following_activity_descriptor",
+			continuation_descriptor
+		)):
+			return false
+	return true
+
+
+func _live_schedule_start_has_protected_ownership(
+	npc_id: StringName,
+	locations: Node
+) -> bool:
+	var live_npc := _get_live_schedule_npc(npc_id, locations)
+	if live_npc == null:
+		return false
+	var machine := live_npc.get_node_or_null("NpcStateMachine")
+	if machine == null:
+		return false
+	if machine.has_method("get_scheduled_activity_ownership_gate"):
+		var gate: Dictionary = machine.call("get_scheduled_activity_ownership_gate")
+		return bool(gate.get("protected", false))
+	if machine.has_method("is_socially_engaged") and bool(
+		machine.call("is_socially_engaged")
+	):
+		return true
+	return _machine_schedule_start_is_emergency_or_scripted(machine)
+
+
+func _live_schedule_start_is_emergency_or_scripted(
+	npc_id: StringName,
+	locations: Node
+) -> bool:
+	var live_npc := _get_live_schedule_npc(npc_id, locations)
+	if live_npc == null:
+		return false
+	return _machine_schedule_start_is_emergency_or_scripted(
+		live_npc.get_node_or_null("NpcStateMachine")
+	)
+
+
+func _machine_schedule_start_is_emergency_or_scripted(machine: Node) -> bool:
+	if machine == null:
+		return false
+	if machine.has_method("get_scheduled_activity_ownership_gate"):
+		var gate: Dictionary = machine.call("get_scheduled_activity_ownership_gate")
+		return bool(gate.get("protected", false))
+	if machine.has_method("has_scripted_control_claim") and bool(
+		machine.call("has_scripted_control_claim")
+	):
+		return true
+	var current_state = machine.get("current_state")
+	var current_state_name := String(current_state.name) if current_state != null else ""
+	if current_state_name in [
+		"Fight",
+		"Flee",
+		"ReactToEvent",
+		"Collapse",
+		"Knockout",
+		"DisabledDead",
+		"Dead",
+	]:
+		return true
+	return false
+
+
+func _get_live_schedule_npc(
+	npc_id: StringName,
+	locations: Node
+) -> Node:
+	if locations == null or not locations.has_method("get_live_npc"):
+		return null
+	var live_npc = locations.call("get_live_npc", String(npc_id)) as Node
+	if live_npc == null or not is_instance_valid(live_npc):
+		return null
+	return live_npc
+
+
+func _set_schedule_decision_debug(
+	npc_id: StringName,
+	definition: NpcSpotDefinition,
+	decision: Dictionary,
+	locations: Node,
+	deferred_for_flexible_grace: bool
+) -> void:
+	if definition == null or decision.is_empty():
+		_clear_schedule_decision_debug(npc_id)
+		return
+	var current_state := &""
+	var live_npc := _get_live_schedule_npc(npc_id, locations)
+	if live_npc != null:
+		var machine := live_npc.get_node_or_null("NpcStateMachine")
+		var state = machine.get("current_state") if machine != null else null
+		if state != null:
+			current_state = StringName(state.name)
+	var now_game_hours := float(decision.get(
+		"evaluated_total_game_hours",
+		0.0
+	))
+	_schedule_decision_debug_by_npc[String(npc_id)] = {
+		"spot_id": definition.spot_id,
+		"phase": StringName(String(decision.get("phase", "closed"))),
+		"start_policy": StringName(String(decision.get("start_policy", "hard"))),
+		"occurrence_key": String(decision.get("occurrence_key", "")),
+		"window_index": int(decision.get("window_index", -1)),
+		"effective_priority": int(decision.get(
+			"effective_priority",
+			definition.priority
+		)),
+		"current_state": current_state,
+		"deferred_for_flexible_grace": deferred_for_flexible_grace,
+		"grace_remaining_game_hours": maxf(
+			float(decision.get("grace_end_total_hours", now_game_hours))
+				- now_game_hours,
+			0.0
+		),
+		"lateness_game_hours": float(decision.get(
+			"lateness_game_hours",
+			0.0
+		)),
+	}
+
+
+func _clear_schedule_decision_debug(npc_id: StringName) -> void:
+	_schedule_decision_debug_by_npc.erase(String(npc_id))
+
+
+func get_schedule_decision_debug_descriptor(npc_id: StringName) -> Dictionary:
+	var descriptor_value: Variant = _schedule_decision_debug_by_npc.get(
+		String(npc_id),
+		{}
+	)
+	return (
+		descriptor_value.duplicate(true)
+		if descriptor_value is Dictionary
+		else {}
+	)
+
+
 func _find_invitation_interrupt_definition(
 	npc_id: StringName,
 	record: Dictionary,
-	hour: float,
-	current_definition: NpcSpotDefinition
+	total_game_hours: float,
+	current_definition: NpcSpotDefinition,
+	current_effective_priority: int = -1000000
 ) -> NpcSpotDefinition:
 	if current_definition == null:
 		return null
 	if current_definition.state_name == INVITE_PLAYER_STATE:
 		return null
+	if current_effective_priority <= -1000000:
+		current_effective_priority = current_definition.priority
 
-	var best_definition := _find_best_definition(npc_id, record, hour)
+	var best_candidate := _find_best_candidate(
+		npc_id,
+		record,
+		total_game_hours
+	)
+	var best_definition := best_candidate.get(
+		"definition",
+		null
+	) as NpcSpotDefinition
 	if best_definition == null:
 		return null
 	if _debug_definition_disabled(best_definition):
@@ -4070,7 +5120,10 @@ func _find_invitation_interrupt_definition(
 		return null
 	if best_definition.state_name != INVITE_PLAYER_STATE:
 		return null
-	if best_definition.priority <= current_definition.priority:
+	if int(best_candidate.get(
+		"effective_priority",
+		best_definition.priority
+	)) <= current_effective_priority:
 		return null
 
 	return best_definition

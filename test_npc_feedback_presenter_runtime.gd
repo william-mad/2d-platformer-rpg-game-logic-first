@@ -20,6 +20,13 @@ const MemoryPolicy = preload(
 )
 
 
+class FeedbackTestNpc:
+	extends CharacterBody2D
+
+	func get_npc_location_id() -> StringName:
+		return &"feedback_npc"
+
+
 func test_cue_model_uses_structured_identity_and_copies_metadata() -> void:
 	var source_metadata := {
 		"identity_key": "hunger_high",
@@ -370,6 +377,129 @@ func test_presented_hidden_cue_has_bounded_absolute_lifetime() -> void:
 	assert_true(bool(finished[0].has_been_presented), "presentation is retained")
 
 
+func test_unseen_refresh_preserves_identity_and_absolute_lifetime() -> void:
+	var presenter: Presenter = _presenter_fixture(true).presenter
+	var finished: Array[Dictionary] = []
+	presenter.cue_finished.connect(func(descriptor: Dictionary) -> void:
+		finished.append(descriptor)
+	)
+	var original: Cue = Cue.create(&"unseen_refresh", {
+		"fallback_text": "Unseen refresh",
+		"duration_seconds": 0.2,
+		"maximum_lifetime_seconds": 0.6,
+		"replace_policy": Cue.REFRESH_EXISTING,
+		"metadata": {
+			"identity_key": "unseen_refresh",
+			"occurrence_count": 1,
+		},
+	})
+	presenter.submit_cue(original)
+	var original_descriptor := presenter.get_current_cue_descriptor()
+	presenter._process(0.3)
+	var refreshed: Cue = Cue.create(&"unseen_refresh", {
+		"fallback_text": "Updated unseen refresh",
+		"duration_seconds": 0.2,
+		"maximum_lifetime_seconds": 5.0,
+		"replace_policy": Cue.REFRESH_EXISTING,
+		"metadata": {
+			"identity_key": "unseen_refresh",
+			"occurrence_count": 2,
+		},
+	})
+	assert_true(bool(presenter.submit_cue(refreshed).accepted), "refresh is accepted")
+	var descriptor := presenter.get_current_cue_descriptor()
+	assert_eq(descriptor.cue_id, original_descriptor.cue_id, "cue identity is preserved")
+	assert_eq(
+		descriptor.created_at_usec,
+		original_descriptor.created_at_usec,
+		"refresh preserves the original creation timestamp"
+	)
+	assert_eq(
+		descriptor.maximum_lifetime_seconds,
+		0.6,
+		"refresh cannot replace the original absolute lifetime"
+	)
+	assert_true(
+		float(descriptor.absolute_elapsed_seconds) >= 0.3,
+		"unseen refresh preserves absolute elapsed time"
+	)
+	assert_eq(
+		descriptor.metadata.occurrence_count,
+		2,
+		"refresh still updates copied cue metadata"
+	)
+	presenter._process(0.31)
+	assert_eq(finished.size(), 1, "unseen refreshed cue expires on its original bound")
+	assert_eq(
+		finished[0].finish_reason,
+		&"unseen_lifetime_expired",
+		"unseen refresh retains unseen expiry semantics"
+	)
+
+
+func test_presented_refresh_resets_visible_time_only_once() -> void:
+	var presenter: Presenter = _presenter_fixture().presenter
+	var presented := {"count": 0}
+	var finished: Array[Dictionary] = []
+	presenter.cue_presented.connect(func(_descriptor: Dictionary) -> void:
+		presented.count += 1
+	)
+	presenter.cue_finished.connect(func(descriptor: Dictionary) -> void:
+		finished.append(descriptor)
+	)
+	var original: Cue = Cue.create(&"presented_refresh", {
+		"fallback_text": "Presented refresh",
+		"duration_seconds": 0.5,
+		"maximum_lifetime_seconds": 1.0,
+		"cooldown_seconds": 5.0,
+		"replace_policy": Cue.REFRESH_EXISTING,
+		"metadata": {"identity_key": "presented_refresh"},
+	})
+	presenter.submit_cue(original)
+	assert_eq(presented.count, 1, "initial visible cue presents once")
+	var cooldown_key: String = original.get_cooldown_key()
+	var cooldown_expiry := int(
+		presenter._cooldown_expiry_usec_by_key.get(cooldown_key, 0)
+	)
+	presenter._process(0.3)
+	for occurrence in range(2, 6):
+		var refresh: Cue = Cue.create(&"presented_refresh", {
+			"fallback_text": "Presented refresh",
+			"duration_seconds": 0.5,
+			"maximum_lifetime_seconds": 1.0,
+			"cooldown_seconds": 5.0,
+			"replace_policy": Cue.REFRESH_EXISTING,
+			"metadata": {
+				"identity_key": "presented_refresh",
+				"occurrence_count": occurrence,
+			},
+		})
+		presenter.submit_cue(refresh)
+		if occurrence == 2:
+			var descriptor := presenter.get_current_cue_descriptor()
+			assert_true(
+				float(descriptor.visible_elapsed_seconds) <= 0.001,
+				"presented refresh restarts only visible duration"
+			)
+			assert_true(
+				float(descriptor.absolute_elapsed_seconds) >= 0.3,
+				"presented refresh preserves absolute elapsed time"
+			)
+		presenter._process(0.2)
+	assert_eq(presented.count, 1, "refresh never presents the same cue again")
+	assert_eq(
+		int(presenter._cooldown_expiry_usec_by_key.get(cooldown_key, 0)),
+		cooldown_expiry,
+		"refresh does not restart presentation cooldown"
+	)
+	assert_eq(finished.size(), 1, "repeated refreshes cannot keep a cue alive")
+	assert_eq(
+		finished[0].finish_reason,
+		&"maximum_lifetime_elapsed",
+		"presented refresh ends at the original absolute bound"
+	)
+
+
 func test_expired_queued_cue_is_rejected_before_becoming_current() -> void:
 	var presenter: Presenter = _presenter_fixture().presenter
 	var rejections: Array[Dictionary] = []
@@ -433,6 +563,139 @@ func test_accepted_intention_submits_once_and_refresh_is_silent() -> void:
 		<= commitment_before,
 		"presentation does not extend commitment"
 	)
+
+
+func test_late_schedule_feedback_requires_live_record_commit_and_is_once_per_session() -> void:
+	var fixture := _adapter_fixture()
+	var npc: Node = fixture.npc
+	var controller: NpcBehaviorController = fixture.controller
+	var presenter: Presenter = fixture.presenter
+	var simulator := root.get_node_or_null("NpcWorldSimulation")
+	var locations := root.get_node_or_null("NpcLocations")
+	assert_not_null(simulator, "schedule feedback requires world simulator")
+	assert_not_null(locations, "schedule feedback requires live registry")
+	if simulator == null or locations == null:
+		return
+	var previous_live = locations.live_npcs.get("feedback_npc", null)
+	locations.live_npcs["feedback_npc"] = npc
+	var starts := {"count": 0}
+	presenter.cue_started.connect(func(_descriptor: Dictionary) -> void:
+		starts.count += 1
+	)
+	controller.commit_candidate(NpcBehaviorIntent.create(
+		&"Work",
+		&"Work",
+		NpcBehaviorIntent.SOURCE_SCHEDULE,
+		"schedule_candidate",
+		70,
+		"mom_work",
+		"late-candidate",
+		0.0,
+		0,
+		{
+			"schedule_phase": "late",
+			"schedule_occurrence_key": "mom_work:12:0",
+		}
+	))
+	assert_eq(starts.count, 0, "accepted candidate alone is silent before record commit")
+	var on_time := _schedule_activity("on-time-session", "on_time")
+	simulator.scheduled_activity_committed.emit(&"feedback_npc", on_time)
+	assert_eq(starts.count, 0, "normal on-time commit emits no late cue")
+	var late := _schedule_activity("late-session", "late")
+	simulator.scheduled_activity_committed.emit(&"feedback_npc", late)
+	assert_eq(starts.count, 1, "genuinely committed late activity emits once")
+	assert_eq(
+		presenter.get_current_cue_descriptor().cue_code,
+		&"schedule_running_late",
+		"late commit maps to dedicated cue"
+	)
+	assert_eq(
+		presenter.get_current_cue_descriptor().fallback_text,
+		"Running late",
+		"late cue is concise"
+	)
+	simulator.scheduled_activity_committed.emit(&"feedback_npc", late)
+	assert_eq(starts.count, 1, "same-session commit refresh is silent")
+	locations.live_npcs.erase("feedback_npc")
+	simulator.scheduled_activity_committed.emit(
+		&"feedback_npc",
+		_schedule_activity("offscreen-session", "late")
+	)
+	assert_eq(starts.count, 1, "offscreen-only late execution is silent")
+	assert_null(
+		fixture.machine.current_state,
+		"presentation-only schedule feedback changes no behavior state"
+	)
+	if previous_live != null:
+		locations.live_npcs["feedback_npc"] = previous_live
+
+
+func test_finishing_up_feedback_requires_live_authoritative_session_and_emits_once() -> void:
+	var fixture := _adapter_fixture()
+	var npc: Node = fixture.npc
+	var machine: NpcStateMachine = fixture.machine
+	var presenter: Presenter = fixture.presenter
+	var simulator := root.get_node_or_null("NpcWorldSimulation")
+	var locations := root.get_node_or_null("NpcLocations")
+	assert_not_null(simulator, "overtime feedback requires world simulator")
+	assert_not_null(locations, "overtime feedback requires live registry")
+	if simulator == null or locations == null:
+		return
+	var previous_live = locations.live_npcs.get("feedback_npc", null)
+	locations.live_npcs["feedback_npc"] = npc
+	var activity := _schedule_activity("overtime-feedback-session", "late")
+	activity["schedule_completion_policy"] = "finish_current"
+	activity["schedule_maximum_overtime_game_hours"] = 0.5
+	activity["schedule_overtime_end_total_hours"] = 306.5
+	activity["schedule_window_end_total_hours"] = 306.0
+	activity["status"] = "active"
+	var live_action := activity.duplicate(true)
+	live_action["spot_id"] = ""
+	assert_true(machine.restore_action_descriptor(live_action), "matching action session is authoritative")
+	var starts := {"count": 0}
+	presenter.cue_started.connect(func(_descriptor: Dictionary) -> void:
+		starts.count += 1
+	)
+	var continuation := {
+		"may_continue": true,
+		"reason_code": &"finishing_current_activity",
+		"completion_policy": &"finish_current",
+		"occurrence_key": "mom_work:12:0",
+		"window_end_total_hours": 306.0,
+		"overtime_end_total_hours": 306.5,
+		"in_overtime": true,
+		"overtime_game_hours": 0.1,
+		"overtime_remaining_game_hours": 0.4,
+	}
+	simulator.scheduled_activity_entered_overtime.emit(
+		&"feedback_npc", activity, continuation
+	)
+	assert_eq(starts.count, 1, "live authoritative overtime emits one cue")
+	assert_eq(
+		presenter.get_current_cue_descriptor().cue_code,
+		&"schedule_finishing_up",
+		"overtime maps to the dedicated cue"
+	)
+	assert_eq(
+		presenter.get_current_cue_descriptor().fallback_text,
+		"Finishing up",
+		"overtime cue is concise"
+	)
+	simulator.scheduled_activity_entered_overtime.emit(
+		&"feedback_npc", activity, continuation
+	)
+	assert_eq(starts.count, 1, "same session cannot repeat the overtime cue")
+	var stale := activity.duplicate(true)
+	stale["session_id"] = "stale-overtime-session"
+	stale["action_session_id"] = "stale-overtime-session"
+	simulator.scheduled_activity_entered_overtime.emit(
+		&"feedback_npc", stale, continuation
+	)
+	assert_eq(starts.count, 1, "non-authoritative session is silent")
+	if previous_live != null:
+		locations.live_npcs["feedback_npc"] = previous_live
+	else:
+		locations.live_npcs.erase("feedback_npc")
 
 
 func test_internal_idle_is_silent_and_emergency_replaces_need() -> void:
@@ -505,6 +768,71 @@ func test_new_memory_cues_merge_refresh_and_routine_memory_is_silent() -> void:
 	)
 
 
+func test_player_harm_memory_feedback_is_actor_safe_and_prioritized() -> void:
+	var fixture := _adapter_fixture()
+	var memory: NpcShortTermMemory = fixture.memory
+	var presenter: Presenter = fixture.presenter
+	var player := Node2D.new()
+	player.add_to_group("player")
+	player.set_meta("relationship_id", "feedback_player")
+	add_child_autofree(player)
+	var starts := {"count": 0}
+	var updates := {"count": 0}
+	presenter.cue_started.connect(func(_descriptor: Dictionary) -> void:
+		starts.count += 1
+	)
+	presenter.cue_updated.connect(func(_descriptor: Dictionary) -> void:
+		updates.count += 1
+	)
+	memory.remember(_harm_memory_event(
+		"player_harm",
+		10.0,
+		&"__player__"
+	))
+	assert_eq(starts.count, 1, "direct player harm starts one cue")
+	assert_eq(
+		presenter.get_current_cue_descriptor().fallback_text,
+		"Upset with you",
+		"confirmed current-player identity permits directed wording"
+	)
+	memory.remember(_harm_memory_event(
+		"player_harm_repeat",
+		10.1,
+		&"__player__"
+	))
+	assert_eq(starts.count, 1, "merged player harm keeps one active cue")
+	assert_eq(updates.count, 1, "merged player harm refreshes presentation metadata")
+	assert_eq(
+		presenter.get_current_cue_descriptor().metadata.occurrence_count,
+		2,
+		"merged occurrence count reaches the refreshed cue"
+	)
+	presenter.submit_cue(Catalog.create_cue(&"hunger_high"))
+	assert_eq(
+		presenter.get_current_cue_descriptor().cue_code,
+		MemoryPolicy.EVENT_HARMED_BY_ACTOR,
+		"routine need cannot replace harm feedback"
+	)
+	presenter.submit_cue(Catalog.create_cue(&"emergency"))
+	assert_eq(
+		presenter.get_current_cue_descriptor().cue_code,
+		&"emergency",
+		"harm feedback cannot replace or outrank emergency"
+	)
+
+	var npc_fixture := _adapter_fixture()
+	var npc_memory: NpcShortTermMemory = npc_fixture.memory
+	npc_memory.remember(_harm_memory_event(
+		"npc_harm",
+		10.0,
+		&"other_npc"
+	))
+	assert_true(
+		npc_fixture.presenter.get_current_cue_descriptor().is_empty(),
+		"NPC-on-NPC harm never falsely says 'with you'"
+	)
+
+
 func test_failure_memories_submit_but_import_and_expiry_are_silent() -> void:
 	var fixture := _adapter_fixture()
 	var memory: NpcShortTermMemory = fixture.memory
@@ -559,7 +887,13 @@ func test_policy_final_outcomes_submit_once_and_candidate_inspection_is_silent()
 	)
 	var social := {
 		"all_candidates_suppressed": true,
-		"reason_code": &"no_social_target_due_to_recent_refusal",
+		"reason_code": &"no_social_target_due_to_recent_memory",
+		"suppressed_count": 2,
+		"suppressed_by_reason": {
+			"recent_conversation_refusal": 1,
+			"recently_harmed_by_candidate": 1,
+			"recently_talked_with_candidate": 0,
+		},
 		"earliest_retry_game_hours": 100.0,
 	}
 	machine.set_social_selection_feedback(social)
@@ -569,6 +903,19 @@ func test_policy_final_outcomes_submit_once_and_candidate_inspection_is_silent()
 		presenter.get_current_cue_descriptor().cue_code,
 		&"all_social_candidates_suppressed",
 		"final social suppression submits one concise cue"
+	)
+	assert_eq(
+		presenter.get_current_cue_descriptor().metadata.suppressed_count,
+		2,
+		"final cue carries the aggregate count"
+	)
+	assert_eq(
+		presenter.get_current_cue_descriptor().metadata.suppressed_by_reason.get(
+			"recently_harmed_by_candidate",
+			0
+		),
+		1,
+		"final cue carries structured reasons without actor identities"
 	)
 	presenter.clear_all(&"test")
 	machine.set_target_selection_feedback({
@@ -758,7 +1105,7 @@ func _adapter_fixture(
 	require_player: bool = false,
 	developer_label_enabled: bool = true
 ) -> Dictionary:
-	var npc := CharacterBody2D.new()
+	var npc := FeedbackTestNpc.new()
 	npc.name = "FeedbackNpc"
 	var label := Label.new()
 	label.name = "StateLabel"
@@ -835,6 +1182,49 @@ func _memory_event(
 	)
 	event.memory_id = memory_id
 	return event
+
+
+func _harm_memory_event(
+	memory_id: String,
+	now_game_hours: float,
+	attacker_id: StringName
+) -> NpcMemoryEvent:
+	var event := MemoryEvent.create(
+		MemoryPolicy.EVENT_HARMED_BY_ACTOR,
+		{
+			"source": "damage_event",
+			"reason_code": "damage_received",
+			"subject_id": attacker_id,
+			"target_id": "feedback_npc",
+			"logical_action": "Harm",
+			"metadata": {
+				"damage_amount": 1.0,
+				"attacker_kind": &"player",
+				"remaining_hp": 99.0,
+				"caused_death": false,
+			},
+		},
+		now_game_hours
+	)
+	event.memory_id = memory_id
+	return event
+
+
+func _schedule_activity(session_id: String, phase: String) -> Dictionary:
+	return {
+		"session_id": session_id,
+		"action_session_id": session_id,
+		"activity_id": session_id,
+		"source": "schedule",
+		"spot_id": "mom_work",
+		"state_name": "Work",
+		"priority": 70,
+		"schedule_phase": phase,
+		"schedule_occurrence_key": "mom_work:12:0",
+		"schedule_window_index": 0,
+		"schedule_lateness_game_hours": 0.75 if phase == "late" else 0.0,
+		"schedule_effective_priority": 70,
+	}
 
 
 func _custom_cue(

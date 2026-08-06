@@ -1,5 +1,7 @@
 class_name NpcActivityIdentity extends RefCounted
 
+const Identity = preload("res://scripts/systems/npc_identity.gd")
+
 const TARGETED_SPOT_ACTIONS := {
 	"Work": true,
 	"Eat": true,
@@ -102,45 +104,11 @@ static func has_target_identity(descriptor: Dictionary) -> bool:
 
 
 static func get_persistent_npc_id(target: Node) -> String:
-	if target == null or not is_instance_valid(target):
-		return ""
-	if target.is_in_group("player"):
-		return "__player__"
-	if target.has_method("get_npc_location_id"):
-		var method_id := String(target.call("get_npc_location_id")).strip_edges()
-		if not method_id.is_empty():
-			return method_id
-	if target.has_meta("npc_location_id"):
-		var meta_id := String(target.get_meta("npc_location_id")).strip_edges()
-		if not meta_id.is_empty():
-			return meta_id
-	return ""
+	return Identity.get_stable_actor_id(target)
 
 
 static func get_persistent_spot_id(target: Node, action_kind: StringName = &"") -> String:
-	if target == null or not is_instance_valid(target):
-		return ""
-
-	# A work spot can expose a distinct simulated food source on the same live node.
-	if String(_canonical_action_kind(action_kind)) == "Eat" and _has_property(target, &"eat_world_definition"):
-		var eat_definition = target.get("eat_world_definition")
-		var eat_spot_id := _get_definition_spot_id(eat_definition)
-		if not eat_spot_id.is_empty():
-			return eat_spot_id
-
-	if target.has_method("get_world_spot_id"):
-		var method_id := String(target.call("get_world_spot_id")).strip_edges()
-		if not method_id.is_empty():
-			return method_id
-	if _has_property(target, &"spot_id"):
-		var property_id := String(target.get("spot_id")).strip_edges()
-		if not property_id.is_empty():
-			return property_id
-	if _has_property(target, &"world_definition"):
-		var definition_id := _get_definition_spot_id(target.get("world_definition"))
-		if not definition_id.is_empty():
-			return definition_id
-	return ""
+	return Identity.get_spot_id(target, _canonical_action_kind(action_kind))
 
 
 static func get_node_scene_path(target: Node) -> String:
@@ -200,22 +168,3 @@ static func _canonical_action_kind(action_kind: StringName) -> StringName:
 		"routine_task", "Routine Task":
 			return &"RoutineTask"
 	return action_kind
-
-
-static func _get_definition_spot_id(definition) -> String:
-	if definition == null:
-		return ""
-	if definition is Dictionary:
-		return String(definition.get("spot_id", "")).strip_edges()
-	if _has_property(definition, &"spot_id"):
-		return String(definition.get("spot_id")).strip_edges()
-	return ""
-
-
-static func _has_property(object: Object, property_name: StringName) -> bool:
-	if object == null:
-		return false
-	for property in object.get_property_list():
-		if StringName(property.get("name", &"")) == property_name:
-			return true
-	return false

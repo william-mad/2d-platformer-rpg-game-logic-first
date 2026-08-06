@@ -1,0 +1,32 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/character_metric_bar.gd" id="1_script"]
+
+[node name="CharacterMetricBar" type="VBoxContainer"]
+custom_minimum_size = Vector2(0, 31)
+theme_override_constants/separation = 2
+script = ExtResource("1_script")
+
+[node name="Header" type="HBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="MetricName" type="Label" parent="Header"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"MutedLabel"
+text = "Metric"
+
+[node name="MetricValue" type="Label" parent="Header"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(44, 0)
+layout_mode = 2
+text = "0"
+horizontal_alignment = 2
+
+[node name="MetricBar" type="ProgressBar" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 11)
+layout_mode = 2
+value = 50.0
+show_percentage = false

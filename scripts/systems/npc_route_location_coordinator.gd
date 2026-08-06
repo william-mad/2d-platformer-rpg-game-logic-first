@@ -389,7 +389,7 @@ static func install_offscreen_start_route(
 			!= activity_session
 		or not expected_pending.is_empty()
 		or not expected_activity.is_empty()
-		or not expected_action.is_empty()
+		or _action_blocks_offscreen_start(expected_action)
 		or bool(locations.call("is_npc_live", npc_key))
 	):
 		return false
@@ -423,6 +423,17 @@ static func install_offscreen_start_route(
 		and NpcActionSessionModel._descriptor_session_id(committed.get("action", {}))
 			== activity_session
 	)
+
+
+static func _action_blocks_offscreen_start(action: Dictionary) -> bool:
+	if action.is_empty():
+		return false
+	# A terminal live action can be captured during scene teardown before the
+	# state machine clears it. It cannot execute offscreen and must not deadlock
+	# the next scheduled route. Non-terminal actions remain protected.
+	return String(action.get("status", "active")).to_lower() not in [
+		"cancelling", "cancelled", "completed", "failed",
+	]
 
 
 static func record_can_migrate_finish_route_to_replan(

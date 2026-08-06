@@ -10,6 +10,10 @@ const MENU_TALK := &"talk"
 const MENU_GOSSIP := &"gossip"
 const MENU_NPC_PROMPT := &"npc_prompt"
 const DEFAULT_DIALOGUE_METADATA := &"default_dialogue_definition"
+const NpcIdentity = preload("res://scripts/systems/npc_identity.gd")
+const SocialStateSchema = preload(
+	"res://scripts/systems/npc_social_state_schema.gd"
+)
 
 @export_group("Interaction")
 @export var interaction_action: StringName = &"charm"
@@ -426,6 +430,7 @@ func _handle_interaction_option(selected_index: int) -> void:
 		var target := menu_target_npc
 		_close_menu()
 		if target != null and target.has_method("try_open_trade") and bool(target.call("try_open_trade", player)):
+			_mark_player_npc_met(target, &"trade")
 			interaction_started.emit(player, target, &"trade")
 			interaction_applied.emit(player, target, &"trade")
 		else:
@@ -437,6 +442,7 @@ func _handle_interaction_option(selected_index: int) -> void:
 		var target := menu_target_npc
 		var result: Dictionary = target.call("try_toggle_travel_with_player", player)
 		if bool(result.get("success", false)):
+			_mark_player_npc_met(target, &"travel")
 			interaction_applied.emit(player, target, &"travel")
 			_finish_menu_attempt("", true)
 		else:
@@ -626,6 +632,7 @@ func _apply_interaction_effects(
 	effect_set_values: Dictionary,
 	effect_interaction_id: StringName
 ) -> void:
+	_mark_player_npc_met(target_npc, effect_interaction_id)
 	var receiver := _get_event_receiver(target_npc)
 	var machine := _get_machine(target_npc)
 
@@ -634,13 +641,39 @@ func _apply_interaction_effects(
 	elif machine != null and not effect_delta.is_empty():
 		machine.apply_value_delta(effect_delta, player)
 
+	var split_set_values := SocialStateSchema.split_value_delta(
+		effect_set_values
+	)
+	var local_set_values: Dictionary = split_set_values.get(
+		"local_values", {}
+	)
 	if machine != null:
-		for value_key in effect_set_values.keys():
+		for value_key in local_set_values.keys():
 			machine.set_value(
 				StringName(String(value_key)),
-				float(effect_set_values[value_key]),
+				float(local_set_values[value_key]),
 				player,
 				evaluate_set_value_reactions
+			)
+
+	var directed_set_values: Dictionary = split_set_values.get(
+		"directed_opinion", {}
+	)
+	var relationships := _get_relationship_system()
+	if (
+		not directed_set_values.is_empty()
+		and relationships != null
+		and relationships.has_method("set_opinion_metric")
+	):
+		for value_key in directed_set_values.keys():
+			relationships.call(
+				"set_opinion_metric",
+				target_npc,
+				player,
+				StringName(String(value_key)),
+				float(directed_set_values[value_key]),
+				"player_interaction_absolute",
+				{"interaction_id": String(effect_interaction_id)}
 			)
 
 	if target_npc.has_method("on_player_npc_interaction"):
@@ -774,6 +807,13 @@ func _finish_npc_prompt(accepted: bool, reason: String = "") -> void:
 		and is_instance_valid(player)
 	):
 		callback_target.call(callback_method, target_npc, player, callback_prompt_id)
+	if (
+		accepted
+		and reason.is_empty()
+		and target_npc != null
+		and is_instance_valid(target_npc)
+	):
+		_mark_player_npc_met(target_npc, callback_prompt_id)
 
 	if target_npc != null and is_instance_valid(target_npc):
 		_end_target_menu_hold(target_npc)
@@ -876,6 +916,7 @@ func _try_begin_modal_dialogue(definition: DialogueDefinition) -> void:
 	close_for_scripted_handoff()
 	var result: Dictionary = controller.call("begin_dialogue", player, target_npc, definition)
 	if bool(result.get("accepted", false)):
+		_mark_player_npc_met(target_npc, &"dialogue")
 		interaction_started.emit(player, target_npc, &"dialogue")
 		return
 
@@ -1243,15 +1284,7 @@ func _get_relationship_id_for_node(target: Node) -> String:
 	var relationships := _get_relationship_system()
 	if relationships != null and relationships.has_method("get_relationship_id"):
 		return String(relationships.call("get_relationship_id", target))
-
-	if target.has_method("get_relationship_id"):
-		return String(target.call("get_relationship_id"))
-	if target.has_meta("relationship_id"):
-		return String(target.get_meta("relationship_id"))
-	if target.is_inside_tree():
-		return String(target.get_path())
-
-	return "instance:%s" % target.get_instance_id()
+	return NpcIdentity.get_actor_id(target, true)
 
 
 func _get_relationship_system() -> Node:
@@ -1259,6 +1292,44 @@ func _get_relationship_system() -> Node:
 		return null
 
 	return get_node_or_null("/root/Relationships")
+
+
+func _mark_player_npc_met(
+	target_npc: Node,
+	interaction_kind: StringName
+) -> void:
+	if (
+		target_npc == null
+		or not is_instance_valid(target_npc)
+		or player == null
+		or not is_instance_valid(player)
+	):
+		return
+	# Persistence-backed character menus must never learn generated path/instance
+	# identities. A successful interaction with a legacy identity-free actor still
+	# runs normally; it simply cannot become a durable known-character entry.
+	if (
+		NpcIdentity.get_stable_actor_id(target_npc).is_empty()
+		or NpcIdentity.get_stable_actor_id(player).is_empty()
+	):
+		return
+	var relationships := _get_relationship_system()
+	if relationships == null or not relationships.has_method("meet"):
+		return
+	var starting_favor := -1.0
+	if NpcIdentity.has_property(target_npc, &"default_relationship_favor"):
+		starting_favor = float(target_npc.get("default_relationship_favor"))
+	relationships.call(
+		"meet",
+		target_npc,
+		player,
+		starting_favor,
+		0.0,
+		{
+			"reason": "player_interaction:%s" % String(interaction_kind),
+			"scope": "direct",
+		}
+	)
 
 
 func _get_event_receiver(target_npc: Node) -> Node:

@@ -16,8 +16,11 @@ ends an action, reserves a spot, or changes relationships or values. Separate,
 stateless interpretation policies query this passive evidence while the producer
 that already owns candidate enumeration makes its decision:
 
-- `NpcSocialMemoryPolicy` interprets recent conversation refusal.
+- `NpcSocialMemoryPolicy` interprets recent conversation refusal, actor harm,
+  and completed-conversation reset windows for autonomous Talk selection.
 - `NpcTargetMemoryPolicy` interprets recent target-specific terminal failure.
+- `NpcPlayerInteractionMemoryPolicy` interprets recent actor-directed harm only
+  when that same actor later attempts ordinary player interaction.
 
 ```text
 gameplay outcome
@@ -101,6 +104,14 @@ the conversation partner is the subject and the remembering NPC is the target.
 For an action failure, the remembering NPC is the subject and the action target
 is the target.
 
+`harmed_by_actor` deliberately uses the opposite actor-directed convention:
+the harmed NPC owns the memory, `subject_id` is the attacker, `target_id` is the
+remembering NPC, and `logical_action` is `Harm`. Both identities must be stable.
+Player actors use the canonical `__player__` identity even when their live node
+has another authored identifier; NPC attackers require an authored relationship/location
+identity. Scene-tree paths, generated instance IDs, display names, and `Node`
+references are rejected.
+
 For `conversation_refused`, the requester is the NPC that stores the memory,
 `subject_id` is the refusing partner, and `target_id` is the requester. Both IDs
 come from `NpcActionSession.get_persistent_id()`, which prefers
@@ -127,6 +138,7 @@ dedupe, merge, occurrence, lifetime, and debug-text policy:
 | `target_unavailable` | 0.50 h | 1.00 h | 0.40 | -0.20 | 0.125 h |
 | `movement_failed` | 0.50 h | 1.00 h | 0.50 | -0.30 | 0.125 h |
 | `intention_target_lost` | 0.75 h | 1.50 h | 0.55 | -0.35 | 0.25 h |
+| `harmed_by_actor` | 1.00 h | 2.00 h | 0.75 | -0.80 | 0.125 h |
 
 Durations use total game hours from `WorldTime`. Pausing world progression pauses
 memory age; accelerated time and large time jumps age memory deterministically.
@@ -159,7 +171,8 @@ cannot mutate internal storage.
 
 - An NPC requester's intended NPC partner explicitly refuses the mutual Talk
   handshake.
-- A real NPC-to-NPC Talk overlay reaches the existing normal completion path.
+- A real NPC-to-NPC or NPC-to-player Talk overlay reaches the existing normal
+  completion path. Player partners are copied as `__player__`.
 - The current matching action session reaches `failed` through
   `fail_active_action`.
 - `missing_action_target`, `movement_target_missing`, and a missing scheduled
@@ -167,43 +180,112 @@ cannot mutate internal storage.
 - A terminal `movement_stuck` result becomes `movement_failed`.
 - A goal-bearing, non-lifecycle intention loses its exact persistent target and
   its state actually exits because of that loss.
+- `DamageEvents.damage_dealt` reports positive actual damage whose exact target
+  is the bound NPC and whose attacker is a stable player or NPC actor.
 
 Other matching action failures become `action_failed`.
 
-The current Talk handshake reports only `can_accept_talk_request == false`; it
-does not expose the partner's private refusal subtype. The observer therefore
-stores the stable `partner_refused_talk` result and does not infer a more specific
-reason from label text or arbitrary strings.
+The mutual Talk handshake now consumes a structured candidate acceptance
+decision. Only `social_decline` is observable as refusal memory, and its stable
+reason code is copied into metadata. The observer never infers a reason from
+label text, feedback wording, or arbitrary error strings.
 
-## Refusal retry policy
+## Actor-directed harm and player interaction
+
+`SocialNpc.take_damage()` remains the sole owner of NPC damage ordering. It
+validates a living target and positive attempt, applies actual HP loss, updates
+the existing relationship favor/anger/fear values, submits existing Fight or
+Flee requests, then emits `DamageEvents.damage_dealt` once with `damage_taken`.
+The memory observer subscribes to that authoritative outcome; there is no second
+direct observation call from `SocialNpc`.
+
+```text
+actual damage
+      |-- relationship anger/fear -> existing Fight/Flee
+      `-- harmed_by_actor memory
+                    |
+         recent-interaction policy
+                    |
+        temporary ordinary refusal
+```
+
+The observer accepts only the bound NPC as target, positive actual damage, and a
+distinct valid player or NPC attacker with a stable identity. It excludes zero
+or rejected damage, environment/unknown sources, monsters, self-damage, invalid
+nodes, and unrelated targets. Copied metadata is limited to `damage_amount`,
+`attacker_kind`, `remaining_hp`, and `caused_death`; no object, path, instance ID,
+or display string enters memory.
+
+`DamageEvents` currently has no unique outcome ID. Inspection confirms the
+authoritative `SocialNpc` path emits it once after actual HP loss, so the observer
+does not guess duplicate identity from timing and amount. Binding is idempotent,
+which prevents duplicate signal delivery. Two real successive hits remain two
+observations; normal semantic merging increments `occurrence_count` inside the
+0.125-hour window.
+
+`NpcPlayerInteractionMemoryPolicy` is stateless and read-only. Its default
+refusal delay is 0.5 game hours from `last_updated_game_hours`, while the memory
+itself normally remains for 1.0 hour and is capped at 2.0 hours from its first
+observation. A genuine repeated hit refreshes the short delay through the normal
+memory update. Resolved or expired records never block, and an NPC attacker never
+blocks the player. All live representations of the player resolve to the same
+canonical identity, while this policy timing remains separate from autonomous
+social selection.
+
+The state machine consults this policy in
+`can_begin_player_interaction(actor)` only after existing actor, active-NPC,
+scripted-control, real-time cooldown, death/disable, scene handoff, state, and
+knockout gates. Those hard reasons therefore remain authoritative. A matching
+memory returns `npc_recently_harmed_by_player` and blocks the ordinary interaction
+menu and its casual actions. It does not start or extend the existing real-time
+interaction cooldown, request a state, change an intention, alter relationships,
+or affect internal NPC-to-NPC Talk, combat, emergencies, or scripted control.
+
+The game-time refusal and the real-time menu cooldown are intentionally separate:
+world-time pause/acceleration affects only the harm policy, while ordinary
+cooldown processing retains its existing real-time behavior.
+
+## Autonomous social-memory policy
 
 `NpcSocialMemoryPolicy` is a stateless interpretation layer. It queries unresolved
-`conversation_refused` events for one candidate's persistent ID and returns a
-structured allow/suppress decision. Resolved refusal memories do not suppress.
-Conversation completion, generic action failure, commitment rejection, player
-dialogue cancellation, and candidate-discovery failure do not qualify.
+events for one candidate's persistent ID and returns one structured
+allow/suppress decision. It interprets only:
 
-The refusal memory lasts about 1.5 game hours, while the default behavioral retry
-delay is only 0.25 game hours (about fifteen in-game minutes). The shorter delay
-uses `last_updated_game_hours`, so a genuine merged repeat restarts the delay
-without changing the memory's lifetime. Both use authoritative total game hours:
-paused game time pauses them, accelerated time advances them, and large time
-jumps resolve them deterministically.
+- `conversation_refused`: 0.25 game hours, reason
+  `recent_conversation_refusal`.
+- `harmed_by_actor`: 0.5 game hours, reason
+  `recently_harmed_by_candidate`.
+- `conversation_completed`: 0.125 game hours, reason
+  `recently_talked_with_candidate`.
+
+Resolved or expired memories do not suppress. Generic action failure,
+commitment rejection, dialogue cancellation, and candidate-discovery failure do
+not qualify. When several memories apply, the latest retry expiry controls;
+equal expiry uses harm, refusal, then completion severity, followed by stable
+memory ID.
+
+Each behavioral retry is intentionally shorter than its memory lifetime. It uses
+`last_updated_game_hours`, so a genuine merged repeat restarts the applicable
+delay without changing memory lifetime. All timings use authoritative total game
+hours: paused game time pauses them, accelerated time advances them, and large
+time jumps resolve them deterministically.
 
 The filter runs after ordinary identity, availability, relationship, and
 same-scene checks, but before the planner reserves a pair or submits an intention.
 Suppressed candidates are skipped without changing the order of allowed
-candidates. Another eligible NPC or the player can still be selected.
+candidates. Another eligible NPC or the player can still be selected. The player
+uses the social target ID `__player__`; player-initiated interaction continues
+through `NpcPlayerInteractionMemoryPolicy`, not this planner policy.
 
-If every otherwise-valid NPC candidate is suppressed, the planner returns
-`no_social_target_due_to_recent_refusal`, creates no reservation or action
+If every otherwise-valid candidate is suppressed, the planner returns
+`no_social_target_due_to_recent_memory`, creates no reservation or action
 session, leaves social need and the current commitment unchanged, and records
 the earliest game-hour retry boundary for the normal social-planning cadence.
 Ordinary schedule and non-social fallback behavior can continue.
 
-The same policy also filters the live `talk_to_seen_target` value-rule candidate
-loop before its request is submitted. Offscreen simulation has no memory and is
-unchanged. The policy is evaluated only during new candidate selection; accepted
+The same policy also filters NPC and player candidates in the live
+`talk_to_seen_target` value-rule loop before its request is submitted. Offscreen
+simulation has no memory and is unchanged. The policy is evaluated only during new candidate selection; accepted
 approaches, Talk overlays, pair ownership, completion, emergency handling,
 schedules, travel, and player interaction are not continuously reevaluated.
 
@@ -212,6 +294,10 @@ authority to skip the whole candidate search. It re-enumerates at the existing
 social-planning cadence. A partner that enters the scene, becomes socially
 available, or replaces a removed partner is therefore visible immediately; the
 policy still suppresses only the partner whose refusal memory matches.
+
+Completed conversation is a short repeat cooldown, not a positive episodic
+preference score. Allowed candidates may be ranked by authored preference and
+directed relationship data, but positive scoring from memories remains deferred.
 
 ## Target-failure retry policy
 
@@ -287,6 +373,21 @@ eligibility already returns independently when the short delay ends.
 
 ## Intentionally excluded outcomes
 
+`conversation_refused` has a strict semantic boundary: the memory observer
+accepts it only when copied metadata identifies a structured candidate decision
+as `decision_kind = social_decline`. The same metadata carries the stable
+`refusal_reason_code`, while the memory subject remains the refusing NPC and the
+target remains the remembering requester. Candidate-owned recent harm or a
+candidate-directed relationship threshold can produce that outcome.
+
+Temporary execution unavailability, invalid or stale requests, protected work,
+scripted or emergency ownership, an existing interaction/session, scene
+transition, reservation conflict, commitment rejection, and teardown do not
+mean that another person rejected the requester. Those paths therefore create no
+refusal memory and no `Recently refused` suppression. A recently completed
+conversation is likewise a temporary reset rather than a decline. Existing
+deduplication and memory lifetime apply unchanged to genuine declines.
+
 The observer does not record candidate inspection, target search with no actual
 partner, behavior-commitment rejection, normal action completion, same-session
 phase or intention refresh, accepted-intention replacement, temporary traversal
@@ -304,6 +405,12 @@ by session and event type, so duplicated cleanup routing creates one observation
 matching session and target IDs. It is not also emitted as
 `target_unavailable` for the same outcome.
 
+Successful-help memory is deferred. The project does not yet expose one central,
+authoritative outcome proving that a particular actor successfully helped a
+particular NPC. Adding it from attempted interactions or presentation callbacks
+would create false memories. The next memory should begin only after such a
+central successful-help event exists.
+
 ## Developer feedback
 
 The state machine exposes an adjacent combined feedback descriptor containing the
@@ -313,12 +420,16 @@ descriptor with considered/suppressed counts, selected candidate, stable reason,
 and earliest retry time. Target selection exposes a `target_selection`
 descriptor with logical action, candidate count, suppression count, selected
 stable ID, per-candidate reasons, and earliest retry.
+After an attempted player interaction, the adjacent
+`player_interaction_memory` descriptor exposes the copied actor ID, memory ID,
+occurrence count, stable reason, and remaining game-hour retry time. It never
+exposes a mutable memory object and is not logged on eligibility polls.
 `NpcBehaviorFeedbackFormatter` renders concise policy lines adjacent to memory.
 
 ```text
 MoveToTarget -> Eat + Talk
 Hungry · need · p50
-social: waiting after refusal
+social: waiting after recent memory
 Eat targets recently failed
 remembers: Mom refused to talk
 ```
@@ -381,6 +492,14 @@ new component first captures the old owner, increments the generation, and
 restores into the new owner. A delayed exit from the old instance has a stale
 token and cannot overwrite or unregister the replacement. Registering the exact
 same component twice is idempotent and does not import twice.
+
+`harmed_by_actor` uses this repository without special storage ownership. A
+still-valid record therefore blocks the matching player after scene replacement,
+the shorter refusal can expire while the record remains stored, and an expired
+record is removed during restoration. Snapshot import emits only
+`memory_changed`, so historical harm never replays a player cue. Each observer
+disconnects from the global damage signal on tree exit; an unloaded old instance
+cannot observe damage delivered to its replacement.
 
 When an NPC is live, repository reads and runtime exports use that component
 directly; the cache is fallback state only. Registrations hold `WeakRef`s, so

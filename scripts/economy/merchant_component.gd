@@ -43,7 +43,11 @@ func get_inventory() -> InventoryModel:
 
 func get_current_favor() -> float:
 	var npc := get_parent()
-	var fallback := float(npc.get("default_relationship_favor")) if npc != null else 50.0
+	var fallback := 50.0
+	if npc != null:
+		var configured_fallback = npc.get("default_relationship_favor")
+		if configured_fallback != null:
+			fallback = float(configured_fallback)
 	var relationships := get_node_or_null("/root/Relationships")
 	if relationships == null or _trade_player == null or not is_instance_valid(_trade_player):
 		return clampf(fallback, 0.0, 100.0)

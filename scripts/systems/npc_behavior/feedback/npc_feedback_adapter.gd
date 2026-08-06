@@ -6,6 +6,10 @@ const Catalog = preload(
 const MemoryPolicy = preload(
 	"res://scripts/systems/npc_behavior/npc_memory_policy.gd"
 )
+const PlayerInteractionMemoryPolicy = preload(
+	"res://scripts/systems/npc_behavior/npc_player_interaction_memory_policy.gd"
+)
+const ActionSession = preload("res://scripts/systems/npc_action_session.gd")
 const Presenter = preload(
 	"res://scripts/systems/npc_behavior/feedback/npc_feedback_presenter.gd"
 )
@@ -14,6 +18,8 @@ var _machine: NpcStateMachine
 var _controller: NpcBehaviorController
 var _memory: NpcShortTermMemory
 var _presenter: Presenter
+var _late_schedule_sessions_seen: Dictionary = {}
+var _overtime_schedule_sessions_seen: Dictionary = {}
 
 
 func bind(
@@ -35,6 +41,7 @@ func bind(
 	_bind_controller_signals()
 	_bind_memory_signals()
 	_bind_machine_signals()
+	_bind_schedule_commit_signal()
 	_bind_control_claim_signal()
 	_refresh_state_suppression()
 
@@ -86,6 +93,31 @@ func _bind_control_claim_signal() -> void:
 		gameplay_flow.connect(&"npc_control_claim_changed", callback)
 
 
+func _bind_schedule_commit_signal() -> void:
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if (
+		simulator == null
+		or not simulator.has_signal(&"scheduled_activity_committed")
+	):
+		return
+	var callback := Callable(self, "_on_scheduled_activity_committed")
+	if not simulator.is_connected(&"scheduled_activity_committed", callback):
+		simulator.connect(&"scheduled_activity_committed", callback)
+	if simulator.has_signal(&"scheduled_activity_entered_overtime"):
+		var overtime_callback := Callable(
+			self,
+			"_on_scheduled_activity_entered_overtime"
+		)
+		if not simulator.is_connected(
+			&"scheduled_activity_entered_overtime",
+			overtime_callback
+		):
+			simulator.connect(
+				&"scheduled_activity_entered_overtime",
+				overtime_callback
+			)
+
+
 func _on_intention_accepted(intent: NpcBehaviorIntent) -> void:
 	_submit_intention(intent)
 
@@ -95,6 +127,111 @@ func _on_intention_replaced(
 	current: NpcBehaviorIntent
 ) -> void:
 	_submit_intention(current)
+
+
+func _on_scheduled_activity_committed(
+	npc_id: StringName,
+	activity: Dictionary
+) -> void:
+	if _presenter == null or _machine == null or _machine.npc == null:
+		return
+	if String(ActionSession.get_persistent_id(_machine.npc)) != String(npc_id):
+		return
+	var locations := get_node_or_null("/root/NpcLocations")
+	if (
+		locations != null
+		and locations.has_method("get_live_npc")
+		and locations.call("get_live_npc", String(npc_id)) != _machine.npc
+	):
+		return
+	if String(activity.get("source", "schedule")) != "schedule":
+		return
+	if String(activity.get("schedule_phase", "")) != "late":
+		return
+	var session_id := ActionSession._descriptor_session_id(activity)
+	if session_id.is_empty() or _late_schedule_sessions_seen.has(session_id):
+		return
+	var occurrence_key := String(activity.get(
+		"schedule_occurrence_key",
+		""
+	)).strip_edges()
+	if occurrence_key.is_empty():
+		return
+	_late_schedule_sessions_seen[session_id] = true
+	var cue := Catalog.create_cue(&"schedule_running_late", {
+		"source_session_id": session_id,
+		"metadata": {
+			"identity_key": "schedule_running_late:%s" % occurrence_key,
+			"cooldown_key": "schedule_running_late",
+			"spot_id": StringName(String(activity.get("spot_id", ""))),
+			"schedule_occurrence_key": occurrence_key,
+			"schedule_window_index": int(activity.get(
+				"schedule_window_index",
+				-1
+			)),
+			"schedule_lateness_game_hours": float(activity.get(
+				"schedule_lateness_game_hours",
+				0.0
+			)),
+			"schedule_effective_priority": int(activity.get(
+				"schedule_effective_priority",
+				activity.get("priority", 0)
+			)),
+		},
+	})
+	_presenter.submit_cue(cue)
+
+
+func _on_scheduled_activity_entered_overtime(
+	npc_id: StringName,
+	activity: Dictionary,
+	continuation_decision: Dictionary
+) -> void:
+	if _presenter == null or _machine == null or _machine.npc == null:
+		return
+	if String(ActionSession.get_persistent_id(_machine.npc)) != String(npc_id):
+		return
+	var locations := get_node_or_null("/root/NpcLocations")
+	if (
+		locations != null
+		and locations.has_method("get_live_npc")
+		and locations.call("get_live_npc", String(npc_id)) != _machine.npc
+	):
+		return
+	if String(activity.get("source", "schedule")) != "schedule":
+		return
+	if String(continuation_decision.get("completion_policy", "")) != "finish_current":
+		return
+	if not bool(continuation_decision.get("may_continue", false)):
+		return
+	if String(continuation_decision.get("reason_code", "")) != "finishing_current_activity":
+		return
+	var session_id := ActionSession._descriptor_session_id(activity)
+	if session_id.is_empty() or _overtime_schedule_sessions_seen.has(session_id):
+		return
+	if (
+		_machine.has_method("get_active_action_session_id")
+		and String(_machine.call("get_active_action_session_id")) != session_id
+	):
+		return
+	_overtime_schedule_sessions_seen[session_id] = true
+	var cue := Catalog.create_cue(&"schedule_finishing_up", {
+		"source_session_id": session_id,
+		"metadata": {
+			"identity_key": "schedule_finishing_up:%s" % session_id,
+			"cooldown_key": "schedule_finishing_up:%s" % session_id,
+			"spot_id": StringName(String(activity.get("spot_id", ""))),
+			"schedule_occurrence_key": String(activity.get(
+				"schedule_occurrence_key",
+				""
+			)),
+			"schedule_overtime_game_hours": float(continuation_decision.get(
+				"overtime_game_hours",
+				0.0
+			)),
+		},
+	})
+	_presenter.submit_cue(cue)
 
 
 func _submit_intention(intent: NpcBehaviorIntent) -> void:
@@ -161,7 +298,13 @@ func _submit_memory(descriptor: Dictionary) -> void:
 		MemoryPolicy.EVENT_TARGET_UNAVAILABLE,
 		MemoryPolicy.EVENT_MOVEMENT_FAILED,
 		MemoryPolicy.EVENT_INTENTION_TARGET_LOST,
+		MemoryPolicy.EVENT_HARMED_BY_ACTOR,
 	]:
+		return
+	if (
+		event_type == MemoryPolicy.EVENT_HARMED_BY_ACTOR
+		and not _memory_subject_is_current_player(descriptor)
+	):
 		return
 	var memory_id := String(descriptor.get("memory_id", "")).strip_edges()
 	if memory_id.is_empty():
@@ -206,7 +349,33 @@ func _memory_cooldown_key(
 				String(descriptor.get("logical_action", "")),
 				String(descriptor.get("target_id", "")),
 			]
+		MemoryPolicy.EVENT_HARMED_BY_ACTOR:
+			return "%s:%s" % [
+				String(event_type),
+				String(descriptor.get("subject_id", "")),
+			]
 	return String(event_type)
+
+
+func _memory_subject_is_current_player(descriptor: Dictionary) -> bool:
+	if _machine == null or _machine.npc == null or not _machine.npc.is_inside_tree():
+		return false
+	var subject_id := StringName(String(descriptor.get(
+		"subject_id",
+		""
+	)).strip_edges())
+	if subject_id == &"":
+		return false
+	for candidate in _machine.npc.get_tree().get_nodes_in_group("player"):
+		var player := candidate as Node
+		if (
+			player != null
+			and is_instance_valid(player)
+			and PlayerInteractionMemoryPolicy.get_stable_actor_id(player)
+				== subject_id
+		):
+			return true
+	return false
 
 
 func _on_policy_feedback_changed(
@@ -233,6 +402,14 @@ func _on_policy_feedback_changed(
 						"identity_key": "all_social_candidates_suppressed",
 						"cooldown_key": "all_social_candidates_suppressed",
 						"reason_code": descriptor.get("reason_code", &""),
+						"suppressed_count": int(descriptor.get(
+							"suppressed_count",
+							0
+						)),
+						"suppressed_by_reason": descriptor.get(
+							"suppressed_by_reason",
+							{}
+						).duplicate(true),
 					},
 				}
 			))

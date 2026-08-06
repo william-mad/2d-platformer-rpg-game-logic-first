@@ -1,5 +1,7 @@
 class_name NpcActionSession extends RefCounted
 
+const Identity = preload("res://scripts/systems/npc_identity.gd")
+
 enum Status {
 	PROPOSED,
 	ACTIVE,
@@ -82,6 +84,9 @@ static func create(
 	var descriptor_metadata = descriptor.get("metadata", {})
 	if descriptor_metadata is Dictionary:
 		session.metadata = descriptor_metadata.duplicate(true)
+	for descriptor_key in descriptor:
+		if String(descriptor_key).begins_with("schedule_"):
+			session.metadata[String(descriptor_key)] = descriptor[descriptor_key]
 	# Preserve scheduled identity/value hints used by exact-target activity states.
 	for metadata_key in [
 		"activity_id", "scheduled_activity_id", "schedule_activity_id",
@@ -207,6 +212,9 @@ func to_descriptor() -> Dictionary:
 		descriptor["released_reservation_ids"] = released_reservation_ids.keys()
 	if not metadata.is_empty():
 		descriptor["metadata"] = metadata.duplicate(true)
+		for metadata_key in metadata:
+			if String(metadata_key).begins_with("schedule_"):
+				descriptor[String(metadata_key)] = metadata[metadata_key]
 	return descriptor
 
 
@@ -228,22 +236,7 @@ static func _is_lifecycle_status_name(value: String) -> bool:
 
 
 static func get_persistent_id(target: Node) -> String:
-	if target == null or not is_instance_valid(target):
-		return ""
-	for method_name in [&"get_npc_location_id", &"get_persistent_spot_id", &"get_spot_id", &"get_relationship_id"]:
-		if target.has_method(method_name):
-			var value := String(target.call(method_name)).strip_edges()
-			if not value.is_empty():
-				return value
-	for property_name in [&"spot_id", &"location_id", &"persistent_id"]:
-		for property in target.get_property_list():
-			if StringName(property.get("name", "")) == property_name:
-				var value := String(target.get(property_name)).strip_edges()
-				if not value.is_empty():
-					return value
-	if target.is_inside_tree():
-		return String(target.get_path())
-	return ""
+	return Identity.get_target_id(target, &"", true, false)
 
 
 static func _descriptor_session_id(descriptor: Dictionary) -> String:

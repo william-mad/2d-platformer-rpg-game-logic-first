@@ -4,6 +4,8 @@ signal talk_started(talker: Node2D, partner: Node2D)
 signal talk_finished(talker: Node2D, partner: Node2D, changed_values: Dictionary)
 signal talk_cancelled(talker: Node2D, partner: Node2D, reason: String)
 
+const NpcIdentity = preload("res://scripts/systems/npc_identity.gd")
+
 
 class TalkProgressRing:
 	extends Control
@@ -801,21 +803,13 @@ func _get_gossip_target_label(relationship: Dictionary, target: Node) -> String:
 
 
 func _get_relationship_id_for_node(target: Node) -> String:
-	if target == null:
+	if target == null or not is_instance_valid(target):
 		return ""
 
 	var relationships := _get_relationship_system()
 	if relationships != null and relationships.has_method("get_relationship_id"):
 		return String(relationships.call("get_relationship_id", target))
-
-	if target.has_method("get_relationship_id"):
-		return String(target.call("get_relationship_id"))
-	if target.has_meta("relationship_id"):
-		return String(target.get_meta("relationship_id"))
-	if target.is_inside_tree():
-		return String(target.get_path())
-
-	return "instance:%s" % target.get_instance_id()
+	return NpcIdentity.get_actor_id(target, true)
 
 
 func _get_relationship_system() -> Node:

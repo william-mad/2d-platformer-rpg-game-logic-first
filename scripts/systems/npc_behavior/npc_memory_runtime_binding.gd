@@ -1,6 +1,7 @@
 class_name NpcMemoryRuntimeBinding extends Node
 
 const REPOSITORY_PATH: String = "/root/NpcMemoryRuntimeRepository"
+const Identity = preload("res://scripts/systems/npc_identity.gd")
 
 var ownership_token: String = ""
 var generation: int = 0
@@ -117,39 +118,4 @@ func _apply_registration_result(
 
 
 func _resolve_stable_npc_id(npc: Node) -> String:
-	for property_name in [&"location_id", &"relationship_id"]:
-		if not _has_property(npc, property_name):
-			continue
-		var property_id := String(npc.get(property_name)).strip_edges()
-		if _is_stable_id(property_id):
-			return property_id
-
-	if npc.has_meta("npc_location_id"):
-		var meta_id := String(npc.get_meta("npc_location_id")).strip_edges()
-		if _is_stable_id(meta_id):
-			return meta_id
-
-	for method_name in [&"get_npc_location_id", &"get_relationship_id"]:
-		if not npc.has_method(method_name):
-			continue
-		var method_id := String(npc.call(method_name)).strip_edges()
-		if _is_stable_id(method_id):
-			return method_id
-	return ""
-
-
-func _is_stable_id(candidate: String) -> bool:
-	if candidate.is_empty() or candidate.begins_with("/") or candidate.contains("/"):
-		return false
-	if candidate.begins_with("npc:"):
-		var suffix := candidate.substr(4)
-		if suffix.is_valid_int():
-			return false
-	return true
-
-
-func _has_property(object: Object, property_name: StringName) -> bool:
-	for descriptor in object.get_property_list():
-		if StringName(descriptor.get("name", "")) == property_name:
-			return true
-	return false
+	return Identity.get_stable_actor_id(npc)

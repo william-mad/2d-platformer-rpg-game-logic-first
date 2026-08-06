@@ -1,6 +1,10 @@
 class_name NpcActivitySelector
 extends RefCounted
 
+const ScheduleWindowPolicy = preload(
+	"res://scripts/systems/npc_schedule_window_policy.gd"
+)
+
 
 static func find_best_definition(
 	spot_definitions: Dictionary,
@@ -9,23 +13,57 @@ static func find_best_definition(
 	hour: float,
 	runtime
 ) -> NpcSpotDefinition:
-	var best_definition: NpcSpotDefinition = null
-	var best_urgency := -INF
+	var candidate := find_best_candidate(
+		spot_definitions,
+		npc_id,
+		record,
+		hour,
+		runtime
+	)
+	return candidate.get("definition", null) as NpcSpotDefinition
+
+
+static func find_best_candidate(
+	spot_definitions: Dictionary,
+	npc_id: StringName,
+	record: Dictionary,
+	total_game_hours: float,
+	runtime
+) -> Dictionary:
+	var best_candidate: Dictionary = {}
+	var hour := fposmod(total_game_hours, 24.0)
 	for definition_value in spot_definitions.values():
 		var definition := definition_value as NpcSpotDefinition
 		if definition == null:
 			continue
+		var schedule_decision: Dictionary = {}
 		if runtime._definition_is_meal_cycle_managed(definition):
 			if not runtime._meal_cycle_definition_can_start(definition, npc_id, hour):
 				continue
+			schedule_decision = {
+				"eligible": true,
+				"phase": ScheduleWindowPolicy.PHASE_ON_TIME,
+				"start_policy": ScheduleWindowPolicy.START_POLICY_HARD,
+				"window_index": -1,
+				"occurrence_key": "",
+				"effective_priority": definition.priority,
+				"may_interrupt_busy_live_npc": true,
+				"meal_cycle_managed": true,
+			}
 		elif not definition.allows_npc_id(npc_id):
 			continue
+		else:
+			schedule_decision = ScheduleWindowPolicy.evaluate_definition(
+				definition,
+				total_game_hours
+			)
+			if not bool(schedule_decision.get("eligible", false)):
+				continue
 		if not spot_has_capacity(definition, runtime):
 			continue
 		if not spot_runtime_is_available(definition, runtime):
 			continue
-		if not definition.is_active_at(hour):
-			continue
+		var urgency := 0.0
 		if definition.value_name != &"":
 			if (
 				definition.require_npc_value_threshold
@@ -37,34 +75,48 @@ static func find_best_definition(
 				String(definition.value_name)
 			))
 			var effective_threshold := get_effective_need_threshold(definition, hour, runtime)
-			var urgency := get_definition_urgency(definition, runtime)
+			urgency = get_definition_urgency(definition, runtime)
 			if definition.require_npc_value_threshold:
 				if current_value < effective_threshold:
 					continue
 				if definition.need_maximum >= 0.0 and current_value > definition.need_maximum:
 					continue
 				urgency = current_value - effective_threshold
-			if (
-				best_definition == null
-				or definition.priority > best_definition.priority
-				or (
-					definition.priority == best_definition.priority
-					and urgency > best_urgency
-				)
-				or (
-					definition.priority == best_definition.priority
-					and is_equal_approx(urgency, best_urgency)
-					and String(definition.spot_id) < String(best_definition.spot_id)
-				)
-			):
-				best_definition = definition
-				best_urgency = urgency
-			continue
-		if best_definition == null or definition.priority > best_definition.priority:
-			best_definition = definition
-			best_urgency = 0.0
+		var candidate := {
+			"definition": definition,
+			"schedule_decision": schedule_decision.duplicate(true),
+			"effective_priority": int(schedule_decision.get(
+				"effective_priority",
+				definition.priority
+			)),
+			"urgency": urgency,
+		}
+		if _candidate_comes_before(candidate, best_candidate):
+			best_candidate = candidate
+	return best_candidate
 
-	return best_definition
+
+static func _candidate_comes_before(
+	candidate: Dictionary,
+	current_best: Dictionary
+) -> bool:
+	if current_best.is_empty():
+		return true
+	var candidate_priority := int(candidate.get("effective_priority", 0))
+	var best_priority := int(current_best.get("effective_priority", 0))
+	if candidate_priority != best_priority:
+		return candidate_priority > best_priority
+	var candidate_urgency := float(candidate.get("urgency", 0.0))
+	var best_urgency := float(current_best.get("urgency", 0.0))
+	if not is_equal_approx(candidate_urgency, best_urgency):
+		return candidate_urgency > best_urgency
+	var candidate_definition := candidate.get("definition", null) as NpcSpotDefinition
+	var best_definition := current_best.get("definition", null) as NpcSpotDefinition
+	if candidate_definition == null:
+		return false
+	if best_definition == null:
+		return true
+	return String(candidate_definition.spot_id) < String(best_definition.spot_id)
 
 
 static func get_effective_need_threshold(

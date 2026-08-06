@@ -2,6 +2,10 @@ class_name NpcStateMachine extends Node
 
 const NpcActivityIdentity = preload("res://scripts/systems/npc_activity_identity.gd")
 const NpcActionSessionModel = preload("res://scripts/systems/npc_action_session.gd")
+const NpcIdentity = preload("res://scripts/systems/npc_identity.gd")
+const SocialWriteRouter = preload(
+	"res://scripts/systems/npc_social_write_router.gd"
+)
 const NpcBehaviorIntentModel = preload(
 	"res://scripts/systems/npc_behavior/npc_behavior_intent.gd"
 )
@@ -11,8 +15,20 @@ const NpcBehaviorFeedbackFormatter = preload(
 const NpcSocialMemoryPolicyModel = preload(
 	"res://scripts/systems/npc_behavior/npc_social_memory_policy.gd"
 )
+const NpcSocialCandidateScorerModel = preload(
+	"res://scripts/systems/npc_behavior/npc_social_candidate_scorer.gd"
+)
+const NpcSocialAcceptancePolicyModel = preload(
+	"res://scripts/systems/npc_behavior/npc_social_acceptance_policy.gd"
+)
+const NpcSocialConfigurationValidator = preload(
+	"res://scripts/systems/npc_behavior/npc_social_configuration_validator.gd"
+)
 const NpcTargetMemoryPolicyModel = preload(
 	"res://scripts/systems/npc_behavior/npc_target_memory_policy.gd"
+)
+const NpcPlayerInteractionMemoryPolicyModel = preload(
+	"res://scripts/systems/npc_behavior/npc_player_interaction_memory_policy.gd"
 )
 signal state_changed(state_name: StringName, previous_state_name: StringName)
 signal state_request_failed(state_name: StringName, reason: String)
@@ -26,6 +42,17 @@ signal policy_feedback_changed(
 	descriptor: Dictionary
 )
 signal activity_target_selection_committed(descriptor: Dictionary)
+
+const SOCIAL_FEEDBACK_VOLATILE_FIELDS := {
+	"evaluated_game_hours": true,
+	"evaluated_at_usec": true,
+	"simulation_pass_id": true,
+	"published_at_usec": true,
+	"remaining_retry_hours": true,
+}
+const MAX_SOCIAL_CONFIGURATION_WARNING_KEYS := 2048
+
+static var _emitted_social_configuration_warning_keys: Dictionary = {}
 
 const VALUE_ALIASES := {
 	"sleepiness": "sleep_need",
@@ -163,7 +190,9 @@ enum MonsterSightReaction {
 @export var loneliness_value_name: StringName = &"lonely"
 
 @export_group("Social Seeking")
-@export var cross_scene_talk_enabled: bool = true
+## Enables autonomous world-simulation social seeking. Candidate selection is
+## intentionally limited to actors in the NPC's current scene.
+@export var world_social_seeking_enabled: bool = true
 @export_range(0.0, 100.0, 0.1) var cross_scene_talk_need_threshold: float = 70.0
 @export_range(0, 100, 1) var cross_scene_talk_priority: int = 60
 @export_range(0.0, 100.0, 0.1) var cross_scene_minimum_npc_favor: float = 10.0
@@ -176,7 +205,12 @@ enum MonsterSightReaction {
 @export var npc_talk_refuse_lower_priority_tasks: bool = true
 @export_range(0.0, 120.0, 0.1, "suffix:s") var npc_talk_refusal_cooldown_seconds: float = 8.0
 @export_range(0.0, 24.0, 0.01, "suffix:h") var recent_refusal_retry_delay_game_hours: float = 0.25
+@export_range(0.0, 24.0, 0.01, "suffix:h") var recent_harm_social_delay_game_hours: float = 0.5
+@export_range(0.0, 24.0, 0.001, "suffix:h") var recent_conversation_repeat_delay_game_hours: float = 0.125
 @export_range(0, 1000, 1) var npc_talk_moving_task_priority_bonus: int = 15
+@export_range(0.0, 100.0, 0.1) var npc_social_acceptance_minimum_favor: float = 20.0
+@export_range(0.0, 100.0, 0.1) var npc_social_acceptance_maximum_anger: float = 70.0
+@export_range(0.0, 100.0, 0.1) var npc_social_acceptance_maximum_fear: float = 80.0
 
 @export_group("Target Failure Memory")
 @export_range(0.0, 24.0, 0.001, "suffix:h") var target_unavailable_retry_game_hours: float = 0.25
@@ -186,6 +220,7 @@ enum MonsterSightReaction {
 @export_group("Player Interaction")
 @export_range(0.0, 30.0, 0.1, "suffix:s") var default_player_interaction_hold_seconds: float = 5.0
 @export_range(0.0, 120.0, 0.1, "suffix:s") var default_player_interaction_cooldown_seconds: float = 20.0
+@export_range(0.0, 24.0, 0.01, "suffix:h") var recent_harm_interaction_delay_game_hours: float = 0.5
 
 @export_group("Relationship Fear Decay")
 @export var fear_decay_enabled: bool = true
@@ -492,9 +527,32 @@ var feedback_presenter: Node
 var feedback_adapter: Node
 var _behavior_action_replacement_in_progress: bool = false
 var _social_memory_policy := NpcSocialMemoryPolicyModel.new()
+var _social_candidate_scorer := NpcSocialCandidateScorerModel.new()
+var _social_acceptance_policy := NpcSocialAcceptancePolicyModel.new()
 var _target_memory_policy := NpcTargetMemoryPolicyModel.new()
+var _player_interaction_memory_policy := (
+	NpcPlayerInteractionMemoryPolicyModel.new()
+)
 var _social_selection_feedback: Dictionary = {}
+var _social_scoring_descriptor: Dictionary = {}
+var _last_social_acceptance_descriptor: Dictionary = {}
 var _target_selection_feedback: Dictionary = {}
+var _last_player_interaction_memory_policy: Dictionary = {}
+var _social_configuration_validation_issues: Array[Dictionary] = []
+
+
+func _set(property: StringName, value: Variant) -> bool:
+	# Compatibility for scenes saved before the inspector setting was renamed.
+	if property == &"cross_scene_talk_enabled":
+		world_social_seeking_enabled = bool(value)
+		return true
+	return false
+
+
+func _get(property: StringName) -> Variant:
+	if property == &"cross_scene_talk_enabled":
+		return world_social_seeking_enabled
+	return null
 
 
 func _ready() -> void:
@@ -510,9 +568,78 @@ func _ready() -> void:
 	_cache_feedback_components()
 	initialize_states()
 	_bind_npc_control_claim_notifications()
+	call_deferred("refresh_social_configuration_validation")
 
 	if active and current_state == null:
 		request_state(initial_state_name, null, "initial")
+
+
+func refresh_social_configuration_validation() -> Array[Dictionary]:
+	_social_configuration_validation_issues = (
+		NpcSocialConfigurationValidator.validate_state_machine_configuration(
+			self,
+			"",
+			"npc.%s.social" % _get_npc_label()
+		)
+	)
+	if npc != null and is_instance_valid(npc):
+		_social_configuration_validation_issues.append_array(
+			NpcSocialConfigurationValidator.validate_actor_id(
+				NpcIdentity.get_stable_actor_id(npc),
+				"npc.%s.actor_id" % _get_npc_label()
+			)
+		)
+	if OS.is_debug_build():
+		for issue in _social_configuration_validation_issues:
+			var issue_key := _get_social_configuration_warning_key(
+				issue,
+				not _npc_has_authored_scene_origin()
+			)
+			if _emitted_social_configuration_warning_keys.has(issue_key):
+				continue
+			_emitted_social_configuration_warning_keys[issue_key] = true
+			while (
+				_emitted_social_configuration_warning_keys.size()
+					> MAX_SOCIAL_CONFIGURATION_WARNING_KEYS
+			):
+				_emitted_social_configuration_warning_keys.erase(
+					_emitted_social_configuration_warning_keys.keys()[0]
+				)
+			push_warning("NPC social configuration [%s] %s: %s" % [
+				String(issue.get("code", "invalid_configuration")),
+				String(issue.get("path", "social")),
+				String(issue.get("message", "Invalid social configuration.")),
+			])
+	return get_social_configuration_validation_issues()
+
+
+func get_social_configuration_validation_issues() -> Array[Dictionary]:
+	return _social_configuration_validation_issues.duplicate(true)
+
+
+static func _get_social_configuration_warning_key(
+	issue: Dictionary,
+	normalize_transient_actor_path: bool = false
+) -> String:
+	var code := String(issue.get("code", "invalid_configuration"))
+	var issue_path := String(issue.get("path", "social"))
+	if code == "missing_stable_actor_id" and normalize_transient_actor_path:
+		# Identity-free legacy/test actors can be numerous and often have generated
+		# node names. One global warning preserves visibility without one warning per
+		# transient actor; every machine still retains its own structured issue.
+		issue_path = "npc.*.actor_id"
+	return JSON.stringify([
+		String(issue.get("severity", "warning")),
+		code,
+		issue_path,
+		String(issue.get("message", "Invalid social configuration.")),
+	])
+
+
+func _npc_has_authored_scene_origin() -> bool:
+	if npc == null or not is_instance_valid(npc):
+		return false
+	return not String(npc.scene_file_path).is_empty() or npc.owner != null
 
 
 func _exit_tree() -> void:
@@ -926,6 +1053,60 @@ func _is_current_scripted_action_arrival(state_name: StringName) -> bool:
 
 func _has_scripted_control_claim() -> bool:
 	return scripted_control_claim_token != 0
+
+
+func has_scripted_control_claim() -> bool:
+	return _has_scripted_control_claim()
+
+
+func get_scheduled_activity_ownership_gate() -> Dictionary:
+	var current_state_name := (
+		StringName(current_state.name)
+		if current_state != null
+		else &""
+	)
+	var result := {
+		"protected": false,
+		"reason_code": &"available",
+		"current_primary_state": current_state_name,
+	}
+	if _has_scripted_control_claim():
+		result["protected"] = true
+		result["reason_code"] = &"scripted_control"
+		return result
+	if interaction_overlay != null:
+		result["protected"] = true
+		result["reason_code"] = &"interaction_overlay"
+		result["interaction_state"] = StringName(interaction_overlay.name)
+		return result
+	if current_state_name in [
+		&"Fight",
+		&"Flee",
+		&"ReactToEvent",
+		&"Collapse",
+		&"Knockout",
+		&"DisabledDead",
+		&"Dead",
+	]:
+		result["protected"] = true
+		result["reason_code"] = &"emergency_state"
+		return result
+	var intention_source := &""
+	if behavior_controller != null and behavior_controller.current_intent != null:
+		intention_source = behavior_controller.current_intent.source
+	if intention_source in [&"emergency", &"scripted", &"scripted_event"]:
+		result["protected"] = true
+		result["reason_code"] = &"protected_intention"
+		result["intention_source"] = intention_source
+		return result
+	if (
+		active_action != null
+		and active_action.source in [&"emergency", &"scripted", &"scripted_event"]
+	):
+		result["protected"] = true
+		result["reason_code"] = &"protected_action"
+		result["action_source"] = active_action.source
+	return result
 
 
 func _scripted_control_claim_token_is_current(claim_token: int) -> bool:
@@ -1488,6 +1669,7 @@ func _build_behavior_candidate(
 	var feedback_text := String(request_context.get("behavior_feedback_text", ""))
 	var origin_value := StringName(String(request_context.get("behavior_origin_value", "")))
 	var legacy_derived := false
+	var action_metadata_for_intent: Dictionary = {}
 
 	if _proposed_action != null:
 		logical_action = _proposed_action.action_kind
@@ -1495,6 +1677,7 @@ func _build_behavior_candidate(
 		session_id = _proposed_action.session_id
 		target_id = _get_action_session_behavior_target_id(_proposed_action, target_id)
 		var session_behavior := _proposed_action.metadata
+		action_metadata_for_intent = session_behavior.duplicate(true)
 		if session_behavior.has("behavior_source"):
 			source = StringName(String(session_behavior["behavior_source"]))
 		reason_code = StringName(String(session_behavior.get(
@@ -1518,6 +1701,7 @@ func _build_behavior_candidate(
 		session_id = active_action.session_id
 		source = active_action.source
 		target_id = _get_action_session_behavior_target_id(active_action, target_id)
+		action_metadata_for_intent = active_action.metadata.duplicate(true)
 
 	if source == &"":
 		source = _get_action_source(reason, actor, logical_action)
@@ -1538,6 +1722,9 @@ func _build_behavior_candidate(
 	var metadata := {
 		"legacy_derived": legacy_derived,
 	}
+	for metadata_key in action_metadata_for_intent:
+		if String(metadata_key).begins_with("schedule_"):
+			metadata[String(metadata_key)] = action_metadata_for_intent[metadata_key]
 	if request_context.has("arrival_state"):
 		metadata["arrival_state"] = String(request_context["arrival_state"])
 	return NpcBehaviorIntentModel.create(
@@ -2679,17 +2866,7 @@ func _ensure_action_session_spot_reservation(session: NpcActionSession) -> Dicti
 
 
 func _get_stable_spot_id(candidate: Node) -> StringName:
-	if candidate == null or not is_instance_valid(candidate):
-		return &""
-	for method_name in [&"get_persistent_spot_id", &"get_spot_id", &"get_world_spot_id"]:
-		if candidate.has_method(method_name):
-			var method_value := String(candidate.call(method_name)).strip_edges()
-			if not method_value.is_empty():
-				return StringName(method_value)
-	for property_info in candidate.get_property_list():
-		if StringName(String(property_info.get("name", ""))) == &"spot_id":
-			return StringName(String(candidate.get(&"spot_id")).strip_edges())
-	return &""
+	return StringName(NpcIdentity.get_spot_id(candidate))
 
 
 func _release_replaced_spot_reservations(
@@ -2823,10 +3000,12 @@ func _get_action_source(reason: String, actor: Node2D, action_kind: StringName) 
 
 
 func _get_action_owner_id() -> String:
-	if npc != null and npc.has_method("get_npc_location_id"):
-		var npc_id := String(npc.call("get_npc_location_id")).strip_edges()
-		if not npc_id.is_empty():
-			return npc_id
+	# Action/session ownership still supports identity-free live legacy NPCs.
+	# Use the centralized resolver so their fallback remains the same path-based
+	# key used before canonical identity was introduced.
+	var npc_id := NpcIdentity.get_actor_id(npc, true, false)
+	if not npc_id.is_empty():
+		return npc_id
 	return _get_npc_label()
 
 
@@ -3573,6 +3752,7 @@ func begin_player_interaction_hold(actor: Node2D, hold_seconds: float = -1.0) ->
 
 
 func can_begin_player_interaction(actor: Node2D = null) -> Dictionary:
+	_last_player_interaction_memory_policy = {}
 	if actor != null and not _is_player_interaction_actor(actor):
 		return {"accepted": false, "reason": "invalid_player"}
 	if not active or npc == null or not is_instance_valid(npc):
@@ -3596,7 +3776,49 @@ func can_begin_player_interaction(actor: Node2D = null) -> Dictionary:
 	if _npc_is_knocked_out():
 		return {"accepted": false, "reason": "npc_knocked_out"}
 
+	var actor_id := NpcPlayerInteractionMemoryPolicyModel.get_stable_actor_id(
+		actor
+	)
+	var remembering_npc_id := (
+		NpcPlayerInteractionMemoryPolicyModel.get_stable_actor_id(npc)
+	)
+	var memory_decision := _player_interaction_memory_policy.evaluate_actor(
+		short_term_memory,
+		actor_id,
+		_get_world_total_hours(),
+		{
+			"remembering_npc_id": remembering_npc_id,
+			"recent_harm_interaction_delay_game_hours": (
+				recent_harm_interaction_delay_game_hours
+			),
+		}
+	)
+	_last_player_interaction_memory_policy = memory_decision.duplicate(true)
+	if not bool(memory_decision.get("allowed", true)):
+		return {
+			"accepted": false,
+			"reason": "npc_recently_harmed_by_player",
+			"memory_policy": memory_decision.duplicate(true),
+		}
+
 	return {"accepted": true, "reason": ""}
+
+
+func get_player_interaction_memory_debug_descriptor() -> Dictionary:
+	if _last_player_interaction_memory_policy.is_empty():
+		return {}
+	var descriptor := _last_player_interaction_memory_policy.duplicate(true)
+	var details = descriptor.get("details", {})
+	if details is Dictionary and details.has("retry_game_hours"):
+		var remaining := maxf(
+			float(details.get("retry_game_hours", 0.0))
+				- _get_world_total_hours(),
+			0.0
+		)
+		descriptor["remaining_retry_hours"] = remaining
+		if remaining <= 0.0:
+			return {}
+	return descriptor
 
 
 func end_player_interaction_hold(actor: Node2D = null) -> void:
@@ -3692,13 +3914,139 @@ func is_ignoring_player_interaction(actor: Node2D = null) -> bool:
 
 
 func can_accept_talk_request(candidate: Node2D, request_priority: int = -1) -> bool:
-	if _has_scripted_control_claim():
-		return false
-	var priority := request_priority
+	return bool(evaluate_npc_talk_request(candidate, {
+		"request_priority": request_priority,
+		"record_debug_descriptor": false,
+	}).get("accepted", false))
+
+
+func evaluate_npc_talk_request(
+	requester: Node2D,
+	request_context: Dictionary = {}
+) -> Dictionary:
+	var requester_id := _get_social_candidate_id(requester)
+	var candidate_id := _get_social_candidate_id(npc)
+	var priority := int(request_context.get(
+		"request_priority",
+		npc_talk_handshake_priority
+	))
 	if priority < 0:
 		priority = npc_talk_handshake_priority
+	var availability := _evaluate_npc_talk_availability(
+		requester,
+		StringName(requester_id),
+		StringName(candidate_id),
+		priority,
+		request_context
+	)
+	var relationships := get_node_or_null("/root/Relationships")
+	var candidate_relationship_id := _get_relationship_id_for_actor(
+		relationships,
+		npc,
+		candidate_id
+	)
+	var requester_relationship_id := _get_relationship_id_for_actor(
+		relationships,
+		requester,
+		requester_id
+	)
+	var decision := _social_acceptance_policy.evaluate(
+		StringName(requester_id),
+		StringName(candidate_id),
+		{
+			"availability": availability,
+			"social_memory_decision": (
+				get_autonomous_social_memory_decision(requester)
+				if bool(availability.get("available", false))
+				else {}
+			),
+			"relationship": _get_directed_relationship_snapshot(
+				relationships,
+				candidate_relationship_id,
+				requester_relationship_id
+			),
+			"minimum_favor": npc_social_acceptance_minimum_favor,
+			"maximum_anger": npc_social_acceptance_maximum_anger,
+			"maximum_fear": npc_social_acceptance_maximum_fear,
+		}
+	)
+	decision["availability"] = availability.duplicate(true)
+	decision["evaluated_game_hours"] = _get_world_total_hours()
+	decision["evaluated_at_usec"] = Time.get_ticks_usec()
+	if bool(request_context.get("record_debug_descriptor", true)):
+		_last_social_acceptance_descriptor = decision.duplicate(true)
+	return decision.duplicate(true)
 
-	return _can_enter_talk_with(candidate, priority)
+
+func get_social_acceptance_debug_descriptor() -> Dictionary:
+	return _last_social_acceptance_descriptor.duplicate(true)
+
+
+func _evaluate_npc_talk_availability(
+	requester: Node2D,
+	requester_id: StringName,
+	candidate_id: StringName,
+	request_priority: int,
+	request_context: Dictionary
+) -> Dictionary:
+	if requester == null or not is_instance_valid(requester):
+		return _social_availability(false, &"invalid_request", &"invalid_requester")
+	if not requester.is_in_group("npc"):
+		return _social_availability(false, &"invalid_request", &"requester_not_npc")
+	if requester == npc or requester_id == candidate_id:
+		return _social_availability(false, &"invalid_request", &"self_request")
+	if requester_id == &"" or candidate_id == &"":
+		return _social_availability(false, &"invalid_request", &"invalid_social_identity")
+	if bool(request_context.get("require_current_session", false)):
+		var expected_session_id := String(request_context.get("session_id", "")).strip_edges()
+		var request_source := StringName(String(request_context.get("source", &"social_ai")))
+		var requester_machine := _get_talk_machine_for_target(requester)
+		if (
+			expected_session_id.is_empty()
+			or requester_machine == null
+			or requester_machine._get_talk_request_session_id(request_source) != expected_session_id
+		):
+			return _social_availability(false, &"invalid_request", &"stale_social_session")
+	if _has_scripted_control_claim():
+		return _social_availability(false, &"temporarily_unavailable", &"scripted_control")
+	if (
+		_current_state_is(&"DisabledDead")
+		or get_value(&"hp", 100.0) <= 0.0
+		or get_value(&"disabled", 0.0) > 0.0
+	):
+		return _social_availability(false, &"temporarily_unavailable", &"candidate_disabled")
+	if _npc_is_knocked_out():
+		return _social_availability(false, &"temporarily_unavailable", &"candidate_downed")
+	if current_state != null and SCRIPTED_CONTROL_EMERGENCY_STATES.has(String(current_state.name)):
+		return _social_availability(false, &"temporarily_unavailable", &"emergency_state")
+	var scene_handoff_reason := _get_scene_handoff_interaction_block_reason()
+	if not scene_handoff_reason.is_empty():
+		return _social_availability(false, &"temporarily_unavailable", StringName(scene_handoff_reason))
+	if interaction_overlay != null:
+		return _social_availability(false, &"temporarily_unavailable", &"active_interaction")
+	if is_socially_engaged():
+		return _social_availability(false, &"temporarily_unavailable", &"existing_social_session")
+	if get_state(&"Talk") == null:
+		return _social_availability(false, &"temporarily_unavailable", &"talk_state_unavailable")
+	if _should_refuse_talk_for_priority(request_priority):
+		return _social_availability(false, &"temporarily_unavailable", &"protected_primary_activity")
+	if not primary_state_continues_under_talk():
+		return _social_availability(false, &"temporarily_unavailable", &"talk_incompatible_primary_state")
+	if not _can_enter_talk_with(requester, request_priority):
+		return _social_availability(false, &"temporarily_unavailable", &"talk_state_incompatible")
+	return _social_availability(true, &"accepted", &"")
+
+
+static func _social_availability(
+	available: bool,
+	decision_kind: StringName,
+	reason_code: StringName
+) -> Dictionary:
+	return {
+		"available": available,
+		"decision_kind": decision_kind,
+		"reason_code": reason_code,
+	}
 
 
 func is_talking_with(candidate: Node2D) -> bool:
@@ -3815,41 +4163,57 @@ func _request_talk_state(
 	if not _can_enter_talk_with(new_target, priority):
 		return _reject_state_request(&"Talk", "talker_cannot_enter_talk")
 
-	if not partner_machine.can_accept_talk_request(npc, priority):
-		_reject_state_request(&"Talk", "partner_refused_talk")
-		if partner_machine.has_signal(&"state_request_failed"):
-			partner_machine.state_request_failed.emit(&"Talk", "talk_refused")
-		if memory_observer != null:
-			memory_observer.observe_conversation_refused(
-				new_target,
-				_get_talk_request_session_id(talk_source),
-				&"partner_refused_talk",
-				talk_source
-			)
-		_start_talk_refusal_cooldown(new_target)
-		return false
-
+	var requester_session_id := _get_talk_request_session_id(talk_source)
 	var shared_talk_session_id := (
-		_proposed_action.session_id
-		if (
-			_proposed_action != null
-			and _proposed_action.action_kind == &"Talk"
-			and _proposed_action.source == talk_source
-		)
-		else active_action.session_id
-		if active_action != null and active_action.source == talk_source
+		requester_session_id
+		if not requester_session_id.is_empty()
 		else NpcActionSessionModel.make_session_id(
 			_get_action_owner_id(),
 			talk_source,
 			&"Talk"
 		)
 	)
+	var acceptance_decision := partner_machine.evaluate_npc_talk_request(npc, {
+		"request_priority": priority,
+		"session_id": shared_talk_session_id,
+		"source": talk_source,
+		"require_current_session": not requester_session_id.is_empty(),
+	})
+	if not bool(acceptance_decision.get("accepted", false)):
+		var decision_kind := StringName(String(acceptance_decision.get(
+			"decision_kind",
+			&"invalid_request"
+		)))
+		var reason_code := StringName(String(acceptance_decision.get(
+			"reason_code",
+			&"candidate_rejected"
+		)))
+		# The candidate descriptor is the diagnostic authority for this normal
+		# social outcome. Avoid turning planner cadence into state-rejection spam.
+		last_state_request_failure_reason = "partner_%s:%s" % [
+			String(decision_kind),
+			String(reason_code),
+		]
+		if decision_kind == NpcSocialAcceptancePolicyModel.DECISION_SOCIAL_DECLINE:
+			if memory_observer != null:
+				memory_observer.observe_conversation_refused(
+					new_target,
+					shared_talk_session_id,
+					reason_code,
+					talk_source,
+					{
+						"refusal_reason_code": reason_code,
+						"decision_kind": decision_kind,
+					}
+				)
+			_start_talk_refusal_cooldown(new_target)
+		return false
+
 	var partner_started := partner_machine._accept_talk_request(
 		npc, priority, "talk_handshake", shared_talk_session_id, talk_source
 	)
 	if not partner_started:
 		_reject_state_request(&"Talk", "partner_talk_start_failed")
-		_start_talk_refusal_cooldown(new_target)
 		return false
 
 	var self_started := _accept_talk_request(
@@ -4149,6 +4513,10 @@ func _remove_interaction_overlay(reason: String) -> void:
 		)
 	if current_state != null:
 		current_state.resume_presentation_after_talk_overlay()
+	if String(removed_overlay.name) == "Talk":
+		_last_social_acceptance_descriptor.clear()
+		_social_scoring_descriptor.clear()
+		set_social_selection_feedback({})
 	_update_debug_label()
 	_breadcrumb(
 		"npc_state:overlay_exit",
@@ -4254,22 +4622,7 @@ func _start_talk_refusal_cooldown(refused_target: Node2D) -> void:
 
 
 func _get_talk_refusal_cooldown_key(candidate: Node2D) -> String:
-	if candidate == null or not is_instance_valid(candidate):
-		return ""
-	if candidate.is_in_group("player"):
-		return "player"
-	if candidate.has_method("get_npc_location_id"):
-		var npc_id := String(candidate.call("get_npc_location_id")).strip_edges()
-		if not npc_id.is_empty():
-			return "npc:%s" % npc_id
-	if candidate.has_meta("npc_location_id"):
-		var meta_id := String(candidate.get_meta("npc_location_id")).strip_edges()
-		if not meta_id.is_empty():
-			return "npc:%s" % meta_id
-	if candidate.is_inside_tree():
-		return "path:%s" % String(candidate.get_path())
-
-	return "instance:%s" % candidate.get_instance_id()
+	return NpcIdentity.get_actor_id(candidate, true)
 
 
 func _player_interaction_hold_is_active() -> bool:
@@ -4409,13 +4762,70 @@ func die() -> void:
 func apply_social_event(
 	stat_delta: Dictionary,
 	actor: Node2D = null,
-	requires_actor_visibility: bool = true
+	requires_actor_visibility: bool = true,
+	event_reason: String = "social_event",
+	event_context: Dictionary = {}
 ) -> bool:
 	if requires_actor_visibility and actor != null and npc != null:
 		if npc.has_method("can_see") and not bool(npc.call("can_see", actor)):
 			return false
 
-	return apply_value_delta(stat_delta, actor)
+	var route_context := event_context.duplicate(true)
+	if not route_context.has("source"):
+		route_context["source"] = "npc_state_machine"
+	var routed := SocialWriteRouter.route_delta(
+		npc,
+		actor,
+		stat_delta,
+		get_node_or_null("/root/Relationships"),
+		event_reason,
+		route_context
+	)
+	var local_values: Dictionary = routed.get("local_values", {})
+	var local_applied := (
+		apply_value_delta(local_values, actor, false)
+		if not local_values.is_empty()
+		else false
+	)
+	var directed_applied := bool(routed.get("directed_applied", false))
+	var event_eligible_for_talk_payout := (
+		bool(routed.get("directed_eligible", false))
+		or _has_eligible_local_social_delta(local_values)
+	)
+	var directed_changes: Dictionary = routed.get("directed_changes", {})
+	var directed_favor_delta := float(
+		directed_changes.get("favor", 0.0)
+	)
+	var reaction_changes: Dictionary = (
+		last_changed_values.duplicate(true) if local_applied else {}
+	)
+	if not is_zero_approx(directed_favor_delta):
+		reaction_changes["favor"] = float(
+			reaction_changes.get("favor", 0.0)
+		) + directed_favor_delta
+	if event_eligible_for_talk_payout:
+		# The interaction choice itself succeeded even when its valid values were
+		# already at a clamp boundary. Pending exists only when the player UI opted
+		# into prepaid Talk completion, so ordinary/autonomous Talk is unchanged.
+		_confirm_pending_player_talk_payout(actor)
+	if local_applied or directed_applied:
+		# Keep reactions as one priority-arbitrated pass. This transient snapshot
+		# lets ReactToEvent inspect the directed favor delta without storing favor
+		# in the machine's owner-only value dictionary.
+		last_event_actor = actor
+		last_changed_values = reaction_changes.duplicate(true)
+		if not reaction_changes.is_empty() and _value_reactions_enabled():
+			evaluate_value_reactions(actor, reaction_changes)
+	return local_applied or directed_applied
+
+
+func _has_eligible_local_social_delta(local_values: Dictionary) -> bool:
+	var normalized_delta := _normalize_value_delta(local_values)
+	_remove_stored_only_values(normalized_delta)
+	for value in normalized_delta.values():
+		if not is_zero_approx(_variant_to_float(value)):
+			return true
+	return false
 
 
 func replace_values(
@@ -5320,8 +5730,12 @@ func _cache_feedback_components() -> void:
 
 func _on_memory_changed() -> void:
 	# A merge, resolution, removal, or expiry changes policy eligibility. Do not
-	# retain an all-suppressed descriptor across that revision.
-	_target_selection_feedback = {}
+	# retain policy or social-choice descriptors across that revision.
+	set_target_selection_feedback({})
+	set_social_selection_feedback({})
+	_social_scoring_descriptor.clear()
+	_last_social_acceptance_descriptor.clear()
+	_last_player_interaction_memory_policy = {}
 	_update_debug_label()
 
 
@@ -6123,6 +6537,34 @@ func _get_rule_request_actor(actor: Node2D, rule: Dictionary) -> Node2D:
 	var requested_state := StringName(String(rule.get("state", "")))
 	if requested_state in [&"Eat", &"Rest", &"Recreation"]:
 		return null
+	if (
+		requested_state == &"Talk"
+		and StringName(String(rule.get("behavior_source", ""))) == &"social_ai"
+	):
+		var social_candidates: Array[Node2D] = []
+		var seen_social_candidates: Dictionary = {}
+		_append_social_rule_candidate(
+			social_candidates,
+			seen_social_candidates,
+			actor,
+			rule
+		)
+		_append_social_rule_candidate(
+			social_candidates,
+			seen_social_candidates,
+			get_selected_threat(),
+			rule
+		)
+		for perceived_target in get_perceived_targets():
+			_append_social_rule_candidate(
+				social_candidates,
+				seen_social_candidates,
+				perceived_target,
+				rule
+			)
+		return select_ranked_autonomous_social_target(
+			social_candidates
+		).get("target_node", null) as Node2D
 	if _rule_allows_target(rule, actor):
 		return actor
 
@@ -6138,6 +6580,21 @@ func _get_rule_request_actor(actor: Node2D, rule: Dictionary) -> Node2D:
 		return null
 
 	return null
+
+
+func _append_social_rule_candidate(
+	candidates: Array[Node2D],
+	seen_candidates: Dictionary,
+	candidate: Node2D,
+	rule: Dictionary
+) -> void:
+	if not _rule_allows_target(rule, candidate):
+		return
+	var instance_id := candidate.get_instance_id()
+	if seen_candidates.has(instance_id):
+		return
+	seen_candidates[instance_id] = true
+	candidates.append(candidate)
 
 
 func _rule_allows_target(rule: Dictionary, candidate: Node2D) -> bool:
@@ -6183,25 +6640,209 @@ func _social_memory_allows_rule_target(
 	candidate: Node2D
 ) -> bool:
 	if (
-		short_term_memory == null
-		or not candidate.is_in_group("npc")
-		or String(rule.get("behavior_source", "")) != "social_ai"
+		String(rule.get("behavior_source", "")) != "social_ai"
 		or String(rule.get("state", "")) != "Talk"
 	):
 		return true
-	var candidate_id := NpcActionSessionModel.get_persistent_id(candidate)
-	if candidate_id.is_empty():
-		return true
-	var decision := _social_memory_policy.evaluate_candidate(
+	return bool(get_autonomous_social_memory_decision(candidate).get(
+		"allowed",
+		true
+	))
+
+
+func get_autonomous_social_memory_decision(candidate: Node2D) -> Dictionary:
+	# Memory is persisted, so unlike the live handshake it must never use a
+	# transient scene-tree path as an actor identity.
+	var candidate_id := NpcIdentity.get_stable_actor_id(candidate)
+	var remembering_npc_id := NpcIdentity.get_stable_actor_id(npc)
+	if (
+		short_term_memory == null
+		or candidate_id.is_empty()
+		or remembering_npc_id.is_empty()
+	):
+		return {
+			"allowed": true,
+			"candidate_id": StringName(candidate_id),
+			"reason_code": &"",
+			"memory_event_type": &"",
+			"memory_id": "",
+			"remaining_retry_hours": 0.0,
+			"retry_game_hours": 0.0,
+		}
+	return _social_memory_policy.evaluate_candidate(
 		short_term_memory,
 		StringName(candidate_id),
 		_get_world_total_hours(),
 		{
-			"remembering_npc_id": _get_action_owner_id(),
-			"retry_delay_game_hours": recent_refusal_retry_delay_game_hours,
+			"remembering_npc_id": remembering_npc_id,
+			"recent_refusal_retry_delay_game_hours": (
+				recent_refusal_retry_delay_game_hours
+			),
+			"recent_harm_social_delay_game_hours": (
+				recent_harm_social_delay_game_hours
+			),
+			"recent_conversation_repeat_delay_game_hours": (
+				recent_conversation_repeat_delay_game_hours
+			),
 		}
 	)
-	return bool(decision.get("allowed", true))
+
+
+func select_ranked_autonomous_social_target(candidates: Array[Node2D]) -> Dictionary:
+	var requester_id := _get_action_owner_id()
+	var preferred_target_id := _get_authored_social_preference_target_id()
+	var relationships := get_node_or_null("/root/Relationships")
+	var requester_relationship_id := _get_relationship_id_for_actor(
+		relationships,
+		npc,
+		requester_id
+	)
+	var scored: Array[Dictionary] = []
+	for candidate in candidates:
+		var candidate_id := _get_social_candidate_id(candidate)
+		if candidate_id.is_empty():
+			continue
+		var candidate_relationship_id := _get_relationship_id_for_actor(
+			relationships,
+			candidate,
+			candidate_id
+		)
+		var relationship := _get_directed_relationship_snapshot(
+			relationships,
+			requester_relationship_id,
+			candidate_relationship_id
+		)
+		var live_distance := (
+			npc.global_position.distance_to(candidate.global_position)
+			if npc != null and is_instance_valid(npc)
+			else 0.0
+		)
+		var score := _social_candidate_scorer.score_candidate(
+			StringName(requester_id),
+			StringName(candidate_id),
+			{
+				"relationship": relationship,
+				"is_authored_preference": (
+					preferred_target_id == candidate_id
+				),
+				"has_live_distance": npc != null,
+				"live_distance": live_distance,
+			}
+		)
+		scored.append({
+			"target_node": candidate,
+			"candidate_id": candidate_id,
+			"score": score,
+		})
+	scored.sort_custom(_live_social_candidate_precedes)
+	var diagnostics: Array[Dictionary] = []
+	for entry in scored:
+		var score_descriptor: Dictionary = entry.score.duplicate(true)
+		score_descriptor["allowed"] = true
+		diagnostics.append(score_descriptor)
+	var selected_target: Node2D
+	var selected_candidate_id := ""
+	if not scored.is_empty():
+		selected_target = scored[0].target_node as Node2D
+		selected_candidate_id = String(scored[0].candidate_id)
+	_social_scoring_descriptor = {
+		"requester_id": StringName(requester_id),
+		"evaluated_game_hours": _get_world_total_hours(),
+		"evaluated_at_usec": Time.get_ticks_usec(),
+		"candidate_count": scored.size(),
+		"selected_candidate_id": StringName(selected_candidate_id),
+		"candidates": diagnostics,
+	}
+	return {
+		"target_node": selected_target,
+		"descriptor": _social_scoring_descriptor.duplicate(true),
+	}
+
+
+func get_social_scoring_debug_descriptor() -> Dictionary:
+	return _social_scoring_descriptor.duplicate(true)
+
+
+func clear_social_scoring_debug_descriptor() -> void:
+	_social_scoring_descriptor.clear()
+
+
+func _get_social_candidate_id(candidate: Node2D) -> String:
+	if candidate == null or not is_instance_valid(candidate):
+		return ""
+	if not candidate.is_in_group("player") and not candidate.is_in_group("npc"):
+		return ""
+	# Live handshakes and session matching still support identity-free legacy
+	# actors. Memory-writing and memory-query paths resolve stable IDs separately.
+	return NpcIdentity.get_actor_id(candidate, true, false)
+
+
+func _get_authored_social_preference_target_id() -> String:
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations == null or not locations.has_method("get_record_snapshot"):
+		return ""
+	var record = locations.call("get_record_snapshot", _get_action_owner_id())
+	if not (record is Dictionary):
+		return ""
+	return String(record.get("social_visit_target_id", "")).strip_edges()
+
+
+func _get_relationship_id_for_actor(
+	relationships: Node,
+	actor: Node,
+	fallback: String
+) -> String:
+	if (
+		relationships != null
+		and actor != null
+		and relationships.has_method("get_relationship_id")
+	):
+		var relationship_id := String(relationships.call(
+			"get_relationship_id",
+			actor
+		)).strip_edges()
+		if not relationship_id.is_empty():
+			return relationship_id
+	var stable_actor_id := NpcIdentity.get_stable_actor_id(actor)
+	if not stable_actor_id.is_empty():
+		return stable_actor_id
+	return fallback.strip_edges()
+
+
+func _get_directed_relationship_snapshot(
+	relationships: Node,
+	requester_id: String,
+	candidate_id: String
+) -> Dictionary:
+	if (
+		relationships == null
+		or not relationships.has_method("get_relationship_by_id")
+		or requester_id.is_empty()
+		or candidate_id.is_empty()
+	):
+		return {}
+	var snapshot = relationships.call(
+		"get_relationship_by_id",
+		requester_id,
+		candidate_id
+	)
+	return snapshot.duplicate(true) if snapshot is Dictionary else {}
+
+
+static func _live_social_candidate_precedes(a: Dictionary, b: Dictionary) -> bool:
+	var a_score: Dictionary = a.get("score", {})
+	var b_score: Dictionary = b.get("score", {})
+	var a_total := float(a_score.get("total_score", 0.0))
+	var b_total := float(b_score.get("total_score", 0.0))
+	if not is_equal_approx(a_total, b_total):
+		return a_total > b_total
+	var a_distance := float(a_score.get("live_distance", 0.0))
+	var b_distance := float(b_score.get("live_distance", 0.0))
+	if not is_equal_approx(a_distance, b_distance):
+		return a_distance < b_distance
+	return String(a.get("candidate_id", "")) < String(
+		b.get("candidate_id", "")
+	)
 
 
 func _get_relationship_favor_for_target(candidate: Node) -> float:
@@ -6496,6 +7137,9 @@ func get_feedback_descriptor() -> Dictionary:
 	var target_selection := _get_active_target_selection_feedback()
 	if not target_selection.is_empty():
 		feedback["target_selection"] = target_selection
+	var interaction_memory := get_player_interaction_memory_debug_descriptor()
+	if not interaction_memory.is_empty():
+		feedback["player_interaction_memory"] = interaction_memory
 	return feedback
 
 
@@ -6537,15 +7181,40 @@ func set_social_selection_feedback(descriptor: Dictionary) -> void:
 	var next_feedback: Dictionary = {}
 	if (
 		bool(descriptor.get("all_candidates_suppressed", false))
-		and String(descriptor.get("reason_code", ""))
-			== "no_social_target_due_to_recent_refusal"
+		and String(descriptor.get("reason_code", "")) in [
+			"no_social_target_due_to_recent_refusal",
+			"no_social_target_due_to_recent_memory",
+		]
 	):
-		next_feedback = descriptor.duplicate(true)
-	if _social_selection_feedback == next_feedback:
-		return
+		# The world retains the full candidate diagnostics. The live feedback path
+		# only needs the aggregate retry data, so do not clone or retain the large
+		# candidate arrays again for every NPC and signal emission.
+		next_feedback = descriptor.duplicate(false)
+		next_feedback.erase("candidate_decisions")
+		next_feedback.erase("candidates")
+		var suppressed_by_reason = next_feedback.get("suppressed_by_reason", {})
+		if suppressed_by_reason is Dictionary:
+			next_feedback["suppressed_by_reason"] = suppressed_by_reason.duplicate(true)
+	var semantic_changed := (
+		_get_social_feedback_semantic_snapshot(_social_selection_feedback)
+		!= _get_social_feedback_semantic_snapshot(next_feedback)
+	)
+	# Retain the newest freshness envelope even when the player-facing outcome
+	# has not changed. Debug readers stay current without another feedback cue.
 	_social_selection_feedback = next_feedback
+	if not semantic_changed:
+		return
 	policy_feedback_changed.emit(&"social", next_feedback.duplicate(true))
 	_update_debug_label()
+
+
+static func _get_social_feedback_semantic_snapshot(
+	descriptor: Dictionary
+) -> Dictionary:
+	var semantic := descriptor.duplicate(true)
+	for field_name in SOCIAL_FEEDBACK_VOLATILE_FIELDS:
+		semantic.erase(field_name)
+	return semantic
 
 
 func _get_active_social_selection_feedback() -> Dictionary:

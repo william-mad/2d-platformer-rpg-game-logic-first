@@ -1,5 +1,7 @@
 extends Node
 
+const NpcIdentity = preload("res://scripts/systems/npc_identity.gd")
+
 signal world_progression_lock_changed(locked: bool)
 signal world_progression_unlocked()
 signal npc_control_claim_changed(npc: Node, claimed: bool, token_id: int)
@@ -333,14 +335,9 @@ func _warn_npc_control_claim_rejected(npc: Node, existing_token: int) -> void:
 func _get_npc_persistent_id(npc: Node) -> StringName:
 	if npc == null or not is_instance_valid(npc):
 		return &""
-	if npc.has_method("get_npc_location_id"):
-		var location_id := String(npc.call("get_npc_location_id")).strip_edges()
-		if not location_id.is_empty():
-			return StringName(location_id)
-	if npc.has_meta("npc_location_id"):
-		var metadata_id := String(npc.get_meta("npc_location_id")).strip_edges()
-		if not metadata_id.is_empty():
-			return StringName(metadata_id)
+	var actor_id := NpcIdentity.get_stable_actor_id(npc)
+	if not actor_id.is_empty():
+		return StringName(actor_id)
 	return StringName("%s:%d" % [npc.name, npc.get_instance_id()])
 
 

@@ -1,5 +1,12 @@
 class_name SocialNpc extends CharacterBody2D
 
+const SocialWriteRouter = preload(
+	"res://scripts/systems/npc_social_write_router.gd"
+)
+const PlayerRelationshipPresentation = preload(
+	"res://scripts/systems/npc_player_relationship_presentation.gd"
+)
+
 const STORED_ONLY_STAT_KEYS := {
 	"curiosity": true,
 	"sadness": true,
@@ -56,6 +63,7 @@ const STAT_KEY_ALIASES := {
 
 @export_group("Identity")
 @export var display_name: String = ""
+@export var character_profile: NpcCharacterProfile
 @export var npc_tags: Array[StringName] = []
 @export var show_name_tag: bool = true
 @export var show_location_id_in_name_tag: bool = true
@@ -154,6 +162,8 @@ var is_downed: bool = false
 # Cached player reference so _update_favor_bar_visibility() does not scan the player
 # group on every NPC every physics frame. Refreshed lazily when it becomes invalid.
 var cached_player: Node2D
+var player_relationship_presentation := PlayerRelationshipPresentation.new()
+var neutral_body_color: Color = Color.WHITE
 
 
 func _ready() -> void:
@@ -170,10 +180,12 @@ func _ready() -> void:
 	setup_hp_bar()
 	setup_knockout_bar()
 	_update_facing()
+	if body_visual != null:
+		neutral_body_color = body_visual.color
+	_setup_relationship_identity()
 	_update_favor_bar()
 	_update_favor_bar_visibility()
 	_update_visual_mood()
-	_setup_relationship_identity()
 	_setup_npc_tags()
 	_update_name_tag()
 
@@ -186,6 +198,7 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	_unregister_location_tracking()
 	_disconnect_event_bus()
+	player_relationship_presentation.unbind()
 
 
 func _physics_process(delta: float) -> void:
@@ -266,20 +279,52 @@ func is_npc_perception_enabled() -> bool:
 func apply_social_event(
 	stat_delta: Dictionary,
 	actor: Node2D = null,
-	requires_actor_visibility: bool = true
+	requires_actor_visibility: bool = true,
+	event_reason: String = "social_event",
+	event_context: Dictionary = {}
 ) -> bool:
 	if requires_actor_visibility and actor != null and not can_see(actor):
 		return false
 
-	var normalized_delta := _normalize_stat_delta(stat_delta)
+	if _state_machine_active():
+		# Keep one routing boundary: the active machine owns value mutation and
+		# preserves its established reaction priority without duplicating writes.
+		return npc_state_machine.apply_social_event(
+			stat_delta,
+			actor,
+			false,
+			event_reason,
+			event_context
+		)
+
+	var route_context := event_context.duplicate(true)
+	if not route_context.has("source"):
+		route_context["source"] = "social_npc"
+	var routed := SocialWriteRouter.route_delta(
+		self,
+		actor,
+		stat_delta,
+		_get_relationship_system(),
+		event_reason,
+		route_context
+	)
+	var directed_changes: Dictionary = routed.get("directed_changes", {})
+	var directed_applied := bool(routed.get("directed_applied", false))
+	var normalized_delta := _normalize_stat_delta(
+		routed.get("local_values", {})
+	)
 	_remove_stored_only_stats(normalized_delta)
 	if normalized_delta.is_empty():
-		return false
-	if _state_machine_active():
-		# The state machine owns active NPC values and emits the canonical result back to this NPC.
-		return npc_state_machine.apply_value_delta(normalized_delta, actor)
+		if directed_applied:
+			_react_to_event(
+				actor,
+				float(directed_changes.get("favor", 0.0))
+			)
+		return directed_applied
 
 	var favor_delta := float(normalized_delta.get("favor", 0.0))
+	if directed_applied:
+		favor_delta += float(directed_changes.get("favor", 0.0))
 	var changed_stats: Dictionary = {}
 
 	for stat_key in normalized_delta.keys():
@@ -335,7 +380,7 @@ func take_damage(
 		emotion_stats.clear()
 	var relationship_anger_delta := 0.0
 	var relationship_fear_delta := 0.0
-	if damage_came_from_npc and emotion_stats.has("anger"):
+	if damage_has_relationship_actor and emotion_stats.has("anger"):
 		relationship_anger_delta = float(emotion_stats.get("anger", 0.0))
 		emotion_stats.erase("anger")
 	if damage_has_relationship_actor and emotion_stats.has("fear"):
@@ -349,27 +394,34 @@ func take_damage(
 	var damage_stats := {
 		"hp": -amount,
 	}
-	if not damage_came_from_npc and not damage_came_from_monster:
-		damage_stats["favor"] = -amount * damage_favor_penalty
+	var damage_relationship_reason := "damage"
+	if damage_has_relationship_actor:
+		damage_relationship_reason = (
+			"damaged_by_player" if damage_came_from_player else "damaged_by_npc"
+		)
+		var expected_damage_taken := minf(amount, previous_hp)
+		damage_stats["favor"] = (
+			-expected_damage_taken * damage_favor_penalty
+		)
 	damage_stats.merge(emotion_stats, true)
 
-	# HP and legacy undirected reactions stay on the NPC; fear of an attacker is
-	# stored only in that actor's relationship record below.
+	# HP and source-less broad mood reactions stay on the NPC. Opinions about a
+	# known attacker are stored only in that actor's relationship record (favor
+	# through the routed event, anger/fear below); unknown/environment damage never
+	# spends an ambiguous global favor balance.
 	# Add hurt animations here later:
 	# if animation_player != null:
 	# 	animation_player.play("hurt")
-	apply_social_event(damage_stats, damage_actor, false)
+	apply_social_event(
+		damage_stats,
+		damage_actor,
+		false,
+		damage_relationship_reason,
+		{"source": "damage", "damage_amount": amount}
+	)
 
 	var damage_taken := previous_hp - get_hp()
 	if damage_has_relationship_actor and damage_taken > 0.0:
-		var damage_relationship_reason := (
-			"damaged_by_player" if damage_came_from_player else "damaged_by_npc"
-		)
-		change_relationship_favor_for(
-			damage_actor,
-			-damage_taken * damage_favor_penalty,
-			damage_relationship_reason
-		)
 		var relationship_anger := change_relationship_anger_for(
 			damage_actor,
 			relationship_anger_delta,
@@ -726,7 +778,7 @@ func _get_world_simulation_profile() -> Dictionary:
 			"full_recovery_game_hours": npc_state_machine.loneliness_full_recovery_game_hours,
 		},
 		"social_seeking": {
-			"enabled": npc_state_machine.cross_scene_talk_enabled,
+			"enabled": npc_state_machine.world_social_seeking_enabled,
 			"talk_need_threshold": npc_state_machine.cross_scene_talk_need_threshold,
 			"priority": npc_state_machine.cross_scene_talk_priority,
 			"minimum_npc_favor": npc_state_machine.cross_scene_minimum_npc_favor,
@@ -927,7 +979,30 @@ func get_knockout() -> float:
 
 
 func get_display_name() -> String:
-	# Chooses the label text shown above the NPC, preferring explicit display_name.
+	if character_profile != null:
+		var profile_name := character_profile.display_name.strip_edges()
+		if not profile_name.is_empty():
+			return profile_name
+	return _get_legacy_display_name()
+
+
+func get_character_profile_snapshot() -> Dictionary:
+	var snapshot := {
+		"display_name": "",
+		"subtitle": "",
+		"description": "",
+		"portrait_path": "",
+		"accent_color": Color(0.31, 0.62, 0.72, 1.0),
+	}
+	if character_profile != null:
+		snapshot.merge(character_profile.get_snapshot(), true)
+	if String(snapshot.get("display_name", "")).strip_edges().is_empty():
+		snapshot["display_name"] = _get_legacy_display_name()
+	return snapshot.duplicate(true)
+
+
+func _get_legacy_display_name() -> String:
+	# Keeps authored scenes and old saves unchanged when no profile is assigned.
 	if not display_name.is_empty():
 		return display_name
 
@@ -1176,14 +1251,54 @@ func _update_facing() -> void:
 
 
 func _update_favor_bar() -> void:
+	if favor_bar == null:
+		return
 	favor_bar.min_value = favor_min
 	favor_bar.max_value = favor_max
-	favor_bar.value = clampf(get_favor(), favor_min, favor_max)
+	var presentation := get_player_relationship_presentation_snapshot()
+	if not bool(presentation.get("available", false)):
+		favor_bar.value = favor_min
+		favor_bar.visible = false
+		return
+	favor_bar.value = clampf(
+		float(presentation.get("favor", favor_min)), favor_min, favor_max
+	)
+
+
+func get_player_relationship_presentation_snapshot() -> Dictionary:
+	return player_relationship_presentation.get_opinion_snapshot(
+		_get_player()
+	)
+
+
+func get_player_favor_for_presentation():
+	var presentation := get_player_relationship_presentation_snapshot()
+	if not bool(presentation.get("available", false)):
+		return null
+	return float(presentation.get("favor", 0.0))
+
+
+func refresh_player_relationship_presentation() -> void:
+	_update_favor_bar()
+	_update_visual_mood()
+	_update_favor_bar_visibility()
 
 
 func _update_favor_bar_visibility() -> void:
+	if favor_bar == null:
+		return
+	var had_cached_player := (
+		cached_player != null and is_instance_valid(cached_player)
+	)
 	var player := _get_player()
 	if player == null:
+		favor_bar.visible = false
+		return
+	if not had_cached_player:
+		_update_favor_bar()
+		_update_visual_mood()
+	var presentation := get_player_relationship_presentation_snapshot()
+	if not bool(presentation.get("available", false)):
 		favor_bar.visible = false
 		return
 
@@ -1200,7 +1315,17 @@ func _get_player() -> Node2D:
 
 
 func _update_visual_mood() -> void:
-	var favor_ratio := inverse_lerp(favor_min, favor_max, get_favor())
+	if body_visual == null:
+		return
+	var presentation := get_player_relationship_presentation_snapshot()
+	if not bool(presentation.get("available", false)):
+		body_visual.color = neutral_body_color
+		return
+	var favor_ratio := inverse_lerp(
+		favor_min,
+		favor_max,
+		float(presentation.get("favor", favor_min))
+	)
 	favor_ratio = clampf(favor_ratio, 0.0, 1.0)
 
 	if favor_ratio < 0.34:
@@ -1264,6 +1389,9 @@ func _setup_relationship_identity() -> void:
 		return
 
 	set_meta("relationship_id", String(resolved_id))
+	player_relationship_presentation.bind(
+		self, _get_relationship_system()
+	)
 
 
 func _setup_npc_tags() -> void:

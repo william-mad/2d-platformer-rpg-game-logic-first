@@ -60,6 +60,8 @@ func _initialize() -> void:
 	var machine := NpcStateMachine.new()
 	machine.name = "NpcStateMachine"
 	machine.active = false
+	var behavior_controller := NpcBehaviorController.new()
+	behavior_controller.name = "NpcBehaviorController"
 	var rejecting_state := RejectingState.new()
 	rejecting_state.name = "Busy"
 	rejecting_state.allows_scheduled_activity_interrupt = true
@@ -69,6 +71,7 @@ func _initialize() -> void:
 	idle_state.name = "Idle"
 	var move_state := NpcState.new()
 	move_state.name = "MoveToTarget"
+	machine.add_child(behavior_controller)
 	machine.add_child(rejecting_state)
 	machine.add_child(work_state)
 	machine.add_child(idle_state)
@@ -111,6 +114,33 @@ func _initialize() -> void:
 		"state_name": "Work",
 		"target_scene_path": TEST_SCENE_PATH,
 		"target_position": Vector2.ZERO,
+		"priority": 27,
+		"schedule_phase": "late",
+		"schedule_occurrence_key": "transaction_work_spot:12:0",
+		"schedule_window_index": 0,
+		"schedule_window_start_total_hours": 304.0,
+		"schedule_grace_end_total_hours": 304.5,
+		"schedule_window_end_total_hours": 306.0,
+		"schedule_lateness_game_hours": 0.75,
+		"schedule_base_priority": 20,
+		"schedule_effective_priority": 27,
+		"schedule_completion_policy": "finish_current",
+		"schedule_maximum_overtime_game_hours": 0.5,
+		"schedule_overtime_end_total_hours": 306.5,
+		"metadata": {
+			"schedule_phase": "late",
+			"schedule_occurrence_key": "transaction_work_spot:12:0",
+			"schedule_window_index": 0,
+			"schedule_window_start_total_hours": 304.0,
+			"schedule_grace_end_total_hours": 304.5,
+			"schedule_window_end_total_hours": 306.0,
+			"schedule_lateness_game_hours": 0.75,
+			"schedule_base_priority": 20,
+			"schedule_effective_priority": 27,
+			"schedule_completion_policy": "finish_current",
+			"schedule_maximum_overtime_game_hours": 0.5,
+			"schedule_overtime_end_total_hours": 306.5,
+		},
 	}
 
 	var rejected := bool(locations.call(
@@ -189,6 +219,47 @@ func _initialize() -> void:
 		"live state machine and persistent record share one session ID"
 	)
 	_expect(
+		int(accepted_action.get("priority", -1)) == 27,
+		"effective schedule priority reaches the persistent action"
+	)
+	_expect(
+		String((accepted_action.get("metadata", {}) as Dictionary).get(
+			"schedule_occurrence_key", ""
+		)) == "transaction_work_spot:12:0",
+		"persistent action retains copied schedule occurrence context"
+	)
+	_expect(
+		String(accepted_action.get("schedule_occurrence_key", ""))
+			== "transaction_work_spot:12:0",
+		"typed action descriptor exposes copied schedule context"
+	)
+	_expect(
+		String(accepted_action.get("schedule_completion_policy", ""))
+			== "finish_current"
+		and is_equal_approx(
+			float(accepted_action.get("schedule_overtime_end_total_hours", 0.0)),
+			306.5
+		),
+		"persistent action retains completion policy and absolute overtime deadline"
+	)
+	var accepted_intent: Dictionary = (
+		machine.behavior_controller.get_current_intent_descriptor()
+		if machine.behavior_controller != null
+		else {}
+	)
+	_expect(
+		String((accepted_intent.get("metadata", {}) as Dictionary).get(
+			"schedule_occurrence_key", ""
+		)) == "transaction_work_spot:12:0",
+		"accepted behavior intention receives the same schedule context"
+	)
+	_expect(
+		String((accepted_intent.get("metadata", {}) as Dictionary).get(
+			"schedule_completion_policy", ""
+		)) == "finish_current",
+		"accepted behavior intention receives completion context"
+	)
+	_expect(
 		int(simulator.spot_claim_counts.get(TEST_SPOT_ID, 0)) == 1,
 		"accepted live assignment retains exactly one spot claim"
 	)
@@ -199,6 +270,19 @@ func _initialize() -> void:
 		TEST_SCENE_PATH,
 		Vector2.ZERO
 	)), "same-session proposal retry is accepted")
+	var refreshed_action: Dictionary = machine.get_active_action_descriptor()
+	_expect(
+		String((refreshed_action.get("metadata", {}) as Dictionary).get(
+			"schedule_occurrence_key", ""
+		)) == "transaction_work_spot:12:0",
+		"same-session refresh preserves the occurrence key"
+	)
+	_expect(
+		is_equal_approx(float((refreshed_action.get("metadata", {}) as Dictionary).get(
+			"schedule_overtime_end_total_hours", 0.0
+		)), 306.5),
+		"same-session refresh preserves the overtime deadline"
+	)
 	_expect(
 		int(simulator.spot_claim_counts.get(TEST_SPOT_ID, 0)) == 1,
 		"same-session proposal retry does not double claim"

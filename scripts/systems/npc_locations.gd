@@ -1,5 +1,10 @@
 extends Node
 
+const NpcIdentity = preload("res://scripts/systems/npc_identity.gd")
+const NpcIdentityPersistence = preload(
+	"res://scripts/systems/npc_identity_persistence.gd"
+)
+
 const NpcActionSessionModel = preload("res://scripts/systems/npc_action_session.gd")
 const NpcRouteLocationCoordinator = preload(
 	"res://scripts/systems/npc_route_location_coordinator.gd"
@@ -15,6 +20,9 @@ var npc_records: Dictionary = {}
 var live_npcs: Dictionary = {}
 var active_scene_context: Node
 var active_scene_path: String = ""
+var _last_omitted_unstable_save_signature: String = ""
+
+
 func register_npc(npc: Node) -> bool:
 	if npc == null or not is_instance_valid(npc):
 		return false
@@ -22,12 +30,23 @@ func register_npc(npc: Node) -> bool:
 	var npc_id := get_npc_id(npc)
 	if npc_id.is_empty():
 		return true
+	var identity_migration := NpcIdentityPersistence.plan_location_record_adoption(
+		npc_records,
+		live_npcs,
+		npc,
+		npc_id
+	)
 
 	_breadcrumb("npc_locations:register_start", npc_id)
 	var current_scene_path := get_current_scene_path()
 	var npc_scene_path := _get_npc_scene_path(npc)
-	var created_record := not npc_records.has(npc_id)
-	var existing_record: Dictionary = npc_records.get(npc_id, {})
+	var adopted_record := bool(identity_migration.get("adopted", false))
+	var created_record := not adopted_record and not npc_records.has(npc_id)
+	var existing_record: Dictionary = (
+		identity_migration.get("record", {})
+		if adopted_record
+		else npc_records.get(npc_id, {})
+	)
 	var expected_scene_path := String(existing_record.get("scene_path", current_scene_path))
 	if not created_record and not expected_scene_path.is_empty() and expected_scene_path != current_scene_path:
 		_breadcrumb(
@@ -70,6 +89,20 @@ func register_npc(npc: Node) -> bool:
 	if not _capture_live_npc_into_record(npc_id, npc, record):
 		live_npcs.erase(npc_id)
 		return false
+	if adopted_record:
+		NpcIdentityPersistence.commit_location_record_adoption(
+			npc_records,
+			live_npcs,
+			npc,
+			identity_migration
+		)
+		_breadcrumb(
+			"npc_locations:identity_record_adopted",
+			"%s <- %s" % [
+				npc_id,
+				String(identity_migration.get("selected_id", "")),
+			]
+		)
 	npc_records[npc_id] = record
 
 	npc_registered.emit(npc_id, npc, current_scene_path)
@@ -1452,9 +1485,28 @@ func finish_scheduled_activity(
 
 func get_save_data() -> Dictionary:
 	synchronize_live_records()
+	var unstable_record_ids := (
+		NpcIdentityPersistence.get_unstable_location_record_ids(npc_records)
+	)
+	var omitted_signature := "|".join(unstable_record_ids)
+	if (
+		not unstable_record_ids.is_empty()
+		and omitted_signature != _last_omitted_unstable_save_signature
+	):
+		var omitted_ids := ", ".join(unstable_record_ids)
+		_breadcrumb("npc_locations:save_omit_unstable_identity", omitted_ids)
+		push_warning(
+			(
+				"NPC location save omitted identity-free runtime record(s): %s. "
+				+ "Assign an authored location_id before persistence is required."
+			) % [omitted_ids]
+		)
+	_last_omitted_unstable_save_signature = omitted_signature
 	return {
 		"active_scene_path": active_scene_path,
-		"records": npc_records.duplicate(true),
+		"records": NpcIdentityPersistence.sanitize_location_records_for_save(
+			npc_records
+		),
 	}
 
 
@@ -1487,28 +1539,10 @@ func apply_save_data(data: Dictionary) -> void:
 
 
 func get_npc_id(npc: Node) -> String:
-	if npc == null:
-		return ""
-
-	if npc.has_method("get_npc_location_id"):
-		var method_id := String(npc.call("get_npc_location_id")).strip_edges()
-		if not method_id.is_empty():
-			return method_id
-
-	if npc.has_meta("npc_location_id"):
-		var meta_id := String(npc.get_meta("npc_location_id")).strip_edges()
-		if not meta_id.is_empty():
-			return meta_id
-
-	if npc.has_method("get_relationship_id"):
-		var relationship_id := String(npc.call("get_relationship_id")).strip_edges()
-		if not relationship_id.is_empty():
-			return relationship_id
-
-	if npc.is_inside_tree():
-		return String(npc.get_path())
-
-	return ""
+	# Location records, relationships, sessions, and memories now share the same
+	# authored-ID precedence. Keep the historical live path fallback for legacy
+	# identity-free NPCs, but do not synthesize a new off-tree instance key here.
+	return NpcIdentity.get_actor_id(npc, true, false)
 
 
 func get_current_scene_path() -> String:
@@ -1527,6 +1561,7 @@ func _build_initial_record(
 	return {
 		"npc_id": npc_id,
 		"node_name": npc.name,
+		"character_profile": _get_character_profile_snapshot(npc),
 		"npc_scene_path": npc_scene_path,
 		"home_scene_path": current_scene_path,
 		"home_position": _get_node_position(npc),
@@ -1551,6 +1586,7 @@ func _build_initial_record(
 
 func _refresh_record_from_node(record: Dictionary, npc: Node, npc_scene_path: String) -> void:
 	record["node_name"] = npc.name
+	record["character_profile"] = _get_character_profile_snapshot(npc)
 	if String(record.get("npc_scene_path", "")).is_empty() and not npc_scene_path.is_empty():
 		record["npc_scene_path"] = npc_scene_path
 
@@ -1775,10 +1811,60 @@ func _fresh_empty_inventory_save_data() -> Dictionary:
 	return InventoryModel.get_empty_save_data()
 
 
+func _get_character_profile_snapshot(npc: Node) -> Dictionary:
+	var fallback_name := String(npc.name) if npc != null else ""
+	if npc != null and npc.has_method("get_display_name"):
+		fallback_name = String(npc.call("get_display_name")).strip_edges()
+	var snapshot: Dictionary = {}
+	if npc != null and npc.has_method("get_character_profile_snapshot"):
+		var profile_value = npc.call("get_character_profile_snapshot")
+		if profile_value is Dictionary:
+			snapshot = profile_value.duplicate(true)
+	return _normalize_character_profile_snapshot(snapshot, fallback_name)
+
+
+func _normalize_character_profile_snapshot(
+	profile_value: Variant,
+	fallback_name: String = ""
+) -> Dictionary:
+	var profile: Dictionary = (
+		profile_value.duplicate(true)
+		if profile_value is Dictionary
+		else {}
+	)
+	var clean_display_name := String(
+		profile.get("display_name", fallback_name)
+	).strip_edges()
+	if clean_display_name.is_empty():
+		clean_display_name = fallback_name.strip_edges()
+	var accent_value = profile.get(
+		"accent_color", Color(0.31, 0.62, 0.72, 1.0)
+	)
+	return {
+		"display_name": clean_display_name,
+		"subtitle": String(profile.get("subtitle", "")).strip_edges(),
+		"description": String(
+			profile.get("description", "")
+		).strip_edges(),
+		"portrait_path": String(
+			profile.get("portrait_path", "")
+		).strip_edges(),
+		"accent_color": (
+			accent_value
+			if accent_value is Color
+			else Color(0.31, 0.62, 0.72, 1.0)
+		),
+	}
+
+
 func _normalize_loaded_record(npc_id: String, saved_record: Dictionary) -> Dictionary:
 	var record := saved_record.duplicate(true)
 	record["npc_id"] = String(record.get("npc_id", npc_id))
 	record["node_name"] = String(record.get("node_name", npc_id))
+	record["character_profile"] = _normalize_character_profile_snapshot(
+		record.get("character_profile", {}),
+		String(record["node_name"])
+	)
 	record["npc_scene_path"] = String(record.get("npc_scene_path", ""))
 	record["home_scene_path"] = String(record.get("home_scene_path", ""))
 	record["scene_path"] = String(record.get("scene_path", ""))

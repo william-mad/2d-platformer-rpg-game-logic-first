@@ -23,9 +23,19 @@ need_threshold_at_spot_value_maximum = 40.0
 owner_ids = Array[StringName]([&"mom", &"player"])
 capacity = 0
 active_time_windows = Array[Dictionary]([{
+"completion_policy": "finish_current",
 "end_hour": 10.0,
+"grace_game_minutes": 30.0,
+"late_priority_bonus": 10,
+"maximum_overtime_game_minutes": 30.0,
+"start_policy": "flexible",
 "start_hour": 9.0
 }, {
+"completion_policy": "finish_current",
 "end_hour": 18.0,
+"grace_game_minutes": 30.0,
+"late_priority_bonus": 10,
+"maximum_overtime_game_minutes": 30.0,
+"start_policy": "flexible",
 "start_hour": 16.0
 }])

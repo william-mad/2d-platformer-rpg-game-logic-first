@@ -1,13 +1,13 @@
 class_name NpcStateValueDisplay extends Label
 
+const SocialStateSchema = preload("res://scripts/systems/npc_social_state_schema.gd")
+const NpcIdentity = preload("res://scripts/systems/npc_identity.gd")
+
 @export var target_npc_path: NodePath
 @export var display_title: String = "NPC State Machine"
 @export var show_relationships: bool = true
 @export var max_relationship_rows: int = 4
 @export var value_order: Array[String] = [
-	"favor",
-	"love",
-	"trust",
 	"anger",
 	"hunger",
 	"energy",
@@ -17,7 +17,6 @@ class_name NpcStateValueDisplay extends Label
 	"talk_need",
 	"lonely",
 	"sadness",
-	"suspicion",
 	"curiosity",
 	"hp",
 	"knockout",
@@ -102,7 +101,7 @@ func _update_display() -> void:
 	var written_keys: Array[String] = []
 
 	for key in value_order:
-		if not machine.values.has(key):
+		if not machine.values.has(key) or not _is_declared_local_value(key):
 			continue
 
 		written_keys.append(key)
@@ -110,7 +109,7 @@ func _update_display() -> void:
 
 	for value_key in machine.values.keys():
 		var key := String(value_key)
-		if written_keys.has(key):
+		if written_keys.has(key) or not _is_declared_local_value(key):
 			continue
 
 		lines.append(_format_value_line(key, machine.values[value_key]))
@@ -166,7 +165,9 @@ func _on_relationship_favor_changed(
 
 
 func _update_if_owner_is_target(relationship_owner: Node) -> void:
-	if relationship_owner == target_npc:
+	# ID-based relationship changes may not have a live owner node. Refreshing this
+	# small debug label is preferable to leaving a stale directed opinion onscreen.
+	if relationship_owner == null or relationship_owner == target_npc:
 		_update_display()
 
 
@@ -175,7 +176,17 @@ func _append_relationship_lines(lines: Array[String]) -> void:
 	if relationships == null or target_npc == null:
 		return
 
-	var npc_relationships = relationships.call("get_relationships_for", target_npc)
+	var owner_id := NpcIdentity.get_stable_actor_id(target_npc)
+	if (
+		owner_id.is_empty()
+		or not relationships.has_method("get_relationships_for_id")
+	):
+		return
+	# Debug presentation is read-only. The node-based compatibility API may migrate
+	# legacy aliases, while this stable-ID snapshot never mutates relationship state.
+	var npc_relationships = relationships.call(
+		"get_relationships_for_id", owner_id
+	)
 	if not (npc_relationships is Dictionary):
 		return
 
@@ -188,7 +199,13 @@ func _append_relationship_lines(lines: Array[String]) -> void:
 
 	var relationship_rows: Array = []
 	for relationship_id in npc_relationships.keys():
-		relationship_rows.append(npc_relationships[relationship_id])
+		var relationship = npc_relationships[relationship_id]
+		if relationship is Dictionary and bool(relationship.get("met", false)):
+			relationship_rows.append(relationship)
+
+	if relationship_rows.is_empty():
+		lines.append("none")
+		return
 
 	relationship_rows.sort_custom(Callable(self, "_sort_relationship_rows"))
 
@@ -198,18 +215,52 @@ func _append_relationship_lines(lines: Array[String]) -> void:
 
 
 func _sort_relationship_rows(first, second) -> bool:
-	return String(first.get("other_name", "")) < String(second.get("other_name", ""))
+	return _get_relationship_subject_label(first).to_lower() < (
+		_get_relationship_subject_label(second).to_lower()
+	)
 
 
 func _format_relationship_line(relationship: Dictionary) -> String:
-	return "%s favor: %s" % [
-		String(relationship.get("other_name", "NPC")),
-		_format_value(relationship.get("favor", 0.0))
+	var owner_label := String(relationship.get("owner_name", "NPC")).strip_edges()
+	if owner_label.is_empty() and target_npc != null:
+		owner_label = String(target_npc.name)
+	var subject_label := _get_relationship_subject_label(relationship)
+	var metric_parts: Array[String] = []
+	for definition in SocialStateSchema.get_definitions_for_scope(
+		SocialStateSchema.SCOPE_DIRECTED_OPINION
+	):
+		var metric_id := String(definition.get("id", ""))
+		if metric_id.is_empty() or not relationship.has(metric_id):
+			continue
+		metric_parts.append("%s %s" % [
+			String(definition.get("label", metric_id.capitalize())),
+			_format_value(relationship[metric_id]),
+		])
+	return "%s -> %s | %s" % [
+		owner_label,
+		subject_label,
+		" / ".join(metric_parts) if not metric_parts.is_empty() else "no opinion values",
 	]
 
 
+func _get_relationship_subject_label(relationship: Dictionary) -> String:
+	var label := String(relationship.get("other_name", "")).strip_edges()
+	if not label.is_empty():
+		return label
+	var subject_id := String(relationship.get("other_id", "")).strip_edges()
+	if NpcIdentity.is_player_id(subject_id):
+		return "Player"
+	if not subject_id.is_empty():
+		return subject_id.replace("_", " ").capitalize()
+	return "Character"
+
+
 func _format_value_line(key: String, value) -> String:
-	var line := "%s: %s" % [key, _format_value(value)]
+	var definition := SocialStateSchema.get_definition(StringName(key))
+	var label := String(definition.get("label", key.capitalize()))
+	var scope := StringName(definition.get("scope", &""))
+	var scope_label := "mood" if scope == SocialStateSchema.SCOPE_BROAD_MOOD else "local"
+	var line := "%s %s: %s" % [scope_label, label, _format_value(value)]
 
 	if last_changed_values.has(key):
 		var delta := float(last_changed_values[key])
@@ -217,6 +268,18 @@ func _format_value_line(key: String, value) -> String:
 		line += "  (%s%s)" % [sign_text, _format_value(delta)]
 
 	return line
+
+
+func _is_declared_local_value(key: String) -> bool:
+	var definition := SocialStateSchema.get_definition(StringName(key))
+	return (
+		not definition.is_empty()
+		and StringName(definition.get("scope", &""))
+			!= SocialStateSchema.SCOPE_DIRECTED_OPINION
+		and bool(
+			definition.get("presentation", {}).get("show_in_debug", false)
+		)
+	)
 
 
 func _format_value(value) -> String:

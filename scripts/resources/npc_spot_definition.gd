@@ -1,5 +1,9 @@
 class_name NpcSpotDefinition extends Resource
 
+const ScheduleWindowPolicy = preload(
+	"res://scripts/systems/npc_schedule_window_policy.gd"
+)
+
 @export_group("Identity")
 @export var spot_id: StringName = &""
 @export_file("*.tscn") var scene_path: String = ""
@@ -101,6 +105,67 @@ func get_validation_errors() -> Array[String]:
 						index, field_name,
 					]
 				)
+		var start_policy := ScheduleWindowPolicy.canonicalize_start_policy(
+			window.get("start_policy", ScheduleWindowPolicy.START_POLICY_HARD)
+		)
+		if start_policy not in [
+			ScheduleWindowPolicy.START_POLICY_HARD,
+			ScheduleWindowPolicy.START_POLICY_FLEXIBLE,
+		]:
+			errors.append(
+				"active_time_windows[%d].start_policy must be hard or flexible"
+				% index
+			)
+		if window.has("grace_game_minutes"):
+			var grace_value: Variant = window["grace_game_minutes"]
+			if not _is_finite_number(grace_value) or float(grace_value) < 0.0:
+				errors.append(
+					"active_time_windows[%d].grace_game_minutes must be finite and non-negative"
+					% index
+				)
+			elif (
+				window.has("start_hour")
+				and window.has("end_hour")
+				and float(grace_value) / 60.0
+					> ScheduleWindowPolicy.get_window_duration_hours(window)
+			):
+				errors.append(
+					"active_time_windows[%d].grace_game_minutes exceeds the window duration"
+					% index
+				)
+		if window.has("late_priority_bonus"):
+			var bonus_value: Variant = window["late_priority_bonus"]
+			if not _is_finite_number(bonus_value) or float(bonus_value) < 0.0:
+				errors.append(
+					"active_time_windows[%d].late_priority_bonus must be finite and non-negative"
+					% index
+				)
+		var completion_policy := ScheduleWindowPolicy.canonicalize_completion_policy(
+			window.get(
+				"completion_policy",
+				ScheduleWindowPolicy.COMPLETION_POLICY_STOP_AT_WINDOW_END
+			)
+		)
+		if completion_policy not in [
+			ScheduleWindowPolicy.COMPLETION_POLICY_STOP_AT_WINDOW_END,
+			ScheduleWindowPolicy.COMPLETION_POLICY_FINISH_CURRENT,
+		]:
+			errors.append(
+				"active_time_windows[%d].completion_policy must be stop_at_window_end or finish_current"
+				% index
+			)
+		if window.has("maximum_overtime_game_minutes"):
+			var overtime_value: Variant = window["maximum_overtime_game_minutes"]
+			if not _is_finite_number(overtime_value) or float(overtime_value) < 0.0:
+				errors.append(
+					"active_time_windows[%d].maximum_overtime_game_minutes must be finite and non-negative"
+					% index
+				)
+			elif float(overtime_value) > ScheduleWindowPolicy.MAXIMUM_OVERTIME_GAME_MINUTES:
+				errors.append(
+					"active_time_windows[%d].maximum_overtime_game_minutes exceeds the safe maximum of %.0f"
+					% [index, ScheduleWindowPolicy.MAXIMUM_OVERTIME_GAME_MINUTES]
+				)
 	if meal_cycle_recipe != null:
 		var catalog := ItemCatalog.new()
 		if not catalog.load_definitions():
@@ -127,6 +192,13 @@ func get_validation_errors() -> Array[String]:
 					"meal_cycle_recipe must produce at least one edible output with positive hunger value"
 				)
 	return errors
+
+
+func _is_finite_number(value: Variant) -> bool:
+	return (
+		typeof(value) in [TYPE_INT, TYPE_FLOAT]
+		and is_finite(float(value))
+	)
 
 
 func allows_npc_id(npc_id: StringName) -> bool:

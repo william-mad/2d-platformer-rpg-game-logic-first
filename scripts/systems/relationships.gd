@@ -1,5 +1,12 @@
 extends Node
 
+const Identity = preload("res://scripts/systems/npc_identity.gd")
+const RelationshipStore = preload("res://scripts/systems/npc_relationship_store.gd")
+const SocialStateSchema = preload("res://scripts/systems/npc_social_state_schema.gd")
+const SAVE_VERSION: int = 3
+const MAX_MIGRATED_ACTOR_CACHE_ENTRIES: int = 512
+const MAX_MIGRATED_ALIAS_CACHE_ENTRIES: int = 2048
+
 signal relationship_met(relationship_owner: Node, other: Node, relationship: Dictionary)
 signal relationship_seen(relationship_owner: Node, other: Node, relationship: Dictionary)
 signal relationship_changed(relationship_owner: Node, other: Node, changed_values: Dictionary, relationship: Dictionary)
@@ -14,10 +21,21 @@ signal fear_changed(relationship_owner: Node, other: Node, fear: float, delta: f
 @export var max_anger: float = 100.0
 @export var min_fear: float = 0.0
 @export var max_fear: float = 100.0
+@export var default_trust: float = 50.0
+@export var min_trust: float = 0.0
+@export var max_trust: float = 100.0
+@export var default_love: float = 0.0
+@export var min_love: float = 0.0
+@export var max_love: float = 100.0
+@export var default_suspicion: float = 0.0
+@export var min_suspicion: float = 0.0
+@export var max_suspicion: float = 100.0
 @export var emit_event_bus_events: bool = true
 @export var relationship_event_scope: StringName = &"scene"
 
 var relationships: Dictionary = {}
+var _migrated_actor_aliases: Dictionary = {}
+var _migrated_relationship_aliases: Dictionary = {}
 
 
 func meet(
@@ -39,7 +57,7 @@ func meet(
 
 	relationship["met"] = true
 	relationship["meet_count"] = int(relationship.get("meet_count", 0)) + 1
-	relationship["last_seen_msec"] = Time.get_ticks_msec()
+	relationship["last_seen_msec"] = _now_msec()
 	relationship["last_context"] = stored_context
 
 	var relationship_copy := relationship.duplicate(true)
@@ -73,8 +91,12 @@ func change_favor(
 	reason: String = "manual",
 	context: Dictionary = {}
 ) -> float:
-	var current_favor := get_favor(relationship_owner, other, default_favor)
-	return set_favor(relationship_owner, other, current_favor + delta, reason, context)
+	var current_favor := get_favor(
+		relationship_owner, other, default_favor
+	)
+	return set_favor(
+		relationship_owner, other, current_favor + delta, reason, context
+	)
 
 
 func change_favor_by_id(
@@ -86,7 +108,9 @@ func change_favor_by_id(
 ) -> float:
 	var owner_id := get_relationship_id(relationship_owner)
 	var current_favor := get_favor_by_id(owner_id, other_id, default_favor)
-	return set_favor_by_id(relationship_owner, other_id, current_favor + delta, reason, context)
+	return set_favor_by_id(
+		relationship_owner, other_id, current_favor + delta, reason, context
+	)
 
 
 func set_favor(
@@ -96,41 +120,9 @@ func set_favor(
 	reason: String = "manual",
 	context: Dictionary = {}
 ) -> float:
-	if not _can_store_relationship(relationship_owner, other):
-		return default_favor
-
-	var owner_id := get_relationship_id(relationship_owner)
-	var other_id := get_relationship_id(other)
-	var created := not has_relationship_by_id(owner_id, other_id)
-	var relationship := _get_or_create_relationship(owner_id, other_id, relationship_owner, other, default_favor)
-	var stored_context := _get_storable_context(context)
-	var previous_favor := float(relationship.get("favor", default_favor))
-	var next_favor := clampf(value, min_favor, max_favor)
-
-	if created:
-		relationship["met"] = true
-		relationship["last_reason"] = reason
-		relationship["last_context"] = stored_context
-		var created_copy := relationship.duplicate(true)
-		relationship_met.emit(relationship_owner, other, created_copy)
-		_emit_relationship_event(&"relationship_met", relationship_owner, other, created_copy, {}, reason)
-
-	if is_equal_approx(previous_favor, next_favor):
-		return next_favor
-
-	relationship["favor"] = next_favor
-	relationship["updated_at_msec"] = Time.get_ticks_msec()
-	relationship["last_reason"] = reason
-	relationship["last_context"] = stored_context
-
-	var delta := next_favor - previous_favor
-	var changed_values := {"favor": delta}
-	var relationship_copy := relationship.duplicate(true)
-	relationship_changed.emit(relationship_owner, other, changed_values, relationship_copy)
-	favor_changed.emit(relationship_owner, other, next_favor, delta, relationship_copy)
-	_emit_relationship_event(&"relationship_favor_changed", relationship_owner, other, relationship_copy, changed_values, reason)
-
-	return next_favor
+	return set_opinion_metric(
+		relationship_owner, other, &"favor", value, reason, context
+	)
 
 
 func set_favor_by_id(
@@ -142,81 +134,248 @@ func set_favor_by_id(
 ) -> float:
 	if not _can_store_relationship_by_id(relationship_owner, other_id):
 		return default_favor
-
 	var owner_id := get_relationship_id(relationship_owner).strip_edges()
-	var target_id := other_id.strip_edges()
-	var created := not has_relationship_by_id(owner_id, target_id)
+	var runtime_context := context.duplicate()
+	runtime_context["relationship_owner"] = relationship_owner
+	return set_opinion_metric_by_id(
+		owner_id, other_id, &"favor", value, reason, runtime_context
+	)
+
+
+func get_favor(relationship_owner: Node, other: Node, fallback: float = -1.0) -> float:
+	var resolved_fallback := default_favor if fallback < 0.0 else fallback
+	return get_opinion_metric(
+		relationship_owner, other, &"favor", resolved_fallback
+	)
+
+
+func get_favor_by_id(owner_id: String, other_id: String, fallback: float = -1.0) -> float:
+	var resolved_fallback := default_favor if fallback < 0.0 else fallback
+	return get_opinion_metric_by_id(
+		owner_id, other_id, &"favor", resolved_fallback
+	)
+
+
+## Generic directed-opinion API. The first actor is always the opinion owner;
+## the second actor is always its explicit subject.
+func get_opinion_metric(
+	relationship_owner: Node,
+	other: Node,
+	metric_id: StringName,
+	fallback = null
+) -> float:
+	if relationship_owner == null or other == null:
+		return _get_opinion_fallback(metric_id, fallback)
+	return get_opinion_metric_by_id(
+		get_relationship_id(relationship_owner),
+		get_relationship_id(other),
+		metric_id,
+		fallback
+	)
+
+
+func get_opinion_metric_by_id(
+	owner_id: String,
+	other_id: String,
+	metric_id: StringName,
+	fallback = null
+) -> float:
+	var missing_fallback := _get_opinion_fallback(metric_id, fallback)
+	if not SocialStateSchema.is_directed_opinion_metric(metric_id):
+		return missing_fallback
+	var clean_owner_id := owner_id.strip_edges()
+	var clean_other_id := other_id.strip_edges()
+	if not has_relationship_by_id(clean_owner_id, clean_other_id):
+		return missing_fallback
+	var relationship: Dictionary = relationships[clean_owner_id][clean_other_id]
+	var key := String(metric_id)
+	var value := float(
+		relationship.get(key, _get_opinion_default(metric_id))
+	)
+	return clampf(
+		value,
+		_get_opinion_minimum(metric_id),
+		_get_opinion_maximum(metric_id)
+	)
+
+
+func set_opinion_metric(
+	relationship_owner: Node,
+	other: Node,
+	metric_id: StringName,
+	value: float,
+	reason: String = "manual",
+	context: Dictionary = {}
+) -> float:
+	if not _can_store_relationship(relationship_owner, other):
+		return _get_opinion_default(metric_id)
+	var runtime_context := context.duplicate()
+	runtime_context["relationship_owner"] = relationship_owner
+	runtime_context["other"] = other
+	return set_opinion_metric_by_id(
+		get_relationship_id(relationship_owner),
+		get_relationship_id(other),
+		metric_id,
+		value,
+		reason,
+		runtime_context
+	)
+
+
+func set_opinion_metric_by_id(
+	owner_id: String,
+	other_id: String,
+	metric_id: StringName,
+	value: float,
+	reason: String = "manual",
+	context: Dictionary = {}
+) -> float:
+	return _set_opinion_metric_by_id(
+		owner_id, other_id, metric_id, value, reason, context, true
+	)
+
+
+func _set_opinion_metric_by_id(
+	owner_id: String,
+	other_id: String,
+	metric_id: StringName,
+	value: float,
+	reason: String,
+	context: Dictionary,
+	emit_met_on_create: bool
+) -> float:
+	var default_value := _get_opinion_default(metric_id)
+	if (
+		not SocialStateSchema.is_directed_opinion_metric(metric_id)
+		or not _can_store_relationship_ids(owner_id, other_id)
+	):
+		return default_value
+
+	var clean_owner_id := owner_id.strip_edges()
+	var clean_other_id := other_id.strip_edges()
+	var relationship_owner := _get_context_node(context, "relationship_owner")
 	var other := _get_context_node(context, "other")
-	var stored_context := _get_storable_context(context)
+	var created := not has_relationship_by_id(clean_owner_id, clean_other_id)
 	var relationship := _get_or_create_relationship_by_id(
-		owner_id,
-		target_id,
+		clean_owner_id,
+		clean_other_id,
 		relationship_owner,
 		other,
 		default_favor,
 		context
 	)
 	if relationship.is_empty():
-		return default_favor
+		return default_value
 
-	var previous_favor := float(relationship.get("favor", default_favor))
-	var next_favor := clampf(value, min_favor, max_favor)
-
-	if created:
+	var key := String(metric_id)
+	var previous_value := float(relationship.get(key, default_value))
+	var next_value := clampf(
+		value,
+		_get_opinion_minimum(metric_id),
+		_get_opinion_maximum(metric_id)
+	)
+	var stored_context := _get_storable_context(context)
+	if created and emit_met_on_create:
 		relationship["met"] = true
 		relationship["last_reason"] = reason
 		relationship["last_context"] = stored_context
 		var created_copy := relationship.duplicate(true)
 		relationship_met.emit(relationship_owner, other, created_copy)
-		_emit_relationship_event(&"relationship_met", relationship_owner, other, created_copy, {}, reason)
+		_emit_relationship_event(
+			&"relationship_met",
+			relationship_owner,
+			other,
+			created_copy,
+			{},
+			reason
+		)
+	if is_equal_approx(previous_value, next_value):
+		return next_value
 
-	if is_equal_approx(previous_favor, next_favor):
-		return next_favor
-
-	relationship["favor"] = next_favor
-	relationship["updated_at_msec"] = Time.get_ticks_msec()
+	relationship[key] = next_value
+	relationship["met"] = true
+	relationship["updated_at_msec"] = _now_msec()
 	relationship["last_reason"] = reason
 	relationship["last_context"] = stored_context
-
-	var delta := next_favor - previous_favor
-	var changed_values := {"favor": delta}
+	var delta := next_value - previous_value
+	var changed_values: Dictionary = {}
+	changed_values[key] = delta
 	var relationship_copy := relationship.duplicate(true)
-	relationship_changed.emit(relationship_owner, other, changed_values, relationship_copy)
-	favor_changed.emit(relationship_owner, other, next_favor, delta, relationship_copy)
-	_emit_relationship_event(&"relationship_favor_changed", relationship_owner, other, relationship_copy, changed_values, reason)
+	relationship_changed.emit(
+		relationship_owner,
+		other,
+		changed_values,
+		relationship_copy
+	)
+	_emit_legacy_metric_signal(
+		metric_id,
+		relationship_owner,
+		other,
+		next_value,
+		delta,
+		relationship_copy
+	)
+	_emit_relationship_event(
+		StringName("relationship_%s_changed" % key),
+		relationship_owner,
+		other,
+		relationship_copy,
+		changed_values,
+		reason
+	)
+	return next_value
 
-	return next_favor
 
-
-func get_favor(relationship_owner: Node, other: Node, fallback: float = -1.0) -> float:
-	if relationship_owner == null or other == null:
-		return default_favor if fallback < 0.0 else fallback
-
-	return get_favor_by_id(
-		get_relationship_id(relationship_owner),
-		get_relationship_id(other),
-		fallback
+func change_opinion_metric(
+	relationship_owner: Node,
+	other: Node,
+	metric_id: StringName,
+	delta: float,
+	reason: String = "manual",
+	context: Dictionary = {}
+) -> float:
+	if is_zero_approx(delta):
+		return get_opinion_metric(
+			relationship_owner, other, metric_id
+		)
+	var current_value := get_opinion_metric(
+		relationship_owner,
+		other,
+		metric_id
+	)
+	return set_opinion_metric(
+		relationship_owner,
+		other,
+		metric_id,
+		current_value + delta,
+		reason,
+		context
 	)
 
 
-func get_favor_by_id(owner_id: String, other_id: String, fallback: float = -1.0) -> float:
-	var clean_owner_id := owner_id.strip_edges()
-	var clean_other_id := other_id.strip_edges()
-	var missing_fallback := default_favor if fallback < 0.0 else fallback
-	if clean_owner_id.is_empty() or clean_other_id.is_empty():
-		return missing_fallback
-	if not relationships.has(clean_owner_id):
-		return missing_fallback
-
-	var relationships_for_owner: Dictionary = relationships[clean_owner_id]
-	if not relationships_for_owner.has(clean_other_id):
-		return missing_fallback
-
-	var relationship: Dictionary = relationships_for_owner[clean_other_id]
-	if not relationship.has("favor"):
-		return default_favor
-
-	return float(relationship["favor"])
+func change_opinion_metric_by_id(
+	owner_id: String,
+	other_id: String,
+	metric_id: StringName,
+	delta: float,
+	reason: String = "manual",
+	context: Dictionary = {}
+) -> float:
+	if is_zero_approx(delta):
+		return get_opinion_metric_by_id(owner_id, other_id, metric_id)
+	var current_value := get_opinion_metric_by_id(
+		owner_id,
+		other_id,
+		metric_id
+	)
+	return set_opinion_metric_by_id(
+		owner_id,
+		other_id,
+		metric_id,
+		current_value + delta,
+		reason,
+		context
+	)
 
 
 func change_anger(
@@ -226,8 +385,12 @@ func change_anger(
 	reason: String = "manual",
 	context: Dictionary = {}
 ) -> float:
-	var current_anger := get_anger(relationship_owner, other)
-	return set_anger(relationship_owner, other, current_anger + delta, reason, context)
+	var current_anger := get_opinion_metric(
+		relationship_owner, other, &"anger", min_anger
+	)
+	return set_anger(
+		relationship_owner, other, current_anger + delta, reason, context
+	)
 
 
 func set_anger(
@@ -239,49 +402,24 @@ func set_anger(
 ) -> float:
 	if not _can_store_relationship(relationship_owner, other):
 		return min_anger
-
-	var owner_id := get_relationship_id(relationship_owner)
-	var other_id := get_relationship_id(other)
-	var relationship := _get_or_create_relationship(
-		owner_id,
-		other_id,
-		relationship_owner,
-		other,
-		default_favor
+	var runtime_context := context.duplicate()
+	runtime_context["relationship_owner"] = relationship_owner
+	runtime_context["other"] = other
+	return _set_opinion_metric_by_id(
+		get_relationship_id(relationship_owner),
+		get_relationship_id(other),
+		&"anger",
+		value,
+		reason,
+		runtime_context,
+		false
 	)
-	var previous_anger := float(relationship.get("anger", min_anger))
-	var next_anger := clampf(value, min_anger, max_anger)
-	if is_equal_approx(previous_anger, next_anger):
-		return next_anger
-
-	relationship["anger"] = next_anger
-	relationship["met"] = true
-	relationship["updated_at_msec"] = Time.get_ticks_msec()
-	relationship["last_reason"] = reason
-	relationship["last_context"] = _get_storable_context(context)
-
-	var delta := next_anger - previous_anger
-	var changed_values := {"anger": delta}
-	var relationship_copy := relationship.duplicate(true)
-	relationship_changed.emit(relationship_owner, other, changed_values, relationship_copy)
-	anger_changed.emit(relationship_owner, other, next_anger, delta, relationship_copy)
-	_emit_relationship_event(
-		&"relationship_anger_changed",
-		relationship_owner,
-		other,
-		relationship_copy,
-		changed_values,
-		reason
-	)
-	return next_anger
 
 
 func get_anger(relationship_owner: Node, other: Node, fallback: float = 0.0) -> float:
-	var relationship := get_relationship(relationship_owner, other)
-	if relationship.is_empty():
-		return fallback
-
-	return float(relationship.get("anger", fallback))
+	return get_opinion_metric(
+		relationship_owner, other, &"anger", fallback
+	)
 
 
 func decay_anger_for(relationship_owner: Node, amount: float) -> void:
@@ -309,7 +447,7 @@ func decay_anger_for_id(owner_id: String, amount: float, relationship_owner: Nod
 		var next_anger := maxf(previous_anger - amount, min_anger)
 		var delta := next_anger - previous_anger
 		relationship["anger"] = next_anger
-		relationship["updated_at_msec"] = Time.get_ticks_msec()
+		relationship["updated_at_msec"] = _now_msec()
 		relationship["last_reason"] = "passive_decay"
 
 		var changed_values := {"anger": delta}
@@ -325,8 +463,12 @@ func change_fear(
 	reason: String = "manual",
 	context: Dictionary = {}
 ) -> float:
-	var current_fear := get_fear(relationship_owner, other)
-	return set_fear(relationship_owner, other, current_fear + delta, reason, context)
+	var current_fear := get_opinion_metric(
+		relationship_owner, other, &"fear", min_fear
+	)
+	return set_fear(
+		relationship_owner, other, current_fear + delta, reason, context
+	)
 
 
 func set_fear(
@@ -338,49 +480,24 @@ func set_fear(
 ) -> float:
 	if not _can_store_relationship(relationship_owner, other):
 		return min_fear
-
-	var owner_id := get_relationship_id(relationship_owner)
-	var other_id := get_relationship_id(other)
-	var relationship := _get_or_create_relationship(
-		owner_id,
-		other_id,
-		relationship_owner,
-		other,
-		default_favor
+	var runtime_context := context.duplicate()
+	runtime_context["relationship_owner"] = relationship_owner
+	runtime_context["other"] = other
+	return _set_opinion_metric_by_id(
+		get_relationship_id(relationship_owner),
+		get_relationship_id(other),
+		&"fear",
+		value,
+		reason,
+		runtime_context,
+		false
 	)
-	var previous_fear := float(relationship.get("fear", min_fear))
-	var next_fear := clampf(value, min_fear, max_fear)
-	if is_equal_approx(previous_fear, next_fear):
-		return next_fear
-
-	relationship["fear"] = next_fear
-	relationship["met"] = true
-	relationship["updated_at_msec"] = Time.get_ticks_msec()
-	relationship["last_reason"] = reason
-	relationship["last_context"] = _get_storable_context(context)
-
-	var delta := next_fear - previous_fear
-	var changed_values := {"fear": delta}
-	var relationship_copy := relationship.duplicate(true)
-	relationship_changed.emit(relationship_owner, other, changed_values, relationship_copy)
-	fear_changed.emit(relationship_owner, other, next_fear, delta, relationship_copy)
-	_emit_relationship_event(
-		&"relationship_fear_changed",
-		relationship_owner,
-		other,
-		relationship_copy,
-		changed_values,
-		reason
-	)
-	return next_fear
 
 
 func get_fear(relationship_owner: Node, other: Node, fallback: float = 0.0) -> float:
-	var relationship := get_relationship(relationship_owner, other)
-	if relationship.is_empty():
-		return fallback
-
-	return float(relationship.get("fear", fallback))
+	return get_opinion_metric(
+		relationship_owner, other, &"fear", fallback
+	)
 
 
 func decay_fear_for(
@@ -443,7 +560,7 @@ func decay_fear_for_id(
 
 		var delta := next_fear - previous_fear
 		relationship["fear"] = next_fear
-		relationship["updated_at_msec"] = Time.get_ticks_msec()
+		relationship["updated_at_msec"] = _now_msec()
 		relationship["last_reason"] = "passive_decay"
 
 		var changed_values := {"fear": delta}
@@ -470,7 +587,9 @@ func get_relationship_by_id(owner_id: String, other_id: String) -> Dictionary:
 	if not has_relationship_by_id(clean_owner_id, clean_other_id):
 		return {}
 
-	return relationships[clean_owner_id][clean_other_id].duplicate(true)
+	var relationship: Dictionary = relationships[clean_owner_id][clean_other_id].duplicate(true)
+	_normalize_opinion_metrics_in_place(relationship)
+	return relationship
 
 
 func get_relationships_for(relationship_owner: Node) -> Dictionary:
@@ -485,7 +604,33 @@ func get_relationships_for_id(owner_id: String) -> Dictionary:
 	if clean_owner_id.is_empty() or not relationships.has(clean_owner_id):
 		return {}
 
-	return relationships[clean_owner_id].duplicate(true)
+	var rows: Dictionary = relationships[clean_owner_id].duplicate(true)
+	for other_id in rows.keys():
+		var relationship = rows[other_id]
+		if relationship is Dictionary:
+			_normalize_opinion_metrics_in_place(relationship)
+	return rows
+
+
+## A presentation-safe, read-only directory built only from met relationships
+## with persistence-safe actor IDs. Passing a viewer keeps actors connected to
+## that viewer on either directed axis; it does not imply a symmetric opinion.
+func get_known_actor_directory_snapshot(viewer_id: String = "") -> Dictionary:
+	return RelationshipStore.get_known_actor_directory_snapshot(
+		relationships,
+		viewer_id
+	)
+
+
+func get_known_character_ids_snapshot(
+	viewer_id: String = "",
+	include_player: bool = false
+) -> PackedStringArray:
+	return RelationshipStore.get_known_character_ids_snapshot(
+		relationships,
+		viewer_id,
+		include_player
+	)
 
 
 func has_relationship_by_id(owner_id: String, other_id: String) -> bool:
@@ -498,37 +643,32 @@ func has_relationship_by_id(owner_id: String, other_id: String) -> bool:
 
 
 func get_relationship_id(actor: Node) -> String:
-	if actor == null:
-		return ""
-
-	if actor.has_method("get_relationship_id"):
-		var method_id := String(actor.call("get_relationship_id"))
-		if not method_id.is_empty():
-			return method_id
-
-	if actor.has_meta("relationship_id"):
-		var meta_id := String(actor.get_meta("relationship_id"))
-		if not meta_id.is_empty():
-			return meta_id
-
-	if actor.is_inside_tree():
-		return String(actor.get_path())
-
-	return "instance:%s" % actor.get_instance_id()
+	var actor_id := Identity.get_actor_id(actor, true)
+	if not actor_id.is_empty():
+		_migrate_actor_aliases(actor, actor_id)
+	return actor_id
 
 
 func clear_relationships() -> void:
 	relationships.clear()
+	_migrated_actor_aliases.clear()
+	_migrated_relationship_aliases.clear()
 
 
 func get_save_data() -> Dictionary:
 	return {
-		"relationships": relationships.duplicate(true),
+		"version": SAVE_VERSION,
+		"relationships": RelationshipStore.get_persistence_safe_graph_snapshot(
+			relationships,
+			_get_opinion_policy()
+		),
 	}
 
 
 func apply_save_data(data: Dictionary) -> void:
 	relationships.clear()
+	_migrated_actor_aliases.clear()
+	_migrated_relationship_aliases.clear()
 
 	var saved_relationships = data.get("relationships", data)
 	if not (saved_relationships is Dictionary):
@@ -539,26 +679,35 @@ func apply_save_data(data: Dictionary) -> void:
 		if not (saved_for_owner is Dictionary):
 			continue
 
-		var owner_id := String(owner_id_key).strip_edges()
-		if owner_id.is_empty():
+		var stored_owner_id := String(owner_id_key).strip_edges()
+		if stored_owner_id.is_empty():
 			continue
 
-		relationships[owner_id] = {}
 		for other_id_key in saved_for_owner.keys():
 			var saved_relationship = saved_for_owner[other_id_key]
 			if not (saved_relationship is Dictionary):
 				continue
 
-			var other_id := String(other_id_key).strip_edges()
-			if other_id.is_empty():
+			var stored_other_id := String(other_id_key).strip_edges()
+			if stored_other_id.is_empty():
 				continue
 
 			var relationship: Dictionary = saved_relationship.duplicate(true)
-			relationship["owner_id"] = String(relationship.get("owner_id", owner_id))
-			relationship["other_id"] = String(relationship.get("other_id", other_id))
-			relationship["favor"] = clampf(float(relationship.get("favor", default_favor)), min_favor, max_favor)
-			relationship["anger"] = clampf(float(relationship.get("anger", min_anger)), min_anger, max_anger)
-			relationship["fear"] = clampf(float(relationship.get("fear", min_fear)), min_fear, max_fear)
+			var owner_id := _canonicalize_loaded_actor_id(
+				stored_owner_id,
+				relationship,
+				true
+			)
+			var other_id := _canonicalize_loaded_actor_id(
+				stored_other_id,
+				relationship,
+				false
+			)
+			if owner_id.is_empty() or other_id.is_empty():
+				continue
+			relationship["owner_id"] = owner_id
+			relationship["other_id"] = other_id
+			_normalize_opinion_metrics_in_place(relationship)
 			relationship["met"] = bool(relationship.get("met", false))
 			relationship["meet_count"] = int(relationship.get("meet_count", 0))
 			relationship["owner_name"] = String(relationship.get("owner_name", ""))
@@ -567,7 +716,291 @@ func apply_save_data(data: Dictionary) -> void:
 			relationship["other_path"] = String(relationship.get("other_path", ""))
 			relationship["last_reason"] = String(relationship.get("last_reason", ""))
 			relationship["last_context"] = _get_storable_context(relationship.get("last_context", {}))
-			relationships[owner_id][other_id] = relationship
+			_store_migrated_relationship(
+				owner_id,
+				other_id,
+				relationship,
+				stored_owner_id == owner_id and stored_other_id == other_id
+			)
+
+
+func _canonicalize_loaded_actor_id(
+	stored_id: String,
+	relationship: Dictionary,
+	is_owner: bool
+) -> String:
+	var role := "owner" if is_owner else "other"
+	var embedded_id := String(relationship.get("%s_id" % role, "")).strip_edges()
+	if Identity.is_player_id(embedded_id):
+		return String(Identity.PLAYER_ACTOR_ID)
+	return Identity.canonicalize_saved_actor_id(
+		stored_id,
+		String(relationship.get("%s_name" % role, "")),
+		String(relationship.get("%s_path" % role, ""))
+	)
+
+
+func _migrate_actor_aliases(actor: Node, canonical_id: String) -> void:
+	if (
+		actor == null
+		or relationships.is_empty()
+		or not Identity.is_stable_id(canonical_id)
+	):
+		return
+	var aliases := Identity.get_actor_aliases(actor)
+	var sorted_aliases := aliases.duplicate()
+	sorted_aliases.sort()
+	var migration_signature := "|".join(PackedStringArray(sorted_aliases))
+	if (
+		_migrated_actor_aliases.has(canonical_id)
+		and String(_migrated_actor_aliases[canonical_id]) == migration_signature
+	):
+		return
+	if aliases.is_empty():
+		_cache_migrated_actor_signature(canonical_id, migration_signature)
+		return
+
+	for alias in aliases:
+		migrate_relationship_alias(alias, canonical_id)
+	_cache_migrated_actor_signature(canonical_id, migration_signature)
+
+
+## Moves one exact legacy actor key to an explicit canonical key on both axes.
+## No name/path guessing occurs here: callers must provide both IDs, and the
+## destination must satisfy the shared persistence-safe identity contract.
+func migrate_relationship_alias(
+	legacy_id: String,
+	canonical_id: String
+) -> Dictionary:
+	var clean_legacy_id := legacy_id.strip_edges()
+	var clean_canonical_id := canonical_id.strip_edges()
+	if clean_legacy_id.is_empty() or clean_canonical_id.is_empty():
+		return {
+			"accepted": false,
+			"reason": "missing_identity",
+			"migrated_rows": 0,
+		}
+	if not Identity.is_stable_id(clean_canonical_id):
+		return {
+			"accepted": false,
+			"reason": "unstable_canonical_identity",
+			"migrated_rows": 0,
+		}
+	if clean_legacy_id == clean_canonical_id:
+		return {
+			"accepted": true,
+			"reason": "already_canonical",
+			"migrated_rows": 0,
+		}
+	var migration_key := "%s\n%s" % [
+		clean_legacy_id,
+		clean_canonical_id,
+	]
+	if _migrated_relationship_aliases.has(migration_key):
+		return {
+			"accepted": true,
+			"reason": "already_migrated",
+			"migrated_rows": 0,
+		}
+	var migrated_owner_rows := 0
+	var migrated_target_rows := 0
+	if relationships.has(clean_legacy_id):
+		var legacy_rows = relationships[clean_legacy_id]
+		if legacy_rows is Dictionary:
+			for other_id_key in legacy_rows.keys():
+				var other_id := String(other_id_key).strip_edges()
+				if other_id == clean_legacy_id:
+					other_id = clean_canonical_id
+				var relationship = legacy_rows[other_id_key]
+				if relationship is Dictionary:
+					_store_migrated_relationship(
+						clean_canonical_id,
+						other_id,
+						relationship
+					)
+					migrated_owner_rows += 1
+		relationships.erase(clean_legacy_id)
+
+	for owner_id_key in relationships.keys():
+		var owner_id := String(owner_id_key).strip_edges()
+		var owner_rows = relationships[owner_id_key]
+		if not (owner_rows is Dictionary) or not owner_rows.has(clean_legacy_id):
+			continue
+		var relationship = owner_rows[clean_legacy_id]
+		if relationship is Dictionary:
+			_store_migrated_relationship(
+				owner_id,
+				clean_canonical_id,
+				relationship
+			)
+			migrated_target_rows += 1
+		owner_rows.erase(clean_legacy_id)
+
+	_cache_migrated_relationship_alias(migration_key)
+	_migrated_actor_aliases.erase(clean_legacy_id)
+	return {
+		"accepted": true,
+		"reason": "migrated",
+		"migrated_rows": migrated_owner_rows + migrated_target_rows,
+		"migrated_owner_rows": migrated_owner_rows,
+		"migrated_target_rows": migrated_target_rows,
+	}
+
+
+func _cache_migrated_actor_signature(actor_id: String, signature: String) -> void:
+	_migrated_actor_aliases[actor_id] = signature
+	while _migrated_actor_aliases.size() > MAX_MIGRATED_ACTOR_CACHE_ENTRIES:
+		_migrated_actor_aliases.erase(_migrated_actor_aliases.keys()[0])
+
+
+func _cache_migrated_relationship_alias(migration_key: String) -> void:
+	_migrated_relationship_aliases[migration_key] = true
+	while _migrated_relationship_aliases.size() > MAX_MIGRATED_ALIAS_CACHE_ENTRIES:
+		_migrated_relationship_aliases.erase(
+			_migrated_relationship_aliases.keys()[0]
+		)
+
+
+func _store_migrated_relationship(
+	owner_id: String,
+	other_id: String,
+	relationship: Dictionary,
+	prefer_candidate_on_tie: bool = false
+) -> void:
+	var clean_owner_id := owner_id.strip_edges()
+	var clean_other_id := other_id.strip_edges()
+	if clean_owner_id.is_empty() or clean_other_id.is_empty():
+		return
+	if not relationships.has(clean_owner_id):
+		relationships[clean_owner_id] = {}
+	var rows: Dictionary = relationships[clean_owner_id]
+	var candidate := relationship.duplicate(true)
+	candidate["owner_id"] = clean_owner_id
+	candidate["other_id"] = clean_other_id
+	_normalize_opinion_metrics_in_place(candidate)
+	if rows.has(clean_other_id):
+		var existing = rows[clean_other_id]
+		if existing is Dictionary:
+			_normalize_opinion_metrics_in_place(existing)
+		if (
+			existing is Dictionary
+			and (
+				_relationship_recency(existing)
+					> _relationship_recency(candidate)
+				or (
+					_relationship_recency(existing)
+						== _relationship_recency(candidate)
+					and not prefer_candidate_on_tie
+				)
+			)
+		):
+			existing["owner_id"] = clean_owner_id
+			existing["other_id"] = clean_other_id
+			return
+	rows[clean_other_id] = candidate
+
+
+func _relationship_recency(relationship: Dictionary) -> int:
+	return maxi(
+		int(relationship.get("updated_at_msec", 0)),
+		maxi(
+			int(relationship.get("last_seen_msec", 0)),
+			int(relationship.get("created_at_msec", 0))
+		)
+	)
+
+
+func _get_normalized_relationships_snapshot() -> Dictionary:
+	return RelationshipStore.get_normalized_graph_snapshot(
+		relationships,
+		_get_opinion_policy()
+	)
+
+
+func _normalize_opinion_metrics_in_place(relationship: Dictionary) -> void:
+	RelationshipStore.normalize_row_in_place(
+		relationship,
+		_get_opinion_policy()
+	)
+
+
+func _get_opinion_fallback(metric_id: StringName, fallback) -> float:
+	if fallback != null:
+		return float(fallback)
+	return _get_opinion_default(metric_id)
+
+
+func _get_opinion_default(metric_id: StringName) -> float:
+	return RelationshipStore.get_metric_default(
+		_get_opinion_policy(),
+		metric_id
+	)
+
+
+func _get_opinion_minimum(metric_id: StringName) -> float:
+	return RelationshipStore.get_metric_minimum(
+		_get_opinion_policy(),
+		metric_id
+	)
+
+
+func _get_opinion_maximum(metric_id: StringName) -> float:
+	return RelationshipStore.get_metric_maximum(
+		_get_opinion_policy(),
+		metric_id
+	)
+
+
+func _get_opinion_policy() -> Dictionary:
+	return {
+		"defaults": {
+			&"favor": default_favor,
+			&"trust": default_trust,
+			&"love": default_love,
+			&"anger": min_anger,
+			&"fear": min_fear,
+			&"suspicion": default_suspicion,
+		},
+		"minimums": {
+			&"favor": min_favor,
+			&"trust": min_trust,
+			&"love": min_love,
+			&"anger": min_anger,
+			&"fear": min_fear,
+			&"suspicion": min_suspicion,
+		},
+		"maximums": {
+			&"favor": max_favor,
+			&"trust": max_trust,
+			&"love": max_love,
+			&"anger": max_anger,
+			&"fear": max_fear,
+			&"suspicion": max_suspicion,
+		},
+	}
+
+
+func _emit_legacy_metric_signal(
+	metric_id: StringName,
+	relationship_owner: Node,
+	other: Node,
+	value: float,
+	delta: float,
+	relationship: Dictionary
+) -> void:
+	match metric_id:
+		&"favor":
+			favor_changed.emit(
+				relationship_owner, other, value, delta, relationship
+			)
+		&"anger":
+			anger_changed.emit(
+				relationship_owner, other, value, delta, relationship
+			)
+		&"fear":
+			fear_changed.emit(
+				relationship_owner, other, value, delta, relationship
+			)
 
 
 func _get_or_create_relationship(
@@ -604,6 +1037,9 @@ func _get_or_create_relationship_by_id(
 		relationships[clean_owner_id] = {}
 
 	if relationships[clean_owner_id].has(clean_other_id):
+		_normalize_opinion_metrics_in_place(
+			relationships[clean_owner_id][clean_other_id]
+		)
 		_update_relationship_identity_fields(
 			relationships[clean_owner_id][clean_other_id],
 			relationship_owner,
@@ -612,7 +1048,7 @@ func _get_or_create_relationship_by_id(
 		)
 		return relationships[clean_owner_id][clean_other_id]
 
-	var now := Time.get_ticks_msec()
+	var now := _now_msec()
 	relationships[clean_owner_id][clean_other_id] = {
 		"owner_id": clean_owner_id,
 		"other_id": clean_other_id,
@@ -621,8 +1057,11 @@ func _get_or_create_relationship_by_id(
 		"owner_path": _get_relationship_owner_path(relationship_owner, context),
 		"other_path": _get_relationship_other_path(other, context),
 		"favor": clampf(starting_favor, min_favor, max_favor),
+		"trust": _get_opinion_default(&"trust"),
+		"love": _get_opinion_default(&"love"),
 		"anger": min_anger,
 		"fear": min_fear,
+		"suspicion": _get_opinion_default(&"suspicion"),
 		"met": false,
 		"meet_count": 0,
 		"created_at_msec": now,
@@ -633,6 +1072,12 @@ func _get_or_create_relationship_by_id(
 	}
 
 	return relationships[clean_owner_id][clean_other_id]
+
+
+func _now_msec() -> int:
+	# Relationship metadata is persisted, so process-uptime ticks cannot be
+	# compared across runs. Epoch milliseconds preserve recency after a load.
+	return int(Time.get_unix_time_from_system() * 1000.0)
 
 
 func _update_relationship_identity_fields(
@@ -718,6 +1163,16 @@ func _can_store_relationship_by_id(relationship_owner: Node, other_id: String) -
 		return false
 
 	return owner_id != target_id
+
+
+func _can_store_relationship_ids(owner_id: String, other_id: String) -> bool:
+	var clean_owner_id := owner_id.strip_edges()
+	var clean_other_id := other_id.strip_edges()
+	return (
+		not clean_owner_id.is_empty()
+		and not clean_other_id.is_empty()
+		and clean_owner_id != clean_other_id
+	)
 
 
 func _get_context_node(context: Dictionary, key: String) -> Node:

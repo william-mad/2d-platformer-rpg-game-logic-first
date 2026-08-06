@@ -77,14 +77,14 @@ func test_policy_filters_only_matching_unresolved_refusal() -> void:
 		bool(policy.evaluate_candidate(memory, &"mom", 10.0).allowed),
 		"no memory allows an NPC candidate"
 	)
-	_remember(memory, MemoryPolicy.EVENT_CONVERSATION_COMPLETED, &"mom", 10.0)
+	_remember(memory, MemoryPolicy.EVENT_CONVERSATION_COMPLETED, &"dad", 10.0)
 	_remember(memory, MemoryPolicy.EVENT_ACTION_FAILED, &"mom", 10.0)
 	_remember(memory, MemoryPolicy.EVENT_CONVERSATION_REFUSED, &"dad", 10.0)
 	assert_true(
 		bool(policy.evaluate_candidate(
 			memory, &"mom", 10.1, {"remembering_npc_id": "child"}
 		).allowed),
-		"completed, generic-failure, and other-partner memories do not suppress"
+		"generic failures and memories about other partners do not suppress"
 	)
 	var refusal_result := _remember(
 		memory,
@@ -118,6 +118,92 @@ func test_policy_filters_only_matching_unresolved_refusal() -> void:
 		).allowed),
 		"resolved refusal memories explicitly do not suppress"
 	)
+
+
+func test_harm_and_completed_conversation_have_independent_short_cooldowns() -> void:
+	var policy := SocialMemoryPolicy.new()
+	var memory := _memory()
+	_remember(
+		memory,
+		MemoryPolicy.EVENT_HARMED_BY_ACTOR,
+		&"mom",
+		10.0,
+		{"logical_action": "Harm"}
+	)
+	_remember(memory, MemoryPolicy.EVENT_CONVERSATION_COMPLETED, &"dad", 10.0)
+	var harm := policy.evaluate_candidate(
+		memory, &"mom", 10.2, {"remembering_npc_id": "child"}
+	)
+	var repeat := policy.evaluate_candidate(
+		memory, &"dad", 10.1, {"remembering_npc_id": "child"}
+	)
+	assert_eq(harm.reason_code, &"recently_harmed_by_candidate", "harm blocks its actor")
+	assert_eq(harm.memory_event_type, MemoryPolicy.EVENT_HARMED_BY_ACTOR, "harm type is explicit")
+	assert_eq(repeat.reason_code, &"recently_talked_with_candidate", "completion avoids a repeat")
+	assert_true(
+		bool(policy.evaluate_candidate(
+			memory, &"mom", 10.51, {"remembering_npc_id": "child"}
+		).allowed),
+		"harm stops controlling social choice after 0.5 game hours"
+	)
+	assert_true(
+		bool(policy.evaluate_candidate(
+			memory, &"dad", 10.126, {"remembering_npc_id": "child"}
+		).allowed),
+		"conversation completion stops controlling choice after 0.125 game hours"
+	)
+	assert_true(
+		bool(policy.evaluate_candidate(
+			memory, &"mom", 10.51, {"remembering_npc_id": "someone_else"}
+		).allowed),
+		"the same event remains scoped to the remembering NPC"
+	)
+
+
+func test_multiple_blockers_choose_latest_expiry_then_severity_and_memory_id() -> void:
+	var policy := SocialMemoryPolicy.new()
+	var memory := _memory()
+	_remember(
+		memory,
+		MemoryPolicy.EVENT_HARMED_BY_ACTOR,
+		&"mom",
+		10.0,
+		{"logical_action": "Harm"}
+	)
+	_remember(memory, MemoryPolicy.EVENT_CONVERSATION_REFUSED, &"mom", 10.3)
+	var latest := policy.evaluate_candidate(
+		memory, &"mom", 10.31, {"remembering_npc_id": "child"}
+	)
+	assert_eq(
+		latest.reason_code,
+		&"recent_conversation_refusal",
+		"latest retry expiry controls even when an earlier blocker is more severe"
+	)
+
+	var equal_memory := _memory()
+	_remember(
+		equal_memory,
+		MemoryPolicy.EVENT_HARMED_BY_ACTOR,
+		&"mom",
+		10.0,
+		{"logical_action": "Harm"}
+	)
+	_remember(equal_memory, MemoryPolicy.EVENT_CONVERSATION_REFUSED, &"mom", 10.25)
+	_remember(equal_memory, MemoryPolicy.EVENT_CONVERSATION_COMPLETED, &"mom", 10.375)
+	var equal_expiry := policy.evaluate_candidate(
+		equal_memory, &"mom", 10.4, {"remembering_npc_id": "child"}
+	)
+	assert_eq(
+		equal_expiry.reason_code,
+		&"recently_harmed_by_candidate",
+		"equal retry expiry uses harm, refusal, completed severity order"
+	)
+	var by_id: Array[Dictionary] = [
+		{"retry_game_hours": 11.0, "reason_code": &"recent_conversation_refusal", "memory_id": "z"},
+		{"retry_game_hours": 11.0, "reason_code": &"recent_conversation_refusal", "memory_id": "a"},
+	]
+	by_id.sort_custom(SocialMemoryPolicy._blocker_precedes)
+	assert_eq(by_id[0].memory_id, "a", "equal blockers use stable memory-ID order")
 
 
 func test_policy_uses_last_update_and_keeps_longer_memory() -> void:
@@ -266,7 +352,7 @@ func test_all_suppressed_is_non_mutating_and_reports_earliest_retry() -> void:
 	assert_true(selected.is_empty(), "no suppressed target is selected")
 	assert_eq(
 		descriptor.reason_code,
-		&"no_social_target_due_to_recent_refusal",
+		&"no_social_target_due_to_recent_memory",
 		"all-suppressed has a stable planner result"
 	)
 	assert_true(bool(descriptor.all_candidates_suppressed), "all-suppressed is explicit")
@@ -429,7 +515,7 @@ func test_world_boundary_submits_nothing_when_all_candidates_suppressed() -> voi
 	)
 	assert_eq(
 		descriptor.reason_code,
-		&"no_social_target_due_to_recent_refusal",
+		&"no_social_target_due_to_recent_memory",
 		"world observability exposes the planner result"
 	)
 	assert_true(
@@ -505,7 +591,7 @@ func test_policy_does_not_interrupt_established_action_or_talk_feedback() -> voi
 	assert_true(formatted.contains("remembers:"), "memory feedback is not replaced")
 
 
-func test_feedback_expires_and_player_candidate_is_never_suppressed() -> void:
+func test_feedback_expires_after_retry_window() -> void:
 	var world_time := root.get_node("WorldTime") as WorldTimeSystem
 	var fixture := _full_npc_fixture(&"child")
 	fixture.machine.set_social_selection_feedback({
@@ -541,7 +627,7 @@ func test_feedback_expires_and_player_candidate_is_never_suppressed() -> void:
 	)
 
 
-func test_live_seen_target_rule_filters_npcs_but_not_player() -> void:
+func test_live_seen_target_rule_filters_npcs_and_canonical_player() -> void:
 	var fixture := _full_npc_fixture(&"child")
 	var mom := TestNpc.new(&"mom")
 	mom.add_to_group("npc")
@@ -555,6 +641,13 @@ func test_live_seen_target_rule_filters_npcs_but_not_player() -> void:
 		&"mom",
 		10.0
 	)
+	_remember(
+		fixture.memory,
+		MemoryPolicy.EVENT_HARMED_BY_ACTOR,
+		&"__player__",
+		10.0,
+		{"logical_action": "Harm"}
+	)
 	var social_rule := {
 		"state": "Talk",
 		"behavior_source": "social_ai",
@@ -565,9 +658,98 @@ func test_live_seen_target_rule_filters_npcs_but_not_player() -> void:
 		bool(fixture.machine.call("_rule_allows_target", social_rule, mom)),
 		"the immediate live NPC candidate path applies the same policy"
 	)
-	assert_true(
+	assert_false(
 		bool(fixture.machine.call("_rule_allows_target", social_rule, player)),
-		"player interaction bypasses NPC refusal-memory filtering"
+		"autonomous social Talk uses the canonical player memory identity"
+	)
+	var player_initiated_rule := social_rule.duplicate(true)
+	player_initiated_rule["behavior_source"] = "player_interaction"
+	assert_true(
+		bool(fixture.machine.call(
+			"_rule_allows_target",
+			player_initiated_rule,
+			player
+		)),
+		"non-social-AI interaction remains governed by its separate policy"
+	)
+	var completed: Dictionary = fixture.observer.observe_conversation_completed(player, {
+		"session_id": "social:player:completed",
+		"target_persistent_id": "scene_specific_player_id",
+		"source": "social_ai",
+		"phase": "completed",
+	})
+	assert_true(bool(completed.accepted), "completed player Talk creates normal memory")
+	assert_eq(
+		completed.memory.subject_id,
+		"__player__",
+		"player conversation memory ignores scene-specific player identity"
+	)
+	var planner := SocialPlanner.new()
+	var locations := add_child_autofree(LocalLocations.new()) as LocalLocations
+	var rng := RandomNumberGenerator.new()
+	planner.begin_simulation_pass()
+	var selected := planner.choose_candidate(
+		&"child",
+		_record(),
+		{"child": _record()},
+		locations,
+		_settings(),
+		null,
+		player,
+		rng,
+		Callable(),
+		fixture.memory,
+		10.1,
+		{"remembering_npc_id": "child"}
+	)
+	assert_true(selected.is_empty(), "blocked player is excluded before selection")
+	var descriptor := planner.get_last_selection_descriptor()
+	assert_eq(descriptor.suppressed_count, 1, "player contributes to suppression counts")
+	assert_eq(
+		descriptor.suppressed_by_reason.get("recently_harmed_by_candidate", 0),
+		1,
+		"diagnostics identify harm without exposing an actor name"
+	)
+
+
+func test_identity_free_social_partner_remains_live_only_and_is_not_remembered() -> void:
+	var fixture := _full_npc_fixture(&"child")
+	var legacy_partner := Node2D.new()
+	legacy_partner.name = "LegacyPartner"
+	legacy_partner.add_to_group("npc")
+	add_child_autofree(legacy_partner)
+	var memory_count_before: int = fixture.memory.get_recent_memories().size()
+	assert_false(
+		String(fixture.machine.call(
+			"_get_social_candidate_id",
+			legacy_partner
+		)).is_empty(),
+		"identity-free legacy NPCs retain a transient live handshake ID"
+	)
+	var memory_decision: Dictionary = fixture.machine.call(
+		"get_autonomous_social_memory_decision",
+		legacy_partner
+	)
+	assert_true(bool(memory_decision.allowed), "missing stable identity does not block live Talk")
+	assert_eq(memory_decision.candidate_id, &"", "transient IDs are excluded from memory queries")
+	var completed: Dictionary = fixture.observer.observe_conversation_completed(
+		legacy_partner,
+		{"session_id": "social:legacy:completed", "source": "social_ai"}
+	)
+	assert_false(bool(completed.accepted), "transient partner identity is not persisted")
+	assert_eq(completed.reason, "invalid_partner_identity", "memory rejection is explicit")
+	var refused: Dictionary = fixture.observer.observe_conversation_refused(
+		legacy_partner,
+		"social:legacy:refused",
+		&"declined",
+		&"social_ai",
+		{"decision_kind": "social_decline"}
+	)
+	assert_false(bool(refused.accepted), "transient refusal identity is not persisted")
+	assert_eq(
+		fixture.memory.get_recent_memories().size(),
+		memory_count_before,
+		"identity-free social events leave episodic memory unchanged"
 	)
 
 

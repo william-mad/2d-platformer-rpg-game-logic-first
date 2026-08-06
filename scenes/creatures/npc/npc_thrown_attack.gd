@@ -177,7 +177,10 @@ func _apply_anger_hit_relief(victim: Node) -> void:
 	if intended_target != null and is_instance_valid(intended_target) and victim != intended_target:
 		return
 
-	if victim.is_in_group("npc") and source_npc.has_method("change_relationship_anger_for"):
+	if (
+		(victim.is_in_group("npc") or victim.is_in_group("player"))
+		and source_npc.has_method("change_relationship_anger_for")
+	):
 		source_npc.call(
 			"change_relationship_anger_for",
 			victim,
@@ -186,6 +189,7 @@ func _apply_anger_hit_relief(victim: Node) -> void:
 		)
 		return
 
+	# Non-social targets retain the old broad-mood fallback.
 	var state_machine := source_npc.get_node_or_null("NpcStateMachine")
 	if state_machine != null and state_machine.has_method("apply_value_delta"):
 		state_machine.call("apply_value_delta", {"anger": -absf(anger_drop_on_intended_target_hit)}, victim, true)

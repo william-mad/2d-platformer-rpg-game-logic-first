@@ -33,6 +33,14 @@ func enter() -> void:
 	)
 
 
+func exit() -> void:
+	# Ranking diagnostics describe only the active search. Clear them on every
+	# transition, including no-target, timeout, rejection, and Talk handoff.
+	if machine != null:
+		machine.clear_social_scoring_debug_descriptor()
+	super.exit()
+
+
 func physics_process(delta: float) -> NpcState:
 	if not action_session_is_current():
 		return reconcile_invalid_action_session()
@@ -83,41 +91,58 @@ func is_searching_for_talk_target(candidate: Node2D) -> bool:
 
 
 func _find_talk_target() -> Node2D:
-	# Prefer the explicitly requested partner, then select from perception.
+	# An explicitly committed partner remains authoritative. Fresh autonomous
+	# candidates are filtered first, then ranked by the state machine's shared scorer.
 	if machine != null:
 		var action_target := machine.get_active_action_target()
-		if _is_allowed_talk_target(action_target):
+		if _is_allowed_talk_target(action_target, false):
+			machine.clear_social_scoring_debug_descriptor()
 			_breadcrumb("npc_talk_search:target_action", "%s -> %s" % [_npc_label(), _target_label(action_target)])
 			return action_target
-		for perceived_target in machine.get_perceived_targets():
-			if _is_allowed_talk_target(perceived_target):
-				return perceived_target
 
 	if npc == null or not npc.is_inside_tree():
 		return null
 
-	var closest_target: Node2D = null
-	var closest_distance := INF
+	var candidates: Array[Node2D] = []
+	var seen_nodes: Dictionary = {}
+	if machine != null:
+		for perceived_target in machine.get_perceived_targets():
+			_append_rankable_candidate(candidates, seen_nodes, perceived_target)
 
 	for group_name in target_groups:
 		for candidate in npc.get_tree().get_nodes_in_group(String(group_name)):
-			var candidate_node := candidate as Node2D
-			if not _is_allowed_talk_target(candidate_node):
-				continue
-
-			var distance := npc.global_position.distance_to(candidate_node.global_position)
-			if distance >= closest_distance:
-				continue
-
-			closest_distance = distance
-			closest_target = candidate_node
-
-	if closest_target != null:
-		_breadcrumb("npc_talk_search:target_closest", "%s -> %s" % [_npc_label(), _target_label(closest_target)])
-	return closest_target
+			_append_rankable_candidate(
+				candidates,
+				seen_nodes,
+				candidate as Node2D
+			)
+	if machine != null:
+		var ranked := machine.select_ranked_autonomous_social_target(candidates)
+		var selected := ranked.get("target_node", null) as Node2D
+		if selected != null:
+			_breadcrumb("npc_talk_search:target_ranked", "%s -> %s" % [_npc_label(), _target_label(selected)])
+		return selected
+	return null
 
 
-func _is_allowed_talk_target(candidate: Node2D) -> bool:
+func _append_rankable_candidate(
+	candidates: Array[Node2D],
+	seen_nodes: Dictionary,
+	candidate: Node2D
+) -> void:
+	if not _is_allowed_talk_target(candidate, true):
+		return
+	var instance_id := candidate.get_instance_id()
+	if seen_nodes.has(instance_id):
+		return
+	seen_nodes[instance_id] = true
+	candidates.append(candidate)
+
+
+func _is_allowed_talk_target(
+	candidate: Node2D,
+	apply_social_memory: bool = true
+) -> bool:
 	# Rejects missing/self targets and filters NPCs by relationship favor.
 	if candidate == null or not is_instance_valid(candidate):
 		return false
@@ -140,6 +165,12 @@ func _is_allowed_talk_target(candidate: Node2D) -> bool:
 		require_relationship_favor_for_npcs
 	):
 		return false
+	if apply_social_memory and machine != null:
+		var memory_decision := machine.get_autonomous_social_memory_decision(
+			candidate
+		)
+		if not bool(memory_decision.get("allowed", true)):
+			return false
 
 	if require_relationship_favor_for_npcs and candidate.is_in_group("npc"):
 		return _get_relationship_favor_for(candidate) > minimum_relationship_favor

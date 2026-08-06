@@ -36,10 +36,22 @@ static func format_label(
 	if (
 		social_selection is Dictionary
 		and bool(social_selection.get("all_candidates_suppressed", false))
-		and String(social_selection.get("reason_code", ""))
-			== "no_social_target_due_to_recent_refusal"
+		and String(social_selection.get("reason_code", "")) in [
+			"no_social_target_due_to_recent_refusal",
+			"no_social_target_due_to_recent_memory",
+		]
 	):
-		lines.append("social: waiting after refusal")
+		var reason_counts = social_selection.get("suppressed_by_reason", {})
+		var refusal_only: bool = not (reason_counts is Dictionary) or reason_counts.is_empty() or (
+			int(reason_counts.get("recent_conversation_refusal", 0)) > 0
+			and int(reason_counts.get("recently_harmed_by_candidate", 0)) == 0
+			and int(reason_counts.get("recently_talked_with_candidate", 0)) == 0
+		)
+		lines.append(
+			"social: waiting after refusal"
+			if refusal_only
+			else "social: waiting after recent memory"
+		)
 	var target_selection = feedback.get("target_selection", {})
 	if (
 		target_selection is Dictionary

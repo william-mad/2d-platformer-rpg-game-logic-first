@@ -491,8 +491,15 @@ func _apply_reward_once() -> void:
 			active_mom.call("apply_social_event", mom_reward_delta, active_player, false)
 		else:
 			var machine := active_mom.get_node_or_null("NpcStateMachine")
-			if machine != null and machine.has_method("apply_value_delta"):
-				machine.call("apply_value_delta", mom_reward_delta, active_player)
+			if machine != null and machine.has_method("apply_social_event"):
+				machine.call(
+					"apply_social_event",
+					mom_reward_delta,
+					active_player,
+					false,
+					"magic_lesson_reward",
+					{"source": "magic_lesson"}
+				)
 
 
 func _finalize_lesson_score(

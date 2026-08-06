@@ -462,13 +462,16 @@ func test_explicit_npc_refusal_only_records_for_requester() -> void:
 	var requester := _full_npc_fixture(&"requester")
 	var refuser := _full_npc_fixture(&"refuser")
 	var requester_machine: NpcStateMachine = requester.machine
-	var refuser_machine: NpcStateMachine = refuser.machine
-	refuser_machine.state_history = [refuser_machine.get_state(&"MoveToTarget")]
-	refuser_machine.current_state_priority = 50
+	refuser.memory.remember_event(MemoryPolicy.EVENT_HARMED_BY_ACTOR, {
+		"subject_id": &"requester",
+		"target_id": &"refuser",
+		"logical_action": &"Harm",
+		"now_game_hours": 10.0,
+	})
 
 	assert_false(
 		requester_machine.request_state(&"Talk", refuser.npc, "social_seek", 0),
-		"busy intended partner explicitly refuses Talk"
+		"candidate who remembers recent harm socially declines Talk"
 	)
 	var refusals: Array[NpcMemoryEvent] = requester.memory.find_recent(
 		MemoryPolicy.EVENT_CONVERSATION_REFUSED
@@ -498,12 +501,12 @@ func test_explicit_npc_refusal_only_records_for_requester() -> void:
 		"repeated refusal by the same NPC merges"
 	)
 	var other_refuser := _full_npc_fixture(&"other_refuser")
-	var other_refuser_machine: NpcStateMachine = other_refuser.machine
-	var other_refuser_states: Array[NpcState] = [
-		other_refuser_machine.get_state(&"MoveToTarget")
-	]
-	other_refuser_machine.state_history = other_refuser_states
-	other_refuser_machine.current_state_priority = 50
+	other_refuser.memory.remember_event(MemoryPolicy.EVENT_HARMED_BY_ACTOR, {
+		"subject_id": &"requester",
+		"target_id": &"other_refuser",
+		"logical_action": &"Harm",
+		"now_game_hours": 10.0,
+	})
 	requester_machine.talk_refusal_cooldowns.clear()
 	requester_machine.request_state(&"Talk", other_refuser.npc, "social_seek", 0)
 	assert_eq(
@@ -684,6 +687,53 @@ func test_snapshot_round_trip_and_import_validation() -> void:
 	assert_eq(result.malformed_count, 2, "import ignores malformed and unknown entries")
 	assert_eq(result.duplicate_id_count, 1, "first duplicate imported memory ID wins")
 	assert_eq(destination.get_memory_by_id("kept").memory_id, "kept", "valid ID is preserved")
+
+
+func test_snapshot_boundary_rejects_transient_actor_identities() -> void:
+	var source := _memory()
+	source.remember(_event(
+		MemoryPolicy.EVENT_ACTION_FAILED,
+		10.0,
+		{
+			"memory_id": "stable",
+			"subject_id": "mom",
+			"target_id": "mom_bed",
+		}
+	))
+	source.remember(_event(
+		MemoryPolicy.EVENT_ACTION_FAILED,
+		10.0,
+		{
+			"memory_id": "runtime_path",
+			"subject_id": "mom",
+			"target_id": "/root/Home/Partner",
+		}
+	))
+	var exported := source.export_snapshot(10.0)
+	assert_eq(exported.size(), 1, "save export omits runtime-only actor paths")
+	assert_eq(String(exported[0].memory_id), "stable", "stable memory remains")
+
+	var generated := exported[0].duplicate(true)
+	generated.memory_id = "generated"
+	generated.subject_id = "npc:12345"
+	var path_shaped := exported[0].duplicate(true)
+	path_shaped.memory_id = "path_shaped"
+	path_shaped.target_id = "/root/OldScene/Partner"
+	var destination := _memory()
+	var result := destination.import_snapshot(
+		[exported[0], generated, path_shaped],
+		10.0
+	)
+	assert_eq(result.imported_count, 1, "only persistence-safe memory imports")
+	assert_eq(
+		result.unstable_identity_count,
+		2,
+		"discarded legacy actor references are reported separately"
+	)
+	assert_null(
+		destination.get_memory_by_id("generated"),
+		"generated instance identities do not survive load"
+	)
 
 
 func test_snapshot_import_enforces_capacity_deterministically() -> void:

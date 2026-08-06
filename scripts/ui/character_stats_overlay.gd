@@ -1,5 +1,8 @@
 class_name CharacterStatsOverlay extends CanvasLayer
 
+const NpcIdentity = preload("res://scripts/systems/npc_identity.gd")
+const SocialStateSchema = preload("res://scripts/systems/npc_social_state_schema.gd")
+
 @export var toggle_action: StringName = &"stats"
 @export var starts_visible: bool = false
 @export var refresh_interval_seconds: float = 0.25
@@ -18,12 +21,8 @@ class_name CharacterStatsOverlay extends CanvasLayer
 	"talk_need",
 	"lonely",
 	"bored",
-	"love",
-	"favor",
-	"trust",
 	"anger",
 	"sadness",
-	"suspicion",
 	"curiosity",
 	"energy",
 	"knockout",
@@ -254,7 +253,8 @@ func _append_npc_lines(lines: Array[String]) -> void:
 		lines.append(_get_character_label(npc))
 		lines.append("state: %s" % _get_current_state_name(npc))
 		_append_active_state_details(lines, npc)
-		_append_value_lines(lines, _get_character_values(npc))
+		_append_local_npc_value_lines(lines, _get_character_values(npc))
+		_append_player_opinion_lines(lines, _get_relationship_id(npc), _get_character_label(npc))
 
 	_append_selected_offscreen_npc_lines(lines)
 
@@ -310,13 +310,25 @@ func _append_selected_offscreen_npc_lines(lines: Array[String]) -> void:
 		if not destination_scene.is_empty():
 			lines.append("destination: %s" % destination_scene.get_file())
 	else:
-		lines.append("state: simulated idle")
+		var pending = record.get("pending_travel", {})
+		if pending is Dictionary and not pending.is_empty():
+			var pending_activity = pending.get("activity", {})
+			var pending_state := String(pending.get("requested_state_name", "activity"))
+			if pending_activity is Dictionary and not pending_activity.is_empty():
+				pending_state = String(pending_activity.get("state_name", pending_state))
+			lines.append("state: travelling to %s (simulated)" % pending_state)
+			var destination_scene := String(pending.get("target_scene_path", ""))
+			if not destination_scene.is_empty():
+				lines.append("destination: %s" % destination_scene.get_file())
+		else:
+			lines.append("state: simulated idle")
 
 	var node_state = record.get("node_state", {})
 	if node_state is Dictionary:
 		var social_stats = node_state.get("social_stats", {})
 		if social_stats is Dictionary:
-			_append_value_lines(lines, social_stats)
+			_append_local_npc_value_lines(lines, social_stats)
+	_append_player_opinion_lines(lines, selected_npc_id, display_name)
 
 
 func _append_need_spot_lines(lines: Array[String]) -> void:
@@ -372,6 +384,84 @@ func _append_value_lines(lines: Array[String], values: Dictionary) -> void:
 		lines.append("%s: %s" % [key, _format_value(value)])
 
 
+func _append_local_npc_value_lines(lines: Array[String], values: Dictionary) -> void:
+	var written_keys: Array[String] = []
+	for key in stat_order:
+		if not values.has(key) or not _is_declared_local_value(key):
+			continue
+		var value = values[key]
+		if value == null:
+			continue
+		written_keys.append(key)
+		lines.append("%s: %s" % [_get_local_value_label(key), _format_value(value)])
+
+	for value_key in values.keys():
+		var key := String(value_key)
+		if written_keys.has(key) or not _is_declared_local_value(key):
+			continue
+		var value = values[value_key]
+		if value == null:
+			continue
+		lines.append("%s: %s" % [_get_local_value_label(key), _format_value(value)])
+
+
+func _append_player_opinion_lines(
+	lines: Array[String],
+	owner_id: String,
+	owner_label: String
+) -> void:
+	var clean_owner_id := owner_id.strip_edges()
+	if clean_owner_id.is_empty():
+		return
+	var relationships := get_node_or_null("/root/Relationships")
+	if relationships == null or not relationships.has_method("get_relationship_by_id"):
+		return
+	var relationship = relationships.call(
+		"get_relationship_by_id",
+		clean_owner_id,
+		String(NpcIdentity.PLAYER_ACTOR_ID)
+	)
+	if (
+		not (relationship is Dictionary)
+		or relationship.is_empty()
+		or not bool(relationship.get("met", false))
+	):
+		return
+
+	lines.append("opinion: %s -> Player" % owner_label)
+	for definition in SocialStateSchema.get_definitions_for_scope(
+		SocialStateSchema.SCOPE_DIRECTED_OPINION
+	):
+		var metric_id := String(definition.get("id", ""))
+		if metric_id.is_empty() or not relationship.has(metric_id):
+			continue
+		lines.append("  %s: %s" % [
+			String(definition.get("label", metric_id.capitalize())),
+			_format_value(relationship[metric_id]),
+		])
+
+
+func _is_declared_local_value(key: String) -> bool:
+	var definition := SocialStateSchema.get_definition(StringName(key))
+	return (
+		not definition.is_empty()
+		and StringName(definition.get("scope", &""))
+			!= SocialStateSchema.SCOPE_DIRECTED_OPINION
+		and bool(
+			definition.get("presentation", {}).get("show_in_debug", false)
+		)
+	)
+
+
+func _get_local_value_label(key: String) -> String:
+	var definition := SocialStateSchema.get_definition(StringName(key))
+	var label := String(definition.get("label", key.capitalize()))
+	var scope := StringName(definition.get("scope", &""))
+	if scope == SocialStateSchema.SCOPE_BROAD_MOOD:
+		return "mood %s" % label
+	return "local %s" % label
+
+
 func _get_character_values(character: Node) -> Dictionary:
 	var machine := _get_machine(character)
 	if machine != null:
@@ -404,6 +494,13 @@ func _get_npc_location_id(character: Node) -> String:
 		return String(character.get_meta("npc_location_id"))
 
 	return ""
+
+
+func _get_relationship_id(character: Node) -> String:
+	# UI reads must not trigger the node-based relationship API's legacy alias
+	# migration. Characters without an authored stable identity are intentionally
+	# absent from persisted/directed debug presentation.
+	return NpcIdentity.get_stable_actor_id(character)
 
 
 func _get_current_state_name(character: Node) -> String:

@@ -9,6 +9,9 @@ const Visual = preload(
 const Cue = preload(
 	"res://scripts/systems/npc_behavior/feedback/npc_feedback_cue.gd"
 )
+const SocialConfigurationValidator = preload(
+	"res://scripts/systems/npc_behavior/npc_social_configuration_validator.gd"
+)
 
 signal cue_started(descriptor: Dictionary)
 signal cue_presented(descriptor: Dictionary)
@@ -16,6 +19,8 @@ signal cue_visibility_changed(descriptor: Dictionary, visible: bool)
 signal cue_updated(descriptor: Dictionary)
 signal cue_finished(descriptor: Dictionary)
 signal cue_rejected(descriptor: Dictionary)
+
+static var _emitted_configuration_warning_keys: Dictionary = {}
 
 @export var player_feedback_enabled: bool = true
 @export_range(1, 3, 1) var maximum_queue_size: int = 3
@@ -39,10 +44,42 @@ var _current_has_been_presented: bool = false
 var _current_currently_visible: bool = false
 var _visibility_check_elapsed_seconds: float = 0.0
 var _visual_attach_pending: bool = false
+var _configuration_validation_issues: Array[Dictionary] = []
 
 
 func _ready() -> void:
 	set_process(false)
+	_configuration_validation_issues = (
+		SocialConfigurationValidator.validate_default_feedback_catalog(
+			icon_textures_by_key
+		)
+	)
+	if OS.is_debug_build():
+		for issue in _configuration_validation_issues:
+			var issue_key := _get_configuration_issue_key(issue)
+			if _emitted_configuration_warning_keys.has(issue_key):
+				continue
+			_emitted_configuration_warning_keys[issue_key] = true
+			push_warning("NPC feedback configuration [%s] %s: %s" % [
+				String(issue.get("code", "invalid_configuration")),
+				String(issue.get("path", "feedback_catalog")),
+				String(issue.get("message", "Invalid feedback configuration.")),
+			])
+
+
+func get_configuration_validation_issues() -> Array[Dictionary]:
+	return _configuration_validation_issues.duplicate(true)
+
+
+static func _get_configuration_issue_key(issue: Dictionary) -> String:
+	# JSON encoding avoids delimiter collisions while keeping the key stable
+	# across presenter instances and independent of Dictionary insertion order.
+	return JSON.stringify([
+		String(issue.get("severity", "warning")),
+		String(issue.get("code", "invalid_configuration")),
+		String(issue.get("path", "feedback_catalog")),
+		String(issue.get("message", "Invalid feedback configuration.")),
+	])
 
 
 func _exit_tree() -> void:
@@ -107,10 +144,24 @@ func submit_cue(cue: Cue) -> Dictionary:
 	)
 	if matching_current:
 		if submitted.replace_policy == Cue.REFRESH_EXISTING:
+			var original_cue_id := current_cue.cue_id
+			var original_created_at_usec := current_cue.created_at_usec
+			var original_maximum_lifetime := (
+				current_cue.maximum_lifetime_seconds
+			)
 			var was_presented := _current_has_been_presented
+			var absolute_elapsed := _current_absolute_elapsed_seconds
+			var visible_elapsed := _current_visible_elapsed_seconds
 			current_cue = submitted
-			_current_absolute_elapsed_seconds = 0.0
-			_current_visible_elapsed_seconds = 0.0
+			current_cue.cue_id = original_cue_id
+			current_cue.created_at_usec = original_created_at_usec
+			current_cue.maximum_lifetime_seconds = (
+				original_maximum_lifetime
+			)
+			_current_absolute_elapsed_seconds = absolute_elapsed
+			_current_visible_elapsed_seconds = (
+				0.0 if was_presented else visible_elapsed
+			)
 			_current_has_been_presented = was_presented
 			_apply_current_visual()
 			_update_visual_visibility()

@@ -1,7 +1,11 @@
 class_name NpcMemoryObserver extends Node
 
 const ActionSession = preload("res://scripts/systems/npc_action_session.gd")
+const Identity = preload("res://scripts/systems/npc_identity.gd")
 const MemoryPolicy = preload("res://scripts/systems/npc_behavior/npc_memory_policy.gd")
+const PlayerInteractionMemoryPolicy = preload(
+	"res://scripts/systems/npc_behavior/npc_player_interaction_memory_policy.gd"
+)
 
 const TERMINAL_DEDUPE_GAME_HOURS: float = 0.05
 const MAXIMUM_TERMINAL_DEDUPE_KEYS: int = 64
@@ -9,14 +13,83 @@ const MAXIMUM_TERMINAL_DEDUPE_KEYS: int = 64
 var _machine: NpcStateMachine
 var _memory: NpcShortTermMemory
 var _recent_terminal_events: Dictionary = {}
+var _damage_events_ref: WeakRef
+
+
+func _ready() -> void:
+	_connect_damage_events()
+
+
+func _exit_tree() -> void:
+	_disconnect_damage_events()
+	_machine = null
+	_memory = null
 
 
 func bind(
 	machine: NpcStateMachine,
 	memory: NpcShortTermMemory
 ) -> void:
+	_disconnect_damage_events()
 	_machine = machine
 	_memory = memory
+	_connect_damage_events()
+
+
+func observe_damage_dealt(
+	amount: float,
+	attacker: Node,
+	target: Node
+) -> Dictionary:
+	if _memory == null or _machine == null:
+		return {"accepted": false, "reason": "observer_unbound"}
+	var remembering_npc := _machine.npc
+	if (
+		remembering_npc == null
+		or not is_instance_valid(remembering_npc)
+		or target != remembering_npc
+	):
+		return {"accepted": false, "reason": "unrelated_damage_target"}
+	if amount <= 0.0:
+		return {"accepted": false, "reason": "no_actual_damage"}
+	if attacker == null or not is_instance_valid(attacker):
+		return {"accepted": false, "reason": "invalid_damage_attacker"}
+	if attacker == remembering_npc:
+		return {"accepted": false, "reason": "self_damage"}
+	if _is_monster_actor(attacker):
+		return {"accepted": false, "reason": "monster_damage_excluded"}
+
+	var attacker_kind: StringName = &""
+	if attacker.is_in_group("player"):
+		attacker_kind = &"player"
+	elif attacker.is_in_group("npc"):
+		attacker_kind = &"npc"
+	else:
+		return {"accepted": false, "reason": "unsupported_damage_attacker"}
+	var attacker_id := PlayerInteractionMemoryPolicy.get_stable_actor_id(attacker)
+	var remembering_id := PlayerInteractionMemoryPolicy.get_stable_actor_id(
+		remembering_npc
+	)
+	if attacker_id == &"" or remembering_id == &"":
+		return {"accepted": false, "reason": "missing_stable_actor_identity"}
+	if attacker_id == remembering_id:
+		return {"accepted": false, "reason": "self_damage_identity"}
+
+	var remaining_hp := _machine.get_value(&"hp", 0.0)
+	return _memory.remember_event(MemoryPolicy.EVENT_HARMED_BY_ACTOR, {
+		"source": "damage_event",
+		"reason_code": "damage_received",
+		"subject_id": attacker_id,
+		"target_id": remembering_id,
+		"logical_action": "Harm",
+		"now_game_hours": _get_current_game_hours(),
+		"metadata": {
+			"damage_amount": amount,
+			"attacker_kind": attacker_kind,
+			"remaining_hp": remaining_hp,
+			"caused_death": remaining_hp <= 0.0,
+		},
+	})
 
 
 func observe_action_terminal(
@@ -61,6 +134,11 @@ func observe_action_terminal(
 		target_id = String(session_descriptor.get("spot_id", "")).strip_edges()
 	if classification in [&"target_unavailable", &"intention_target_lost"] and target_id.is_empty():
 		return {"accepted": false, "reason": "missing_target_identity"}
+	var remembering_id := _remembering_npc_id()
+	if remembering_id.is_empty():
+		return {"accepted": false, "reason": "missing_stable_actor_identity"}
+	if not target_id.is_empty() and not Identity.is_stable_id(target_id):
+		return {"accepted": false, "reason": "unstable_target_identity"}
 	var memory_reason_code := String(
 		matching_intent.get("reason_code", "")
 	).strip_edges()
@@ -73,7 +151,7 @@ func observe_action_terminal(
 			session_descriptor.get("source", "gameplay")
 		)),
 		"reason_code": memory_reason_code,
-		"subject_id": _remembering_npc_id(),
+		"subject_id": remembering_id,
 		"target_id": target_id,
 		"place_id": String(session_descriptor.get(
 			"scene_path",
@@ -102,6 +180,8 @@ func observe_conversation_refused(
 	source: StringName = &"social_ai",
 	metadata: Dictionary = {}
 ) -> Dictionary:
+	if String(metadata.get("decision_kind", "")) != "social_decline":
+		return {"accepted": false, "reason": "not_social_decline"}
 	if (
 		_memory == null
 		or refusing_npc == null
@@ -109,7 +189,7 @@ func observe_conversation_refused(
 		or not refusing_npc.is_in_group("npc")
 	):
 		return {"accepted": false, "reason": "invalid_npc_partner"}
-	var subject_id := ActionSession.get_persistent_id(refusing_npc)
+	var subject_id := Identity.get_stable_actor_id(refusing_npc)
 	var remembering_id := _remembering_npc_id()
 	if subject_id.is_empty() or remembering_id.is_empty() or subject_id == remembering_id:
 		return {"accepted": false, "reason": "invalid_partner_identity"}
@@ -129,13 +209,21 @@ func observe_conversation_completed(
 	partner: Node2D,
 	session_descriptor: Dictionary
 ) -> Dictionary:
+	var partner_is_npc := (
+		partner != null
+		and is_instance_valid(partner)
+		and partner.is_in_group("npc")
+	)
+	var partner_is_player := (
+		partner != null
+		and is_instance_valid(partner)
+		and partner.is_in_group("player")
+	)
 	if (
 		_memory == null
-		or partner == null
-		or not is_instance_valid(partner)
-		or not partner.is_in_group("npc")
+		or not (partner_is_npc or partner_is_player)
 	):
-		return {"accepted": false, "reason": "invalid_npc_partner"}
+		return {"accepted": false, "reason": "invalid_social_partner"}
 	var session_id := String(session_descriptor.get("session_id", "")).strip_edges()
 	if session_id.is_empty():
 		return {"accepted": false, "reason": "missing_social_session"}
@@ -146,11 +234,10 @@ func observe_conversation_completed(
 	]
 	if _terminal_event_was_seen(terminal_key, now_game_hours):
 		return {"accepted": false, "reason": "duplicate_terminal_event"}
-	var partner_id := String(
-		session_descriptor.get("target_persistent_id", "")
-	).strip_edges()
-	if partner_id.is_empty():
-		partner_id = ActionSession.get_persistent_id(partner)
+	# The live session may contain a scene-path fallback for identity-free actors.
+	# Episodic memory is persisted, so derive its partner directly from the stable
+	# identity resolver instead of trusting that transient session field.
+	var partner_id := Identity.get_stable_actor_id(partner)
 	var remembering_id := _remembering_npc_id()
 	if partner_id.is_empty() or remembering_id.is_empty() or partner_id == remembering_id:
 		return {"accepted": false, "reason": "invalid_partner_identity"}
@@ -249,7 +336,7 @@ func _remembering_npc_id() -> String:
 	if _machine == null:
 		return ""
 	var bound_npc := _machine.npc
-	return ActionSession.get_persistent_id(bound_npc)
+	return Identity.get_stable_actor_id(bound_npc)
 
 
 func _get_current_game_hours() -> float:
@@ -259,3 +346,41 @@ func _get_current_game_hours() -> float:
 	if world_time != null and world_time.has_method("get_total_hours"):
 		return maxf(float(world_time.call("get_total_hours")), 0.0)
 	return 0.0
+
+
+func _connect_damage_events() -> void:
+	if not is_inside_tree() or _machine == null or _memory == null:
+		return
+	var damage_events := get_node_or_null("/root/DamageEvents")
+	if damage_events == null or not damage_events.has_signal(&"damage_dealt"):
+		return
+	var callback := Callable(self, "_on_damage_dealt")
+	if not damage_events.is_connected(&"damage_dealt", callback):
+		damage_events.connect(&"damage_dealt", callback)
+	_damage_events_ref = weakref(damage_events)
+
+
+func _disconnect_damage_events() -> void:
+	if _damage_events_ref == null:
+		return
+	var damage_events = _damage_events_ref.get_ref()
+	var callback := Callable(self, "_on_damage_dealt")
+	if (
+		damage_events != null
+		and is_instance_valid(damage_events)
+		and damage_events.has_signal(&"damage_dealt")
+		and damage_events.is_connected(&"damage_dealt", callback)
+	):
+		damage_events.disconnect(&"damage_dealt", callback)
+	_damage_events_ref = null
+
+
+func _on_damage_dealt(amount: float, attacker: Node, target: Node) -> void:
+	observe_damage_dealt(amount, attacker, target)
+
+
+func _is_monster_actor(actor: Node) -> bool:
+	for group_name in [&"monster", &"monsters", &"enemy", &"enemies"]:
+		if actor.is_in_group(group_name):
+			return true
+	return false

@@ -67,6 +67,9 @@ The initial restrained mappings are:
 | `boredom_high` | Needs a break |
 | `social_need_high` | Looking for company |
 | `conversation_refused` | Recently refused |
+| `harmed_by_actor` | Upset with you |
+| `schedule_running_late` | Running late |
+| `schedule_finishing_up` | Finishing up |
 | `target_unavailable` | That place is unavailable |
 | `movement_failed` | Can't reach that |
 | `intention_target_lost` | Lost track of that |
@@ -96,6 +99,25 @@ reconciliation, repeated value evaluation, routine Work, Sleep, travel, schedule
 scripted, and manual intentions. The controller's existing
 `intention_refreshed` signal is not connected to player feedback.
 
+Late schedule feedback uses a stricter boundary than accepted intention. A live
+scheduled travel intention can be accepted before its persistent activity record
+is committed, so `NpcWorldSimulation.scheduled_activity_committed` is emitted
+only after `NpcLocations` stores the authoritative activity. The adapter requires
+the matching live NPC, `schedule_phase == "late"`, a stable occurrence key, and
+a new session before submitting `schedule_running_late`. Candidate inspection,
+grace deferral, on-time starts, failed reservations/routes/state requests,
+same-session refresh, restored records, and offscreen-only execution remain
+silent. This committed signal is copied observability and cannot affect behavior.
+
+Overtime feedback uses a separate live boundary signal. The world simulator emits
+`scheduled_activity_entered_overtime` only when an already observed live activity
+crosses its captured absolute window end while the same `finish_current` session
+may still continue. The adapter verifies that the live state machine still owns
+that session and submits `schedule_finishing_up` once. Offscreen transitions,
+restored historical overtime, expired overtime, stale sessions, and legacy
+stop-at-end schedules remain silent. The feedback signal does not decide whether
+work continues.
+
 Candidate inspection remains silent. For an ordinary live need action, the state
 machine emits `activity_target_selection_committed` only after all normal gates
 have accepted an alternative: an earlier target was suppressed by target-failure
@@ -113,9 +135,12 @@ observability after commitment; it cannot influence the selection or request.
 ## Memory and policy event rules
 
 A new live `conversation_refused`, `target_unavailable`, `movement_failed`, or
-`intention_target_lost` memory can submit a cue. An active cue may refresh when
-the same memory merges; otherwise its identity-aware cooldown prevents repeated
-planning passes from spamming it.
+`intention_target_lost` memory can submit a cue. A new live `harmed_by_actor`
+memory also submits a cue only when its subject ID matches a currently live
+player's stable identity. NPC-on-NPC harm is silent in this first player-facing
+mapping, so it can never falsely render actor-directed wording. Raw actor IDs are
+never rendered. An active cue may refresh when the same memory merges; otherwise
+its identity-aware cooldown prevents repeated planning passes from spamming it.
 
 Conversation completion, memory expiry, eviction, resolution, removal, generic
 action failure, and internal diagnostics are not presented.
@@ -128,17 +153,20 @@ current cue is intentionally not transferred across scene replacement.
 
 The state machine emits a copied presentation signal when its existing structured
 policy descriptor changes. The blocked final outcomes
-`no_social_target_due_to_recent_refusal` and
+`no_social_target_due_to_recent_memory` and
 `all_targets_recently_failed` create blocked-all cues. Candidate inspection,
 allowed candidates, and repeated unchanged descriptors do not. Successful
 alternative selection uses the separate post-commit outcome described above,
-never this pre-request policy descriptor.
+never this pre-request policy descriptor. The social cue keeps its generic text
+and carries aggregate suppression counts by structured reason; it does not expose
+candidate identities or emit one cue per candidate.
 
 ## Arbitration, queues, and cooldowns
 
 Problems and emergencies outrank routine needs and social intentions. A movement
 failure can replace Hungry; Hungry cannot replace a current movement failure.
-An emergency can replace any ordinary cue.
+The priority-75 harm-memory cue can replace routine needs but cannot replace the
+priority-100 emergency cue. An emergency can replace any ordinary cue.
 
 Duplicate identity is based on structured codes and source IDs. Cooldown keys add
 subject, target, or logical-action identity where required. They are never shown
@@ -176,6 +204,15 @@ or expiring a cue unseen does not create a cooldown, so a later opportunity to
 show that information is not blocked by something the player never saw.
 Repeated hide/show transitions and refresh of an already presented cue do not
 restart cooldown bookkeeping.
+
+`refresh_existing` preserves the active cue's original `cue_id`,
+`created_at_usec`, maximum-lifetime value, and absolute elapsed clock. It may
+replace copied metadata such as `occurrence_count` and, after the cue has already
+been presented, reset only visible elapsed time so the updated content can be
+seen. An unseen refresh preserves both clocks. Refresh never emits
+`cue_presented` again or restarts cooldown, and repeated refreshes cannot move the
+original absolute expiry anchor. A later cue accepted after normal completion
+and cooldown receives a new identity and lifetime normally.
 
 Ordinary cues pause visible time, while retaining their bounded absolute
 lifetime, during:

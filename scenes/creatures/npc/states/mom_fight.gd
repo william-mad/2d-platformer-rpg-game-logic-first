@@ -577,7 +577,10 @@ func _apply_melee_anger_hit_relief(victim: Node) -> void:
 		return
 
 	var anger_delta := -absf(anger_drop)
-	if victim.is_in_group("npc") and npc.has_method("change_relationship_anger_for"):
+	if (
+		(victim.is_in_group("npc") or victim.is_in_group("player"))
+		and npc.has_method("change_relationship_anger_for")
+	):
 		npc.call("change_relationship_anger_for", victim, anger_delta, "fight_melee_hit")
 		return
 

@@ -2,6 +2,7 @@ class_name NpcShortTermMemory extends Node
 
 const MemoryEvent = preload("res://scripts/systems/npc_behavior/npc_memory_event.gd")
 const MemoryPolicy = preload("res://scripts/systems/npc_behavior/npc_memory_policy.gd")
+const Identity = preload("res://scripts/systems/npc_identity.gd")
 
 signal memory_added(memory_descriptor: Dictionary)
 signal memory_merged(memory_descriptor: Dictionary)
@@ -224,6 +225,8 @@ func export_snapshot(now_game_hours: float) -> Array[Dictionary]:
 	ordered.sort_custom(_snapshot_memory_before)
 	var snapshot: Array[Dictionary] = []
 	for memory in ordered:
+		if _event_has_unstable_persistent_identity(memory):
+			continue
 		snapshot.append(memory.to_dict())
 	return snapshot
 
@@ -236,6 +239,7 @@ func import_snapshot(
 	var imported: Array[NpcMemoryEvent] = []
 	var seen_ids: Dictionary = {}
 	var malformed_count := 0
+	var unstable_identity_count := 0
 	var expired_count := 0
 	var duplicate_id_count := 0
 	for value in snapshot:
@@ -245,6 +249,9 @@ func import_snapshot(
 		var memory := MemoryEvent.from_dict(value)
 		if not MemoryPolicy.is_supported(memory.event_type):
 			malformed_count += 1
+			continue
+		if _event_has_unstable_persistent_identity(memory):
+			unstable_identity_count += 1
 			continue
 		_normalize_event(memory, now_game_hours)
 		if memory.is_expired(now_game_hours):
@@ -293,11 +300,24 @@ func import_snapshot(
 	return {
 		"imported_count": _memories.size(),
 		"malformed_count": malformed_count,
+		"unstable_identity_count": unstable_identity_count,
 		"expired_count": expired_count,
 		"duplicate_id_count": duplicate_id_count,
 		"merged_count": merged_count,
 		"evicted_count": evicted_count,
 	}
+
+
+static func _event_has_unstable_persistent_identity(
+	memory: NpcMemoryEvent
+) -> bool:
+	if memory == null:
+		return true
+	for actor_id in [String(memory.subject_id), String(memory.target_id)]:
+		var clean_id := String(actor_id).strip_edges()
+		if not clean_id.is_empty() and not Identity.is_stable_id(clean_id):
+			return true
+	return false
 
 
 func _normalize_event(memory: NpcMemoryEvent, now_game_hours: float) -> void:

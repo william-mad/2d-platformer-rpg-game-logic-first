@@ -1,0 +1,521 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/pause_menu.gd" id="1_script"]
+[ext_resource type="Theme" path="res://ui/pause/pause_menu_theme.tres" id="2_theme"]
+
+[node name="PauseMenu" type="CanvasLayer"]
+process_mode = 3
+visible = false
+layer = 100
+script = ExtResource("1_script")
+
+[node name="PauseRoot" type="Control" parent="."]
+unique_name_in_owner = true
+process_mode = 3
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+theme = ExtResource("2_theme")
+
+[node name="Dim" type="ColorRect" parent="PauseRoot"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.005, 0.008, 0.01, 0.78)
+
+[node name="Center" type="CenterContainer" parent="PauseRoot"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MenuShell" type="PanelContainer" parent="PauseRoot/Center"]
+custom_minimum_size = Vector2(920, 510)
+layout_mode = 2
+theme_type_variation = &"MenuShell"
+
+[node name="OuterMargin" type="MarginContainer" parent="PauseRoot/Center/MenuShell"]
+layout_mode = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 14
+
+[node name="Layout" type="VBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Header" type="HBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout"]
+layout_mode = 2
+
+[node name="PausedTitle" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Header"]
+layout_mode = 2
+theme_type_variation = &"MenuTitle"
+text = "PAUSED"
+
+[node name="HeaderSpacer" type="Control" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="PageTitle" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"SectionTitle"
+text = "Pause Menu"
+vertical_alignment = 1
+
+[node name="HeaderSeparator" type="HSeparator" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout"]
+layout_mode = 2
+
+[node name="Body" type="HBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+
+[node name="NavPanel" type="PanelContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body"]
+custom_minimum_size = Vector2(178, 0)
+layout_mode = 2
+
+[node name="NavMargin" type="MarginContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/NavPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="Nav" type="VBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/NavPanel/NavMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ResumeButton" type="Button" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/NavPanel/NavMargin/Nav"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+text = "RESUME"
+
+[node name="CharactersButton" type="Button" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/NavPanel/NavMargin/Nav"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+text = "CHARACTERS"
+
+[node name="SaveButton" type="Button" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/NavPanel/NavMargin/Nav"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+text = "SAVE"
+
+[node name="LoadButton" type="Button" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/NavPanel/NavMargin/Nav"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+text = "LOAD"
+
+[node name="OptionsButton" type="Button" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/NavPanel/NavMargin/Nav"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+text = "OPTIONS"
+
+[node name="NavSpacer" type="Control" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/NavPanel/NavMargin/Nav"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="TitleButton" type="Button" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/NavPanel/NavMargin/Nav"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+theme_type_variation = &"DangerButton"
+text = "RETURN TO TITLE"
+
+[node name="ContentPanel" type="PanelContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ContentMargin" type="MarginContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 12
+
+[node name="Views" type="Control" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin"]
+custom_minimum_size = Vector2(665, 390)
+layout_mode = 2
+
+[node name="LandingView" type="VBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+alignment = 1
+theme_override_constants/separation = 14
+
+[node name="LandingTitle" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/LandingView"]
+layout_mode = 2
+theme_type_variation = &"SectionTitle"
+text = "THE WORLD IS PAUSED"
+horizontal_alignment = 1
+
+[node name="LandingCopy" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/LandingView"]
+layout_mode = 2
+text = "Review known characters, manage save files, or change options.\nRelationship pages always show who holds an opinion and who it is about."
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="LandingHint" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/LandingView"]
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "Arrow keys / controller / mouse to navigate  •  Esc to resume"
+horizontal_alignment = 1
+
+[node name="CharactersView" type="HBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 12
+
+[node name="OwnerPanel" type="PanelContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView"]
+custom_minimum_size = Vector2(158, 0)
+layout_mode = 2
+
+[node name="OwnerMargin" type="MarginContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/OwnerPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="OwnerColumn" type="VBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/OwnerPanel/OwnerMargin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="KnownTitle" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/OwnerPanel/OwnerMargin/OwnerColumn"]
+layout_mode = 2
+theme_type_variation = &"SectionTitle"
+text = "KNOWN"
+horizontal_alignment = 1
+
+[node name="OwnerScroll" type="ScrollContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/OwnerPanel/OwnerMargin/OwnerColumn"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="OwnerList" type="VBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/OwnerPanel/OwnerMargin/OwnerColumn/OwnerScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 5
+
+[node name="NoKnownCharacters" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/OwnerPanel/OwnerMargin/OwnerColumn"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "No known\ncharacters yet."
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="CharacterDetail" type="VBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 6
+
+[node name="CharacterHeader" type="HBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail"]
+layout_mode = 2
+
+[node name="OwnerName" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/CharacterHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SectionTitle"
+text = "CHARACTER"
+
+[node name="PreviousSubjectButton" type="Button" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/CharacterHeader"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(42, 34)
+layout_mode = 2
+tooltip_text = "Previous opinion subject"
+text = "<"
+
+[node name="SubjectPageLabel" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/CharacterHeader"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(58, 0)
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "1 / 1"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="NextSubjectButton" type="Button" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/CharacterHeader"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(42, 34)
+layout_mode = 2
+tooltip_text = "Next opinion subject"
+text = ">"
+
+[node name="DirectionLabel" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DirectionLabel"
+text = "OWNER  ->  SUBJECT"
+horizontal_alignment = 1
+
+[node name="CharacterSeparator" type="HSeparator" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail"]
+layout_mode = 2
+
+[node name="DetailBody" type="HBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="ProfilePanel" type="PanelContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody"]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+
+[node name="ProfileMargin" type="MarginContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/ProfilePanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="ProfileColumn" type="VBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/ProfilePanel/ProfileMargin"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="PortraitFrame" type="PanelContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/ProfilePanel/ProfileMargin/ProfileColumn"]
+custom_minimum_size = Vector2(152, 162)
+layout_mode = 2
+
+[node name="Portrait" type="TextureRect" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/ProfilePanel/ProfileMargin/ProfileColumn/PortraitFrame"]
+unique_name_in_owner = true
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="PortraitPlaceholder" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/ProfilePanel/ProfileMargin/ProfileColumn/PortraitFrame"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "PORTRAIT\nRESERVED"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="OwnerSubtitle" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/ProfilePanel/ProfileMargin/ProfileColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Known character"
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="OwnerRuntime" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/ProfilePanel/ProfileMargin/ProfileColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "OFFSCREEN"
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="OwnerDescription" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/ProfilePanel/ProfileMargin/ProfileColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"MutedLabel"
+text = "Character information will appear here."
+autowrap_mode = 2
+
+[node name="SocialScroll" type="ScrollContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="SocialColumn" type="VBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/SocialScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 5
+
+[node name="OpinionTitle" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/SocialScroll/SocialColumn"]
+layout_mode = 2
+theme_type_variation = &"SectionTitle"
+text = "DIRECTED OPINION"
+
+[node name="OpinionStatus" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/SocialScroll/SocialColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "No opinion recorded"
+
+[node name="OpinionMetrics" type="VBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/SocialScroll/SocialColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="CharacteristicsSeparator" type="HSeparator" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/SocialScroll/SocialColumn"]
+layout_mode = 2
+
+[node name="CharacteristicsTitle" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/SocialScroll/SocialColumn"]
+layout_mode = 2
+theme_type_variation = &"SectionTitle"
+text = "OWNER CHARACTERISTICS"
+
+[node name="CharacteristicsHint" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/SocialScroll/SocialColumn"]
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "Personal needs, physical condition, and broad mood — not opinions."
+autowrap_mode = 2
+
+[node name="CharacteristicMetrics" type="VBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/SocialScroll/SocialColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="SaveView" type="VBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 12
+
+[node name="SaveTitle" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/SaveView"]
+layout_mode = 2
+theme_type_variation = &"SectionTitle"
+text = "SAVE GAME"
+
+[node name="SaveCopy" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/SaveView"]
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "Choose a file. Existing files are overwritten immediately."
+
+[node name="SaveSlots" type="VBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/SaveView"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="SaveStatus" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/SaveView"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+autowrap_mode = 2
+
+[node name="LoadView" type="VBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 12
+
+[node name="LoadTitle" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/LoadView"]
+layout_mode = 2
+theme_type_variation = &"SectionTitle"
+text = "LOAD GAME"
+
+[node name="LoadCopy" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/LoadView"]
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "Loading replaces the current world with the selected file."
+
+[node name="LoadSlots" type="VBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/LoadView"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="LoadStatus" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/LoadView"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+autowrap_mode = 2
+
+[node name="OptionsView" type="VBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 14
+
+[node name="OptionsTitle" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView"]
+layout_mode = 2
+theme_type_variation = &"SectionTitle"
+text = "OPTIONS"
+
+[node name="OptionsCopy" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView"]
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "Changes are applied and saved automatically."
+
+[node name="VolumeLabel" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView"]
+layout_mode = 2
+text = "Master volume"
+
+[node name="VolumeRow" type="HBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="MasterVolumeSlider" type="HSlider" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/VolumeRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(460, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+max_value = 100.0
+step = 1.0
+value = 100.0
+
+[node name="MasterVolumeValue" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/VolumeRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+text = "100%"
+horizontal_alignment = 2
+vertical_alignment = 1
+
+[node name="FullscreenToggle" type="CheckButton" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+text = "Fullscreen"
+
+[node name="OptionsSpacer" type="Control" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="OptionsHint" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView"]
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "More settings can be added here without changing the pause navigation."
+
+[node name="Footer" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout"]
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "Esc: resume   •   Enter / A: select   •   Left / Right: browse opinions"
+horizontal_alignment = 1
