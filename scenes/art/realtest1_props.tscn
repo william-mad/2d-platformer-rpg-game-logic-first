@@ -1,0 +1,33 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/art/props/tree.tscn" id="1_tree"]
+[ext_resource type="PackedScene" path="res://scenes/art/props/weeds.tscn" id="3_weeds"]
+[ext_resource type="PackedScene" path="res://scenes/art/props/barrel.tscn" id="4_barrel"]
+[ext_resource type="PackedScene" path="res://scenes/art/props/boxes.tscn" id="5_boxes"]
+[ext_resource type="PackedScene" path="res://scenes/art/props/box_small.tscn" id="6_box_small"]
+[ext_resource type="PackedScene" path="res://scenes/art/props/lamp.tscn" id="7_lamp"]
+[ext_resource type="PackedScene" path="res://scenes/art/props/stand.tscn" id="8_stand"]
+
+[node name="RealTest1Props" type="Node2D"]
+z_index = -10
+
+[node name="Tree" parent="." instance=ExtResource("1_tree")]
+position = Vector2(-3950, 385)
+
+[node name="Weeds" parent="." instance=ExtResource("3_weeds")]
+position = Vector2(-3440, 385)
+
+[node name="Barrel" parent="." instance=ExtResource("4_barrel")]
+position = Vector2(-3000, 385)
+
+[node name="Boxes" parent="." instance=ExtResource("5_boxes")]
+position = Vector2(-2700, 385)
+
+[node name="SmallBox" parent="." instance=ExtResource("6_box_small")]
+position = Vector2(-2580, 385)
+
+[node name="Lamp" parent="." instance=ExtResource("7_lamp")]
+position = Vector2(720, 385)
+
+[node name="Stand" parent="." instance=ExtResource("8_stand")]
+position = Vector2(1240, 385)

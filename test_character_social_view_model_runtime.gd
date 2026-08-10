@@ -150,6 +150,8 @@ func test_direction_is_explicit_and_missing_opinion_does_not_invent_metrics() ->
 		"favor": 72.0,
 		"trust": 81.0,
 		"love": 65.0,
+		"lust": 44.0,
+		"shame": 13.0,
 		"anger": 4.0,
 		"fear": 2.0,
 		"suspicion": 7.0,
@@ -173,7 +175,19 @@ func test_direction_is_explicit_and_missing_opinion_does_not_invent_metrics() ->
 	var toward_player: Dictionary = model.get_opinion("mom", "__player__")
 	assert_true(bool(toward_player.recorded), "a met directed row is recorded")
 	assert_eq(toward_player.direction, "MOM  ->  PLAYER", "direction names owner and subject")
-	assert_eq(toward_player.metrics.size(), 6, "schema-backed directed metrics are exposed")
+	assert_eq(toward_player.metrics.size(), 8, "schema-backed directed metrics are exposed")
+	var metric_ids: Array[String] = []
+	var metric_polarities: Dictionary = {}
+	for metric in toward_player.metrics:
+		metric_ids.append(String(metric.id))
+		metric_polarities[String(metric.id)] = int(metric.polarity)
+	assert_eq(
+		metric_ids,
+		["favor", "trust", "love", "lust", "shame", "anger", "fear", "suspicion"],
+		"character opinions follow the canonical directed metric order"
+	)
+	assert_eq(metric_polarities.lust, 1, "lust uses positive-opinion presentation")
+	assert_eq(metric_polarities.shame, -1, "shame uses negative-opinion presentation")
 
 	var toward_guard: Dictionary = model.get_opinion("mom", "guard")
 	assert_false(bool(toward_guard.recorded), "missing directed row is not treated as neutral")

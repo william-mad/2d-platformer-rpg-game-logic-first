@@ -22,13 +22,30 @@ func update(delta: float) -> bool:
 		_current_tension = 0.0
 		return false
 
+	refresh_measurement(delta)
+	if _current_tension > maxf(float(_rope.maximum_tension), 0.05):
+		_snap()
+		return true
+	_rope._update_load_bearing(_current_tension)
+	return false
+
+
+func refresh_measurement(delta: float) -> float:
+	if (
+		_rope == null
+		or not _rope.active
+		or not _rope._endpoints_are_valid()
+	):
+		_current_tension = 0.0
+		return _current_tension
+
 	var offset: Vector2 = (
 		_rope._get_end_position() - _rope._get_start_position()
 	)
 	var distance := offset.length()
 	if distance <= 0.001:
 		_current_tension = 0.0
-		return false
+		return _current_tension
 
 	var direction := offset / distance
 	var start_velocity := _read_body_velocity(_rope.start_body)
@@ -58,11 +75,7 @@ func update(delta: float) -> bool:
 		maxf(projected_distance - float(_rope.get_rest_length()), 0.0)
 		/ maxf(float(_rope.elasticity), 0.1)
 	)
-
-	if _current_tension <= maxf(float(_rope.maximum_tension), 0.05):
-		return false
-	_snap()
-	return true
+	return _current_tension
 
 
 func reset() -> void:

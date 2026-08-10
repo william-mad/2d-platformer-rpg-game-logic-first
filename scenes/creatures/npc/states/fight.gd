@@ -186,12 +186,7 @@ func _can_target_for_fight(candidate: Node2D) -> bool:
 	if _target_is_training_target(candidate):
 		return candidate.has_method("take_damage")
 	if candidate.is_in_group("npc"):
-		return (
-			npc != null
-			and npc.has_method("get_relationship_anger_for")
-			and float(npc.call("get_relationship_anger_for", candidate, 0.0))
-			> calm_anger_threshold
-		)
+		return _get_effective_anger_for(candidate) > calm_anger_threshold
 
 	if candidate.is_in_group("player") and require_player_normal_layer:
 		return _target_is_on_collision_layer(candidate, normal_player_layer)
@@ -416,19 +411,33 @@ func _anger_is_calm() -> bool:
 		return false
 	if machine == null or anger_value_name == &"":
 		return false
-	if (
-		fight_target != null
-		and is_instance_valid(fight_target)
-		and fight_target.is_in_group("npc")
-		and npc != null
-		and npc.has_method("get_relationship_anger_for")
-	):
-		return (
-			float(npc.call("get_relationship_anger_for", fight_target, 0.0))
-			<= calm_anger_threshold
-		)
+	return _get_effective_anger_for(fight_target) <= calm_anger_threshold
 
-	return machine.get_value(anger_value_name) <= calm_anger_threshold
+
+func _get_effective_anger_for(candidate: Node2D) -> float:
+	var broad_anger := (
+		machine.get_value(anger_value_name)
+		if machine != null and anger_value_name != &""
+		else 0.0
+	)
+	if (
+		candidate == null
+		or not is_instance_valid(candidate)
+		or not (candidate.is_in_group("player") or candidate.is_in_group("npc"))
+		or npc == null
+		or not npc.has_method("get_relationship_anger_for")
+	):
+		return broad_anger
+	var directed_anger := float(
+		npc.call("get_relationship_anger_for", candidate, 0.0)
+	)
+	if candidate.is_in_group("npc"):
+		# Preserve the established NPC-to-NPC rule: those fights require anger
+		# directed at that NPC rather than a broad mood.
+		return directed_anger
+	# Player combat historically consumed broad anger. Player-directed anger now
+	# participates without removing that compatibility path.
+	return maxf(broad_anger, directed_anger)
 
 
 func _get_finished_fight_state() -> NpcState:

@@ -1,0 +1,52 @@
+[gd_scene format=3]
+
+[ext_resource type="Texture2D" path="res://images/backgrounds/handmade/bg sky.png" id="1_sky"]
+[ext_resource type="Texture2D" path="res://images/backgrounds/handmade/mountains bg.png" id="2_mountains"]
+[ext_resource type="Texture2D" path="res://images/backgrounds/handmade/bg sky over bg.png" id="3_overlay"]
+[ext_resource type="Script" path="res://scripts/testscenes/realtest1_handmade_background.gd" id="4_background"]
+
+[node name="RealTest1Background" type="Node"]
+script = ExtResource("4_background")
+
+[node name="BaseSky" type="CanvasLayer" parent="."]
+layer = -100
+
+[node name="Gradient" type="TextureRect" parent="BaseSky"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("1_sky")
+expand_mode = 1
+stretch_mode = 0
+
+[node name="MountainLayer" type="CanvasLayer" parent="."]
+layer = -99
+
+[node name="MountainStrip" type="Node2D" parent="MountainLayer"]
+
+[node name="Left" type="Sprite2D" parent="MountainLayer/MountainStrip"]
+position = Vector2(-512, 221)
+texture = ExtResource("2_mountains")
+
+[node name="Center" type="Sprite2D" parent="MountainLayer/MountainStrip"]
+position = Vector2(576, 221)
+texture = ExtResource("2_mountains")
+
+[node name="Right" type="Sprite2D" parent="MountainLayer/MountainStrip"]
+position = Vector2(1664, 221)
+texture = ExtResource("2_mountains")
+
+[node name="SkyOverlay" type="CanvasLayer" parent="."]
+layer = -98
+
+[node name="Gradient" type="TextureRect" parent="SkyOverlay"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("3_overlay")
+expand_mode = 1
+stretch_mode = 0

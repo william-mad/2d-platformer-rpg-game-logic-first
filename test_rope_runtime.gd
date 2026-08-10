@@ -50,6 +50,7 @@ func _initialize() -> void:
 	_test_elastic_give_is_smooth_and_never_moves_positions_directly()
 	_test_tension_color_progression_and_reset()
 	await _test_maximum_tension_snaps_cleanly_with_feedback()
+	_test_npc_rope_status_notifications()
 	_test_closest_target_uses_the_attachment_point()
 	_test_npc_default_weight_and_scene_contract()
 
@@ -1431,6 +1432,202 @@ func _test_maximum_tension_snaps_cleanly_with_feedback() -> void:
 		)
 	await create_timer(0.1).timeout
 	await process_frame
+	_clear_fixture()
+
+
+func _test_npc_rope_status_notifications() -> void:
+	var actor := _make_body(Vector2.ZERO, 1.0)
+	var npc := SocialNpc.new()
+	npc.position = Vector2(100.0, 0.0)
+	_fixture_nodes.append(npc)
+	var status_events: Array[Vector2i] = []
+	npc.rope_status_changed.connect(
+		func(is_roped: bool, is_being_dragged: bool) -> void:
+			status_events.append(Vector2i(
+				int(is_roped),
+				int(is_being_dragged)
+			))
+	)
+	var rope := _make_rope(actor, npc, 20.0, 60.0)
+	_expect(
+		status_events == [Vector2i(1, 0)]
+		and npc.is_roped()
+		and not npc.is_being_dragged_by_rope(),
+		"an NPC reports a slack attachment as roped but not dragged"
+	)
+
+	var slack_event_count := status_events.size()
+	rope._physics_process(STEP)
+	_expect(
+		status_events.size() == slack_event_count,
+		"an unchanged slack rope does not spam NPC status signals"
+	)
+	npc.position.x = 102.0
+	rope._physics_process(STEP)
+	_expect(
+		status_events.back() == Vector2i(1, 1)
+		and npc.is_being_dragged_by_rope(),
+		"a taut load-bearing rope reports that the NPC is being dragged"
+	)
+	var taut_event_count := status_events.size()
+	rope._physics_process(STEP)
+	_expect(
+		status_events.size() == taut_event_count,
+		"steady rope load emits only one dragged transition"
+	)
+	npc.position.x = 100.0
+	rope._physics_process(STEP)
+	_expect(
+		status_events.back() == Vector2i(1, 0),
+		"a rope returning to slack keeps the NPC roped and clears dragged"
+	)
+
+	var actor_position := actor.position
+	var npc_position := npc.position
+	var snap_count := 0
+	rope.rope_snapped.connect(
+		func(_midpoint: Vector2, _tension: float) -> void:
+			snap_count += 1
+	)
+	_expect(
+		not npc.try_break_free_from_rope() and rope.active,
+		"an NPC without break-free permission cannot detach its rope"
+	)
+	npc.can_break_free_from_rope = true
+	_expect(
+		npc.try_break_free_from_rope()
+		and not rope.active
+		and status_events.back() == Vector2i(0, 0),
+		"an allowed future struggle can explicitly release the whole rope"
+	)
+	_expect_vector_close(
+		actor.position,
+		actor_position,
+		0.0,
+		"an NPC-requested release never moves the other endpoint"
+	)
+	_expect_vector_close(
+		npc.position,
+		npc_position,
+		0.0,
+		"an NPC-requested release never snaps the NPC position"
+	)
+	_expect(
+		snap_count == 0,
+		"an NPC-requested release is not reported as a tension snap"
+	)
+
+	var second_actor := _make_body(Vector2(200.0, 0.0), 1.0)
+	var first_rope := _make_rope(actor, npc, 20.0, 60.0)
+	var second_rope := _make_rope(second_actor, npc, 20.0, 60.0)
+	var attached_event_count := status_events.size()
+	first_rope.detach()
+	_expect(
+		npc.is_roped()
+		and status_events.size() == attached_event_count,
+		"detaching one of several ropes does not falsely release the NPC"
+	)
+	second_rope.detach()
+	_expect(
+		not npc.is_roped()
+		and status_events.back() == Vector2i(0, 0),
+		"the NPC reports release only after its final rope detaches"
+	)
+	_clear_fixture()
+
+	var player := _make_body(Vector2.ZERO, 1.0)
+	var rebind_npc := SocialNpc.new()
+	rebind_npc.position = Vector2(40.0, 0.0)
+	rebind_npc.add_to_group(&"rope_attachable")
+	_fixture_nodes.append(rebind_npc)
+	var other_endpoint := SocialNpc.new()
+	other_endpoint.position = Vector2(90.0, 0.0)
+	other_endpoint.add_to_group(&"rope_attachable")
+	_fixture_nodes.append(other_endpoint)
+	var rebind_events: Array[Vector2i] = []
+	var other_endpoint_events: Array[Vector2i] = []
+	rebind_npc.rope_status_changed.connect(
+		func(is_roped: bool, is_being_dragged: bool) -> void:
+			rebind_events.append(Vector2i(
+				int(is_roped),
+				int(is_being_dragged)
+			))
+	)
+	other_endpoint.rope_status_changed.connect(
+		func(is_roped: bool, is_being_dragged: bool) -> void:
+			other_endpoint_events.append(Vector2i(
+				int(is_roped),
+				int(is_being_dragged)
+			))
+	)
+	var controlled_rope := _make_unattached_rope(player)
+	controlled_rope.extra_length = 0.0
+	controlled_rope.track_attachable(rebind_npc)
+	controlled_rope.track_attachable(other_endpoint)
+	_expect(
+		controlled_rope.toggle_closest_endpoint(Rope.END_X),
+		"the notification rebind fixture attaches its first endpoint"
+	)
+	rebind_npc.position.x = 42.0
+	controlled_rope._physics_process(STEP)
+	_expect(
+		rebind_events.back() == Vector2i(1, 1),
+		"the notification rebind fixture begins under rope load"
+	)
+	var first_attachment_event_count := rebind_events.size()
+	_expect(
+		controlled_rope.toggle_closest_endpoint(Rope.END_S),
+		"the notification rebind fixture attaches its second endpoint"
+	)
+	_expect(
+		rebind_npc.is_roped()
+		and rebind_npc.is_being_dragged_by_rope()
+		and rebind_events.size() == first_attachment_event_count,
+		"adding the second end does not falsely release or unload the NPC"
+	)
+	_expect(
+		other_endpoint_events == [Vector2i(1, 1)]
+		and float(other_endpoint.get_rope_status().get(
+			"strongest_tension",
+			0.0
+		)) > 0.0,
+		"a new endpoint receives the freshly measured rebind load"
+	)
+	controlled_rope.detach()
+	_clear_fixture()
+
+	var reacting_actor := _make_body(Vector2.ZERO, 1.0)
+	var reacting_npc := SocialNpc.new()
+	reacting_npc.position = Vector2(100.0, 0.0)
+	reacting_npc.can_break_free_from_rope = true
+	_fixture_nodes.append(reacting_npc)
+	var reacting_events: Array[Vector2i] = []
+	reacting_npc.rope_status_changed.connect(
+		func(is_roped: bool, is_being_dragged: bool) -> void:
+			reacting_events.append(Vector2i(
+				int(is_roped),
+				int(is_being_dragged)
+			))
+			if is_being_dragged:
+				reacting_npc.try_break_free_from_rope()
+	)
+	var reacting_rope := _make_rope(
+		reacting_actor,
+		reacting_npc,
+		20.0,
+		60.0
+	)
+	reacting_npc.position.x = 102.0
+	reacting_rope._physics_process(STEP)
+	_expect(
+		not reacting_rope.active
+		and reacting_events == [
+			Vector2i(1, 0),
+			Vector2i(1, 1),
+			Vector2i(0, 0),
+		],
+		"an NPC can safely break free from inside its dragged signal"
+	)
 	_clear_fixture()
 
 

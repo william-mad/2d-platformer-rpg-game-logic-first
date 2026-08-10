@@ -122,6 +122,7 @@ var player_hud
 
 func _ready() -> void:
 	add_to_group(&"saveable")
+	_register_relationship_identity()
 	player_hud = get_node_or_null("/root/PlayerHud")
 	var animation_callback := Callable(self, "_on_player_animation_started")
 	if not animation_player.animation_started.is_connected(animation_callback):
@@ -146,6 +147,15 @@ func _ready() -> void:
 	if player_hud != null and player_hud.has_method("bind_player_inventory"):
 		player_hud.call("bind_player_inventory", get_inventory(), self)
 	pass
+
+
+func _register_relationship_identity() -> void:
+	var relationships := get_node_or_null("/root/Relationships")
+	if (
+		relationships != null
+		and relationships.has_method("register_actor_identity")
+	):
+		relationships.call("register_actor_identity", self)
 
 
 func _exit_tree() -> void:

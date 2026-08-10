@@ -1887,6 +1887,15 @@ func request_action_from_descriptor(descriptor: Dictionary, live_target: Node2D 
 	var action_source := StringName(String(descriptor.get("source", "schedule")))
 	if not _scripted_control_request_is_allowed(action_kind, {}):
 		return _reject_claimed_autonomous_request(action_kind, action_source)
+	if _persistent_schedule_blocks_autonomous_action(action_source, descriptor):
+		last_state_request_failure_reason = "authoritative_scheduled_activity"
+		_breadcrumb(
+			"npc_state:autonomous_action_deferred",
+			"%s state=%s source=%s" % [
+				_get_npc_label(), String(action_kind), String(action_source)
+			]
+		)
+		return false
 	var session := NpcActionSessionModel.create(
 		_get_action_owner_id(),
 		action_kind,
@@ -1926,6 +1935,40 @@ func request_action_from_descriptor(descriptor: Dictionary, live_target: Node2D 
 	if _proposed_action == session:
 		_proposed_action = null
 	return accepted
+
+
+func _persistent_schedule_blocks_autonomous_action(
+	action_source: StringName,
+	descriptor: Dictionary
+) -> bool:
+	if not NpcBehaviorIntentModel.is_autonomous_source(action_source):
+		return false
+	# This narrow gate exists only between a live scheduled execution cycle ending
+	# and NpcWorldSimulation authoritatively finishing or resuming its persistent
+	# activity. Ordinary autonomous actions must not erase that record in the gap.
+	if (
+		active_action == null
+		or active_action.source != NpcBehaviorIntentModel.SOURCE_SCHEDULE
+		or active_action.status != NpcActionSession.Status.COMPLETED
+	):
+		return false
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations == null or not locations.has_method("get_record_snapshot"):
+		return false
+	var record = locations.call("get_record_snapshot", _get_action_owner_id())
+	if not (record is Dictionary):
+		return false
+	var activity = record.get("activity", {})
+	if not (activity is Dictionary) or activity.is_empty():
+		return false
+	if String(activity.get("status", "active")) in [
+		"completed", "failed", "cancelled", "cancelling",
+	]:
+		return false
+	var persistent_session_id := NpcActionSessionModel._descriptor_session_id(activity)
+	if persistent_session_id.is_empty() or persistent_session_id != active_action.session_id:
+		return false
+	return NpcActionSessionModel._descriptor_session_id(descriptor) != persistent_session_id
 
 
 func request_action_movement_from_descriptor(
@@ -3368,14 +3411,25 @@ func _maybe_fight_from_seen_target(seen_target: Node2D) -> bool:
 			int(anger_fight_rule.get("priority", _get_anger_fight_priority()))
 		)
 
-	if (
+	var relationship_anger_requires_fight := false
+	if npc != null and npc.has_method("should_fight_actor"):
+		relationship_anger_requires_fight = bool(
+			npc.call("should_fight_actor", seen_target)
+		)
+	elif (
 		seen_target.is_in_group("npc")
 		and npc != null
 		and npc.has_method("should_fight_npc")
-		and bool(npc.call("should_fight_npc", seen_target))
 	):
+		# Compatibility for NPC implementations that predate the generic actor API.
+		relationship_anger_requires_fight = bool(
+			npc.call("should_fight_npc", seen_target)
+		)
+	if relationship_anger_requires_fight:
 		var fight_priority := _get_anger_fight_priority()
 		if _higher_priority_value_reaction_blocks_combat(seen_target, fight_priority):
+			return false
+		if not can_start_fight_with(seen_target):
 			return false
 		if is_primary_state(&"Fight"):
 			return true
@@ -3383,7 +3437,7 @@ func _maybe_fight_from_seen_target(seen_target: Node2D) -> bool:
 		return request_state(
 			&"Fight",
 			seen_target,
-			"npc_relationship_anger_seen",
+			"relationship_anger_seen",
 			fight_priority
 		)
 
@@ -4781,6 +4835,40 @@ func apply_social_event(
 		event_reason,
 		route_context
 	)
+	return bool(_apply_routed_social_event(routed, actor).get("applied", false))
+
+
+## Applies caller-scoped local values and explicitly actor-directed opinion values
+## through the same reaction transaction. This avoids forcing authored directed
+## anger/fear through the legacy mixed-value schema while retaining one signal and
+## one value-reaction pass.
+func apply_explicit_directed_social_event(
+	local_stat_delta: Dictionary,
+	directed_opinion: Dictionary,
+	actor: Node2D,
+	requires_actor_visibility: bool = true,
+	event_reason: String = "social_event",
+	event_context: Dictionary = {}
+) -> Dictionary:
+	if requires_actor_visibility and actor != null and npc != null:
+		if npc.has_method("can_see") and not bool(npc.call("can_see", actor)):
+			return {"applied": false, "relationship": {}}
+	var route_context := event_context.duplicate(true)
+	if not route_context.has("source"):
+		route_context["source"] = "npc_state_machine"
+	var routed := SocialWriteRouter.route_explicit_directed_delta(
+		npc,
+		actor,
+		local_stat_delta,
+		directed_opinion,
+		get_node_or_null("/root/Relationships"),
+		event_reason,
+		route_context
+	)
+	return _apply_routed_social_event(routed, actor)
+
+
+func _apply_routed_social_event(routed: Dictionary, actor: Node2D) -> Dictionary:
 	var local_values: Dictionary = routed.get("local_values", {})
 	var local_applied := (
 		apply_value_delta(local_values, actor, false)
@@ -4816,7 +4904,13 @@ func apply_social_event(
 		last_changed_values = reaction_changes.duplicate(true)
 		if not reaction_changes.is_empty() and _value_reactions_enabled():
 			evaluate_value_reactions(actor, reaction_changes)
-	return local_applied or directed_applied
+	return {
+		"applied": local_applied or directed_applied,
+		"local_applied": local_applied,
+		"directed_applied": directed_applied,
+		"directed_changes": directed_changes,
+		"relationship": routed.get("relationship", {}),
+	}
 
 
 func _has_eligible_local_social_delta(local_values: Dictionary) -> bool:
@@ -5017,6 +5111,29 @@ func evaluate_value_reactions(
 	if current_state == get_state(state_name):
 		set_target_selection_feedback({})
 		return true
+	var requested_state := get_state(state_name)
+	if (
+		requested_state == null
+		or (
+			current_state != null
+			and not current_state.can_exit_to(requested_state, priority)
+		)
+	):
+		# Value changes remain committed even when the current primary owns control.
+		# Preflight the state's existing interruption contract before constructing an
+		# intention, action session, feedback update, and guaranteed rejection. This is
+		# especially important for repeated favor-loss events during Fight.
+		set_target_selection_feedback({})
+		_breadcrumb(
+			"npc_state:value_reaction_blocked",
+			"%s %s->%s priority=%d" % [
+				_get_npc_label(),
+				String(current_state.name) if current_state != null else "none",
+				String(state_name),
+				priority,
+			]
+		)
+		return false
 	var request_context: Dictionary = {}
 	var selection_descriptor: Dictionary = {}
 	var target_selection := _prepare_memory_informed_rule_target(
@@ -5132,6 +5249,17 @@ func play_animation(state_animation_name: StringName) -> bool:
 		_animation_player.play(state_animation_name)
 		return true
 	return false
+
+
+func play_fixed_animation(state_animation_name: StringName) -> bool:
+	if (
+		_animation_controller != null
+		and _animation_controller.has_method(&"request_fixed_animation")
+	):
+		return bool(_animation_controller.call(
+			&"request_fixed_animation", state_animation_name, true
+		))
+	return play_animation(state_animation_name)
 
 
 func face_x_direction(x_direction: float) -> void:

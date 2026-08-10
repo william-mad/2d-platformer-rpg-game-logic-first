@@ -1,0 +1,44 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/instances/movable_hidden_object.gd" id="1_movable"]
+[ext_resource type="PackedScene" path="res://scenes/art/props/box_big.tscn" id="2_box_big"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_body"]
+size = Vector2(41, 34)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_hide_area"]
+size = Vector2(56, 45)
+
+[node name="BigBoxHiddenSpot" type="CharacterBody2D" groups=["hidden_spot", "rope_attachable"]]
+z_index = -10
+collision_layer = 256
+collision_mask = 1
+safe_margin = 0.04
+floor_snap_length = 4.0
+script = ExtResource("1_movable")
+
+[node name="BoxBig" parent="." instance=ExtResource("2_box_big")]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(0, -17)
+shape = SubResource("RectangleShape2D_body")
+
+[node name="HideArea" type="Area2D" parent="."]
+unique_name_in_owner = true
+collision_layer = 0
+collision_mask = 10
+monitorable = false
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="HideArea"]
+position = Vector2(0, -22.5)
+shape = SubResource("RectangleShape2D_hide_area")
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+
+[node name="RopeAttachPoint" type="Marker2D" parent="."]
+unique_name_in_owner = true
+position = Vector2(0, -25)
+
+[node name="HiddenPlayerPoint" type="Marker2D" parent="."]
+unique_name_in_owner = true
+position = Vector2(0, -1)

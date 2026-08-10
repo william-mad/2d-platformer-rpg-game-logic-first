@@ -1072,6 +1072,16 @@ func sync_live_action_descriptor(npc_id: String, npc: Node, descriptor: Dictiona
 			not activity_session_id.is_empty()
 			and action_session_id != activity_session_id
 		):
+			# A different live owner may legitimately supersede the scheduled action
+			# (for example combat or scripted control), but clearing the record without
+			# releasing its claim leaves an orphan for the periodic repair pass. Make the
+			# ownership transfer atomic at the record boundary instead.
+			_notify_activity_claim_release(
+				StringName(String(activity.get("spot_id", ""))),
+				"activity_superseded",
+				activity_session_id,
+				StringName(npc_id)
+			)
 			record["activity"] = {}
 			NpcRouteLocationCoordinator.clear_finish_replan_marker(record)
 			var pending = record.get("pending_travel", {})

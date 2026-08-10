@@ -3,9 +3,9 @@
 [ext_resource type="Texture2D" uid="uid://ccmh11d5xjwap" path="res://images/backgrounds/ChatGPT Image 21 de mai. de 2026, 15_21_21.png" id="1_3040p"]
 [ext_resource type="Texture2D" uid="uid://clymdki0w7gnc" path="res://images/backgrounds/ChatGPT Image 25 de mai.png" id="2_yycyj"]
 [ext_resource type="Texture2D" uid="uid://dpovqj2p2nf5v" path="res://images/backgrounds/ChatGPT Image 25 de mai. de 2026, 17_29_38.png" id="3_b5vik"]
-[ext_resource type="PackedScene" uid="uid://bn1fjdks8u6tm" path="res://scenes/things/bush.tscn" id="7_ju3ft"]
+[ext_resource type="PackedScene" path="res://scenes/things/movable_big_box_hidden_spot.tscn" id="7_ju3ft"]
 [ext_resource type="Texture2D" uid="uid://ci6agdxh5ivvj" path="res://images/sprites/assets/ChatGPT Image 25 de mai. de 2026, 14_27_48.png" id="8_5rj4s"]
-[ext_resource type="PackedScene" uid="uid://mhtjqmdrcoo0" path="res://scenes/things/fixed_hidden_spot.tscn" id="10_b7a4s"]
+[ext_resource type="PackedScene" path="res://scenes/things/fixed_flowering_bush_hidden_spot.tscn" id="10_b7a4s"]
 [ext_resource type="PackedScene" uid="uid://by1aphre1t601" path="res://player/player.tscn" id="12_aas6m"]
 [ext_resource type="PackedScene" path="res://scenes/things/save_spot.tscn" id="13_12mqf"]
 [ext_resource type="Script" uid="uid://dmk04b5rdyj3l" path="res://scripts/testscenes/realtest1_time_view.gd" id="14_time_view"]
@@ -18,7 +18,7 @@
 [ext_resource type="Resource" uid="uid://bltr1rkw27va" path="res://data/npc_spots/mom_work.tres" id="23_mom_work_definition"]
 [ext_resource type="Resource" path="res://data/npc_spots/mom_eat_prep.tres" id="24_mom_eat_prep_definition"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_recreation_spot.tscn" id="25_recreation_spot"]
-[ext_resource type="PackedScene" path="res://scenes/things/npc_rest_spot.tscn" id="26_rest_spot"]
+[ext_resource type="PackedScene" path="res://scenes/things/npc_bench_rest_spot.tscn" id="26_rest_spot"]
 [ext_resource type="Script" uid="uid://bamkt5f56h1bc" path="res://scripts/instances/player_spawn.gd" id="27_player_spawn"]
 [ext_resource type="Texture2D" uid="uid://cxni1nl08ssfo" path="res://images/sprites/tilesets/tileset 1.png" id="28_gmeiq"]
 [ext_resource type="PackedScene" path="res://scenes/instances/practice_dummy.tscn" id="28_practice_dummy"]
@@ -28,24 +28,26 @@
 [ext_resource type="Script" uid="uid://dn42doidkbj0h" path="res://scripts/instances/scripted_event_smoke_test.gd" id="32_scripted_event_smoke"]
 [ext_resource type="PackedScene" path="res://scenes/items/world_loot_container.tscn" id="33_debug_sword_pickup"]
 [ext_resource type="Resource" path="res://data/npc_routes/edges/realtest1_to_realhometest.tres" id="34_yard_home_route"]
+[ext_resource type="PackedScene" path="res://scenes/art/realtest1_background.tscn" id="35_handmade_background"]
+[ext_resource type="PackedScene" path="res://scenes/art/realtest1_props.tscn" id="36_handmade_props"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_o4ojr"]
 texture = ExtResource("28_gmeiq")
 texture_region_size = Vector2i(64, 64)
 0:0/0 = 0
-0:0/0/physics_layer_0/polygon_0/points = PackedVector2Array(-32, -32, 32, -32, 32, 32, -32, 32)
+0:0/0/physics_layer_0/polygon_0/points = PackedVector2Array(-32, -31, 32, -31, 32, 32, -32, 32)
 2:0/0 = 0
-2:0/0/physics_layer_0/polygon_0/points = PackedVector2Array(-32, -32, 32, -32, 32, 32, -32, 32)
+2:0/0/physics_layer_0/polygon_0/points = PackedVector2Array(-32, -31, 32, -31, 32, 32, -32, 32)
 0:2/0 = 0
-0:2/0/physics_layer_0/polygon_0/points = PackedVector2Array(-32, -32, 32, -32, 32, 32, -32, 32)
+0:2/0/physics_layer_0/polygon_0/points = PackedVector2Array(-32, -31, 32, -31, 32, 32, -32, 32)
 2:2/0 = 0
-2:2/0/physics_layer_0/polygon_0/points = PackedVector2Array(-32, -32, 32, -32, 32, 32, -32, 32)
+2:2/0/physics_layer_0/polygon_0/points = PackedVector2Array(-32, -31, 32, -31, 32, 32, -32, 32)
 4:2/0 = 0
-4:2/0/physics_layer_0/polygon_0/points = PackedVector2Array(-32, -32, 32, -32, 32, 32, -32, 32)
+4:2/0/physics_layer_0/polygon_0/points = PackedVector2Array(-32, -31, 32, -31, 32, 32, -32, 32)
 5:2/0 = 0
-5:2/0/physics_layer_0/polygon_0/points = PackedVector2Array(-32, -32, 32, -32, 32, 32, -32, 32)
+5:2/0/physics_layer_0/polygon_0/points = PackedVector2Array(-32, -31, 32, -31, 32, 32, -32, 32)
 6:2/0 = 0
-6:2/0/physics_layer_0/polygon_0/points = PackedVector2Array(-32, -32, 32, -32, 32, 32, -32, 32)
+6:2/0/physics_layer_0/polygon_0/points = PackedVector2Array(-32, -31, 32, -31, 32, 32, -32, 32)
 
 [sub_resource type="TileSet" id="TileSet_3x7gj"]
 tile_size = Vector2i(64, 64)
@@ -62,6 +64,10 @@ script = ExtResource("16_npc_location_scene")
 scene_path = "res://scenes/testscenes/realtest1.tscn"
 spawn_x_min = -4200.0
 spawn_x_max = 2700.0
+
+[node name="HandmadeBackground" parent="." instance=ExtResource("35_handmade_background")]
+
+[node name="HandmadeProps" parent="." instance=ExtResource("36_handmade_props")]
 
 [node name="moving sky" type="Parallax2D" parent="." unique_id=88205550]
 visible = false
@@ -114,7 +120,7 @@ texture = ExtResource("3_b5vik")
 flip_h = true
 
 [node name="HiddenSpot" parent="." unique_id=525282655 instance=ExtResource("7_ju3ft")]
-position = Vector2(2035, 109)
+position = Vector2(2035, 385)
 
 [node name="Sprite2D5" type="Sprite2D" parent="." unique_id=750089689]
 visible = false
@@ -164,7 +170,7 @@ hframes = 3
 frame = 2
 
 [node name="FixedHiddenSpot" parent="." unique_id=237761450 instance=ExtResource("10_b7a4s")]
-position = Vector2(-1471, 360)
+position = Vector2(-1471, 385)
 
 [node name="Player" parent="." unique_id=500096349 instance=ExtResource("12_aas6m")]
 position = Vector2(-240, 381)

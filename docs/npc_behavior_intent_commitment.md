@@ -115,6 +115,38 @@ intent or failure memory is produced.
 Active sessions are never continuously filtered. Movement and arrival refresh
 the same accepted intention by session identity exactly as before.
 
+## Transaction ownership and runtime hot paths
+
+The following rules are performance contracts as well as correctness contracts:
+
+- One gameplay cause produces at most one directed relationship transaction per
+  owner/subject pair. Damage therefore commits its favor, anger, and fear changes
+  together. Splitting one hit into several writes repeats identity resolution,
+  relationship signaling, EventBus delivery, and presentation refresh on the main
+  thread.
+- A committed value change may propose a reaction, but the current primary state
+  still owns interruption. The state machine checks the existing `can_exit_to()`
+  contract before constructing reaction intent, action-session, and feedback work.
+  Fight, Talk, emergency, and scripted protection are not weakened by this check.
+- A persistent scheduled activity remains authoritative between live execution
+  cycles, including the short interval after its live action is marked completed
+  and before world simulation resumes or finishes the persistent record. A new
+  `need` or `social_ai` session cannot erase that activity in this interval; the
+  exact scheduled session can continue normally.
+- If a higher-authority source such as emergency or scripted control legitimately
+  supersedes a scheduled activity, the persistent record and its spot reservation
+  change in the same operation. Periodic reservation repair is recovery for corrupt
+  or old data, not a normal activity-lifecycle step.
+
+The diagnostic signatures for violations are repeated
+`ReactToEvent reason=cannot_exit_Fight`, a newly committed schedule immediately
+following a stale autonomous callback, or `NPC reservation repair ... removed=1`
+after a session replacement. These are symptoms of duplicated work or split
+ownership at a transaction boundary. They can stall the main thread and make all
+input and physics interactions feel rough even when the interaction subsystem is
+not the source. The rope system is deliberately outside this contract and is not
+modified by these fixes.
+
 ## Developer feedback
 
 The overhead label is formatted by `NpcBehaviorFeedbackFormatter`, which has no

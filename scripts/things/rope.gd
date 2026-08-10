@@ -18,6 +18,9 @@ const RopeThrowControllerScript = preload(
 const RopeTensionControllerScript = preload(
 	"res://scripts/things/rope_tension_controller.gd"
 )
+const RopeStatusNotifierScript = preload(
+	"res://scripts/things/rope_status_notifier.gd"
+)
 
 @export_category("Rope Feel")
 ## Upper bound for the rope's resting length.
@@ -102,15 +105,20 @@ var _terrain_anchor_point: Marker2D
 var _terrain_anchor_body: Node2D
 var _throw_controller = RopeThrowControllerScript.new()
 var _tension_controller = RopeTensionControllerScript.new()
+var _status_notifier = RopeStatusNotifierScript.new()
 
 @onready var line: Line2D = get_node_or_null("Line2D") as Line2D
 @onready var throw_preview: Line2D = get_node_or_null("ThrowPreview") as Line2D
 @onready var throw_end: Polygon2D = get_node_or_null("ThrowEnd") as Polygon2D
 
 
+func _init() -> void:
+	_tension_controller.setup(self)
+	_status_notifier.setup(self)
+
+
 func _ready() -> void:
 	_throw_controller.setup(self)
-	_tension_controller.setup(self)
 	if line != null:
 		line.width = rope_width
 		line.visible = active
@@ -144,6 +152,8 @@ func _physics_process(delta: float) -> void:
 		return
 
 	if _tension_controller.update(delta):
+		return
+	if not active:
 		return
 
 	_constrain_rigid_endpoint_once(start_body, delta)
@@ -497,9 +507,13 @@ func detach() -> void:
 		anchor_to_free.queue_free()
 
 
-static func detach_all_from_body(body: Node2D) -> void:
+static func detach_all_from_body(body: Node2D) -> int:
+	var detached_count := 0
 	for rope in _get_attached_ropes(body):
-		rope.detach()
+		if rope.is_attached_to(body):
+			rope.detach()
+			detached_count += 1
+	return detached_count
 
 
 func track_attachable(attachable: Node2D) -> void:
@@ -672,6 +686,7 @@ func _bind_constraint(
 	):
 		return false
 
+	var previous_rope_status := _status_notifier.capture_topology()
 	var previous_length := _constraint_length
 	_unregister_from_body(start_body)
 	_unregister_from_body(end_body)
@@ -718,13 +733,28 @@ func _bind_constraint(
 	_record_requested_velocity(end_body, _read_body_velocity(end_body))
 	_register_on_body(start_body)
 	_register_on_body(end_body)
+	var measurement_delta := (
+		get_physics_process_delta_time() if is_inside_tree() else 0.0
+	)
+	_status_notifier.set_tension_silently(
+		_tension_controller.refresh_measurement(measurement_delta)
+	)
 	if line != null:
 		line.visible = true
 	refresh_processing()
-	return true
+	_status_notifier.reconcile_topology(
+		previous_rope_status,
+		&"attachment_changed"
+	)
+	return (
+		active
+		and start_body == new_start_body
+		and end_body == new_end_body
+	)
 
 
 func _deactivate_constraint() -> void:
+	var previous_rope_status := _status_notifier.capture_topology()
 	_unregister_from_body(start_body)
 	_unregister_from_body(end_body)
 	active = false
@@ -734,12 +764,17 @@ func _deactivate_constraint() -> void:
 	end_visual_point = null
 	_constraint_length = 1.0
 	_tension_controller.reset()
+	_status_notifier.reset_silently()
 	_requested_velocities.clear()
 	_requested_velocity_frames.clear()
 	if line != null:
 		line.visible = false
 		line.clear_points()
 	refresh_processing()
+	_status_notifier.reconcile_topology(
+		previous_rope_status,
+		&"detached"
+	)
 
 
 func _repair_invalid_controlled_endpoints() -> void:
@@ -834,6 +869,37 @@ func get_tension_ratio() -> float:
 
 func get_tension_color(tension_ratio: float = -1.0) -> Color:
 	return _tension_controller.get_color(tension_ratio)
+
+
+func is_load_bearing() -> bool:
+	return _status_notifier.is_load_bearing()
+
+
+static func get_attached_ropes_for_body(body: Node2D) -> Array[Rope]:
+	return _get_attached_ropes(body)
+
+
+static func get_body_rope_status(body: Node2D) -> Dictionary:
+	var ropes := _get_attached_ropes(body)
+	var is_being_dragged := false
+	var strongest_tension := 0.0
+	for rope in ropes:
+		is_being_dragged = is_being_dragged or rope.is_load_bearing()
+		strongest_tension = maxf(
+			strongest_tension,
+			rope.get_current_tension()
+		)
+	return {
+		"is_roped": not ropes.is_empty(),
+		"is_being_dragged": is_being_dragged,
+		"rope_count": ropes.size(),
+		"strongest_tension": strongest_tension,
+		"ropes": ropes,
+	}
+
+
+func _update_load_bearing(tension: float) -> void:
+	_status_notifier.update_tension(tension)
 
 
 func is_attached_to(body: Node2D) -> bool:

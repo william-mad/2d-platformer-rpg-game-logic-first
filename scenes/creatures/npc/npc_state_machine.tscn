@@ -27,6 +27,7 @@
 [ext_resource type="Script" path="res://scripts/systems/npc_behavior/npc_memory_runtime_binding.gd" id="25_memory_runtime_binding"]
 [ext_resource type="Script" path="res://scripts/systems/npc_behavior/feedback/npc_feedback_presenter.gd" id="26_feedback_presenter"]
 [ext_resource type="Script" path="res://scripts/systems/npc_behavior/feedback/npc_feedback_adapter.gd" id="27_feedback_adapter"]
+[ext_resource type="Script" path="res://scenes/creatures/npc/states/roped.gd" id="28_roped"]
 
 [node name="NpcStateMachine" type="Node"]
 script = ExtResource("1_machine")
@@ -139,6 +140,20 @@ unique_name_in_owner = true
 script = ExtResource("15_fight")
 animation_name = &"run"
 projectile_knockout_damage = 40.0
+
+[node name="Roped" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("28_roped")
+animation_name = &"walk"
+attached_opinion_delta = {
+"anger": 3.0
+}
+dragged_opinion_delta = {
+"anger": 5.0
+}
+continued_drag_opinion_delta = {
+"anger": 1.0
+}
 
 [node name="TravelFollow" type="Node" parent="."]
 unique_name_in_owner = true

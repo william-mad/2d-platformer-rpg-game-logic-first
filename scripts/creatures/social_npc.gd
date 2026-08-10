@@ -20,6 +20,9 @@ const DEPRECATED_GLOBAL_STAT_KEYS := {
 signal target_seen(target: Node2D)
 signal target_lost(target: Node2D)
 signal social_stats_changed(stats: Dictionary)
+## Roped means attached. Dragged means at least one attached rope is taut/load-bearing.
+## Emitted only when either aggregate status changes; it does not select an NPC state.
+signal rope_status_changed(is_roped: bool, is_being_dragged: bool)
 
 const STAT_KEY_ALIASES := {
 	"sleepiness": "sleep_need",
@@ -35,6 +38,8 @@ const STAT_KEY_ALIASES := {
 
 @export_group("Rope")
 @export_range(0.01, 1000.0, 0.01) var rope_weight: float = 2.0
+## A future roped/struggle state can call try_break_free_from_rope().
+@export var can_break_free_from_rope: bool = false
 
 @export_group("Social Stats")
 @export var favor_min: float = 0.0
@@ -163,7 +168,10 @@ var is_downed: bool = false
 # group on every NPC every physics frame. Refreshed lazily when it becomes invalid.
 var cached_player: Node2D
 var player_relationship_presentation := PlayerRelationshipPresentation.new()
+var _relationship_identity_initialized: bool = false
 var neutral_body_color: Color = Color.WHITE
+var _reported_is_roped: bool = false
+var _reported_is_being_dragged: bool = false
 
 
 func _ready() -> void:
@@ -245,6 +253,52 @@ func _move_and_slide_with_rope(
 
 func get_rope_attach_point() -> Node2D:
 	return rope_attach_point if rope_attach_point != null else self
+
+
+func get_rope_status() -> Dictionary:
+	return Rope.get_body_rope_status(self)
+
+
+func get_attached_ropes() -> Array[Rope]:
+	return Rope.get_attached_ropes_for_body(self)
+
+
+func is_roped() -> bool:
+	return bool(get_rope_status().get("is_roped", false))
+
+
+func is_being_dragged_by_rope() -> bool:
+	return bool(get_rope_status().get("is_being_dragged", false))
+
+
+func try_break_free_from_rope() -> bool:
+	if not can_break_free_from_rope:
+		return false
+	return Rope.detach_all_from_body(self) > 0
+
+
+## Optional Rope callback. NPC behavior remains entirely owned by its current/future state.
+func receive_rope_state(
+	_source_rope: Rope,
+	_reason: StringName = &"updated"
+) -> void:
+	var status := get_rope_status()
+	var next_is_roped := bool(status.get("is_roped", false))
+	var next_is_being_dragged := bool(
+		status.get("is_being_dragged", false)
+	)
+	if (
+		next_is_roped == _reported_is_roped
+		and next_is_being_dragged == _reported_is_being_dragged
+	):
+		return
+
+	_reported_is_roped = next_is_roped
+	_reported_is_being_dragged = next_is_being_dragged
+	rope_status_changed.emit(
+		_reported_is_roped,
+		_reported_is_being_dragged
+	)
 
 
 func can_see(target: Node2D) -> bool:
@@ -394,39 +448,77 @@ func take_damage(
 	var damage_stats := {
 		"hp": -amount,
 	}
+	var directed_damage_opinion: Dictionary = {}
 	var damage_relationship_reason := "damage"
 	if damage_has_relationship_actor:
 		damage_relationship_reason = (
 			"damaged_by_player" if damage_came_from_player else "damaged_by_npc"
 		)
 		var expected_damage_taken := minf(amount, previous_hp)
-		damage_stats["favor"] = (
+		directed_damage_opinion["favor"] = (
 			-expected_damage_taken * damage_favor_penalty
 		)
+		if not is_zero_approx(relationship_anger_delta):
+			directed_damage_opinion["anger"] = relationship_anger_delta
+		if not is_zero_approx(relationship_fear_delta):
+			directed_damage_opinion["fear"] = relationship_fear_delta
 	damage_stats.merge(emotion_stats, true)
 
 	# HP and source-less broad mood reactions stay on the NPC. Opinions about a
-	# known attacker are stored only in that actor's relationship record (favor
-	# through the routed event, anger/fear below); unknown/environment damage never
-	# spends an ambiguous global favor balance.
+	# known attacker are stored together in one relationship transaction. Keeping
+	# favor, anger, and fear in one routed event avoids three synchronous identity,
+	# signal, EventBus, and presentation passes for a single hit. Unknown/environment
+	# damage never spends an ambiguous global favor balance.
 	# Add hurt animations here later:
 	# if animation_player != null:
 	# 	animation_player.play("hurt")
-	apply_social_event(
-		damage_stats,
-		damage_actor,
-		false,
-		damage_relationship_reason,
-		{"source": "damage", "damage_amount": amount}
-	)
+	var damage_context := {"source": "damage", "damage_amount": amount}
+	var damage_social_result: Dictionary = {}
+	if (
+		_state_machine_active()
+		and npc_state_machine.has_method("apply_explicit_directed_social_event")
+	):
+		damage_social_result = npc_state_machine.call(
+			"apply_explicit_directed_social_event",
+			damage_stats,
+			directed_damage_opinion,
+			damage_actor,
+			false,
+			damage_relationship_reason,
+			damage_context
+		)
+	else:
+		apply_social_event(
+			damage_stats,
+			damage_actor,
+			false,
+			damage_relationship_reason,
+			damage_context
+		)
+		damage_social_result = SocialWriteRouter.route_explicit_directed_delta(
+			self,
+			damage_actor,
+			{},
+			directed_damage_opinion,
+			_get_relationship_system(),
+			damage_relationship_reason,
+			damage_context
+		)
+		var fallback_directed_changes: Dictionary = damage_social_result.get(
+			"directed_changes", {}
+		)
+		if bool(damage_social_result.get("directed_applied", false)):
+			_react_to_event(
+				damage_actor,
+				float(fallback_directed_changes.get("favor", 0.0))
+			)
 
 	var damage_taken := previous_hp - get_hp()
 	if damage_has_relationship_actor and damage_taken > 0.0:
-		var relationship_anger := change_relationship_anger_for(
-			damage_actor,
-			relationship_anger_delta,
-			damage_relationship_reason
-		)
+		var relationship_snapshot = damage_social_result.get("relationship", {})
+		if not (relationship_snapshot is Dictionary):
+			relationship_snapshot = {}
+		var relationship_anger := float(relationship_snapshot.get("anger", 0.0))
 		if (
 			npc_state_machine != null
 			and get_hp() > 0.0
@@ -442,11 +534,7 @@ func take_damage(
 				"npc_relationship_anger",
 				94
 			)
-		var relationship_fear := change_relationship_fear_for(
-			damage_actor,
-			relationship_fear_delta,
-			damage_relationship_reason
-		)
+		var relationship_fear := float(relationship_snapshot.get("fear", 0.0))
 		if (
 			npc_state_machine != null
 			and get_hp() > 0.0
@@ -805,6 +893,7 @@ func _get_world_simulation_profile() -> Dictionary:
 
 
 func apply_npc_location_save_data(data: Dictionary) -> void:
+	var identity_changed := false
 	if data.has("social_stats") and data["social_stats"] is Dictionary:
 		social_stats = _normalize_stat_values(data["social_stats"])
 	if data.has("starts_moving_right"):
@@ -816,9 +905,15 @@ func apply_npc_location_save_data(data: Dictionary) -> void:
 	if data.has("use_state_machine_when_available"):
 		use_state_machine_when_available = bool(data["use_state_machine_when_available"])
 	if data.has("relationship_id"):
-		relationship_id = StringName(String(data["relationship_id"]))
+		var next_relationship_id := StringName(String(data["relationship_id"]))
+		identity_changed = identity_changed or next_relationship_id != relationship_id
+		relationship_id = next_relationship_id
 	if data.has("location_id"):
-		location_id = StringName(String(data["location_id"]))
+		var next_location_id := StringName(String(data["location_id"]))
+		identity_changed = identity_changed or next_location_id != location_id
+		location_id = next_location_id
+	if identity_changed and _relationship_identity_initialized:
+		_setup_relationship_identity()
 
 	_ensure_social_stats()
 	if hp_bar != null:
@@ -936,7 +1031,17 @@ func should_fight_npc(other: Node) -> bool:
 	return (
 		other != null
 		and other.is_in_group("npc")
-		and get_relationship_anger_for(other, 0.0) >= npc_relationship_fight_anger_threshold
+		and should_fight_actor(other)
+	)
+
+
+func should_fight_actor(other: Node) -> bool:
+	return (
+		other != null
+		and is_instance_valid(other)
+		and (other.is_in_group("player") or other.is_in_group("npc"))
+		and get_relationship_anger_for(other, 0.0)
+			>= npc_relationship_fight_anger_threshold
 	)
 
 
@@ -1250,18 +1355,24 @@ func _update_facing() -> void:
 	sight_pivot.scale.x = direction
 
 
-func _update_favor_bar() -> void:
+func _update_favor_bar(presentation: Dictionary = {}) -> void:
 	if favor_bar == null:
 		return
 	favor_bar.min_value = favor_min
 	favor_bar.max_value = favor_max
-	var presentation := get_player_relationship_presentation_snapshot()
-	if not bool(presentation.get("available", false)):
+	var current_presentation := presentation
+	if current_presentation.is_empty():
+		current_presentation = (
+			_get_compact_player_relationship_presentation_snapshot()
+		)
+	if not bool(current_presentation.get("available", false)):
 		favor_bar.value = favor_min
 		favor_bar.visible = false
 		return
 	favor_bar.value = clampf(
-		float(presentation.get("favor", favor_min)), favor_min, favor_max
+		float(current_presentation.get("favor", favor_min)),
+		favor_min,
+		favor_max
 	)
 
 
@@ -1271,20 +1382,36 @@ func get_player_relationship_presentation_snapshot() -> Dictionary:
 	)
 
 
+func _get_compact_player_relationship_presentation_snapshot() -> Dictionary:
+	return player_relationship_presentation.get_opinion_snapshot(
+		_get_player(),
+		false
+	)
+
+
 func get_player_favor_for_presentation():
-	var presentation := get_player_relationship_presentation_snapshot()
+	var presentation := (
+		_get_compact_player_relationship_presentation_snapshot()
+	)
 	if not bool(presentation.get("available", false)):
 		return null
 	return float(presentation.get("favor", 0.0))
 
 
-func refresh_player_relationship_presentation() -> void:
-	_update_favor_bar()
-	_update_visual_mood()
-	_update_favor_bar_visibility()
+func refresh_player_relationship_presentation(
+	presentation: Dictionary = {}
+) -> void:
+	var current_presentation := presentation
+	if current_presentation.is_empty():
+		current_presentation = (
+			_get_compact_player_relationship_presentation_snapshot()
+		)
+	_update_favor_bar(current_presentation)
+	_update_visual_mood(current_presentation)
+	_update_favor_bar_visibility(current_presentation)
 
 
-func _update_favor_bar_visibility() -> void:
+func _update_favor_bar_visibility(presentation: Dictionary = {}) -> void:
 	if favor_bar == null:
 		return
 	var had_cached_player := (
@@ -1294,11 +1421,15 @@ func _update_favor_bar_visibility() -> void:
 	if player == null:
 		favor_bar.visible = false
 		return
+	var current_presentation := presentation
+	if current_presentation.is_empty():
+		current_presentation = (
+			_get_compact_player_relationship_presentation_snapshot()
+		)
 	if not had_cached_player:
-		_update_favor_bar()
-		_update_visual_mood()
-	var presentation := get_player_relationship_presentation_snapshot()
-	if not bool(presentation.get("available", false)):
+		_update_favor_bar(current_presentation)
+		_update_visual_mood(current_presentation)
+	if not bool(current_presentation.get("available", false)):
 		favor_bar.visible = false
 		return
 
@@ -1314,17 +1445,21 @@ func _get_player() -> Node2D:
 	return cached_player
 
 
-func _update_visual_mood() -> void:
+func _update_visual_mood(presentation: Dictionary = {}) -> void:
 	if body_visual == null:
 		return
-	var presentation := get_player_relationship_presentation_snapshot()
-	if not bool(presentation.get("available", false)):
+	var current_presentation := presentation
+	if current_presentation.is_empty():
+		current_presentation = (
+			_get_compact_player_relationship_presentation_snapshot()
+		)
+	if not bool(current_presentation.get("available", false)):
 		body_visual.color = neutral_body_color
 		return
 	var favor_ratio := inverse_lerp(
 		favor_min,
 		favor_max,
-		float(presentation.get("favor", favor_min))
+		float(current_presentation.get("favor", favor_min))
 	)
 	favor_ratio = clampf(favor_ratio, 0.0, 1.0)
 
@@ -1385,13 +1520,24 @@ func _setup_state_machine() -> void:
 
 func _setup_relationship_identity() -> void:
 	var resolved_id := get_relationship_id()
+	var relationships := _get_relationship_system()
+	if (
+		relationships != null
+		and relationships.has_method("register_actor_identity")
+	):
+		var registered_id := String(
+			relationships.call("register_actor_identity", self)
+		).strip_edges()
+		if not registered_id.is_empty():
+			resolved_id = StringName(registered_id)
 	if resolved_id == &"":
 		return
 
 	set_meta("relationship_id", String(resolved_id))
 	player_relationship_presentation.bind(
-		self, _get_relationship_system()
+		self, relationships
 	)
+	_relationship_identity_initialized = true
 
 
 func _setup_npc_tags() -> void:

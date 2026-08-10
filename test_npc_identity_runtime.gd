@@ -155,6 +155,17 @@ func test_authored_actor_and_spot_ids_share_one_resolution_contract() -> void:
 		"npc_location",
 		"relationships adopt the canonical authored NPC identity"
 	)
+	assert_true(
+		relationships.has_relationship_by_id(
+			"other_npc", "old_relationship_alias"
+		),
+		"ordinary identity lookup does not migrate a legacy row"
+	)
+	assert_eq(
+		relationships.register_actor_identity(actor),
+		"npc_location",
+		"cold actor registration resolves the same canonical identity"
+	)
 	assert_eq(
 		float(relationships.get_relationship_by_id(
 			"other_npc",
@@ -563,6 +574,15 @@ func test_live_actor_alias_migration_handles_metadata_unknown_at_load() -> void:
 		relationships.get_relationship_id(player),
 		"__player__",
 		"live player resolves canonically"
+	)
+	assert_true(
+		relationships.has_relationship_by_id("mom", live_path),
+		"ordinary player identity lookup leaves ambiguous aliases untouched"
+	)
+	assert_eq(
+		relationships.register_actor_identity(player),
+		"__player__",
+		"cold player registration migrates exact live aliases"
 	)
 	assert_eq(
 		float(relationships.get_relationship_by_id("mom", "__player__").favor),

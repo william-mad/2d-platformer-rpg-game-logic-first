@@ -40,10 +40,11 @@ The candidate's opinion is not substituted. The existing bidirectional minimum-
 favor eligibility check remains a separate hard gate for NPC candidates.
 
 Every relationship input is clamped to `0..100`. Missing favor and trust are
-neutral `50`; missing love, anger, fear, and suspicion are neutral `0`. Version 3
-relationship rows store all six as canonical owner-to-subject opinions. Love is
-therefore available to the scorer from real production rows. Trust and suspicion
-remain persistent story currencies and do not affect this score yet.
+neutral `50`; missing love, lust, shame, anger, fear, and suspicion are neutral
+`0`. Version 3 relationship rows store all eight as canonical owner-to-subject
+opinions. Love is therefore available to the scorer from real production rows.
+Trust, lust, shame, and suspicion remain persistent story currencies and do not
+affect this score yet.
 
 ```text
 favor contribution = ((favor - 50) / 50) * 30    [-30, +30]

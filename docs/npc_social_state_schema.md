@@ -31,7 +31,7 @@ Each relationship row identifies both sides with stable IDs:
 
 ```text
 owner_id -> other_id
-favor, trust, love, anger, fear, suspicion
+favor, trust, love, lust, shame, anger, fear, suspicion
 ```
 
 Favor affects social selection/acceptance and existing dialogue or trade paths;
@@ -39,9 +39,17 @@ love also contributes to social candidate scoring. Directed anger and fear
 affect combat and avoidance. Trust and suspicion remain valid story currencies
 even though no general-purpose behavior consumes them yet. They are kept because
 authored story systems can use them later; their lack of a current consumer is
-not treated as an error.
+not treated as an error. Lust and shame are independent persistent axes with no
+decay or behavior consumers yet.
 
-All six metrics use the generic `Relationships` opinion API. Its first actor/ID
+Fight evaluates anger against its concrete player or NPC target. Directed anger
+can start and sustain that fight. Player combat also retains the historical broad
+anger fallback, using the greater of broad and player-directed anger; NPC-to-NPC
+combat remains strictly directed. The same target-specific rule decides whether
+the fight has calmed. Monster reactions remain owned by the separate monster-sight
+policy and do not invent relationship opinions for monsters.
+
+All eight metrics use the generic `Relationships` opinion API. Its first actor/ID
 is always the opinion owner and its second actor/ID is always the subject.
 ID-based snapshot reads return copies and never create, mark, or mutate a
 relationship; node-based compatibility calls may only migrate a known legacy

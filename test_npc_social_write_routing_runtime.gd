@@ -446,6 +446,44 @@ func test_player_damage_routes_attacker_opinions_without_global_favor_leak() -> 
 	)
 
 
+func test_one_damage_event_commits_all_attacker_opinions_once() -> void:
+	var player := _player()
+	var npc := _npc(&"routing_damage_transaction_npc")
+	npc.damage_favor_penalty = 1.0
+	npc.damage_anger_multiplier = 1.0
+	npc.damage_fear_multiplier = 1.0
+	npc.damage_fear_health_threshold_percent = 100.0
+	add_child_autofree(player)
+	add_child_autofree(npc)
+	npc.npc_state_machine.value_reactions_enabled = false
+
+	var emitted_changes: Array[Dictionary] = []
+	var changed_callback := func(
+		relationship_owner: Node,
+		other: Node,
+		changed_values: Dictionary,
+		_relationship: Dictionary
+	) -> void:
+		if relationship_owner == npc and other == player:
+			emitted_changes.append(changed_values.duplicate(true))
+	_relationships().relationship_changed.connect(changed_callback)
+
+	npc.take_damage(10.0, player.global_position, player)
+
+	_relationships().relationship_changed.disconnect(changed_callback)
+	assert_eq(
+		emitted_changes.size(),
+		1,
+		"one hit is one directed-opinion transaction"
+	)
+	if emitted_changes.size() != 1:
+		return
+	var changed_values := emitted_changes[0]
+	assert_true(changed_values.has("favor"), "damage transaction contains favor")
+	assert_true(changed_values.has("anger"), "damage transaction contains anger")
+	assert_true(changed_values.has("fear"), "low-health damage transaction contains fear")
+
+
 func test_player_hits_reduce_only_directed_anger_for_melee_and_projectiles() -> void:
 	var player := _player()
 	var npc := _npc(&"routing_hit_relief_npc")

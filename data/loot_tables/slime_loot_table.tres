@@ -1,7 +1,7 @@
 [gd_resource type="Resource" script_class="LootTableDefinition" format=3 uid="uid://dvb6dgcrf7xp2"]
 
-[ext_resource type="Script" path="res://scripts/resources/economy/loot_table_definition.gd" id="1_table"]
-[ext_resource type="Script" path="res://scripts/resources/economy/loot_table_entry.gd" id="2_entry"]
+[ext_resource type="Script" uid="uid://drmsieeuajd6k" path="res://scripts/resources/economy/loot_table_definition.gd" id="1_table"]
+[ext_resource type="Script" uid="uid://spsg3rgnw2jm" path="res://scripts/resources/economy/loot_table_entry.gd" id="2_entry"]
 
 [sub_resource type="Resource" id="LootTableEntry_gel"]
 script = ExtResource("2_entry")

@@ -2114,30 +2114,29 @@ func get_arrival_position(from_scene_path: String, fallback: Vector2) -> Vector2
 
 func _load_spot_definitions() -> void:
 	spot_definitions.clear()
-	var directory := DirAccess.open(SPOT_DATA_DIRECTORY)
-	if directory == null:
-		return
+	for file_name: String in ResourceLoader.list_directory(SPOT_DATA_DIRECTORY):
+		if file_name.ends_with("/") or file_name.get_extension().to_lower() != "tres":
+			continue
+		var resource_path := SPOT_DATA_DIRECTORY.path_join(file_name)
+		var definition := load(resource_path) as NpcSpotDefinition
+		if definition != null and definition.is_valid_definition():
+			if spot_definitions.has(definition.spot_id):
+				push_warning("Duplicate simulated NPC spot id '%s'; keeping the first definition." % String(definition.spot_id))
+			else:
+				spot_definitions[definition.spot_id] = definition
+		elif definition != null:
+			push_warning(
+				"Invalid NPC spot definition '%s': %s" % [
+					resource_path,
+					"; ".join(definition.get_validation_errors()),
+				]
+			)
 
-	directory.list_dir_begin()
-	var file_name := directory.get_next()
-	while not file_name.is_empty():
-		if not directory.current_is_dir() and file_name.get_extension().to_lower() == "tres":
-			var resource_path := "%s/%s" % [SPOT_DATA_DIRECTORY, file_name]
-			var definition := load(resource_path) as NpcSpotDefinition
-			if definition != null and definition.is_valid_definition():
-				if spot_definitions.has(definition.spot_id):
-					push_warning("Duplicate simulated NPC spot id '%s'; keeping the first definition." % String(definition.spot_id))
-				else:
-					spot_definitions[definition.spot_id] = definition
-			elif definition != null:
-				push_warning(
-					"Invalid NPC spot definition '%s': %s" % [
-						resource_path,
-						"; ".join(definition.get_validation_errors()),
-					]
-				)
-		file_name = directory.get_next()
-	directory.list_dir_end()
+	if spot_definitions.is_empty():
+		push_error(
+			"NPC world simulation found no valid spot definitions in resource directory: %s"
+			% SPOT_DATA_DIRECTORY
+		)
 
 
 func _initialize_definition_runtime_states() -> void:

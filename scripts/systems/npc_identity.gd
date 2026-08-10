@@ -11,9 +11,33 @@ static func get_stable_actor_id(actor: Node) -> String:
 		return ""
 	if actor.is_in_group("player"):
 		return String(PLAYER_ACTOR_ID)
-	for candidate in _get_actor_identity_candidates(actor):
-		if is_stable_id(candidate):
-			return candidate
+
+	# Production actors return from their explicit contract before reflection.
+	# Legacy property-only actors retain the exact historical candidate order.
+	var candidate := _get_method_identity(actor, &"get_npc_location_id")
+	if is_stable_id(candidate):
+		return candidate
+	candidate = _get_meta_identity(actor, &"npc_location_id")
+	if is_stable_id(candidate):
+		return candidate
+	candidate = _get_property_identity(actor, &"location_id")
+	if is_stable_id(candidate):
+		return candidate
+	candidate = _get_method_identity(actor, &"get_relationship_id")
+	if is_stable_id(candidate):
+		return candidate
+	candidate = _get_meta_identity(actor, &"relationship_id")
+	if is_stable_id(candidate):
+		return candidate
+	candidate = _get_property_identity(actor, &"relationship_id")
+	if is_stable_id(candidate):
+		return candidate
+	candidate = _get_method_identity(actor, &"get_persistent_actor_id")
+	if is_stable_id(candidate):
+		return candidate
+	candidate = _get_property_identity(actor, &"persistent_id")
+	if is_stable_id(candidate):
+		return candidate
 	return ""
 
 

@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://8ehnoal3e8eh"
-path="res://.godot/imported/hp bar.png-cc93670dba0abd9138f5adb869972d5b.ctex"
+uid="uid://dujjjldiwf2c7"
+path="res://.godot/imported/bg sky.png-c2308f0c417c28726583152a6bee3463.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://images/sprites/assets/hp bar.png"
-dest_files=["res://.godot/imported/hp bar.png-cc93670dba0abd9138f5adb869972d5b.ctex"]
+source_file="res://images/backgrounds/handmade/bg sky.png"
+dest_files=["res://.godot/imported/bg sky.png-c2308f0c417c28726583152a6bee3463.ctex"]
 
 [params]
 

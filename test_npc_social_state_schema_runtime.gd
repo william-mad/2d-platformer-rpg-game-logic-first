@@ -46,12 +46,31 @@ func test_schema_declares_scope_lifecycle_consumers_and_presentation() -> void:
 		Schema.SCOPE_DIRECTED_OPINION,
 		"explicit actor-targeted anger remains a directed opinion"
 	)
-	for metric_id in [&"favor", &"trust", &"love", &"anger", &"fear", &"suspicion"]:
+	for metric_id in [
+		&"favor",
+		&"trust",
+		&"love",
+		&"lust",
+		&"shame",
+		&"anger",
+		&"fear",
+		&"suspicion",
+	]:
 		var opinion_definition := Schema.get_directed_opinion_definition(metric_id)
 		assert_false(opinion_definition.is_empty(), "%s is a directed metric" % metric_id)
 		assert_true(
 			bool(opinion_definition.presentation.requires_subject),
 			"%s presentation requires an explicit subject" % metric_id
+		)
+	for metric_id in [&"lust", &"shame"]:
+		var definition := Schema.get_directed_opinion_definition(metric_id)
+		assert_eq(definition.default, 0.0, "%s defaults to zero" % metric_id)
+		assert_eq(definition.minimum, 0.0, "%s minimum is zero" % metric_id)
+		assert_eq(definition.maximum, 100.0, "%s maximum is 100" % metric_id)
+		assert_eq(definition.decay, &"none", "%s has no automatic decay" % metric_id)
+		assert_true(
+			(definition.behavior_consumers as Array).is_empty(),
+			"%s has no behavior consumers" % metric_id
 		)
 
 
@@ -62,6 +81,8 @@ func test_value_delta_split_never_guesses_an_opinion_subject() -> void:
 		"anger": 7.0,
 		"favor": 3.0,
 		"love": 1.0,
+		"lust": 6.0,
+		"shame": 8.0,
 		"trust": -2.0,
 		"suspicion": 5.0,
 	})
@@ -71,7 +92,7 @@ func test_value_delta_split_never_guesses_an_opinion_subject() -> void:
 	assert_eq(local_values.sadness, 2.0, "broad moods remain local")
 	assert_eq(local_values.anger, 7.0, "broad anger remains local by default")
 	assert_false(local_values.has("favor"), "directed favor is not stored locally")
-	for metric_id in [&"favor", &"love", &"trust", &"suspicion"]:
+	for metric_id in [&"favor", &"love", &"lust", &"shame", &"trust", &"suspicion"]:
 		assert_true(
 			directed_opinion.has(metric_id),
 			"%s is held for an explicit opinion subject" % metric_id
@@ -95,6 +116,8 @@ func test_real_relationship_rows_contain_all_directed_social_currency() -> void:
 		)
 	assert_eq(float(row.trust), 50.0, "new rows receive neutral directed trust")
 	assert_eq(float(row.love), 0.0, "new rows receive neutral directed love")
+	assert_eq(float(row.lust), 0.0, "new rows receive neutral directed lust")
+	assert_eq(float(row.shame), 0.0, "new rows receive neutral directed shame")
 	assert_eq(row.owner_id, "mom", "row preserves explicit opinion owner")
 	assert_eq(row.other_id, "friend", "row preserves explicit opinion subject")
 
@@ -113,6 +136,59 @@ func test_generic_metric_writes_are_directional_and_clamped() -> void:
 		relationships.get_opinion_metric(friend, mom, &"love"),
 		0.0,
 		"reverse opinion remains independent"
+	)
+	assert_eq(
+		relationships.set_opinion_metric(mom, friend, &"lust", 140.0),
+		100.0,
+		"generic lust set clamps to the metric maximum"
+	)
+	assert_eq(
+		relationships.change_opinion_metric(mom, friend, &"lust", -150.0),
+		0.0,
+		"generic lust change clamps to the metric minimum"
+	)
+	assert_eq(
+		relationships.set_opinion_metric(mom, friend, &"shame", 35.0),
+		35.0,
+		"generic shame set writes the directed metric"
+	)
+	assert_eq(
+		relationships.change_opinion_metric(mom, friend, &"shame", 80.0),
+		100.0,
+		"generic shame change clamps to the metric maximum"
+	)
+	assert_eq(
+		relationships.get_opinion_metric(friend, mom, &"lust"),
+		0.0,
+		"reverse lust remains independent"
+	)
+	assert_eq(
+		relationships.get_opinion_metric(friend, mom, &"shame"),
+		0.0,
+		"reverse shame remains independent"
+	)
+	var batch_result: Dictionary = relationships.apply_opinion_deltas_by_id(
+		"mom", "friend", {"lust": 25.0, "shame": -30.0}, "test_batch"
+	)
+	assert_eq(
+		batch_result.changed_values,
+		{"lust": 25.0, "shame": -30.0},
+		"batched generic opinion changes include both schema metrics"
+	)
+	assert_eq(
+		relationships.get_opinion_metric(mom, friend, &"lust"),
+		25.0,
+		"generic lust get reads the batched value"
+	)
+	assert_eq(
+		relationships.get_opinion_metric(mom, friend, &"shame"),
+		70.0,
+		"generic shame get reads the batched value"
+	)
+	assert_eq(
+		relationships.set_opinion_metric(mom, friend, &"shame", -10.0),
+		0.0,
+		"generic shame set clamps to the metric minimum"
 	)
 	assert_eq(
 		relationships.set_opinion_metric_by_id(
@@ -218,6 +294,8 @@ func test_legacy_save_migrates_and_round_trips_all_opinion_metrics() -> void:
 					"favor": 140.0,
 					"trust": -10.0,
 					"love": 180.0,
+					"lust": 63.0,
+					"shame": 41.0,
 					"anger": 130.0,
 					"fear": -5.0,
 					"suspicion": 120.0,
@@ -234,6 +312,8 @@ func test_legacy_save_migrates_and_round_trips_all_opinion_metrics() -> void:
 	assert_eq(float(row.favor), 100.0, "favor is clamped on import")
 	assert_eq(float(row.trust), 0.0, "trust is clamped on import")
 	assert_eq(float(row.love), 100.0, "love is clamped on import")
+	assert_eq(float(row.lust), 63.0, "lust is normalized on import")
+	assert_eq(float(row.shame), 41.0, "shame is normalized on import")
 	assert_eq(float(row.anger), 100.0, "anger is clamped on import")
 	assert_eq(float(row.fear), 0.0, "fear is clamped on import")
 	assert_eq(float(row.suspicion), 100.0, "suspicion is clamped on import")
@@ -242,6 +322,8 @@ func test_legacy_save_migrates_and_round_trips_all_opinion_metrics() -> void:
 	)
 	assert_eq(float(legacy_row.trust), 50.0, "legacy rows gain neutral trust")
 	assert_eq(float(legacy_row.love), 0.0, "legacy rows gain neutral love")
+	assert_eq(float(legacy_row.lust), 0.0, "legacy rows gain neutral lust")
+	assert_eq(float(legacy_row.shame), 0.0, "legacy rows gain neutral shame")
 
 	var saved: Dictionary = relationships.get_save_data()
 	assert_eq(int(saved.version), 3, "directed opinion save schema is versioned")

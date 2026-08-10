@@ -2,6 +2,7 @@ extends SceneTree
 
 const TEST_NPC_ID := "transaction_npc"
 const TEST_SPOT_ID := &"transaction_work_spot"
+const TEST_NEED_SPOT_ID := &"transaction_need_spot"
 const TEST_SCENE_PATH := "res://transaction_activity_test.tscn"
 
 var _failures: Array[String] = []
@@ -26,6 +27,13 @@ class TestSpot:
 
 	func get_world_spot_id() -> StringName:
 		return TEST_SPOT_ID
+
+
+class TestNeedSpot:
+	extends Node2D
+
+	func get_world_spot_id() -> StringName:
+		return TEST_NEED_SPOT_ID
 
 
 func _initialize() -> void:
@@ -71,11 +79,14 @@ func _initialize() -> void:
 	idle_state.name = "Idle"
 	var move_state := NpcState.new()
 	move_state.name = "MoveToTarget"
+	var routine_state := NpcState.new()
+	routine_state.name = "RoutineTask"
 	machine.add_child(behavior_controller)
 	machine.add_child(rejecting_state)
 	machine.add_child(work_state)
 	machine.add_child(idle_state)
 	machine.add_child(move_state)
+	machine.add_child(routine_state)
 	npc.add_child(machine)
 	test_scene.add_child(npc)
 	machine.bind_npc(npc)
@@ -85,6 +96,9 @@ func _initialize() -> void:
 	var spot := TestSpot.new()
 	spot.name = "TransactionalWorkSpot"
 	test_scene.add_child(spot)
+	var need_spot := TestNeedSpot.new()
+	need_spot.name = "TransactionalNeedSpot"
+	test_scene.add_child(need_spot)
 	var definition := NpcSpotDefinition.new()
 	definition.spot_id = TEST_SPOT_ID
 	definition.scene_path = TEST_SCENE_PATH
@@ -94,6 +108,14 @@ func _initialize() -> void:
 	definition.target_assignment_method = &"assign_work_target"
 	simulator.spot_definitions[TEST_SPOT_ID] = definition
 	simulator.live_spots[TEST_SPOT_ID] = spot
+	var need_definition := NpcSpotDefinition.new()
+	need_definition.spot_id = TEST_NEED_SPOT_ID
+	need_definition.scene_path = TEST_SCENE_PATH
+	need_definition.state_name = &"RoutineTask"
+	need_definition.priority = 10
+	need_definition.capacity = 1
+	simulator.spot_definitions[TEST_NEED_SPOT_ID] = need_definition
+	simulator.live_spots[TEST_NEED_SPOT_ID] = need_spot
 	simulator.spot_reservations.clear()
 	simulator.call("_sync_spot_claim_count_cache")
 
@@ -311,6 +333,34 @@ func _initialize() -> void:
 			int(simulator.spot_claim_counts.get(TEST_SPOT_ID, 0)) == 1,
 			"repair pass %d finds the persistent activity reservation intact" % repair_pass
 		)
+	var competing_need_action := {
+		"session_id": "transaction-need-routine",
+		"action_session_id": "transaction-need-routine",
+		"activity_id": "transaction-need-routine",
+		"action_kind": "RoutineTask",
+		"state_name": "RoutineTask",
+		"source": "need",
+		"priority": 10,
+		"status": "proposed",
+	}
+	_expect(
+		not machine.request_action_from_descriptor(competing_need_action, need_spot),
+		"an autonomous need cannot replace an authoritative scheduled activity between execution cycles"
+	)
+	var protected_record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	_expect(
+		String((protected_record.get("activity", {}) as Dictionary).get(
+			"session_id", ""
+		)) == accepted_session_id,
+		"blocked autonomous need leaves the persistent activity authoritative"
+	)
+	simulator.call(
+		"repair_orphan_spot_reservations", locations.get_records_snapshot()
+	)
+	_expect(
+		int(simulator.spot_claim_counts.get(TEST_SPOT_ID, 0)) == 1,
+		"blocked autonomous need creates no orphan reservation repair"
+	)
 	simulator.call("resume_live_activity", StringName(TEST_NPC_ID), npc)
 	_expect(
 		machine.get_active_action_session_id() == accepted_session_id,
@@ -372,6 +422,9 @@ func _initialize() -> void:
 	_test_stale_resume_rejects_replaced_live_body(
 		locations, simulator, machine, npc, spot, idle_state
 	)
+	_test_permitted_supersession_releases_activity_claim(
+		locations, simulator, npc
+	)
 
 	locations.npc_records = original_records
 	locations.live_npcs = original_live_npcs
@@ -393,6 +446,57 @@ func _initialize() -> void:
 	for failure in _failures:
 		push_error(failure)
 	quit(1)
+
+
+func _test_permitted_supersession_releases_activity_claim(
+	locations: Node,
+	simulator: Node,
+	npc: Node
+) -> void:
+	var scheduled_session := "transaction-superseded-schedule"
+	var claim: Dictionary = simulator.call(
+		"try_claim_spot",
+		StringName(TEST_NPC_ID),
+		scheduled_session,
+		TEST_SPOT_ID,
+		&"activity"
+	)
+	_expect(bool(claim.get("accepted", false)), "supersession fixture owns its spot")
+	var record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	record["activity"] = {
+		"session_id": scheduled_session,
+		"action_session_id": scheduled_session,
+		"activity_id": scheduled_session,
+		"spot_id": String(TEST_SPOT_ID),
+		"state_name": "Work",
+		"source": "schedule",
+		"status": "active",
+	}
+	locations.npc_records[TEST_NPC_ID] = record
+	var emergency_action := {
+		"session_id": "transaction-emergency-replacement",
+		"action_session_id": "transaction-emergency-replacement",
+		"activity_id": "transaction-emergency-replacement",
+		"action_kind": "DisabledDead",
+		"state_name": "DisabledDead",
+		"source": "emergency",
+		"status": "active",
+	}
+	_expect(
+		bool(locations.call(
+			"sync_live_action_descriptor", TEST_NPC_ID, npc, emergency_action
+		)),
+		"permitted replacement synchronizes at the record boundary"
+	)
+	var replaced_record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	_expect(
+		(replaced_record.get("activity", {}) as Dictionary).is_empty(),
+		"permitted replacement clears the superseded scheduled activity"
+	)
+	_expect(
+		int(simulator.spot_claim_counts.get(TEST_SPOT_ID, 0)) == 0,
+		"permitted replacement releases the superseded claim immediately"
+	)
 
 
 func _test_save_repair_is_session_safe(

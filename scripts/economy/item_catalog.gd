@@ -14,11 +14,12 @@ func clear() -> void:
 
 func load_definitions(directory_path: String = DEFAULT_ITEMS_DIR) -> bool:
 	clear()
-	var directory := DirAccess.open(directory_path)
-	if directory == null:
-		_validation_errors.append("Item directory is not readable: %s" % directory_path)
-		return false
 	_scan_directory(directory_path)
+	if _definitions.is_empty():
+		_validation_errors.append(
+			"Item catalog found no valid item definitions in resource directory: %s"
+			% directory_path
+		)
 	return _validation_errors.is_empty()
 
 
@@ -78,13 +79,16 @@ func get_validation_errors() -> PackedStringArray:
 
 
 func _scan_directory(directory_path: String) -> void:
-	var directory := DirAccess.open(directory_path)
-	if directory == null:
-		_validation_errors.append("Item subdirectory is not readable: %s" % directory_path)
-		return
-	var entries := directory.get_files()
-	entries.sort()
-	for file_name: String in entries:
+	var files: PackedStringArray = []
+	var subdirectories: PackedStringArray = []
+	for entry_name: String in ResourceLoader.list_directory(directory_path):
+		if entry_name.ends_with("/"):
+			subdirectories.append(entry_name.trim_suffix("/"))
+		else:
+			files.append(entry_name)
+
+	files.sort()
+	for file_name: String in files:
 		var extension := file_name.get_extension().to_lower()
 		if extension != "tres" and extension != "res":
 			continue
@@ -95,7 +99,6 @@ func _scan_directory(directory_path: String) -> void:
 		elif resource is ItemDefinition:
 			if not register_definition(resource as ItemDefinition):
 				_validation_errors[_validation_errors.size() - 1] += " Source: %s" % resource_path
-	var subdirectories := directory.get_directories()
 	subdirectories.sort()
 	for subdirectory: String in subdirectories:
 		_scan_directory(directory_path.path_join(subdirectory))

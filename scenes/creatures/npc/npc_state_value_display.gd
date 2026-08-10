@@ -24,6 +24,7 @@ const NpcIdentity = preload("res://scripts/systems/npc_identity.gd")
 ]
 
 var target_npc: Node
+var target_npc_id: String = ""
 var machine: NpcStateMachine
 var last_changed_values: Dictionary = {}
 
@@ -38,6 +39,7 @@ func _setup() -> void:
 	if target_npc == null:
 		text = "NPC values\nTarget not found"
 		return
+	target_npc_id = NpcIdentity.get_stable_actor_id(target_npc)
 
 	machine = _get_machine(target_npc)
 	if machine == null:
@@ -136,38 +138,35 @@ func _setup_relationship_signals() -> void:
 	if relationships.has_signal(&"relationship_changed") and not relationships.is_connected(&"relationship_changed", changed_callback):
 		relationships.connect(&"relationship_changed", changed_callback)
 
-	var favor_callback := Callable(self, "_on_relationship_favor_changed")
-	if relationships.has_signal(&"favor_changed") and not relationships.is_connected(&"favor_changed", favor_callback):
-		relationships.connect(&"favor_changed", favor_callback)
 
-
-func _on_relationship_met(relationship_owner: Node, _other: Node, _relationship: Dictionary) -> void:
-	_update_if_owner_is_target(relationship_owner)
+func _on_relationship_met(
+	relationship_owner: Node,
+	_other: Node,
+	relationship: Dictionary
+) -> void:
+	_update_if_owner_is_target(relationship_owner, relationship)
 
 
 func _on_relationship_changed(
 	relationship_owner: Node,
 	_other: Node,
 	_changed_values: Dictionary,
-	_relationship: Dictionary
+	relationship: Dictionary
 ) -> void:
-	_update_if_owner_is_target(relationship_owner)
+	_update_if_owner_is_target(relationship_owner, relationship)
 
 
-func _on_relationship_favor_changed(
+func _update_if_owner_is_target(
 	relationship_owner: Node,
-	_other: Node,
-	_favor: float,
-	_delta: float,
-	_relationship: Dictionary
+	relationship: Dictionary
 ) -> void:
-	_update_if_owner_is_target(relationship_owner)
-
-
-func _update_if_owner_is_target(relationship_owner: Node) -> void:
-	# ID-based relationship changes may not have a live owner node. Refreshing this
-	# small debug label is preferable to leaving a stale directed opinion onscreen.
-	if relationship_owner == null or relationship_owner == target_npc:
+	if relationship_owner == target_npc:
+		_update_display()
+	elif (
+		relationship_owner == null
+		and not target_npc_id.is_empty()
+		and String(relationship.get("owner_id", "")) == target_npc_id
+	):
 		_update_display()
 
 

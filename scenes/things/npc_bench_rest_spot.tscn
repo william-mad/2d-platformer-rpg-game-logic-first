@@ -1,0 +1,12 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/instances/npc_casual_spot.gd" id="1_casual_spot"]
+[ext_resource type="PackedScene" path="res://scenes/art/props/bench.tscn" id="2_bench"]
+
+[node name="NpcBenchRestSpot" type="Node2D"]
+z_index = -10
+script = ExtResource("1_casual_spot")
+activity_state_name = &"Rest"
+
+[node name="Bench" parent="." instance=ExtResource("2_bench")]
+position = Vector2(0, 17)

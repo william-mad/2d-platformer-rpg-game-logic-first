@@ -55,6 +55,24 @@ func load_definitions() -> void:
 	_load_definition_dir(skill_domains_dir, &"skill_domain")
 	_load_definition_dir(abilities_dir, &"ability")
 	_load_definition_dir(xp_rewards_dir, &"xp_reward")
+	if not skill_domains_dir.is_empty() and skill_domain_definitions.is_empty():
+		_warn_once(
+			"dir.skill_domain.empty.%s" % skill_domains_dir,
+			"Progression system found no valid skill domain definitions in resource directory: %s"
+			% skill_domains_dir
+		)
+	if not abilities_dir.is_empty() and ability_definitions.is_empty():
+		_warn_once(
+			"dir.ability.empty.%s" % abilities_dir,
+			"Progression system found no valid ability definitions in resource directory: %s"
+			% abilities_dir
+		)
+	if not xp_rewards_dir.is_empty() and xp_reward_definitions.is_empty():
+		_warn_once(
+			"dir.xp_reward.empty.%s" % xp_rewards_dir,
+			"Progression system found no valid XP reward definitions in resource directory: %s"
+			% xp_rewards_dir
+		)
 	recalculate_level()
 	refresh_auto_unlocks()
 
@@ -471,22 +489,15 @@ func _load_definition_dir(dir_path: String, kind: StringName) -> void:
 	if dir_path.is_empty():
 		return
 
-	var dir := DirAccess.open(dir_path)
-	if dir == null:
-		_warn_once("dir.%s.%s" % [String(kind), dir_path], "Progression data directory is missing: %s" % dir_path)
-		return
-
-	dir.list_dir_begin()
-	var file_name := dir.get_next()
-	while not file_name.is_empty():
+	for entry_name: String in ResourceLoader.list_directory(dir_path):
+		var is_directory := entry_name.ends_with("/")
+		var file_name := entry_name.trim_suffix("/") if is_directory else entry_name
 		var path := dir_path.path_join(file_name)
-		if dir.current_is_dir():
+		if is_directory:
 			if not file_name.begins_with("."):
 				_load_definition_dir(path, kind)
 		elif file_name.get_extension().to_lower() in ["tres", "res"]:
 			_load_definition_resource(path, kind)
-		file_name = dir.get_next()
-	dir.list_dir_end()
 
 
 func _load_definition_resource(path: String, kind: StringName) -> void:

@@ -142,6 +142,37 @@ func request_animation(requested_name: StringName, required: bool = true) -> boo
 	return _play_resolved_animation(resolved_name)
 
 
+## Plays an authored loop without converting it to idle/run from measured speed.
+## This is useful for effort animations such as pushing, bracing, or struggling
+## while a constraint keeps the body nearly stationary.
+func request_fixed_animation(
+	requested_name: StringName,
+	required: bool = true
+) -> bool:
+	if requested_name == &"":
+		_reject_animation_request()
+		return false
+	_resolve_nodes()
+	if animation_player == null:
+		_reject_animation_request()
+		if required:
+			_warn_missing_animation_player_once(requested_name)
+		return false
+
+	var resolved_name := resolve_animation_name(requested_name)
+	if resolved_name == &"":
+		_reject_animation_request()
+		if required:
+			_warn_missing_animation_once(requested_name)
+		return false
+
+	_store_accepted_request(requested_name, resolved_name, LocomotionIntent.NONE)
+	_cancel_ground_locomotion_visual()
+	if _visual_override_owns_playback():
+		return true
+	return _play_resolved_animation(resolved_name)
+
+
 func resolve_animation_name(requested_name: StringName) -> StringName:
 	_resolve_nodes()
 	if animation_player == null or requested_name == &"":

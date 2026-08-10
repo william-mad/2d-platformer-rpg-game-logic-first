@@ -1,0 +1,20 @@
+[gd_scene format=3 uid="uid://uxc2n3ryf6a3"]
+
+[ext_resource type="Texture2D" uid="uid://c2a8ualk8ibjx" path="res://images/sprites/assets/lamp on.png" id="1_texture"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_top"]
+size = Vector2(70, 6)
+
+[node name="Lamp" type="StaticBody2D" unique_id=1065421283]
+texture_filter = 1
+collision_mask = 0
+
+[node name="Sprite2D" type="Sprite2D" parent="." unique_id=1049207406]
+position = Vector2(0, -100)
+texture = ExtResource("1_texture")
+
+[node name="TopPlatform" type="CollisionShape2D" parent="." unique_id=1078117168]
+position = Vector2(6, -179)
+shape = SubResource("RectangleShape2D_top")
+one_way_collision = true
+one_way_collision_margin = 8.0

@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dqvgjft1fxgde"
-path="res://.godot/imported/boxes kinda.png-433b5665bfda89117a30d38c20ac2b40.ctex"
+uid="uid://c2a8ualk8ibjx"
+path="res://.godot/imported/lamp on.png-523cdfdebf80137159eaf9a6d77bf9bf.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://images/sprites/assets/boxes kinda.png"
-dest_files=["res://.godot/imported/boxes kinda.png-433b5665bfda89117a30d38c20ac2b40.ctex"]
+source_file="res://images/sprites/assets/lamp on.png"
+dest_files=["res://.godot/imported/lamp on.png-523cdfdebf80137159eaf9a6d77bf9bf.ctex"]
 
 [params]
 

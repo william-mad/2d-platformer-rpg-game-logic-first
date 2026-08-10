@@ -13,6 +13,7 @@ signal relationship_changed(relationship_owner: Node, other: Node, changed_value
 signal favor_changed(relationship_owner: Node, other: Node, favor: float, delta: float, relationship: Dictionary)
 signal anger_changed(relationship_owner: Node, other: Node, anger: float, delta: float, relationship: Dictionary)
 signal fear_changed(relationship_owner: Node, other: Node, fear: float, delta: float, relationship: Dictionary)
+signal relationship_graph_replaced
 
 @export var default_favor: float = 50.0
 @export var min_favor: float = 0.0
@@ -378,6 +379,196 @@ func change_opinion_metric_by_id(
 	)
 
 
+## Applies one actor-directed interaction through a single relationship record
+## transaction. IDs are already canonical, so this path performs no actor
+## resolution or legacy alias discovery.
+func apply_opinion_deltas_by_id(
+	owner_id: String,
+	other_id: String,
+	deltas: Dictionary,
+	reason: String = "social_event",
+	context: Dictionary = {}
+) -> Dictionary:
+	var clean_owner_id := owner_id.strip_edges()
+	var clean_other_id := other_id.strip_edges()
+	if not _can_store_relationship_ids(clean_owner_id, clean_other_id):
+		return {
+			"accepted": false,
+			"eligible": false,
+			"changed": false,
+			"created": false,
+			"changed_values": {},
+			"relationship": {},
+			"reason": "invalid_identity",
+		}
+
+	var normalized_deltas: Dictionary = {}
+	for raw_metric_id in deltas.keys():
+		var metric_id := StringName(String(raw_metric_id))
+		if not SocialStateSchema.is_directed_opinion_metric(metric_id):
+			continue
+		var delta := float(deltas[raw_metric_id])
+		if not is_finite(delta) or is_zero_approx(delta):
+			continue
+		var metric_key := String(metric_id)
+		normalized_deltas[metric_key] = float(
+			normalized_deltas.get(metric_key, 0.0)
+		) + delta
+
+	var metric_ids: Array[String] = []
+	for metric_key in normalized_deltas.keys():
+		if not is_zero_approx(float(normalized_deltas[metric_key])):
+			metric_ids.append(String(metric_key))
+	metric_ids.sort()
+	if metric_ids.is_empty():
+		return {
+			"accepted": true,
+			"eligible": false,
+			"changed": false,
+			"created": false,
+			"changed_values": {},
+			"relationship": {},
+			"reason": "no_eligible_delta",
+		}
+
+	var relationship_owner := _get_context_node(context, "relationship_owner")
+	var other := _get_context_node(context, "other")
+	var created := not has_relationship_by_id(clean_owner_id, clean_other_id)
+	var relationship: Dictionary = {}
+	var opinion_policy := _get_opinion_policy()
+	if not created:
+		relationship = relationships[clean_owner_id][clean_other_id]
+		RelationshipStore.normalize_row_in_place(relationship, opinion_policy)
+
+	var next_values: Dictionary = {}
+	var changed_values: Dictionary = {}
+	for metric_key in metric_ids:
+		var metric_id := StringName(metric_key)
+		var default_value := RelationshipStore.get_metric_default(
+			opinion_policy, metric_id
+		)
+		var minimum := RelationshipStore.get_metric_minimum(
+			opinion_policy, metric_id
+		)
+		var maximum := RelationshipStore.get_metric_maximum(
+			opinion_policy, metric_id
+		)
+		var previous_value := default_value
+		if not created:
+			previous_value = float(relationship.get(metric_key, default_value))
+		previous_value = clampf(previous_value, minimum, maximum)
+		var requested_value := (
+			previous_value + float(normalized_deltas[metric_key])
+		)
+		var schema_bounded_value := clampf(
+			requested_value,
+			SocialStateSchema.get_directed_opinion_minimum(metric_id),
+			SocialStateSchema.get_directed_opinion_maximum(metric_id)
+		)
+		if is_equal_approx(previous_value, schema_bounded_value):
+			continue
+		var next_value := clampf(
+			requested_value,
+			minimum,
+			maximum
+		)
+		if is_equal_approx(previous_value, next_value):
+			continue
+		next_values[metric_key] = next_value
+		changed_values[metric_key] = next_value - previous_value
+
+	if changed_values.is_empty():
+		return {
+			"accepted": true,
+			"eligible": true,
+			"changed": false,
+			"created": false,
+			"changed_values": {},
+			"relationship": {},
+			"reason": "clamped",
+		}
+
+	if created:
+		relationship = _get_or_create_relationship_by_id(
+			clean_owner_id,
+			clean_other_id,
+			relationship_owner,
+			other,
+			default_favor,
+			context
+		)
+	else:
+		_update_relationship_identity_fields(
+			relationship, relationship_owner, other, context
+		)
+	if relationship.is_empty():
+		return {
+			"accepted": false,
+			"eligible": true,
+			"changed": false,
+			"created": false,
+			"changed_values": {},
+			"relationship": {},
+			"reason": "relationship_unavailable",
+		}
+
+	for metric_key in metric_ids:
+		if next_values.has(metric_key):
+			relationship[metric_key] = next_values[metric_key]
+	var stored_context := _get_storable_context(context)
+	relationship["met"] = true
+	relationship["updated_at_msec"] = _now_msec()
+	relationship["last_reason"] = reason
+	relationship["last_context"] = stored_context
+	var relationship_copy := relationship.duplicate(true)
+	if created:
+		relationship_met.emit(
+			relationship_owner, other, relationship_copy
+		)
+		_emit_relationship_event(
+			&"relationship_met",
+			relationship_owner,
+			other,
+			relationship_copy,
+			{},
+			reason
+		)
+	relationship_changed.emit(
+		relationship_owner,
+		other,
+		changed_values,
+		relationship_copy
+	)
+	for metric_key in metric_ids:
+		if not changed_values.has(metric_key):
+			continue
+		_emit_legacy_metric_signal(
+			StringName(metric_key),
+			relationship_owner,
+			other,
+			float(next_values[metric_key]),
+			float(changed_values[metric_key]),
+			relationship_copy
+		)
+	_emit_relationship_event(
+		&"relationship_changed",
+		relationship_owner,
+		other,
+		relationship_copy,
+		changed_values,
+		reason
+	)
+	return {
+		"accepted": true,
+		"eligible": true,
+		"changed": true,
+		"created": created,
+		"changed_values": changed_values,
+		"relationship": relationship_copy,
+		"reason": "changed",
+	}
+
+
 func change_anger(
 	relationship_owner: Node,
 	other: Node,
@@ -643,6 +834,12 @@ func has_relationship_by_id(owner_id: String, other_id: String) -> bool:
 
 
 func get_relationship_id(actor: Node) -> String:
+	return Identity.get_actor_id(actor, true)
+
+
+## Cold registration boundary for exact live aliases left ambiguous during
+## save import. Ordinary relationship access is deliberately migration-free.
+func register_actor_identity(actor: Node) -> String:
 	var actor_id := Identity.get_actor_id(actor, true)
 	if not actor_id.is_empty():
 		_migrate_actor_aliases(actor, actor_id)
@@ -653,6 +850,7 @@ func clear_relationships() -> void:
 	relationships.clear()
 	_migrated_actor_aliases.clear()
 	_migrated_relationship_aliases.clear()
+	relationship_graph_replaced.emit()
 
 
 func get_save_data() -> Dictionary:
@@ -672,6 +870,7 @@ func apply_save_data(data: Dictionary) -> void:
 
 	var saved_relationships = data.get("relationships", data)
 	if not (saved_relationships is Dictionary):
+		relationship_graph_replaced.emit()
 		return
 
 	for owner_id_key in saved_relationships.keys():
@@ -722,6 +921,7 @@ func apply_save_data(data: Dictionary) -> void:
 				relationship,
 				stored_owner_id == owner_id and stored_other_id == other_id
 			)
+	relationship_graph_replaced.emit()
 
 
 func _canonicalize_loaded_actor_id(
@@ -1059,6 +1259,8 @@ func _get_or_create_relationship_by_id(
 		"favor": clampf(starting_favor, min_favor, max_favor),
 		"trust": _get_opinion_default(&"trust"),
 		"love": _get_opinion_default(&"love"),
+		"lust": _get_opinion_default(&"lust"),
+		"shame": _get_opinion_default(&"shame"),
 		"anger": min_anger,
 		"fear": min_fear,
 		"suspicion": _get_opinion_default(&"suspicion"),

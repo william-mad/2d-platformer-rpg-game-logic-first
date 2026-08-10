@@ -1,0 +1,21 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/instances/hidden_spot.gd" id="1_hidden"]
+[ext_resource type="PackedScene" path="res://scenes/art/props/flowering_bush.tscn" id="2_bush"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_fixed_hidden"]
+size = Vector2(84, 52)
+
+[node name="FixedFloweringBushHiddenSpot" type="Area2D" groups=["hidden_spot"]]
+z_index = -10
+collision_layer = 0
+collision_mask = 10
+monitorable = false
+script = ExtResource("1_hidden")
+move_with_player_while_hidden = false
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(0, -26)
+shape = SubResource("RectangleShape2D_fixed_hidden")
+
+[node name="FloweringBush" parent="." instance=ExtResource("2_bush")]

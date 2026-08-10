@@ -16,6 +16,8 @@ const DIRECTED_OPINION_METRIC_IDS: Array[StringName] = [
 	&"favor",
 	&"trust",
 	&"love",
+	&"lust",
+	&"shame",
 	&"anger",
 	&"fear",
 	&"suspicion",
@@ -38,6 +40,8 @@ const VALUE_ORDER: Array[StringName] = [
 	&"favor",
 	&"trust",
 	&"love",
+	&"lust",
+	&"shame",
 	&"anger",
 	&"fear",
 	&"suspicion",
@@ -281,6 +285,28 @@ const DIRECTED_OPINION_DEFINITIONS: Dictionary = {
 		"decay": &"none",
 		"presentation": PRESENTATION_POSITIVE_OPINION,
 	},
+	&"lust": {
+		"label": "Lust",
+		"scope": SCOPE_DIRECTED_OPINION,
+		"minimum": 0.0,
+		"maximum": 100.0,
+		"default": 0.0,
+		"behavior_consumers": [],
+		"persistence": PERSISTENCE_RELATIONSHIPS,
+		"decay": &"none",
+		"presentation": PRESENTATION_POSITIVE_OPINION,
+	},
+	&"shame": {
+		"label": "Shame",
+		"scope": SCOPE_DIRECTED_OPINION,
+		"minimum": 0.0,
+		"maximum": 100.0,
+		"default": 0.0,
+		"behavior_consumers": [],
+		"persistence": PERSISTENCE_RELATIONSHIPS,
+		"decay": &"none",
+		"presentation": PRESENTATION_NEGATIVE_OPINION,
+	},
 	&"anger": {
 		"label": "Anger",
 		"scope": SCOPE_DIRECTED_OPINION,
@@ -400,7 +426,15 @@ static func split_value_delta(delta: Dictionary) -> Dictionary:
 	var directed_opinion: Dictionary = {}
 	for raw_key in delta.keys():
 		var value_id := StringName(String(raw_key))
-		if value_id in [&"favor", &"love", &"trust", &"suspicion", &"fear"]:
+		if value_id in [
+			&"favor",
+			&"love",
+			&"lust",
+			&"shame",
+			&"trust",
+			&"suspicion",
+			&"fear",
+		]:
 			directed_opinion[value_id] = delta[raw_key]
 		else:
 			local_values[value_id] = delta[raw_key]
