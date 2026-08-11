@@ -374,7 +374,7 @@ func _test_complex_scene_wiring_and_mom_tracks() -> void:
 			&"run",
 			"run_1_mom.png",
 			Animation.LOOP_LINEAR,
-			0.75
+			0.9
 		)
 		var visited: Dictionary = {}
 		for animation_name in player.get_animation_list():

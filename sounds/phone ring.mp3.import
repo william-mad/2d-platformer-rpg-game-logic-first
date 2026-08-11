@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://dia6lx2d0k514"
+path="res://.godot/imported/phone ring.mp3-41866ac05e68184d5fc3e014cbf0b575.mp3str"
+
+[deps]
+
+source_file="res://sounds/phone ring.mp3"
+dest_files=["res://.godot/imported/phone ring.mp3-41866ac05e68184d5fc3e014cbf0b575.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

@@ -65,9 +65,9 @@ scene_path = "res://scenes/testscenes/realtest1.tscn"
 spawn_x_min = -4200.0
 spawn_x_max = 2700.0
 
-[node name="HandmadeBackground" parent="." instance=ExtResource("35_handmade_background")]
+[node name="HandmadeBackground" parent="." unique_id=748070679 instance=ExtResource("35_handmade_background")]
 
-[node name="HandmadeProps" parent="." instance=ExtResource("36_handmade_props")]
+[node name="HandmadeProps" parent="." unique_id=1114410720 instance=ExtResource("36_handmade_props")]
 
 [node name="moving sky" type="Parallax2D" parent="." unique_id=88205550]
 visible = false

@@ -40,8 +40,8 @@ PlayerRuntime="*res://scripts/systems/player_runtime.gd"
 
 [display]
 
-window/size/viewport_width=960
-window/size/viewport_height=540
+window/size/viewport_width=754
+window/size/viewport_height=496
 window/size/mode=4
 window/size/resizable=false
 window/stretch/mode="viewport"

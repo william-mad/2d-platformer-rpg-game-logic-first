@@ -41,6 +41,9 @@ height = 62.0
 radius = 13.0
 height = 52.0
 
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_ground_detection"]
+size = Vector2(26, 2)
+
 [sub_resource type="Animation" id="Animation_boad6"]
 length = 0.001
 tracks/0/type = "value"
@@ -398,9 +401,10 @@ shape = SubResource("SegmentShape2D_wodsf")
 disabled = true
 one_way_collision_margin = 0.0
 
-[node name="ongrounddetection" type="RayCast2D" parent="." unique_id=1938189657]
+[node name="ongrounddetection" type="ShapeCast2D" parent="." unique_id=1938189657]
 position = Vector2(0, -2)
 target_position = Vector2(0, 11)
+shape = SubResource("RectangleShape2D_ground_detection")
 
 [node name="MovementSprite" type="Sprite2D" parent="." unique_id=643543914]
 visible = false

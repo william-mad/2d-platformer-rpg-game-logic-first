@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://35i2lacikvdc"
+path="res://.godot/imported/horn simple.mp3-5b8a482f8fa90c009379c3e082d6199f.mp3str"
+
+[deps]
+
+source_file="res://sounds/horn simple.mp3"
+dest_files=["res://.godot/imported/horn simple.mp3-5b8a482f8fa90c009379c3e082d6199f.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4
