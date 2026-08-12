@@ -25,6 +25,7 @@
 [ext_resource type="Script" path="res://player/scripts/player_equipment_component.gd" id="24_equipment"]
 [ext_resource type="Script" path="res://player/states/roll.gd" id="25_roll"]
 [ext_resource type="Script" path="res://player/scripts/interaction_router.gd" id="26_interaction_router"]
+[ext_resource type="Script" path="res://player/states/walk.gd" id="27_walk"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_wodsf"]
 radius = 35.0
@@ -315,7 +316,10 @@ attack_index = 1
 [node name="Run" type="Node" parent="States" unique_id=1835315550]
 unique_name_in_owner = true
 script = ExtResource("5_g6k8r")
-walk_animation = &"walk"
+
+[node name="Walk" type="Node" parent="States"]
+unique_name_in_owner = true
+script = ExtResource("27_walk")
 
 [node name="Dash" type="Node" parent="States" unique_id=876601785]
 unique_name_in_owner = true

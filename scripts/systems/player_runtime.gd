@@ -68,6 +68,7 @@ func apply_to_player(player: Node) -> bool:
 		player.call("apply_save_data", data)
 
 	_move_player_to_spawn(player, target_spawn_id)
+	player.set_meta(&"arrival_spawn_id", target_spawn_id)
 	if is_travel_active():
 		call_deferred("_restore_companion_after_scene_change", player)
 	return true

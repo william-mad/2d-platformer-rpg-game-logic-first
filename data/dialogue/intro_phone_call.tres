@@ -1,0 +1,154 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_first_question"]
+script = ExtResource("3_choice")
+choice_id = &"ask_what_happened"
+text = "Ask what happened."
+next_node_id = &"followup_01"
+
+[sub_resource type="Resource" id="Choice_first_listen"]
+script = ExtResource("3_choice")
+choice_id = &"say_im_listening"
+text = "Say that you're listening."
+next_node_id = &"followup_01"
+
+[sub_resource type="Resource" id="Choice_second_go"]
+script = ExtResource("3_choice")
+choice_id = &"promise_to_go"
+text = "Promise to go."
+terminal = true
+
+[sub_resource type="Resource" id="Choice_second_wait"]
+script = ExtResource("3_choice")
+choice_id = &"need_more_time"
+text = "Say that you need more time."
+terminal = true
+
+[sub_resource type="Resource" id="Node_intro_01"]
+script = ExtResource("2_node")
+node_id = &"intro_01"
+speaker_id = &"caller"
+speaker_text = "[Caller opening line placeholder.]"
+next_node_id = &"intro_02"
+
+[sub_resource type="Resource" id="Node_intro_02"]
+script = ExtResource("2_node")
+node_id = &"intro_02"
+speaker_id = &"caller"
+speaker_text = "[Caller establishes why they called.]"
+next_node_id = &"intro_03"
+
+[sub_resource type="Resource" id="Node_intro_03"]
+script = ExtResource("2_node")
+node_id = &"intro_03"
+speaker_id = &"player"
+speaker_text = "[Player acknowledges the caller.]"
+next_node_id = &"intro_04"
+
+[sub_resource type="Resource" id="Node_intro_04"]
+script = ExtResource("2_node")
+node_id = &"intro_04"
+speaker_id = &"caller"
+speaker_text = "[Caller continues with important context.]"
+next_node_id = &"intro_05"
+
+[sub_resource type="Resource" id="Node_intro_05"]
+script = ExtResource("2_node")
+node_id = &"intro_05"
+speaker_id = &"player"
+speaker_text = "[Player asks for clarification.]"
+next_node_id = &"intro_06"
+
+[sub_resource type="Resource" id="Node_intro_06"]
+script = ExtResource("2_node")
+node_id = &"intro_06"
+speaker_id = &"caller"
+speaker_text = "[Caller answers the question.]"
+next_node_id = &"intro_07"
+
+[sub_resource type="Resource" id="Node_intro_07"]
+script = ExtResource("2_node")
+node_id = &"intro_07"
+speaker_id = &"caller"
+speaker_text = "[Caller adds a second detail.]"
+next_node_id = &"intro_08"
+
+[sub_resource type="Resource" id="Node_intro_08"]
+script = ExtResource("2_node")
+node_id = &"intro_08"
+speaker_id = &"player"
+speaker_text = "[Player reacts to the news.]"
+next_node_id = &"intro_09"
+
+[sub_resource type="Resource" id="Node_intro_09"]
+script = ExtResource("2_node")
+node_id = &"intro_09"
+speaker_id = &"caller"
+speaker_text = "[Caller explains what is at stake.]"
+next_node_id = &"intro_10"
+
+[sub_resource type="Resource" id="Node_intro_10"]
+script = ExtResource("2_node")
+node_id = &"intro_10"
+speaker_id = &"caller"
+speaker_text = "[Caller asks for the player's response.]"
+next_node_id = &"choice_one"
+
+[sub_resource type="Resource" id="Node_choice_one"]
+script = ExtResource("2_node")
+node_id = &"choice_one"
+speaker_id = &"player"
+speaker_text = "[Choose the player's first response.]"
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_first_question"), SubResource("Choice_first_listen")])
+
+[sub_resource type="Resource" id="Node_followup_01"]
+script = ExtResource("2_node")
+node_id = &"followup_01"
+speaker_id = &"caller"
+speaker_text = "[Caller responds to the first choice.]"
+next_node_id = &"followup_02"
+
+[sub_resource type="Resource" id="Node_followup_02"]
+script = ExtResource("2_node")
+node_id = &"followup_02"
+speaker_id = &"player"
+speaker_text = "[Player follows up.]"
+next_node_id = &"followup_03"
+
+[sub_resource type="Resource" id="Node_followup_03"]
+script = ExtResource("2_node")
+node_id = &"followup_03"
+speaker_id = &"caller"
+speaker_text = "[Caller provides the next instruction.]"
+next_node_id = &"followup_04"
+
+[sub_resource type="Resource" id="Node_followup_04"]
+script = ExtResource("2_node")
+node_id = &"followup_04"
+speaker_id = &"caller"
+speaker_text = "[Caller confirms the destination.]"
+next_node_id = &"followup_05"
+
+[sub_resource type="Resource" id="Node_followup_05"]
+script = ExtResource("2_node")
+node_id = &"followup_05"
+speaker_id = &"caller"
+speaker_text = "[Caller asks for a final commitment.]"
+next_node_id = &"choice_two"
+
+[sub_resource type="Resource" id="Node_choice_two"]
+script = ExtResource("2_node")
+node_id = &"choice_two"
+speaker_id = &"player"
+speaker_text = "[Choose the player's final response.]"
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_second_go"), SubResource("Choice_second_wait")])
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"intro_phone_call"
+entry_node_id = &"intro_01"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_intro_01"), SubResource("Node_intro_02"), SubResource("Node_intro_03"), SubResource("Node_intro_04"), SubResource("Node_intro_05"), SubResource("Node_intro_06"), SubResource("Node_intro_07"), SubResource("Node_intro_08"), SubResource("Node_intro_09"), SubResource("Node_intro_10"), SubResource("Node_choice_one"), SubResource("Node_followup_01"), SubResource("Node_followup_02"), SubResource("Node_followup_03"), SubResource("Node_followup_04"), SubResource("Node_followup_05"), SubResource("Node_choice_two")])

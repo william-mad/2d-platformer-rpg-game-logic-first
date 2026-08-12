@@ -6,7 +6,7 @@ class_name PlayerStateJump extends PlayerState
 @export var ledge_jump_velocity: float = 600.0
 
 var active_jump_velocity: float = 700.0
-var air_movement_speed: float = 260.0
+var air_movement_speed: float = 220.0
 var using_running_profile: bool = false
 
 func init() -> void:
@@ -72,7 +72,7 @@ func physics_update_after_move(_delta: float) -> PlayerState:
 		if player.ongrounddetection.is_colliding():
 			return ledge_grab
 		else:
-			return run if player.direction.x != 0.0 else idle
+			return get_ground_movement_state_for_profile(using_running_profile)
 	#player going down is falling:
 	if player.velocity.y >= 0:
 		return fall
@@ -100,6 +100,10 @@ func is_using_running_profile() -> bool:
 func _capture_jump_profile() -> void:
 	if player.previous_state == fall:
 		using_running_profile = fall.is_using_running_profile()
+	elif player.previous_state == run:
+		using_running_profile = true
+	elif player.previous_state == walk:
+		using_running_profile = false
 	else:
 		using_running_profile = (
 			run.is_running
@@ -109,4 +113,4 @@ func _capture_jump_profile() -> void:
 	active_jump_velocity = (
 		run_jump_velocity if using_running_profile else walk_jump_velocity
 	)
-	air_movement_speed = run.get_movement_speed_for_mode(using_running_profile)
+	air_movement_speed = get_profile_movement_speed(using_running_profile)

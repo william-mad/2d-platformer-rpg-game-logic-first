@@ -6,7 +6,7 @@ class_name PlayerStateFall extends PlayerState
 #coyote time:
 @export var coyote_time : float = 0.1
 var coyote_timer: float = 0
-var air_movement_speed: float = 260.0
+var air_movement_speed: float = 220.0
 var using_running_profile: bool = false
 
 
@@ -25,11 +25,11 @@ func enter() -> void:
 	if player.gravity_multiplier < fall_gravity_multiplier:
 		player.gravity_multiplier = fall_gravity_multiplier
 	
-	#coyote timer if coming from run/idle:
-	if player.previous_state != run:
-		coyote_timer = 0
-	else:
+	# Keep coyote time for either grounded movement state.
+	if player.previous_state == run or player.previous_state == walk:
 		coyote_timer = coyote_time
+	else:
+		coyote_timer = 0
 	
 	
 	pass
@@ -93,7 +93,7 @@ func physics_update_after_move(_delta: float) -> PlayerState:
 		if not player.ongrounddetection.is_colliding():
 			return ledge_grab
 		else:
-			return run if player.direction.x != 0.0 else idle
+			return get_ground_movement_state_for_profile(using_running_profile)
 	return next_state
 
 
@@ -121,6 +121,9 @@ func _capture_air_profile() -> void:
 		return
 
 	using_running_profile = (
-		player.previous_state == run and run.is_running
-	) or player.previous_state == dash_state
-	air_movement_speed = run.get_movement_speed_for_mode(using_running_profile)
+		player.previous_state == run
+		or player.previous_state == dash_state
+		or player.previous_state == roll
+		or (player.previous_state == idle and run.is_running)
+	)
+	air_movement_speed = get_profile_movement_speed(using_running_profile)

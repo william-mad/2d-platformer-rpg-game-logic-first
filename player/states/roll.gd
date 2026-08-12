@@ -67,7 +67,9 @@ func process(delta: float) -> PlayerState:
 	elapsed = minf(elapsed + delta, roll_duration)
 	_update_roll_visual()
 	if elapsed >= roll_duration:
-		return idle
+		if not player.is_on_floor():
+			return fall
+		return get_ground_movement_state_for_profile(true)
 	return null
 
 

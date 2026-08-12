@@ -9,6 +9,7 @@ var _legacy_physics_transition: PlayerState = null
 
 #state references
 @onready var idle: PlayerStateIdle = %Idle
+@onready var walk: PlayerStateWalk = %Walk
 @onready var run: PlayerStateRun = %Run
 @onready var jump: PlayerStateJump = %Jump
 @onready var fall: PlayerStateFall = %Fall
@@ -19,6 +20,7 @@ var _legacy_physics_transition: PlayerState = null
 @onready var attack_1: PlayerComboAttackState = %Attack1
 @onready var crouch_attack: PlayerComboAttackState = %CrouchAttack
 @onready var dash_state = %Dash
+@onready var roll: PlayerStateRoll = %Roll
 @onready var special_attack_3: PlayerState = %SpecialAttack3
 @onready var special_attack_2: PlayerState = %SpecialAttack2
 @onready var special_attack_1: PlayerState = %SpecialAttack1
@@ -73,6 +75,20 @@ func can_hide() -> bool:
 
 func get_dash_state_from_input(_event: InputEvent) -> PlayerState:
 	return dash_state.get_dash_state_from_input(_event)
+
+
+func get_ground_movement_state() -> PlayerState:
+	return get_ground_movement_state_for_profile(run.is_running)
+
+
+func get_ground_movement_state_for_profile(use_running_profile: bool) -> PlayerState:
+	if is_zero_approx(player.direction.x):
+		return idle
+	return run if use_running_profile else walk
+
+
+func get_profile_movement_speed(use_running_profile: bool) -> float:
+	return player.move_speed if use_running_profile else walk.walk_speed
 
 
 func get_attack_release_state() -> PlayerState:

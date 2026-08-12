@@ -1,0 +1,220 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+
+[sub_resource type="Resource" id="Node_memory_01"]
+script = ExtResource("2_node")
+node_id = &"memory_01"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 1 placeholder.]"
+next_node_id = &"memory_02"
+
+[sub_resource type="Resource" id="Node_memory_02"]
+script = ExtResource("2_node")
+node_id = &"memory_02"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 2 placeholder.]"
+next_node_id = &"memory_03"
+
+[sub_resource type="Resource" id="Node_memory_03"]
+script = ExtResource("2_node")
+node_id = &"memory_03"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 3 placeholder.]"
+next_node_id = &"memory_04"
+
+[sub_resource type="Resource" id="Node_memory_04"]
+script = ExtResource("2_node")
+node_id = &"memory_04"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 4 placeholder.]"
+next_node_id = &"memory_05"
+
+[sub_resource type="Resource" id="Node_memory_05"]
+script = ExtResource("2_node")
+node_id = &"memory_05"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 5 placeholder.]"
+next_node_id = &"memory_06"
+
+[sub_resource type="Resource" id="Node_memory_06"]
+script = ExtResource("2_node")
+node_id = &"memory_06"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 6 placeholder.]"
+next_node_id = &"memory_07"
+
+[sub_resource type="Resource" id="Node_memory_07"]
+script = ExtResource("2_node")
+node_id = &"memory_07"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 7 placeholder.]"
+next_node_id = &"memory_08"
+
+[sub_resource type="Resource" id="Node_memory_08"]
+script = ExtResource("2_node")
+node_id = &"memory_08"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 8 placeholder.]"
+next_node_id = &"memory_09"
+
+[sub_resource type="Resource" id="Node_memory_09"]
+script = ExtResource("2_node")
+node_id = &"memory_09"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 9 placeholder.]"
+next_node_id = &"memory_10"
+
+[sub_resource type="Resource" id="Node_memory_10"]
+script = ExtResource("2_node")
+node_id = &"memory_10"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 10 placeholder.]"
+next_node_id = &"memory_11"
+
+[sub_resource type="Resource" id="Node_memory_11"]
+script = ExtResource("2_node")
+node_id = &"memory_11"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 11 placeholder.]"
+next_node_id = &"memory_12"
+
+[sub_resource type="Resource" id="Node_memory_12"]
+script = ExtResource("2_node")
+node_id = &"memory_12"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 12 placeholder.]"
+next_node_id = &"memory_13"
+
+[sub_resource type="Resource" id="Node_memory_13"]
+script = ExtResource("2_node")
+node_id = &"memory_13"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 13 placeholder.]"
+next_node_id = &"memory_14"
+
+[sub_resource type="Resource" id="Node_memory_14"]
+script = ExtResource("2_node")
+node_id = &"memory_14"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 14 placeholder.]"
+next_node_id = &"memory_15"
+
+[sub_resource type="Resource" id="Node_memory_15"]
+script = ExtResource("2_node")
+node_id = &"memory_15"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 15 placeholder.]"
+next_node_id = &"memory_16"
+
+[sub_resource type="Resource" id="Node_memory_16"]
+script = ExtResource("2_node")
+node_id = &"memory_16"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 16 placeholder.]"
+next_node_id = &"memory_17"
+
+[sub_resource type="Resource" id="Node_memory_17"]
+script = ExtResource("2_node")
+node_id = &"memory_17"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 17 placeholder.]"
+next_node_id = &"memory_18"
+
+[sub_resource type="Resource" id="Node_memory_18"]
+script = ExtResource("2_node")
+node_id = &"memory_18"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 18 placeholder.]"
+next_node_id = &"memory_19"
+
+[sub_resource type="Resource" id="Node_memory_19"]
+script = ExtResource("2_node")
+node_id = &"memory_19"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 19 placeholder.]"
+next_node_id = &"memory_20"
+
+[sub_resource type="Resource" id="Node_memory_20"]
+script = ExtResource("2_node")
+node_id = &"memory_20"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 20 placeholder.]"
+next_node_id = &"memory_21"
+
+[sub_resource type="Resource" id="Node_memory_21"]
+script = ExtResource("2_node")
+node_id = &"memory_21"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 21 placeholder.]"
+next_node_id = &"memory_22"
+
+[sub_resource type="Resource" id="Node_memory_22"]
+script = ExtResource("2_node")
+node_id = &"memory_22"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 22 placeholder.]"
+next_node_id = &"memory_23"
+
+[sub_resource type="Resource" id="Node_memory_23"]
+script = ExtResource("2_node")
+node_id = &"memory_23"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 23 placeholder.]"
+next_node_id = &"memory_24"
+
+[sub_resource type="Resource" id="Node_memory_24"]
+script = ExtResource("2_node")
+node_id = &"memory_24"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 24 placeholder.]"
+next_node_id = &"memory_25"
+
+[sub_resource type="Resource" id="Node_memory_25"]
+script = ExtResource("2_node")
+node_id = &"memory_25"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 25 placeholder.]"
+next_node_id = &"memory_26"
+
+[sub_resource type="Resource" id="Node_memory_26"]
+script = ExtResource("2_node")
+node_id = &"memory_26"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 26 placeholder.]"
+next_node_id = &"memory_27"
+
+[sub_resource type="Resource" id="Node_memory_27"]
+script = ExtResource("2_node")
+node_id = &"memory_27"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 27 placeholder.]"
+next_node_id = &"memory_28"
+
+[sub_resource type="Resource" id="Node_memory_28"]
+script = ExtResource("2_node")
+node_id = &"memory_28"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 28 placeholder.]"
+next_node_id = &"memory_29"
+
+[sub_resource type="Resource" id="Node_memory_29"]
+script = ExtResource("2_node")
+node_id = &"memory_29"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 29 placeholder.]"
+next_node_id = &"memory_30"
+
+[sub_resource type="Resource" id="Node_memory_30"]
+script = ExtResource("2_node")
+node_id = &"memory_30"
+speaker_id = &"memory"
+speaker_text = "[Memory dialogue beat 30 placeholder.]"
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"intro_memory_montage"
+entry_node_id = &"memory_01"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_memory_01"), SubResource("Node_memory_02"), SubResource("Node_memory_03"), SubResource("Node_memory_04"), SubResource("Node_memory_05"), SubResource("Node_memory_06"), SubResource("Node_memory_07"), SubResource("Node_memory_08"), SubResource("Node_memory_09"), SubResource("Node_memory_10"), SubResource("Node_memory_11"), SubResource("Node_memory_12"), SubResource("Node_memory_13"), SubResource("Node_memory_14"), SubResource("Node_memory_15"), SubResource("Node_memory_16"), SubResource("Node_memory_17"), SubResource("Node_memory_18"), SubResource("Node_memory_19"), SubResource("Node_memory_20"), SubResource("Node_memory_21"), SubResource("Node_memory_22"), SubResource("Node_memory_23"), SubResource("Node_memory_24"), SubResource("Node_memory_25"), SubResource("Node_memory_26"), SubResource("Node_memory_27"), SubResource("Node_memory_28"), SubResource("Node_memory_29"), SubResource("Node_memory_30")])

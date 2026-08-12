@@ -19,6 +19,7 @@
 [ext_resource type="Script" path="res://scripts/creatures/npc_platform_traversal.gd" id="16_platform_traversal"]
 [ext_resource type="Texture2D" path="res://images/sprites/characters/mom/run_start_1_mom.png" id="17_run_start_texture"]
 [ext_resource type="Texture2D" path="res://images/sprites/characters/mom/run_1_mom.png" id="18_run_texture"]
+[ext_resource type="Texture2D" path="res://images/sprites/characters/mom/jump_1_mom.png" id="19_jump_texture"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_agoec"]
 radius = 15.0
@@ -643,6 +644,7 @@ tracks/5/keys = {
 
 [sub_resource type="Animation" id="Animation_mom_jump_fall"]
 resource_name = "jump_fall"
+length = 1.0
 tracks/0/type = "value"
 tracks/0/imported = false
 tracks/0/enabled = true
@@ -653,7 +655,7 @@ tracks/0/keys = {
 "times": PackedFloat32Array(0),
 "transitions": PackedFloat32Array(1),
 "update": 1,
-"values": [ExtResource("12_wgv2s")]
+"values": [ExtResource("19_jump_texture")]
 }
 tracks/1/type = "value"
 tracks/1/imported = false
@@ -665,7 +667,7 @@ tracks/1/keys = {
 "times": PackedFloat32Array(0),
 "transitions": PackedFloat32Array(1),
 "update": 1,
-"values": [8]
+"values": [7]
 }
 tracks/2/type = "value"
 tracks/2/imported = false
@@ -677,7 +679,7 @@ tracks/2/keys = {
 "times": PackedFloat32Array(0),
 "transitions": PackedFloat32Array(1),
 "update": 1,
-"values": [8]
+"values": [1]
 }
 tracks/3/type = "value"
 tracks/3/imported = false
@@ -689,19 +691,19 @@ tracks/3/keys = {
 "times": PackedFloat32Array(0),
 "transitions": PackedFloat32Array(1),
 "update": 1,
-"values": [Vector2(0, -64)]
+"values": [Vector2(1, -101)]
 }
 tracks/4/type = "value"
 tracks/4/imported = false
 tracks/4/enabled = true
 tracks/4/path = NodePath("Sprite2D:frame")
-tracks/4/interp = 1
+tracks/4/interp = 0
 tracks/4/loop_wrap = true
 tracks/4/keys = {
-"times": PackedFloat32Array(0, 0.2, 0.4, 0.5, 0.7, 0.9),
-"transitions": PackedFloat32Array(1, 1, 1, 1, 1, 1),
+"times": PackedFloat32Array(0, 0.16666667, 0.33333334, 0.35, 0.45, 0.6666667, 0.8333333),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1, 1, 1),
 "update": 1,
-"values": [8, 7, 6, 6, 7, 8]
+"values": [0, 1, 2, 3, 4, 5, 6]
 }
 
 [sub_resource type="AnimationLibrary" id="AnimationLibrary_vhose"]
@@ -780,6 +782,7 @@ travel_policy = ExtResource("12_travel_policy")
 
 [node name="NpcPlatformTraversal" type="Node" parent="."]
 script = ExtResource("16_platform_traversal")
+takeoff_commit_delay_seconds = 0.2
 
 [node name="BodyVisual" type="Polygon2D" parent="." unique_id=2146533437]
 unique_name_in_owner = true
@@ -875,6 +878,7 @@ animation_aliases = {
 }
 force_unflipped_animation_names = PackedStringArray("meal_prep_1", "work_1")
 grounded_locomotion_enabled = true
+grounded_takeoff_frame_count = 2
 locomotion_stop_speed = 4.0
 run_enter_speed = 120.0
 run_exit_speed = 100.0

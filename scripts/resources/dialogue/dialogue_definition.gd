@@ -35,6 +35,12 @@ func get_validation_error() -> String:
 	if not node_ids.has(entry_node_id):
 		return "entry_node_missing"
 	for dialogue_node in nodes:
+		if (
+			dialogue_node.choices.is_empty()
+			and not dialogue_node.terminal
+			and not node_ids.has(dialogue_node.next_node_id)
+		):
+			return "node_next_node_missing"
 		for choice in dialogue_node.choices:
 			if not choice.terminal and not node_ids.has(choice.next_node_id):
 				return "choice_next_node_missing"

@@ -43,7 +43,7 @@ func handle_input( _event : InputEvent) -> PlayerState:
 func process(_delta: float) -> PlayerState:
 	run.update_idle_to_walk_countdown()
 	if player.direction.x != 0:
-		return run
+		return get_ground_movement_state()
 	return next_state
 
 

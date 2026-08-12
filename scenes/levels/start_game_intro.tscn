@@ -1,16 +1,55 @@
-[gd_scene load_steps=2 format=3 uid="uid://b6uelg5wsy8in"]
+[gd_scene load_steps=25 format=3 uid="uid://b6uelg5wsy8in"]
 
 [ext_resource type="Script" path="res://scripts/instances/start_game_intro.gd" id="1_intro"]
+[ext_resource type="Texture2D" uid="uid://b4y6lscblr2u6" path="res://images/backgrounds/intro/fullscreen ilustration 1.png" id="2_background"]
+[ext_resource type="Texture2D" uid="uid://csftbdufw5ge3" path="res://images/square_imgs/story_ilustrations_1phone 1.png" id="3_phone_ready"]
+[ext_resource type="Texture2D" uid="uid://xpexoiq73rdp" path="res://images/square_imgs/story_ilustrations_1phone 2.png" id="4_phone_answered"]
+[ext_resource type="Texture2D" uid="uid://cot6120boq7d7" path="res://images/square_imgs/story_ilustrations1.png" id="5_phone_background_a"]
+[ext_resource type="Texture2D" uid="uid://coclj5s6eb6eo" path="res://images/square_imgs/story_ilustrations2.png" id="6_phone_background_b"]
+[ext_resource type="Texture2D" uid="uid://5s4md7lwc25q" path="res://images/dialog/real_mom/portrait_1_mom_Real1.png" id="7_dialogue_slide_1"]
+[ext_resource type="Texture2D" uid="uid://dtuyl2r7aek4v" path="res://images/dialog/real_mom/portrait_1_mom_Real2.png" id="8_dialogue_slide_2"]
+[ext_resource type="Texture2D" uid="uid://dxigctkhv2aq4" path="res://images/dialog/real_mom/portrait_1_mom_Real3.png" id="9_dialogue_slide_3"]
+[ext_resource type="Texture2D" uid="uid://d4jurewgf8ype" path="res://images/dialog/real_mom/portrait_1_mom_Real4.png" id="10_dialogue_slide_4"]
+[ext_resource type="Texture2D" uid="uid://b4tv4sbc2nw6f" path="res://images/dialog/real_mom/portrait_1_mom_Real5.png" id="11_dialogue_slide_5"]
+[ext_resource type="AudioStream" uid="uid://cfxnd3ecrge0l" path="res://sounds/city muffled.mp3" id="12_city"]
+[ext_resource type="AudioStream" uid="uid://bhcrv6ukvv7m8" path="res://sounds/phone ring2.mp3" id="13_ring"]
+[ext_resource type="Script" path="res://scripts/instances/intro_phone_minigame.gd" id="14_phone_minigame"]
+[ext_resource type="Texture2D" uid="uid://3580uh7rt0di" path="res://images/interactables/hand.png" id="15_hand"]
+[ext_resource type="AudioStream" uid="uid://c4066gjx0e3qs" path="res://sounds/answer_phone.mp3" id="16_answer_feedback"]
+[ext_resource type="Script" path="res://scripts/instances/intro_caller_portrait_presenter.gd" id="17_portrait_presenter"]
+[ext_resource type="Resource" path="res://data/dialogue/intro_phone_call.tres" id="18_intro_dialogue"]
 
-[node name="StartGameIntro" type="Node2D"]
-script = ExtResource("1_intro")
-next_scene_path = "res://scenes/testscenes/realtest1.tscn"
+[sub_resource type="AtlasTexture" id="AtlasTexture_answer_handle"]
+atlas = ExtResource("3_phone_ready")
+region = Rect2(64, 181, 30, 31)
+filter_clip = true
 
-[node name="StageRoot" type="Node2D" parent="."]
+[sub_resource type="AtlasTexture" id="AtlasTexture_track_a"]
+atlas = ExtResource("3_phone_ready")
+region = Rect2(91, 181, 39, 31)
+filter_clip = true
 
-[node name="IntroCanvas" type="CanvasLayer" parent="."]
+[sub_resource type="AtlasTexture" id="AtlasTexture_track_b"]
+atlas = ExtResource("4_phone_answered")
+region = Rect2(91, 181, 39, 31)
+filter_clip = true
 
-[node name="Screen" type="Control" parent="IntroCanvas"]
+[sub_resource type="Shader" id="Shader_phone_blur"]
+code = "shader_type canvas_item;\nrender_mode unshaded;\n\nuniform sampler2D screen_texture : hint_screen_texture, filter_linear_mipmap;\nuniform float blur_strength : hint_range(0.0, 4.0) = 0.0;\n\nvoid fragment() {\n\tCOLOR = textureLod(screen_texture, SCREEN_UV, blur_strength);\n}\n"
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_phone_blur"]
+shader = SubResource("Shader_phone_blur")
+shader_parameter/blur_strength = 0.0
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_opening_blur"]
+shader = SubResource("Shader_phone_blur")
+shader_parameter/blur_strength = 3.0
+
+[node name="PhoneCallIntro" type="Node"]
+
+[node name="EstablishingLayer" type="CanvasLayer" parent="."]
+
+[node name="Screen" type="Control" parent="EstablishingLayer"]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -19,16 +58,46 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
-[node name="Background" type="ColorRect" parent="IntroCanvas/Screen"]
+[node name="EstablishingIllustration" type="TextureRect" parent="EstablishingLayer/Screen"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-color = Color(0.025, 0.028, 0.03, 1)
+mouse_filter = 2
+texture = ExtResource("2_background")
+expand_mode = 1
+stretch_mode = 6
 
-[node name="Center" type="CenterContainer" parent="IntroCanvas/Screen"]
+[node name="OpeningBlurLayer" type="CanvasLayer" parent="."]
+layer = 10
+
+[node name="OpeningBlurOverlay" type="ColorRect" parent="OpeningBlurLayer"]
+unique_name_in_owner = true
+material = SubResource("ShaderMaterial_opening_blur")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="PhoneInteractionLayer" type="CanvasLayer" parent="."]
+layer = 40
+
+[node name="PhoneMinigameHost" type="Control" parent="PhoneInteractionLayer"]
+unique_name_in_owner = true
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("14_phone_minigame")
+
+[node name="PhonePanelCenter" type="CenterContainer" parent="PhoneInteractionLayer/PhoneMinigameHost"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -37,35 +106,272 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
-[node name="IntroStack" type="VBoxContainer" parent="IntroCanvas/Screen/Center"]
-custom_minimum_size = Vector2(360, 0)
+[node name="PhoneInteractionPanel" type="Control" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(248, 248)
 layout_mode = 2
-theme_override_constants/separation = 12
+mouse_filter = 2
 
-[node name="IntroCaption" type="Label" parent="IntroCanvas/Screen/Center/IntroStack"]
+[node name="PhoneBackgroundFrameA" type="TextureRect" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel"]
 unique_name_in_owner = true
-layout_mode = 2
-theme_override_colors/font_color = Color(0.94, 0.9, 0.76, 1)
-theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.8)
-theme_override_constants/shadow_offset_x = 2
-theme_override_constants/shadow_offset_y = 2
-theme_override_font_sizes/font_size = 28
-text = "A QUIET MORNING"
-horizontal_alignment = 1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("5_phone_background_a")
+expand_mode = 1
 
-[node name="IntroSubtitle" type="Label" parent="IntroCanvas/Screen/Center/IntroStack"]
+[node name="PhoneBackgroundFrameB" type="TextureRect" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel"]
 unique_name_in_owner = true
-layout_mode = 2
-theme_override_colors/font_color = Color(0.74, 0.86, 0.82, 1)
-theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.72)
-theme_override_constants/shadow_offset_x = 1
-theme_override_constants/shadow_offset_y = 1
-theme_override_font_sizes/font_size = 16
-text = "The day begins."
-horizontal_alignment = 1
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("6_phone_background_b")
+expand_mode = 1
 
-[node name="IntroAnimationPlayer" type="AnimationPlayer" parent="."]
+[node name="SliderTrackFrameA" type="TextureRect" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel"]
 unique_name_in_owner = true
+layout_mode = 0
+offset_left = 91.0
+offset_top = 181.0
+offset_right = 130.0
+offset_bottom = 212.0
+mouse_filter = 2
+texture = SubResource("AtlasTexture_track_a")
+expand_mode = 1
 
-[node name="ProgrammedIntroBehaviours" type="Node" parent="."]
+[node name="SliderTrackFrameB" type="TextureRect" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel"]
 unique_name_in_owner = true
+visible = false
+layout_mode = 0
+offset_left = 91.0
+offset_top = 181.0
+offset_right = 130.0
+offset_bottom = 212.0
+mouse_filter = 2
+texture = SubResource("AtlasTexture_track_b")
+expand_mode = 1
+
+[node name="AnswerHandle" type="Sprite2D" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel"]
+unique_name_in_owner = true
+z_index = 5
+position = Vector2(79, 196)
+texture = SubResource("AtlasTexture_answer_handle")
+
+[node name="HandSprite" type="Sprite2D" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel"]
+unique_name_in_owner = true
+z_index = 110
+texture_filter = 1
+position = Vector2(150, 105)
+texture = ExtResource("15_hand")
+offset = Vector2(13, 51)
+
+[node name="PhoneBlurOverlay" type="ColorRect" parent="PhoneInteractionLayer/PhoneMinigameHost"]
+unique_name_in_owner = true
+z_index = 100
+material = SubResource("ShaderMaterial_phone_blur")
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="PhoneFlashTimer" type="Timer" parent="PhoneInteractionLayer/PhoneMinigameHost"]
+unique_name_in_owner = true
+wait_time = 0.35
+
+[node name="BlurCycleTimer" type="Timer" parent="PhoneInteractionLayer/PhoneMinigameHost"]
+unique_name_in_owner = true
+one_shot = true
+
+[node name="PhoneHandRevealTimer" type="Timer" parent="PhoneInteractionLayer/PhoneMinigameHost"]
+unique_name_in_owner = true
+one_shot = true
+
+[node name="AnswerFeedback" type="AudioStreamPlayer" parent="PhoneInteractionLayer/PhoneMinigameHost"]
+unique_name_in_owner = true
+stream = ExtResource("16_answer_feedback")
+
+[node name="DialoguePortraitLayer" type="CanvasLayer" parent="."]
+layer = 80
+
+[node name="DialogueBackdropMuteLayer" type="CanvasLayer" parent="."]
+layer = 70
+
+[node name="DialogueBackdropMute" type="ColorRect" parent="DialogueBackdropMuteLayer"]
+unique_name_in_owner = true
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.035, 0.045, 0.06, 0.22)
+
+[node name="PortraitPresentation" type="Control" parent="DialoguePortraitLayer"]
+unique_name_in_owner = true
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("17_portrait_presenter")
+
+[node name="CallerDialoguePortraitSlot" type="Control" parent="DialoguePortraitLayer/PortraitPresentation"]
+unique_name_in_owner = true
+layout_mode = 1
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -248.0
+offset_top = -490.0
+offset_bottom = 6.0
+grow_horizontal = 0
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="DialogueSlideSprite" type="Control" parent="DialoguePortraitLayer/PortraitPresentation/CallerDialoguePortraitSlot"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 0
+offset_right = 248.0
+offset_bottom = 496.0
+mouse_filter = 2
+
+[node name="DialogueSlideFrame1" type="TextureRect" parent="DialoguePortraitLayer/PortraitPresentation/CallerDialoguePortraitSlot/DialogueSlideSprite"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("7_dialogue_slide_1")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="DialogueSlideFrame2" type="TextureRect" parent="DialoguePortraitLayer/PortraitPresentation/CallerDialoguePortraitSlot/DialogueSlideSprite"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("8_dialogue_slide_2")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="DialogueSlideFrame3" type="TextureRect" parent="DialoguePortraitLayer/PortraitPresentation/CallerDialoguePortraitSlot/DialogueSlideSprite"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("9_dialogue_slide_3")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="DialogueSlideFrame4" type="TextureRect" parent="DialoguePortraitLayer/PortraitPresentation/CallerDialoguePortraitSlot/DialogueSlideSprite"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("10_dialogue_slide_4")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="DialogueSlideFrame5" type="TextureRect" parent="DialoguePortraitLayer/PortraitPresentation/CallerDialoguePortraitSlot/DialogueSlideSprite"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("11_dialogue_slide_5")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="PlayerDialoguePortraitSlot" type="Control" parent="DialoguePortraitLayer/PortraitPresentation"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_top = -496.0
+offset_right = 248.0
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="FadeLayer" type="CanvasLayer" parent="."]
+layer = 85
+
+[node name="FadeOverlay" type="ColorRect" parent="FadeLayer"]
+unique_name_in_owner = true
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0, 0, 1)
+
+[node name="Audio" type="Node" parent="."]
+
+[node name="CityAmbience" type="AudioStreamPlayer" parent="Audio"]
+unique_name_in_owner = true
+stream = ExtResource("12_city")
+volume_db = -8.0
+
+[node name="PhoneRinging" type="AudioStreamPlayer" parent="Audio"]
+unique_name_in_owner = true
+stream = ExtResource("13_ring")
+volume_db = -3.0
+
+[node name="Timing" type="Node" parent="."]
+
+[node name="OpeningVisualDelayTimer" type="Timer" parent="Timing"]
+unique_name_in_owner = true
+one_shot = true
+
+[node name="EstablishingTimer" type="Timer" parent="Timing"]
+unique_name_in_owner = true
+one_shot = true
+
+[node name="DialogueSlideTimer" type="Timer" parent="Timing"]
+unique_name_in_owner = true
+wait_time = 0.09
+
+[node name="IntroSequenceController" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("1_intro")
+next_scene_path = "res://scenes/levels/intro_walk_interlude.tscn"
+dialogue_definition = ExtResource("18_intro_dialogue")

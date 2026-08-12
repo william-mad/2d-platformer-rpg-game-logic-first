@@ -138,6 +138,7 @@ var _transition_plan: Dictionary = {}
 var _transition_recalculation_timer: float = 0.0
 var _committed_jump_elapsed: float = 0.0
 var _committed_jump_was_airborne: bool = false
+var _takeoff_anticipation_elapsed: float = 0.0
 var _last_completed_traversal_sequence: int = 0
 var _active_traversal: Dictionary = {}
 var _failure_reposition_plan: Dictionary = {}
@@ -157,6 +158,7 @@ var _last_forward_probe_direction: float = 0.0
 var _hold_for_forward_hazard: bool = false
 var npc: CharacterBody2D
 var machine: NpcStateMachine
+var _airborne_animation_controller: Node
 var _target_actor_ref: WeakRef
 var _fixed_target_position: Vector2 = Vector2.ZERO
 var _has_fixed_target: bool = false
@@ -226,12 +228,14 @@ func _configure_for_character() -> void:
 	_transition_probe.maximum_supported_floor_difference = maximum_supported_floor_difference
 	_transition_probe.arc_samples = ballistic_arc_samples
 	_air_ledge_assist_cast = npc.get_node_or_null(air_ledge_assist_cast_path) as ShapeCast2D
+	_airborne_animation_controller = npc.get_node_or_null("NpcAnimationController")
 	_air_ledge_assist_used = false
 	_transition_phase = TransitionPhase.FOLLOWING
 	_transition_plan.clear()
 	_transition_recalculation_timer = 0.0
 	_committed_jump_elapsed = 0.0
 	_committed_jump_was_airborne = false
+	_takeoff_anticipation_elapsed = 0.0
 	_failure_reposition_plan.clear()
 	_failure_reposition_elapsed = 0.0
 	_forward_floor_hazard_was_detected = false
@@ -504,12 +508,14 @@ func _build_rejected_result(reason: StringName) -> TraversalResult:
 
 
 func _clear_route_state() -> void:
+	_cancel_takeoff_anticipation()
 	_active_traversal.clear()
 	_transition_plan.clear()
 	_failure_reposition_plan.clear()
 	_transition_phase = TransitionPhase.FOLLOWING
 	_committed_jump_elapsed = 0.0
 	_committed_jump_was_airborne = false
+	_takeoff_anticipation_elapsed = 0.0
 	_clear_jump_abandonment()
 	_reset_stuck_tracking()
 	_hold_for_forward_hazard = false
@@ -705,19 +711,28 @@ func physics_update(
 		)
 	if _transition_phase == TransitionPhase.APPROACHING_TRANSITION:
 		var takeoff_position: Vector2 = _transition_plan.get("takeoff_position", npc.global_position)
-		var plan_age_seconds := (
-			Time.get_ticks_msec() - int(_transition_plan.get("accepted_msec", 0))
-		) / 1000.0
-		if (
+		var at_takeoff := (
 			npc.is_on_floor()
 			and npc.global_position.distance_to(takeoff_position) <= takeoff_position_tolerance
-			and plan_age_seconds >= takeoff_commit_delay_seconds
-		):
-			_jump_diagnostic("takeoff reached", "at %s" % takeoff_position)
-			_execute_transition_jump()
-			return _build_result(
-				TraversalStatus.COMMITTED_JUMP, false, true, &"jump_started"
+		)
+		if at_takeoff:
+			var takeoff_delay := maxf(takeoff_commit_delay_seconds, 0.0)
+			_takeoff_anticipation_elapsed = minf(
+				_takeoff_anticipation_elapsed + maxf(delta, 0.0),
+				takeoff_delay
 			)
+			_preview_takeoff_anticipation(
+				1.0 if takeoff_delay <= 0.0 else _takeoff_anticipation_elapsed / takeoff_delay
+			)
+			if _takeoff_anticipation_elapsed >= takeoff_delay:
+				_jump_diagnostic("takeoff reached", "at %s" % takeoff_position)
+				_execute_transition_jump()
+				return _build_result(
+					TraversalStatus.COMMITTED_JUMP, false, true, &"jump_started"
+				)
+		else:
+			_takeoff_anticipation_elapsed = 0.0
+			_cancel_takeoff_anticipation()
 		_move_toward_x(takeoff_position.x, delta, takeoff_position_tolerance)
 		return _build_result(
 			TraversalStatus.APPROACHING_TRANSITION,
@@ -901,6 +916,7 @@ func _update_transition_plan(
 	_transition_plan["route_jump"] = route_started_jump
 	_transition_plan["breadcrumb_msec"] = breadcrumb_msec
 	_transition_plan["accepted_msec"] = Time.get_ticks_msec()
+	_takeoff_anticipation_elapsed = 0.0
 	_transition_phase = TransitionPhase.APPROACHING_TRANSITION
 	_jump_diagnostic(
 		"jump plan accepted",
@@ -922,6 +938,7 @@ func _execute_transition_jump() -> void:
 		_begin_failure_reposition(failed_target, &"invalid_jump_plan")
 		return
 	npc.velocity = planned_velocity
+	_commit_takeoff_anticipation(planned_velocity.y)
 	_jump_cooldown = jump_cooldown_seconds
 	_height_jump_cooldown = height_jump_retry_seconds
 	_reset_stuck_tracking()
@@ -929,6 +946,33 @@ func _execute_transition_jump() -> void:
 	_committed_jump_was_airborne = false
 	_transition_phase = TransitionPhase.EXECUTING_JUMP
 	_jump_diagnostic("jump executed", "velocity=%s" % planned_velocity)
+
+
+func _preview_takeoff_anticipation(progress: float) -> void:
+	if (
+		_airborne_animation_controller != null
+		and is_instance_valid(_airborne_animation_controller)
+		and _airborne_animation_controller.has_method("preview_grounded_takeoff")
+	):
+		_airborne_animation_controller.call("preview_grounded_takeoff", progress)
+
+
+func _commit_takeoff_anticipation(vertical_velocity: float) -> void:
+	if (
+		_airborne_animation_controller != null
+		and is_instance_valid(_airborne_animation_controller)
+		and _airborne_animation_controller.has_method("commit_grounded_takeoff")
+	):
+		_airborne_animation_controller.call("commit_grounded_takeoff", vertical_velocity)
+
+
+func _cancel_takeoff_anticipation() -> void:
+	if (
+		_airborne_animation_controller != null
+		and is_instance_valid(_airborne_animation_controller)
+		and _airborne_animation_controller.has_method("cancel_grounded_takeoff")
+	):
+		_airborne_animation_controller.call("cancel_grounded_takeoff")
 
 
 func _process_committed_jump(delta: float) -> void:

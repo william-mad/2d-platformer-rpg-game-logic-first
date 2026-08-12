@@ -25,7 +25,8 @@ class TestAirborneLocomotionController:
 func _initialize() -> void:
 	await process_frame
 	_test_velocity_driven_airborne_frames_and_resume()
-	_test_mom_airborne_wiring_and_placeholder_frames()
+	_test_grounded_takeoff_frames_precede_airborne_frames()
+	_test_mom_airborne_wiring_and_real_frames()
 	await _test_mom_damage_hop_uses_and_restores_airborne_animation()
 	await process_frame
 
@@ -141,20 +142,84 @@ func _test_velocity_driven_airborne_frames_and_resume() -> void:
 	npc.queue_free()
 
 
-func _test_mom_airborne_wiring_and_placeholder_frames() -> void:
+func _test_grounded_takeoff_frames_precede_airborne_frames() -> void:
+	var npc := TestNpc.new()
+	npc.name = "TakeoffAnimationNpc"
+	root.add_child(npc)
+	var sprite := Sprite2D.new()
+	sprite.name = "Sprite2D"
+	sprite.hframes = 7
+	npc.add_child(sprite)
+	var player := AnimationPlayer.new()
+	player.name = "AnimationPlayer"
+	npc.add_child(player)
+	var library := AnimationLibrary.new()
+	library.add_animation(&"talk", _make_empty_animation(Animation.LOOP_LINEAR))
+	library.add_animation(&"jump_fall", _make_seven_frame_airborne_animation())
+	player.add_animation_library(&"", library)
+	var controller := TestAirborneLocomotionController.new()
+	controller.name = "NpcAnimationController"
+	controller.grounded_takeoff_frame_count = 2
+	npc.add_child(controller)
+	controller.set_physics_process(false)
+	controller.bind_npc(npc)
+
+	_expect(controller.preview_grounded_takeoff(0.0), "grounded takeoff preview is accepted")
+	_expect(sprite.frame == 0, "takeoff delay starts on grounded frame 0")
+	controller.preview_grounded_takeoff(0.75)
+	_expect(sprite.frame == 1, "takeoff delay advances only to grounded frame 1")
+	_expect(controller.request_animation(&"talk"), "new state requests remain accepted during takeoff")
+	_expect(player.assigned_animation == &"jump_fall", "takeoff anticipation defers Talk playback")
+	controller.commit_grounded_takeoff(-600.0)
+	_expect(controller.is_airborne_animation_active(), "committing takeoff begins airborne ownership")
+	_expect(sprite.frame == 2, "physical takeoff begins on the first airborne frame")
+	controller._seek_airborne_pose(-300.0)
+	_expect(sprite.frame == 3, "the brief takeoff frame advances to the shortened rise pose")
+	controller._seek_airborne_pose(-120.0)
+	_expect(sprite.frame == 4, "frame 4 begins shortly before the velocity apex")
+	controller._seek_airborne_pose(0.0)
+	_expect(sprite.frame == 4, "the velocity apex uses the expanded frame 4 pose")
+	controller._seek_airborne_pose(180.0)
+	_expect(sprite.frame == 4, "the first third of descent retains frame 4")
+	controller._seek_airborne_pose(300.0)
+	_expect(sprite.frame == 5, "the middle third of descent uses frame 5")
+	controller._seek_airborne_pose(500.0)
+	_expect(sprite.frame == 6, "the final third of descent uses frame 6")
+	controller._finish_airborne_override()
+	_expect(player.current_animation == &"talk", "landing restores the request received during takeoff")
+
+	npc.queue_free()
+
+
+func _test_mom_airborne_wiring_and_real_frames() -> void:
 	var mom_scene := load("res://scenes/creatures/mom_npc.tscn") as PackedScene
 	var mom := mom_scene.instantiate()
 	var controller := mom.get_node_or_null("NpcAnimationController")
 	var player := mom.get_node_or_null("AnimationPlayer") as AnimationPlayer
+	var traversal := mom.get_node_or_null("NpcPlatformTraversal") as NpcPlatformTraversal
 	_expect(
 		controller is NpcAirborneAnimationController,
 		"Mom uses the reusable airborne animation controller"
 	)
 	_expect(player != null and player.has_animation(&"jump_fall"), "Mom contains a jump_fall clip")
+	_expect(
+		traversal != null
+		and is_equal_approx(traversal.takeoff_commit_delay_seconds, 0.2),
+		"Mom expands grounded takeoff anticipation to 0.20 seconds"
+	)
+	var reusable_traversal := NpcPlatformTraversal.new()
+	_expect(
+		is_equal_approx(reusable_traversal.takeoff_commit_delay_seconds, 0.12),
+		"the reusable platform traversal delay remains unchanged"
+	)
+	reusable_traversal.free()
 	if player != null and player.has_animation(&"jump_fall"):
 		var animation := player.get_animation(&"jump_fall")
 		var frame_values: Array[int] = []
 		var airborne_texture: Texture2D
+		var horizontal_frames := 0
+		var vertical_frames := 0
+		var sprite_position := Vector2.ZERO
 		for track_index in animation.get_track_count():
 			var track_path := String(animation.track_get_path(track_index))
 			if track_path == "Sprite2D:frame":
@@ -162,11 +227,26 @@ func _test_mom_airborne_wiring_and_placeholder_frames() -> void:
 					frame_values.append(int(animation.track_get_key_value(track_index, key_index)))
 			elif track_path == "Sprite2D:texture" and animation.track_get_key_count(track_index) > 0:
 				airborne_texture = animation.track_get_key_value(track_index, 0) as Texture2D
-		_expect(frame_values == [8, 7, 6, 6, 7, 8], "Mom has three crouched rise and three crouched fall placeholder keys")
+			elif track_path == "Sprite2D:hframes" and animation.track_get_key_count(track_index) > 0:
+				horizontal_frames = int(animation.track_get_key_value(track_index, 0))
+			elif track_path == "Sprite2D:vframes" and animation.track_get_key_count(track_index) > 0:
+				vertical_frames = int(animation.track_get_key_value(track_index, 0))
+			elif track_path == "Sprite2D:position" and animation.track_get_key_count(track_index) > 0:
+				sprite_position = animation.track_get_key_value(track_index, 0) as Vector2
+		_expect(
+			frame_values == [0, 1, 2, 3, 4, 5, 6],
+			"Mom uses the seven authored rise, apex, and fall frames"
+		)
 		_expect(
 			airborne_texture != null
-			and airborne_texture.resource_path.ends_with("/mom_actions_1.png"),
-			"Mom's airborne placeholder uses the action sheet instead of the walk sheet"
+			and airborne_texture.resource_path.ends_with("/jump_1_mom.png"),
+			"Mom's airborne clip uses the dedicated jump sheet"
+		)
+		_expect(
+			horizontal_frames == 7
+			and vertical_frames == 1
+			and sprite_position == Vector2(1, -101),
+			"Mom's jump sheet uses seven horizontal cells and the locomotion baseline"
 		)
 	mom.free()
 
@@ -209,15 +289,15 @@ func _test_mom_damage_hop_uses_and_restores_airborne_animation() -> void:
 		if controller.is_airborne_animation_active():
 			airborne_seen = true
 			if mom.velocity.y < 0.0:
-				rising_pose_seen = rising_pose_seen or sprite.frame in [6, 7, 8]
+				rising_pose_seen = rising_pose_seen or sprite.frame in [2, 3, 4]
 			else:
-				falling_pose_seen = falling_pose_seen or sprite.frame in [6, 7, 8]
+				falling_pose_seen = falling_pose_seen or sprite.frame in [4, 5, 6]
 		elif airborne_seen and mom.is_on_floor():
 			break
 
 	_expect(airborne_seen, "Mom's existing damage hop activates jump_fall")
-	_expect(rising_pose_seen, "Mom's damage hop displays a rising placeholder pose")
-	_expect(falling_pose_seen, "Mom's damage hop displays a falling placeholder pose")
+	_expect(rising_pose_seen, "Mom's damage hop displays an authored rising pose")
+	_expect(falling_pose_seen, "Mom's damage hop displays an authored falling pose")
 	_expect(
 		mom.is_on_floor()
 		and not controller.is_airborne_animation_active()
@@ -245,6 +325,18 @@ func _make_six_frame_airborne_animation() -> Animation:
 	animation.value_track_set_update_mode(frame_track, Animation.UPDATE_DISCRETE)
 	var frame_times := [0.0, 0.2, 0.4, 0.5, 0.7, 0.9]
 	for frame_index in 6:
+		animation.track_insert_key(frame_track, frame_times[frame_index], frame_index)
+	return animation
+
+
+func _make_seven_frame_airborne_animation() -> Animation:
+	var animation := Animation.new()
+	animation.length = 1.0
+	var frame_track := animation.add_track(Animation.TYPE_VALUE)
+	animation.track_set_path(frame_track, NodePath("Sprite2D:frame"))
+	animation.value_track_set_update_mode(frame_track, Animation.UPDATE_DISCRETE)
+	var frame_times := [0.0, 1.0 / 6.0, 2.0 / 6.0, 0.35, 0.45, 4.0 / 6.0, 5.0 / 6.0]
+	for frame_index in 7:
 		animation.track_insert_key(frame_track, frame_times[frame_index], frame_index)
 	return animation
 

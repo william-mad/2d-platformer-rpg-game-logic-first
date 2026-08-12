@@ -20,6 +20,8 @@
 [ext_resource type="Resource" path="res://data/npc_routes/edges/realhometest_to_mom_bedroom.tres" id="18_home_bedroom_route"]
 [ext_resource type="Resource" uid="uid://gk33j2oopnkm" path="res://data/interactive_activities/mana_balance.tres" id="19_mana_balance"]
 [ext_resource type="Script" uid="uid://dv7yuq7ydxoyl" path="res://scripts/activities/interactive_activity_launch_options.gd" id="20_activity_launch_options"]
+[ext_resource type="Script" uid="uid://dd4s28glmoxa6" path="res://scripts/instances/intro_bed_arrival.gd" id="21_intro_bed_arrival"]
+[ext_resource type="AudioStream" uid="uid://brj46n6bnd7sh" path="res://sounds/birds.mp3" id="22_intro_birds"]
 
 [sub_resource type="Gradient" id="Gradient_second_floor_window_light"]
 offsets = PackedFloat32Array(0, 0.52, 0.76, 1)
@@ -1114,6 +1116,11 @@ position = Vector2(-269, 371)
 script = ExtResource("9_player_spawn")
 spawn_id = &"from_mom_bedroom"
 
+[node name="PlayerSpawnIntroBed" type="Marker2D" parent="." unique_id=24371790]
+position = Vector2(-916, 375)
+script = ExtResource("9_player_spawn")
+spawn_id = &"intro_bed"
+
 [node name="MomShowerRoutineSpot" parent="." unique_id=613272069 instance=ExtResource("11_shower_spot")]
 position = Vector2(896, 343)
 scale = Vector2(0.7, 0.7)
@@ -1152,6 +1159,25 @@ position = Vector2(-96, 0)
 position = Vector2(96, 0)
 
 [node name="CharacterStatsOverlay" parent="." unique_id=1403932194 instance=ExtResource("5_stats_overlay")]
+
+[node name="IntroBedArrival" type="CanvasLayer" parent="." unique_id=503228460]
+layer = 110
+script = ExtResource("21_intro_bed_arrival")
+
+[node name="IntroBedArrivalOverlay" type="ColorRect" parent="IntroBedArrival" unique_id=590305496]
+unique_name_in_owner = true
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0, 0, 1)
+
+[node name="IntroBedArrivalBirds" type="AudioStreamPlayer" parent="IntroBedArrival" unique_id=1250424084]
+unique_name_in_owner = true
+stream = ExtResource("22_intro_birds")
+volume_db = -7.0
 
 [connection signal="area_entered" from="RoomVisibilityTriggers/Bedroom" to="RoomVisibilityAnimation" method="play" unbinds=1 binds= [&"bedroom"]]
 [connection signal="area_entered" from="RoomVisibilityTriggers/Classroom" to="RoomVisibilityAnimation" method="play" unbinds=1 binds= [&"classroom"]]

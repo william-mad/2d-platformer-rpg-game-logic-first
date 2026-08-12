@@ -76,10 +76,7 @@ func physics_process(_delta: float) -> PlayerState:
 
 
 func get_floor_exit_state() -> PlayerState:
-	if player.direction.x != 0:
-		return run
-
-	return idle
+	return get_ground_movement_state()
 
 
 func should_move_with_hidden_spot() -> bool:

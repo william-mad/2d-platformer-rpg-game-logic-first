@@ -1,10 +1,27 @@
 extends Node
 
+signal dialogue_session_started(session_id: StringName, dialogue_id: StringName)
+signal dialogue_node_started(
+	session_id: StringName,
+	dialogue_id: StringName,
+	node_id: StringName,
+	speaker_id: StringName
+)
+signal dialogue_choice_committed(
+	session_id: StringName,
+	dialogue_id: StringName,
+	choice_id: StringName,
+	choice_data: DialogueChoice
+)
+signal dialogue_session_finished(result: Dictionary)
+
 const UI_SCENE := preload("res://scenes/ui/modal_dialogue_ui.tscn")
 const CLAIM_REASON := &"modal_dialogue"
 const PLAYER_CONTROL_MODE := &"ui_only"
 const TALK_ANIMATION := &"talk"
 const IDLE_ANIMATION := &"idle"
+const SESSION_MODE_WORLD := &"world"
+const SESSION_MODE_MODAL := &"modal"
 const ALLOWED_PRIMARY_STATES := {
 	"Idle": true,
 	"Rest": true,
@@ -20,10 +37,15 @@ var current_definition: DialogueDefinition
 var current_node: DialogueNode
 var current_session_id: StringName = &""
 var choice_committed: bool = false
+var current_session_mode: StringName = &""
+var selected_choice_ids: Array[StringName] = []
+var last_session_result: Dictionary = {}
 
 var _next_session_number: int = 1
 var _cleanup_in_progress: bool = false
 var _ui: ModalDialogueUI
+var _modal_owner_ref: WeakRef
+var _speaker_names: Dictionary = {}
 
 
 func _ready() -> void:
@@ -43,6 +65,13 @@ func _process(_delta: float) -> void:
 	if not is_dialogue_active() or _cleanup_in_progress:
 		return
 	var session_id := current_session_id
+	if current_session_mode == SESSION_MODE_MODAL:
+		if not _modal_owner_is_live():
+			_terminal_cleanup("modal_owner_removed", false, session_id)
+			return
+		if not _world_lock_is_exact(world_progression_lock_token):
+			_terminal_cleanup("token_lost", false, session_id)
+		return
 	if not _participant_is_live(current_npc):
 		_terminal_cleanup("npc_removed", false, session_id)
 		return
@@ -70,6 +99,10 @@ func begin_dialogue(player: Node, npc: Node, definition: Resource) -> Dictionary
 	current_definition = definition as DialogueDefinition
 	current_node = null
 	choice_committed = false
+	current_session_mode = SESSION_MODE_WORLD
+	selected_choice_ids.clear()
+	_modal_owner_ref = null
+	_speaker_names.clear()
 	_cleanup_in_progress = false
 
 	var gameplay_flow := _get_gameplay_flow()
@@ -117,6 +150,7 @@ func begin_dialogue(player: Node, npc: Node, definition: Resource) -> Dictionary
 		return _reject_started_session("scripted_talk_animation_rejected")
 
 	current_node = current_definition.get_node(current_definition.entry_node_id)
+	dialogue_session_started.emit(current_session_id, current_definition.dialogue_id)
 	if not _display_current_node():
 		return _reject_started_session("entry_node_display_rejected")
 
@@ -136,6 +170,51 @@ func begin_dialogue(player: Node, npc: Node, definition: Resource) -> Dictionary
 	return _dialogue_result(true, "")
 
 
+func begin_modal_dialogue(
+	owner: Object,
+	definition: Resource,
+	speaker_names: Dictionary = {}
+) -> Dictionary:
+	var rejection_reason := _get_modal_begin_rejection_reason(owner, definition)
+	if not rejection_reason.is_empty():
+		_debug_log("Dialogue rejected: reason=%s" % rejection_reason)
+		return _dialogue_result(false, rejection_reason)
+
+	current_session_id = _take_session_id()
+	current_definition = definition as DialogueDefinition
+	current_node = null
+	current_npc = null
+	current_player = null
+	choice_committed = false
+	current_session_mode = SESSION_MODE_MODAL
+	selected_choice_ids.clear()
+	_modal_owner_ref = weakref(owner)
+	_speaker_names = speaker_names.duplicate()
+	_cleanup_in_progress = false
+
+	var gameplay_flow := _get_gameplay_flow()
+	world_progression_lock_token = int(gameplay_flow.call(
+		"acquire_world_progression_lock", self, CLAIM_REASON
+	))
+	if world_progression_lock_token == 0:
+		return _reject_started_session("world_lock_rejected")
+
+	current_node = current_definition.get_node(current_definition.entry_node_id)
+	dialogue_session_started.emit(current_session_id, current_definition.dialogue_id)
+	if not _display_current_node():
+		return _reject_started_session("entry_node_display_rejected")
+
+	_debug_log(
+		"Standalone modal dialogue accepted: session=%s dialogue=%s world=%d"
+		% [
+			String(current_session_id),
+			String(current_definition.dialogue_id),
+			world_progression_lock_token,
+		]
+	)
+	return _dialogue_result(true, "")
+
+
 func choose(choice_id: StringName) -> bool:
 	if not is_dialogue_active() or _cleanup_in_progress or choice_committed:
 		return false
@@ -149,14 +228,21 @@ func choose(choice_id: StringName) -> bool:
 
 	# Commit before invoking an effect API so repeated input cannot apply it twice.
 	choice_committed = true
+	selected_choice_ids.append(choice.choice_id)
 	if _ui != null:
 		_ui.disable_input()
+	dialogue_choice_committed.emit(
+		session_id,
+		current_definition.dialogue_id,
+		choice.choice_id,
+		choice
+	)
 	_debug_log(
 		"Dialogue choice committed: session=%s choice=%s favor_delta=%.2f"
 		% [String(session_id), String(choice.choice_id), choice.favor_delta]
 	)
 
-	if not is_zero_approx(choice.favor_delta):
+	if current_session_mode == SESSION_MODE_WORLD and not is_zero_approx(choice.favor_delta):
 		if not _participant_is_live(current_npc) or not _participant_is_live(current_player):
 			_terminal_cleanup("participant_lost_before_choice_effect", false, session_id)
 			return false
@@ -186,6 +272,30 @@ func choose(choice_id: StringName) -> bool:
 	return true
 
 
+func advance() -> bool:
+	if not is_dialogue_active() or _cleanup_in_progress or choice_committed:
+		return false
+	var session_id := current_session_id
+	if current_node == null or current_definition == null:
+		_terminal_cleanup("invalid_dialogue_node", false, session_id)
+		return false
+	if not current_node.choices.is_empty():
+		return false
+
+	if current_node.terminal:
+		_terminal_cleanup("terminal_node", true, session_id)
+		return true
+	var next_node := current_definition.get_node(current_node.next_node_id)
+	if next_node == null:
+		_terminal_cleanup("invalid_next_node", false, session_id)
+		return false
+	current_node = next_node
+	if not _display_current_node():
+		_terminal_cleanup("node_display_rejected", false, session_id)
+		return false
+	return true
+
+
 func cancel_dialogue(reason: String = "player_cancelled") -> bool:
 	if not is_dialogue_active():
 		return false
@@ -196,11 +306,29 @@ func is_dialogue_active() -> bool:
 	return current_session_id != &""
 
 
+func set_session_input_enabled(expected_session_id: StringName, enabled: bool) -> bool:
+	if (
+		expected_session_id == &""
+		or expected_session_id != current_session_id
+		or _cleanup_in_progress
+		or _ui == null
+		or not is_instance_valid(_ui)
+	):
+		return false
+	if enabled:
+		return _ui.enable_input(expected_session_id)
+	_ui.disable_input()
+	return true
+
+
 func dump_active_dialogue() -> Dictionary:
 	var report := {
 		"session_id": current_session_id,
 		"dialogue_id": current_definition.dialogue_id if current_definition != null else &"",
 		"node_id": current_node.node_id if current_node != null else &"",
+		"speaker_id": current_node.speaker_id if current_node != null else &"",
+		"session_mode": current_session_mode,
+		"selected_choice_ids": selected_choice_ids.duplicate(),
 		"npc_valid": _participant_is_live(current_npc),
 		"player_valid": _participant_is_live(current_player),
 		"world_lock_token": world_progression_lock_token,
@@ -263,13 +391,39 @@ func _get_begin_rejection_reason(player: Node, npc: Node, definition: Resource) 
 	return ""
 
 
+func _get_modal_begin_rejection_reason(owner: Object, definition: Resource) -> String:
+	if is_dialogue_active():
+		return "dialogue_already_active"
+	if owner == null or not is_instance_valid(owner):
+		return "invalid_modal_owner"
+	if owner is Node and not (owner as Node).is_inside_tree():
+		return "modal_owner_outside_tree"
+	var dialogue_definition := definition as DialogueDefinition
+	if dialogue_definition == null:
+		return "invalid_dialogue_definition"
+	var definition_error := dialogue_definition.get_validation_error()
+	if not definition_error.is_empty():
+		return definition_error
+	if _get_gameplay_flow() == null:
+		return "gameplay_flow_missing"
+	if _ui == null or not is_instance_valid(_ui):
+		return "dialogue_ui_missing"
+	return ""
+
+
 func _display_current_node() -> bool:
 	if current_node == null or current_session_id == &"" or _ui == null:
 		return false
 	var displayed := _ui.display_node(
-		current_session_id, _get_npc_display_name(current_npc), current_node
+		current_session_id, _get_current_speaker_display_name(), current_node
 	)
 	if displayed:
+		dialogue_node_started.emit(
+			current_session_id,
+			current_definition.dialogue_id,
+			current_node.node_id,
+			current_node.speaker_id
+		)
 		_debug_log(
 			"Dialogue node displayed: session=%s node=%s"
 			% [String(current_session_id), String(current_node.node_id)]
@@ -289,6 +443,9 @@ func _terminal_cleanup(
 	_cleanup_in_progress = true
 
 	var session_id := current_session_id
+	var dialogue_id := current_definition.dialogue_id if current_definition != null else &""
+	var session_mode := current_session_mode
+	var committed_choice_ids := selected_choice_ids.duplicate()
 	var npc := current_npc
 	var player := current_player
 	var world_token := world_progression_lock_token
@@ -330,7 +487,19 @@ func _terminal_cleanup(
 	current_player = null
 	current_session_id = &""
 	choice_committed = false
+	current_session_mode = &""
+	selected_choice_ids.clear()
+	_modal_owner_ref = null
+	_speaker_names.clear()
 	_cleanup_in_progress = false
+	last_session_result = {
+		"session_id": session_id,
+		"dialogue_id": dialogue_id,
+		"session_mode": session_mode,
+		"completed": completed,
+		"reason": reason,
+		"choice_ids": committed_choice_ids,
+	}
 
 	_debug_log(
 		"Dialogue session %s: session=%s reason=%s"
@@ -348,6 +517,7 @@ func _terminal_cleanup(
 			str(player_released),
 		]
 	)
+	dialogue_session_finished.emit(last_session_result.duplicate(true))
 	return true
 
 
@@ -387,6 +557,7 @@ func _ensure_ui() -> void:
 	_ui.name = "ModalDialogueUI"
 	add_child(_ui)
 	_ui.choice_requested.connect(_on_ui_choice_requested)
+	_ui.advance_requested.connect(_on_ui_advance_requested)
 	_ui.cancel_requested.connect(_on_ui_cancel_requested)
 
 
@@ -394,6 +565,12 @@ func _on_ui_choice_requested(session_id: StringName, choice_id: StringName) -> v
 	if session_id != current_session_id or _cleanup_in_progress:
 		return
 	choose(choice_id)
+
+
+func _on_ui_advance_requested(session_id: StringName) -> void:
+	if session_id != current_session_id or _cleanup_in_progress:
+		return
+	advance()
 
 
 func _on_ui_cancel_requested(session_id: StringName) -> void:
@@ -479,6 +656,15 @@ func _weak_ref_matches(value, expected: Object) -> bool:
 	return reference != null and reference.get_ref() == expected
 
 
+func _modal_owner_is_live() -> bool:
+	if _modal_owner_ref == null:
+		return false
+	var owner: Object = _modal_owner_ref.get_ref()
+	if owner == null or not is_instance_valid(owner):
+		return false
+	return not (owner is Node) or (owner as Node).is_inside_tree()
+
+
 func _get_gameplay_flow() -> Node:
 	return get_node_or_null("/root/GameplayFlow")
 
@@ -523,13 +709,28 @@ func _descriptor_is_lesson_or_class_handoff(descriptor: Dictionary) -> bool:
 	return text.contains("lesson") or text.contains("class") or text.contains("invite_player")
 
 
-func _get_npc_display_name(npc: Node) -> String:
-	if npc != null and is_instance_valid(npc):
-		if npc.has_method("get_display_name"):
-			return String(npc.call("get_display_name"))
-		if not String(npc.name).is_empty():
-			return String(npc.name)
-	return "NPC"
+func _get_current_speaker_display_name() -> String:
+	if current_node == null:
+		return "Speaker"
+	var speaker_id := current_node.speaker_id
+	if current_session_mode == SESSION_MODE_MODAL:
+		var configured_name := String(_speaker_names.get(speaker_id, "")).strip_edges()
+		if not configured_name.is_empty():
+			return configured_name
+		var fallback_name := String(speaker_id).replace("_", " ").capitalize()
+		return fallback_name if not fallback_name.is_empty() else "Speaker"
+	if speaker_id == &"player":
+		return _get_participant_display_name(current_player, "Player")
+	return _get_participant_display_name(current_npc, "NPC")
+
+
+func _get_participant_display_name(participant: Node, fallback: String) -> String:
+	if participant != null and is_instance_valid(participant):
+		if participant.has_method("get_display_name"):
+			return String(participant.call("get_display_name"))
+		if not String(participant.name).is_empty():
+			return String(participant.name)
+	return fallback
 
 
 func _participant_is_live(participant) -> bool:
