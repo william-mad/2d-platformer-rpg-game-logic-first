@@ -422,7 +422,7 @@ tracks/3/keys = {
 "times": PackedFloat32Array(0),
 "transitions": PackedFloat32Array(1),
 "update": 1,
-"values": [Vector2(1, -101)]
+"values": [Vector2(1, -100)]
 }
 tracks/4/type = "value"
 tracks/4/imported = false
@@ -486,7 +486,7 @@ tracks/3/keys = {
 "times": PackedFloat32Array(0),
 "transitions": PackedFloat32Array(1),
 "update": 1,
-"values": [Vector2(1, -101)]
+"values": [Vector2(1, -100)]
 }
 tracks/4/type = "value"
 tracks/4/imported = false
@@ -551,7 +551,7 @@ tracks/3/keys = {
 "times": PackedFloat32Array(0),
 "transitions": PackedFloat32Array(1),
 "update": 1,
-"values": [Vector2(1, -101)]
+"values": [Vector2(1, -100)]
 }
 tracks/4/type = "value"
 tracks/4/imported = false
@@ -880,19 +880,19 @@ force_unflipped_animation_names = PackedStringArray("meal_prep_1", "work_1")
 grounded_locomotion_enabled = true
 grounded_takeoff_frame_count = 2
 locomotion_stop_speed = 4.0
-run_enter_speed = 120.0
-run_exit_speed = 100.0
-walk_reference_speed = 77.0
-run_reference_speed = 161.0
+run_enter_speed = 200.0
+run_exit_speed = 165.0
+walk_reference_speed = 120.0
+run_reference_speed = 200.0
 walk_min_speed_scale = 0.6
-walk_max_speed_scale = 1.6
+walk_max_speed_scale = 1.35
 run_start_min_speed_scale = 0.9
 run_start_max_speed_scale = 1.2
-run_min_speed_scale = 0.85
-run_max_speed_scale = 1.6
+run_min_speed_scale = 0.9
+run_max_speed_scale = 1.15
 
 [node name="NpcStateMachine" parent="." unique_id=733584758 instance=ExtResource("4_state_machine")]
-walk_speed = 77.0
+walk_speed = 120.0
 run_speed = 161.0
 default_reaction_time = 0.8
 default_work_time = 2.5

@@ -50,7 +50,7 @@ class TraversalResult:
 
 @export var stop_distance: float = 64.0
 @export_group("Distance-based Speed")
-@export var minimum_speed_multiplier: float = 4.0
+@export var minimum_speed_multiplier: float = 1.0
 @export var maximum_speed_multiplier: float = 12.0
 @export var speed_ramp_start_distance: float = 90.0
 @export var full_speed_distance: float = 650.0

@@ -98,11 +98,33 @@ func _initialize() -> void:
 	_expect(_state_name(machine) == "TravelFollow", "the hysteresis band does not oscillate")
 
 	_settle_on_floor(npc)
-	player.global_position = npc.global_position + Vector2(40.0, 0.0)
+	player.global_position = npc.global_position + Vector2(60.0, 0.0)
+	player.velocity.x = 120.0
 	component.set("_request_retry_timer", 0.0)
-	component.evaluate_follow_need()
+	var moving_grace_snapshot := component.evaluate_follow_need(0.016)
+	follow.physics_process(0.1)
+	_expect(
+		_state_name(machine) == "TravelFollow"
+		and moving_grace_snapshot.get("follow_reason", "") == "player_movement_grace",
+		"player movement keeps Follow active inside the stop threshold"
+	)
+	_expect(
+		is_equal_approx(traversal.stop_distance, follow.moving_player_stop_distance)
+		and npc.velocity.x > 0.0
+		and npc.velocity.x <= machine.walk_speed,
+		"movement grace continues inward at the ordinary walking speed"
+	)
+
+	player.velocity.x = 0.0
+	component.evaluate_follow_need(component.moving_player_follow_grace_seconds * 0.5)
 	follow.physics_process(0.016)
-	_expect(_state_name(machine) == "Idle", "catching up below the stop threshold returns to Idle")
+	_expect(
+		_state_name(machine) == "TravelFollow",
+		"Follow remains active for the short grace after the player stops"
+	)
+	component.evaluate_follow_need(component.moving_player_follow_grace_seconds)
+	follow.physics_process(0.016)
+	_expect(_state_name(machine) == "Idle", "expired movement grace returns a caught-up companion to Idle")
 	_expect(not traversal.has_owner(), "caught-up Follow releases traversal before Idle")
 
 	player.global_position = npc.global_position + Vector2(0.0, -100.0)

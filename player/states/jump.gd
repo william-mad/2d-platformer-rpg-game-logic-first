@@ -1,12 +1,12 @@
 class_name PlayerStateJump extends PlayerState
 
 @export_group("Jump Profiles")
-@export var walk_jump_velocity: float = 700.0
-@export var run_jump_velocity: float = 850.0
+@export var maximum_jump_velocity: float = 850.0
+@export var minimum_jump_velocity: float = 300.0
 @export var ledge_jump_velocity: float = 600.0
 
-var active_jump_velocity: float = 700.0
-var air_movement_speed: float = 220.0
+var active_jump_velocity: float = 300.0
+var air_movement_speed: float = 120.0
 var using_running_profile: bool = false
 
 func init() -> void:
@@ -110,7 +110,13 @@ func _capture_jump_profile() -> void:
 			and player.previous_state != ledge_grab
 		)
 
-	active_jump_velocity = (
-		run_jump_velocity if using_running_profile else walk_jump_velocity
-	)
 	air_movement_speed = get_profile_movement_speed(using_running_profile)
+	active_jump_velocity = _get_speed_scaled_jump_velocity()
+
+
+func _get_speed_scaled_jump_velocity() -> float:
+	var maximum_speed := maxf(player.move_speed, 0.001)
+	var speed_ratio := clampf(air_movement_speed / maximum_speed, 0.0, 1.0)
+	# Ballistic jump height is proportional to vertical velocity squared.
+	var proportional_velocity := maximum_jump_velocity * sqrt(speed_ratio)
+	return clampf(proportional_velocity, minimum_jump_velocity, maximum_jump_velocity)

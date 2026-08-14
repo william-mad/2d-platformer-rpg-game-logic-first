@@ -1,5 +1,7 @@
 class_name PlayerStateDash extends PlayerState
 
+const ProgressionIds := preload("res://scripts/progression/progression_ids.gd")
+
 @export_group("Dash Feel")
 @export var dash_speed: float = 1650.0
 @export var dash_duration: float = 0.16
@@ -74,10 +76,11 @@ func _finish_dash_motion() -> void:
 
 	dash_motion_active = false
 	player.gravity_multiplier = previous_gravity_multiplier
+	var run_speed := player.get_run_speed()
 	if player.direction.x == 0.0:
-		player.velocity.x = dash_direction * player.move_speed * dash_exit_speed_multiplier
+		player.velocity.x = dash_direction * run_speed * dash_exit_speed_multiplier
 	else:
-		player.velocity.x = player.direction.x * player.move_speed * dash_exit_speed_multiplier
+		player.velocity.x = player.direction.x * run_speed * dash_exit_speed_multiplier
 
 
 func handle_input(_event: InputEvent) -> PlayerState:
@@ -122,10 +125,14 @@ func physics_process(_delta: float) -> PlayerState:
 	if dash_motion_active:
 		player.velocity.x = dash_direction * get_current_dash_speed()
 	elif player.direction.x != 0.0:
-		player.velocity.x = player.direction.x * player.move_speed
+		player.velocity.x = player.direction.x * player.get_run_speed()
 	else:
 		var recovery_time := maxf(roll_input_grace_time, 0.001)
-		player.velocity.x = move_toward(player.velocity.x, 0.0, player.move_speed * _delta / recovery_time)
+		player.velocity.x = move_toward(
+			player.velocity.x,
+			0.0,
+			player.get_run_speed() * _delta / recovery_time
+		)
 
 	return null
 
@@ -151,6 +158,9 @@ func get_dash_state_from_input(_event: InputEvent) -> PlayerState:
 	dash_direction = tap_direction
 	player.apply_facing_left(dash_direction < 0.0)
 	last_tap_time_msec = -100000
+	run.enable_running()
+	if not player.is_player_ability_unlocked(ProgressionIds.ABILITY_DASH):
+		return run if player.is_on_floor() else null
 	return self
 
 
@@ -171,7 +181,7 @@ func get_current_dash_speed() -> float:
 	var duration := maxf(dash_duration, 0.001)
 	var progress := clampf(dash_elapsed / duration, 0.0, 1.0)
 	var eased_progress := pow(progress, maxf(dash_ease_power, 0.01))
-	var exit_speed := player.move_speed * maxf(dash_exit_speed_multiplier, 0.0)
+	var exit_speed := player.get_run_speed() * maxf(dash_exit_speed_multiplier, 0.0)
 	return lerpf(dash_speed, exit_speed, eased_progress)
 
 

@@ -321,6 +321,18 @@ func set_session_input_enabled(expected_session_id: StringName, enabled: bool) -
 	return true
 
 
+func set_session_ui_visible(expected_session_id: StringName, should_show: bool) -> bool:
+	if (
+		expected_session_id == &""
+		or expected_session_id != current_session_id
+		or _cleanup_in_progress
+		or _ui == null
+		or not is_instance_valid(_ui)
+	):
+		return false
+	return _ui.set_session_visible(expected_session_id, should_show)
+
+
 func dump_active_dialogue() -> Dictionary:
 	var report := {
 		"session_id": current_session_id,

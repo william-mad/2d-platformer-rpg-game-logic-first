@@ -18,6 +18,11 @@ func _initialize() -> void:
 	var options := NpcPlatformTraversal.TraversalOptions.new()
 	options.desired_stop_distance = 64.0
 	var initial_state := String(machine.current_state.name)
+	_expect(
+		is_equal_approx(traversal.minimum_speed_multiplier, 1.0)
+		and is_equal_approx(float(traversal.call("_get_speed_multiplier", 80.0)), 1.0),
+		"nearby traversal uses the NPC's ordinary walking speed"
+	)
 
 	var actor_a := Node2D.new()
 	actor_a.position = Vector2(220.0, 0.0)

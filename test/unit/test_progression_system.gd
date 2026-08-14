@@ -25,6 +25,24 @@ func test_global_xp_increases_and_recalculates_level() -> void:
 	assert_true(level_events.size() >= 1, "level change signal fires during recalculation")
 
 
+func test_damage_increases_by_fifty_percent_per_level() -> void:
+	assert_true(is_equal_approx(progression.get_damage_multiplier(), 1.0), "level 1 uses base damage")
+	progression.add_global_xp(60, &"test.damage")
+	assert_eq(progression.get_global_level(), 2, "damage check reaches level 2")
+	assert_true(is_equal_approx(progression.get_damage_multiplier(), 1.5), "level 2 adds fifty percent damage")
+	assert_true(is_equal_approx(progression.level_curve.get_damage_multiplier(10), 5.5), "level 10 damage is additive")
+
+
+func test_dash_auto_unlocks_at_level_four() -> void:
+	assert_false(progression.is_ability_unlocked(ProgressionIds.ABILITY_DASH), "dash starts locked")
+	progression.add_global_xp(349, &"test.dash")
+	assert_eq(progression.get_global_level(), 3, "dash remains locked below level 4")
+	assert_false(progression.is_ability_unlocked(ProgressionIds.ABILITY_DASH), "level 3 cannot dash")
+	progression.add_global_xp(1, &"test.dash")
+	assert_eq(progression.get_global_level(), 4, "dash unlock check reaches level 4")
+	assert_true(progression.is_ability_unlocked(ProgressionIds.ABILITY_DASH), "dash auto-unlocks at level 4")
+
+
 func test_skill_xp_is_independent_from_global_level() -> void:
 	progression.add_skill_xp(ProgressionIds.DOMAIN_MAGIC, 40, &"test.skill")
 

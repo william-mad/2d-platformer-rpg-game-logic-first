@@ -143,7 +143,7 @@ func _test_grounded_locomotion_phases_and_cleanup() -> void:
 		started.append(animation_name)
 	)
 
-	controller.sampled_horizontal_speed = 77.0
+	controller.sampled_horizontal_speed = 120.0
 	_expect(controller.request_animation(&"walk"), "walking request activates locomotion")
 	_expect(
 		player.current_animation == &"walk"
@@ -155,7 +155,7 @@ func _test_grounded_locomotion_phases_and_cleanup() -> void:
 		"Walk playback matches its reference speed"
 	)
 
-	controller.sampled_horizontal_speed = 130.0
+	controller.sampled_horizontal_speed = 160.0
 	controller._post_movement_animation_update(1.0 / 60.0)
 	_expect(
 		player.current_animation == &"run_start"
@@ -178,7 +178,7 @@ func _test_grounded_locomotion_phases_and_cleanup() -> void:
 		"finishing RunStart enters the Run loop while speed stays high"
 	)
 
-	controller.sampled_horizontal_speed = 90.0
+	controller.sampled_horizontal_speed = 120.0
 	controller._post_movement_animation_update(1.0 / 60.0)
 	_expect(
 		player.current_animation == &"walk"
@@ -201,7 +201,7 @@ func _test_grounded_locomotion_phases_and_cleanup() -> void:
 	)
 	_expect(is_equal_approx(player.speed_scale, 1.0), "Idle resets shared playback speed")
 
-	controller.sampled_horizontal_speed = 77.0
+	controller.sampled_horizontal_speed = 120.0
 	controller.request_animation(&"walk")
 	controller.sampled_horizontal_speed = 1000.0
 	controller._post_movement_animation_update(1.0 / 60.0)
@@ -233,9 +233,9 @@ func _test_missing_locomotion_clips_fail_soft() -> void:
 	var no_start_npc: TestNpc = no_start_setup["npc"]
 	var no_start_player: AnimationPlayer = no_start_setup["player"]
 	var no_start_controller: TestLocomotionController = no_start_setup["controller"]
-	no_start_controller.sampled_horizontal_speed = 77.0
+	no_start_controller.sampled_horizontal_speed = 120.0
 	_expect(no_start_controller.request_animation(&"walk"), "Walk works without RunStart")
-	no_start_controller.sampled_horizontal_speed = 130.0
+	no_start_controller.sampled_horizontal_speed = 160.0
 	no_start_controller._post_movement_animation_update(1.0 / 60.0)
 	_expect(
 		no_start_player.current_animation == &"run",
@@ -247,7 +247,7 @@ func _test_missing_locomotion_clips_fail_soft() -> void:
 	var no_run_npc: TestNpc = no_run_setup["npc"]
 	var no_run_player: AnimationPlayer = no_run_setup["player"]
 	var no_run_controller: TestLocomotionController = no_run_setup["controller"]
-	no_run_controller.sampled_horizontal_speed = 130.0
+	no_run_controller.sampled_horizontal_speed = 160.0
 	_expect(no_run_controller.request_animation(&"run"), "missing Run accepts Walk fallback")
 	_expect(
 		no_run_player.current_animation == &"walk"
@@ -260,7 +260,7 @@ func _test_missing_locomotion_clips_fail_soft() -> void:
 	var no_walk_npc: TestNpc = no_walk_setup["npc"]
 	var no_walk_player: AnimationPlayer = no_walk_setup["player"]
 	var no_walk_controller: TestLocomotionController = no_walk_setup["controller"]
-	no_walk_controller.sampled_horizontal_speed = 130.0
+	no_walk_controller.sampled_horizontal_speed = 160.0
 	_expect(
 		not no_walk_controller.request_animation(&"run"),
 		"missing required Walk rejects grounded locomotion safely"
@@ -349,8 +349,18 @@ func _test_complex_scene_wiring_and_mom_tracks() -> void:
 	_expect(
 		mom_controller != null
 		and is_equal_approx(mom_controller.walk_min_speed_scale, 0.6)
-		and is_equal_approx(mom_controller.walk_max_speed_scale, 1.6),
-		"Mom uses the widened 0.60-1.60 Walk playback range"
+		and is_equal_approx(mom_controller.walk_max_speed_scale, 1.35)
+		and is_equal_approx(mom_controller.walk_reference_speed, 120.0)
+		and is_equal_approx(mom_controller.run_enter_speed, 200.0)
+		and is_equal_approx(mom_controller.run_exit_speed, 165.0),
+		"Mom keeps Walk across the widened speed margin with matching playback headroom"
+	)
+	_expect(
+		mom_controller != null
+		and is_equal_approx(mom_controller.run_reference_speed, 200.0)
+		and is_equal_approx(mom_controller.run_min_speed_scale, 0.9)
+		and is_equal_approx(mom_controller.run_max_speed_scale, 1.15),
+		"Mom uses the slower capped Run playback tuning"
 	)
 	var player := mom.get_node_or_null("AnimationPlayer") as AnimationPlayer
 	var enabled_flip_tracks := 0
@@ -577,7 +587,7 @@ func _validate_mom_locomotion_clip(
 		"Mom %s uses one row of six 100x200 frames" % animation_name
 	)
 	_expect(
-		sprite_position == Vector2(1.0, -101.0),
+		sprite_position == Vector2(1.0, -100.0),
 		"Mom %s preserves the locomotion feet baseline" % animation_name
 	)
 	_expect(

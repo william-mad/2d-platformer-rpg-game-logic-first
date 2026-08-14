@@ -11,7 +11,7 @@ script = ExtResource("3_animation")
 
 [node name="NpcStateMachine" parent="." instance=ExtResource("2_machine")]
 debug_label_path = NodePath("StateLabel")
-walk_speed = 98.0
+walk_speed = 120.0
 run_speed = 182.0
 default_work_time = 2.0
 default_talk_time = 1.6

@@ -112,7 +112,7 @@ func physics_process(_delta: float) -> PlayerState:
 	if attack_tier == 3:
 		return physics_process_tier_3()
 
-	player.velocity.x = player.direction.x * player.move_speed * move_speed_multiplier
+	player.velocity.x = player.direction.x * player.get_run_speed() * move_speed_multiplier
 	return null
 
 
@@ -218,7 +218,7 @@ func spawn_tier_1_projectile() -> void:
 		player.global_position + Vector2(tier_1_spawn_offset.x * facing_x, tier_1_spawn_offset.y),
 		Vector2(facing_x, 0.0),
 		player,
-		tier_1_damage,
+		player.get_scaled_attack_damage(tier_1_damage),
 		tier_1_projectile_speed,
 		tier_1_projectile_lifetime,
 		tier_1_projectile_radius,
@@ -239,7 +239,7 @@ func spawn_tier_2_wall() -> void:
 		player.global_position + Vector2(tier_2_wall_spawn_offset.x * facing_x, tier_2_wall_spawn_offset.y),
 		Vector2(facing_x, 0.0),
 		player,
-		tier_2_damage,
+		player.get_scaled_attack_damage(tier_2_damage),
 		tier_2_wall_speed,
 		tier_2_wall_lifetime,
 		tier_2_wall_grow_time,
@@ -262,7 +262,7 @@ func spawn_tier_3_burst() -> void:
 	burst.launch(
 		player.global_position,
 		player,
-		tier_3_damage,
+		player.get_scaled_attack_damage(tier_3_damage),
 		tier_3_radius,
 		tier_3_pulse_count,
 		tier_3_pulse_interval,

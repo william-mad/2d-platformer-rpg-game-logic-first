@@ -88,7 +88,7 @@ func get_ground_movement_state_for_profile(use_running_profile: bool) -> PlayerS
 
 
 func get_profile_movement_speed(use_running_profile: bool) -> float:
-	return player.move_speed if use_running_profile else walk.walk_speed
+	return player.get_run_speed() if use_running_profile else walk.walk_speed
 
 
 func get_attack_release_state() -> PlayerState:

@@ -69,7 +69,9 @@ func physics_process(_delta: float) -> PlayerState:
 		player.velocity.x = 0.0
 		return null
 
-	player.velocity.x = player.direction.x * player.move_speed * current_attack.move_speed_multiplier
+	player.velocity.x = (
+		player.direction.x * player.get_run_speed() * current_attack.move_speed_multiplier
+	)
 	return null
 
 

@@ -1,6 +1,6 @@
 class_name PlayerStateWalk extends PlayerState
 
-@export var walk_speed: float = 220.0
+@export var walk_speed: float = 120.0
 @export var walk_animation: StringName = &"walk"
 
 

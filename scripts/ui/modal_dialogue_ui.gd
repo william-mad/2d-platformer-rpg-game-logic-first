@@ -25,7 +25,12 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if active_session_id == &"" or dialogue_label == null or _is_text_fully_revealed():
+	if (
+		active_session_id == &""
+		or not visible
+		or dialogue_label == null
+		or _is_text_fully_revealed()
+	):
 		return
 	var speed := characters_per_second
 	if Input.is_action_pressed(advance_action):
@@ -103,6 +108,15 @@ func enable_input(session_id: StringName) -> bool:
 			first_button = button
 	if first_button != null:
 		call_deferred("_focus_first_choice", session_id, weakref(first_button))
+	return true
+
+
+func set_session_visible(session_id: StringName, should_show: bool) -> bool:
+	if session_id == &"" or session_id != active_session_id:
+		return false
+	visible = should_show
+	if panel != null:
+		panel.visible = should_show
 	return true
 
 

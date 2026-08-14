@@ -51,7 +51,7 @@ func process(_delta: float) -> PlayerState:
 	return next_state
 
 func physics_update_before_move(_delta: float) -> void:
-	player.velocity.x = player.direction.x * player.move_speed
+	player.velocity.x = player.direction.x * player.get_run_speed()
 
 
 func physics_update_after_move(_delta: float) -> PlayerState:

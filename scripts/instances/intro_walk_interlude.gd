@@ -67,16 +67,22 @@ enum Phase {
 @export_range(1.0, 16.0, 0.5, "suffix:s") var birds_fade_in_seconds: float = 8.0
 @export_category("Final Memory Framing")
 @export_range(0.5, 8.0, 0.1, "suffix:s") var final_image_appearance_fade_seconds: float = 2.4
-@export_range(1.0, 3.0, 0.05) var final_image_zoom_start: float = 1.5
-@export_range(1.0, 3.0, 0.05) var final_image_zoom_end: float = 1.8
-@export_range(0.5, 1.0, 0.01) var final_image_bottom_focus_y: float = 0.78
-@export_range(0.0, 0.5, 0.01) var final_image_top_focus_y: float = 0.0
-@export_range(1.0, 16.0, 0.25, "suffix:s") var final_image_pan_seconds: float = 8.0
+@export_range(1.0, 3.0, 0.05) var final_image_zoom_amount: float = 1.85
+@export_range(0.5, 8.0, 0.1, "suffix:s") var final_image_zoom_in_seconds: float = 2.0
+@export_range(0.5, 1.0, 0.01) var final_image_bottom_focus_y: float = 0.88
+@export_range(0.0, 0.5, 0.01) var final_image_eye_focus_y: float = 0.14
+@export_range(0.0, 3.0, 0.1, "suffix:s") var final_image_bottom_hold_seconds: float = 0.7
+@export_range(1.0, 16.0, 0.25, "suffix:s") var final_image_pan_seconds: float = 4.8
+@export_range(0.0, 3.0, 0.1, "suffix:s") var final_image_eye_hold_seconds: float = 0.7
 @export_range(0.5, 8.0, 0.1, "suffix:s") var final_image_restore_seconds: float = 2.4
 
 @export_category("Montage Dialogue")
 @export var montage_dialogue_definition: DialogueDefinition
-@export var montage_speaker_names: Dictionary = {&"memory": "..."}
+@export var montage_speaker_names: Dictionary = {
+	&"memory": "...",
+	&"mom": "Mom",
+	&"player": "Player",
+}
 
 @export_category("Exit")
 @export_range(0.1, 4.0, 0.05, "suffix:s") var exit_fade_seconds: float = 2.0
@@ -104,6 +110,7 @@ enum Phase {
 @onready var impact_illustration: TextureRect = %ImpactIllustration
 @onready var memory_image: TextureRect = %MemoryImage
 @onready var memory_image_incoming: TextureRect = %MemoryImageIncoming
+@onready var memory_portrait_presenter: IntroMemoryPortraitPresenter = %MemoryPortraitPresentation
 @onready var fade_overlay: ColorRect = %InterludeFadeOverlay
 
 var current_phase: Phase = Phase.WALKING
@@ -426,6 +433,7 @@ func _on_dialogue_node_started(
 		if image_index == MEMORY_IMAGES.size() - 1:
 			_final_view_locked_session_id = session_id
 			_set_montage_dialogue_input_enabled(session_id, false)
+			_set_montage_dialogue_visible(session_id, false)
 		_crossfade_memory_image(image_index)
 	if image_index >= MEMORY_IMAGES.size() - 3:
 		_start_birds_fade_in()
@@ -501,27 +509,20 @@ func _start_final_image_bottom_up_view() -> void:
 	memory_image.material = shader_material
 	memory_image.modulate.a = 1.0
 	_final_image_view_complete = false
-	shader_material.set_shader_parameter(&"zoom", final_image_zoom_start)
+	shader_material.set_shader_parameter(&"zoom", 1.0)
 	shader_material.set_shader_parameter(
 		&"focus",
 		Vector2(0.5, final_image_bottom_focus_y)
 	)
 	_final_image_tween = create_tween()
-	_final_image_tween.set_parallel(true)
 	_final_image_tween.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	_final_image_tween.tween_method(
-		_set_final_image_focus_y,
-		final_image_bottom_focus_y,
-		final_image_top_focus_y,
-		final_image_pan_seconds
-	)
-	_final_image_tween.tween_method(
 		_set_final_image_zoom,
-		final_image_zoom_start,
-		final_image_zoom_end,
-		final_image_pan_seconds
+		1.0,
+		final_image_zoom_amount,
+		final_image_zoom_in_seconds
 	)
-	_final_image_tween.finished.connect(_on_final_image_pan_finished, CONNECT_ONE_SHOT)
+	_final_image_tween.finished.connect(_on_final_image_zoomed_in, CONNECT_ONE_SHOT)
 
 
 func _set_final_image_focus_y(value: float) -> void:
@@ -544,19 +545,35 @@ func _reset_final_image_view() -> void:
 	memory_image.material = null
 
 
+func _on_final_image_zoomed_in() -> void:
+	_final_image_tween = create_tween()
+	_final_image_tween.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	if final_image_bottom_hold_seconds > 0.0:
+		_final_image_tween.tween_interval(final_image_bottom_hold_seconds)
+	_final_image_tween.tween_method(
+		_set_final_image_focus_y,
+		final_image_bottom_focus_y,
+		final_image_eye_focus_y,
+		final_image_pan_seconds
+	)
+	if final_image_eye_hold_seconds > 0.0:
+		_final_image_tween.tween_interval(final_image_eye_hold_seconds)
+	_final_image_tween.finished.connect(_on_final_image_pan_finished, CONNECT_ONE_SHOT)
+
+
 func _on_final_image_pan_finished() -> void:
 	_final_image_tween = create_tween()
 	_final_image_tween.set_parallel(true)
 	_final_image_tween.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	_final_image_tween.tween_method(
 		_set_final_image_focus_y,
-		final_image_top_focus_y,
+		final_image_eye_focus_y,
 		0.5,
 		final_image_restore_seconds
 	)
 	_final_image_tween.tween_method(
 		_set_final_image_zoom,
-		final_image_zoom_end,
+		final_image_zoom_amount,
 		1.0,
 		final_image_restore_seconds
 	)
@@ -570,6 +587,8 @@ func _on_final_image_view_finished() -> void:
 	var locked_session_id := _final_view_locked_session_id
 	_final_view_locked_session_id = &""
 	if locked_session_id != &"":
+		memory_portrait_presenter.reveal_session(locked_session_id)
+		_set_montage_dialogue_visible(locked_session_id, true)
 		_set_montage_dialogue_input_enabled(locked_session_id, true)
 	if _dialogue_finished_waiting_for_final_view:
 		_dialogue_finished_waiting_for_final_view = false
@@ -581,6 +600,13 @@ func _set_montage_dialogue_input_enabled(session_id: StringName, enabled: bool) 
 	if dialogue_controller == null or not dialogue_controller.has_method("set_session_input_enabled"):
 		return false
 	return bool(dialogue_controller.call("set_session_input_enabled", session_id, enabled))
+
+
+func _set_montage_dialogue_visible(session_id: StringName, should_show: bool) -> bool:
+	var dialogue_controller := get_node_or_null("/root/DialogueController")
+	if dialogue_controller == null or not dialogue_controller.has_method("set_session_ui_visible"):
+		return false
+	return bool(dialogue_controller.call("set_session_ui_visible", session_id, should_show))
 
 
 func _start_birds_fade_in() -> void:

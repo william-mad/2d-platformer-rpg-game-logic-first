@@ -131,8 +131,8 @@ enum MonsterSightReaction {
 
 @export_group("Movement")
 @export var gravity: float = 1200.0
-@export var walk_speed: float = 63.0
-@export var run_speed: float = 126.0
+@export var walk_speed: float = 120.0
+@export var run_speed: float = 161.0
 @export var stop_distance: float = 12.0
 
 @export_group("Movement Fatigue")

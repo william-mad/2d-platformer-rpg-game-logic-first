@@ -6,6 +6,7 @@ const SocialWriteRouter = preload(
 const PlayerRelationshipPresentation = preload(
 	"res://scripts/systems/npc_player_relationship_presentation.gd"
 )
+const DamageFlash := preload("res://scripts/visual/character_damage_flash.gd")
 
 const STORED_ONLY_STAT_KEYS := {
 	"curiosity": true,
@@ -32,7 +33,7 @@ const STAT_KEY_ALIASES := {
 
 @export_group("Movement")
 @export var gravity: float = 1200.0
-@export var walk_speed: float = 63.0
+@export var walk_speed: float = 120.0
 @export var patrol_range: float = 240.0
 @export var starts_moving_right: bool = true
 
@@ -110,6 +111,13 @@ const STAT_KEY_ALIASES := {
 @export_range(0.0, 1.0, 0.01, "suffix:s") var damage_hop_duration: float = 0.22
 @export_range(0.0, 3000.0, 10.0, "suffix:px/s^2") var damage_hop_horizontal_deceleration: float = 650.0
 
+@export_group("Damage Feedback")
+@export var damage_flash_enabled: bool = true
+@export var damage_flash_peak_color: Color = Color(1.0, 0.86, 0.72, 1.0)
+@export var damage_flash_fade_color: Color = Color(1.0, 0.12, 0.06, 1.0)
+@export_range(0.01, 0.5, 0.01, "suffix:s") var damage_flash_peak_seconds: float = 0.04
+@export_range(0.01, 1.0, 0.01, "suffix:s") var damage_flash_fade_seconds: float = 0.16
+
 @export_group("Event Bus")
 @export var listen_to_event_bus: bool = true
 @export var listen_to_npc_event_bus_only: bool = true
@@ -172,6 +180,7 @@ var _relationship_identity_initialized: bool = false
 var neutral_body_color: Color = Color.WHITE
 var _reported_is_roped: bool = false
 var _reported_is_being_dragged: bool = false
+var _damage_flash := DamageFlash.new()
 
 
 func _ready() -> void:
@@ -204,6 +213,7 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	_stop_damage_flash()
 	_unregister_location_tracking()
 	_disconnect_event_bus()
 	player_relationship_presentation.unbind()
@@ -514,6 +524,8 @@ func take_damage(
 			)
 
 	var damage_taken := previous_hp - get_hp()
+	if damage_taken > 0.0:
+		_play_damage_feedback()
 	if damage_has_relationship_actor and damage_taken > 0.0:
 		var relationship_snapshot = damage_social_result.get("relationship", {})
 		if not (relationship_snapshot is Dictionary):
@@ -561,6 +573,37 @@ func take_damage(
 
 	if get_hp() <= 0.0:
 		die()
+
+
+func _play_damage_feedback() -> void:
+	if not damage_flash_enabled:
+		return
+	_damage_flash.play(
+		self,
+		_get_damage_flash_visuals(),
+		damage_flash_peak_color,
+		damage_flash_fade_color,
+		damage_flash_peak_seconds,
+		damage_flash_fade_seconds
+	)
+
+
+func _stop_damage_flash() -> void:
+	_damage_flash.stop()
+
+
+func _get_damage_flash_visuals() -> Array[CanvasItem]:
+	var visuals: Array[CanvasItem] = []
+	if body_visual != null:
+		visuals.append(body_visual)
+
+	var sprite := get_node_or_null("Sprite2D") as Sprite2D
+	if sprite != null and not visuals.has(sprite):
+		visuals.append(sprite)
+	var animated_sprite := get_node_or_null("AnimatedSprite2D") as AnimatedSprite2D
+	if animated_sprite != null and not visuals.has(animated_sprite):
+		visuals.append(animated_sprite)
+	return visuals
 
 
 func start_damage_hop(damage_source_position: Vector2) -> void:

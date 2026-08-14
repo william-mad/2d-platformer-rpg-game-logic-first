@@ -23,6 +23,8 @@ const TRAVEL_START_PROTECTED_STATES := {
 @export var follow_stop_horizontal_distance: float = 80.0
 @export var follow_start_vertical_separation: float = 80.0
 @export var follow_stop_vertical_separation: float = 45.0
+@export_range(0.0, 1.0, 0.05, "suffix:s") var moving_player_follow_grace_seconds: float = 0.35
+@export_range(0.0, 100.0, 1.0, "suffix:px/s") var player_movement_speed_threshold: float = 8.0
 @export_range(0.05, 1.0, 0.05) var request_retry_seconds: float = 0.25
 @export var coordinator_debug_enabled: bool = false
 
@@ -39,6 +41,8 @@ var _release_block_reason: String = ""
 var _last_horizontal_distance: float = INF
 var _last_vertical_separation: float = INF
 var _last_traversal_debt: bool = false
+var _player_is_moving: bool = false
+var _moving_player_follow_grace_remaining: float = 0.0
 
 
 func _ready() -> void:
@@ -57,7 +61,7 @@ func _physics_process(delta: float) -> void:
 	if not _is_authoritative_active_companion():
 		_deactivate_context(false)
 		return
-	evaluate_follow_need()
+	evaluate_follow_need(delta)
 
 
 func get_unavailable_reason(npc: Node, player: Node) -> String:
@@ -99,26 +103,31 @@ func deactivate_travel_context(request_normal_planning: bool = true) -> void:
 	_deactivate_context(request_normal_planning)
 
 
-func evaluate_follow_need() -> Dictionary:
+func evaluate_follow_need(delta: float = 0.0) -> Dictionary:
 	_resolve_nodes()
 	var player := _get_player()
 	if not _context_active:
+		_reset_player_movement_grace()
 		_follow_required = false
 		_follow_reason = "travel_inactive"
 		return get_debug_snapshot()
 	if not _is_authoritative_active_companion():
+		_reset_player_movement_grace()
 		_follow_required = false
 		_follow_reason = "not_active_companion"
 		return get_debug_snapshot()
 	if _npc == null or _machine == null or _machine.current_state == null:
+		_reset_player_movement_grace()
 		_follow_required = false
 		_follow_reason = "companion_not_ready"
 		return get_debug_snapshot()
 	if player == null:
+		_reset_player_movement_grace()
 		_follow_required = false
 		_follow_reason = "player_unavailable"
 		return get_debug_snapshot()
 
+	_update_player_movement_grace(player, delta)
 	_last_horizontal_distance = absf(player.global_position.x - _npc.global_position.x)
 	_last_vertical_separation = absf(player.global_position.y - _npc.global_position.y)
 	var traversal := _get_traversal()
@@ -148,6 +157,9 @@ func evaluate_follow_need() -> Dictionary:
 	elif _last_horizontal_distance > horizontal_threshold:
 		_follow_required = true
 		_follow_reason = "horizontal_distance"
+	elif currently_following and is_player_movement_grace_active():
+		_follow_required = true
+		_follow_reason = "player_movement_grace"
 	else:
 		_follow_required = false
 		_follow_reason = "inside_stop_threshold" if currently_following else "inside_start_threshold"
@@ -163,6 +175,10 @@ func evaluate_follow_need() -> Dictionary:
 
 func is_follow_required() -> bool:
 	return _follow_required
+
+
+func is_player_movement_grace_active() -> bool:
+	return _context_active and _moving_player_follow_grace_remaining > 0.0
 
 
 func can_release_follow_to_idle() -> bool:
@@ -188,6 +204,8 @@ func get_debug_snapshot() -> Dictionary:
 		"horizontal_distance": _last_horizontal_distance,
 		"vertical_separation": _last_vertical_separation,
 		"traversal_debt": _last_traversal_debt,
+		"player_moving": _player_is_moving,
+		"movement_grace_remaining": _moving_player_follow_grace_remaining,
 		"primary_state": (
 			String(_machine.current_state.name)
 			if _machine != null and _machine.current_state != null
@@ -268,6 +286,7 @@ func _deactivate_context(request_normal_planning: bool) -> void:
 	_follow_required = false
 	_follow_reason = "travel_inactive"
 	_request_retry_timer = 0.0
+	_reset_player_movement_grace()
 	if (
 		request_normal_planning
 		and _machine != null
@@ -310,6 +329,29 @@ func _get_player() -> Node2D:
 	if player != null:
 		_player_ref = weakref(player)
 	return player
+
+
+func _update_player_movement_grace(player: Node2D, delta: float) -> void:
+	var player_body := player as CharacterBody2D
+	_player_is_moving = (
+		player_body != null
+		and absf(player_body.velocity.x) > maxf(player_movement_speed_threshold, 0.0)
+	)
+	if _player_is_moving:
+		_moving_player_follow_grace_remaining = maxf(
+			moving_player_follow_grace_seconds,
+			0.0
+		)
+		return
+	_moving_player_follow_grace_remaining = maxf(
+		_moving_player_follow_grace_remaining - maxf(delta, 0.0),
+		0.0
+	)
+
+
+func _reset_player_movement_grace() -> void:
+	_player_is_moving = false
+	_moving_player_follow_grace_remaining = 0.0
 
 
 func _is_authoritative_active_companion() -> bool:

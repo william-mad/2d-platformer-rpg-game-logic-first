@@ -2,6 +2,7 @@ class_name NpcStateTravelFollow
 extends NpcState
 
 @export var stop_distance: float = 64.0
+@export var moving_player_stop_distance: float = 40.0
 @export var traversal_component_path: NodePath = NodePath("NpcPlatformTraversal")
 @export var show_follow_debug_paths: bool = false
 @export_range(2, 8, 1) var debug_breadcrumb_count: int = 2
@@ -121,7 +122,11 @@ func _get_player() -> Node2D:
 
 
 func _sync_traversal_options() -> void:
-	_options.desired_stop_distance = stop_distance
+	var desired_stop_distance := stop_distance
+	var coordinator := npc.get_node_or_null("TravelCompanion") as TravelCompanionComponent
+	if coordinator != null and coordinator.is_player_movement_grace_active():
+		desired_stop_distance = minf(stop_distance, moving_player_stop_distance)
+	_options.desired_stop_distance = maxf(desired_stop_distance, 0.0)
 	_traversal.debug_enabled = show_follow_debug_paths
 	_traversal.debug_breadcrumb_count = debug_breadcrumb_count
 	_traversal.debug_refresh_seconds = debug_overlay_refresh_seconds

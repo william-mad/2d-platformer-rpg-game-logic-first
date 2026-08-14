@@ -6,6 +6,7 @@ signal hunger_changed(current_hunger: float, changed_by: float)
 
 const MOVEMENT_ANIMATIONS: Array[StringName] = [&"walk", &"run"]
 const GAMEPLAY_CONTROL_UI_ONLY: StringName = &"ui_only"
+const DamageFlash := preload("res://scripts/visual/character_damage_flash.gd")
 const CLAIM_SUPPRESSED_ACTIONS: Array[StringName] = [
 	&"attack",
 	&"jump",
@@ -29,6 +30,7 @@ const CLAIM_SUPPRESSED_ACTIONS: Array[StringName] = [
 @onready var player_inventory: PlayerInventoryComponent = get_node_or_null("PlayerInventory") as PlayerInventoryComponent
 @onready var player_equipment: PlayerEquipmentComponent = get_node_or_null("PlayerEquipment") as PlayerEquipmentComponent
 @onready var interaction_router: InteractionRouter = get_node_or_null("InteractionRouter") as InteractionRouter
+@onready var progression_system: GameProgressionSystem = get_node_or_null("/root/ProgressionSystem") as GameProgressionSystem
 
 #endregion
 
@@ -42,8 +44,22 @@ const CLAIM_SUPPRESSED_ACTIONS: Array[StringName] = [
 
 #region //export variables
 @export var move_speed : float = 520
+@export var level_one_run_speed: float = 260.0
+@export_range(1, 999, 1) var run_speed_max_level: int = 10
 @export var knockback_force: Vector2 = Vector2(220, -160)
 @export var knockback_time: float = 0.15
+@export_group("Run Animation Playback")
+@export_range(0.01, 4.0, 0.01) var run_animation_start_speed_scale: float = 0.65
+@export_range(0.01, 4.0, 0.01) var run_animation_min_speed_scale: float = 0.55
+@export_range(0.01, 4.0, 0.01) var run_animation_max_speed_scale: float = 1.65
+@export_range(0.01, 10.0, 0.01, "suffix:scale/s") var run_animation_acceleration: float = 1.8
+@export_range(0.01, 10.0, 0.01, "suffix:scale/s") var run_animation_deceleration: float = 3.5
+@export_group("Damage Feedback")
+@export var damage_flash_enabled: bool = true
+@export var damage_flash_peak_color: Color = Color(1.0, 0.86, 0.72, 1.0)
+@export var damage_flash_fade_color: Color = Color(1.0, 0.12, 0.06, 1.0)
+@export_range(0.01, 0.5, 0.01, "suffix:s") var damage_flash_peak_seconds: float = 0.04
+@export_range(0.01, 1.0, 0.01, "suffix:s") var damage_flash_fade_seconds: float = 0.16
 @export_group("Knockout")
 @export var max_knockout: float = 100.0
 @export var knockout_decay_per_second: float = 55.0
@@ -118,6 +134,7 @@ var gameplay_control_claim_reason: StringName = &""
 var gameplay_control_mode: StringName = &""
 var _gameplay_input_resume_frame: int = 0
 var _claim_suppressed_actions: Dictionary = {}
+var _damage_flash := DamageFlash.new()
 var player_hud
 
 func _ready() -> void:
@@ -159,6 +176,7 @@ func _register_relationship_identity() -> void:
 
 
 func _exit_tree() -> void:
+	_stop_damage_flash()
 	if player_hud != null and player_hud.has_method("unbind_player_inventory"):
 		player_hud.call("unbind_player_inventory", get_inventory())
 
@@ -292,9 +310,44 @@ func get_equipped_item_id(slot_id: StringName) -> StringName:
 	return player_equipment.get_equipped_item_id(slot_id) if player_equipment != null else &""
 
 
+func get_player_level() -> int:
+	if progression_system == null:
+		return 1
+	return maxi(progression_system.get_global_level(), 1)
+
+
+func is_player_ability_unlocked(ability_id: StringName) -> bool:
+	if progression_system == null:
+		return false
+	return progression_system.is_ability_unlocked(ability_id)
+
+
+func get_run_speed() -> float:
+	var maximum_speed := maxf(move_speed, 0.0)
+	var starting_speed := clampf(level_one_run_speed, 0.0, maximum_speed)
+	var maximum_speed_level := maxi(run_speed_max_level, 1)
+	if maximum_speed_level == 1:
+		return maximum_speed
+
+	var speed_level := clampi(get_player_level(), 1, maximum_speed_level)
+	var level_progress := float(speed_level - 1) / float(maximum_speed_level - 1)
+	return lerpf(starting_speed, maximum_speed, level_progress)
+
+
+func get_level_damage_multiplier() -> float:
+	if progression_system == null:
+		return 1.0
+	var multiplier := progression_system.get_damage_multiplier()
+	return multiplier if is_finite(multiplier) and multiplier >= 0.0 else 1.0
+
+
+func get_scaled_attack_damage(base_damage: float) -> float:
+	return maxf(base_damage, 0.0) * get_level_damage_multiplier()
+
+
 func get_attack_equipment_modifiers(attack_definition: AttackDefinition) -> Dictionary:
 	var modifiers := {
-		"damage_multiplier": 1.0,
+		"damage_multiplier": get_level_damage_multiplier(),
 		"knockout_multiplier": 1.0,
 	}
 	if attack_definition == null or player_equipment == null:
@@ -304,7 +357,9 @@ func get_attack_equipment_modifiers(attack_definition: AttackDefinition) -> Dict
 		return modifiers
 	if not profile.applies_to_attack(attack_definition.tags):
 		return modifiers
-	modifiers["damage_multiplier"] = profile.damage_multiplier
+	modifiers["damage_multiplier"] = (
+		float(modifiers["damage_multiplier"]) * profile.damage_multiplier
+	)
 	modifiers["knockout_multiplier"] = profile.knockout_multiplier
 	return modifiers
 
@@ -477,6 +532,7 @@ func _physics_process(_delta: float) -> void:
 func _move_and_slide_with_rope(delta: float) -> void:
 	velocity = Rope.constrain_attached_velocity(self, velocity, delta)
 	move_and_slide()
+	_update_run_animation_playback(delta)
 
 
 func initialize_states () -> void:
@@ -555,6 +611,40 @@ func get_active_visual_sprite() -> Sprite2D:
 
 func _on_player_animation_started(animation_name: StringName) -> void:
 	_sync_player_animation_visual(animation_name)
+	if animation_name == &"run":
+		animation_player.speed_scale = clampf(
+			run_animation_start_speed_scale,
+			minf(run_animation_min_speed_scale, run_animation_max_speed_scale),
+			maxf(run_animation_min_speed_scale, run_animation_max_speed_scale)
+		)
+	else:
+		animation_player.speed_scale = 1.0
+
+
+func _update_run_animation_playback(delta: float) -> void:
+	if animation_player == null or animation_player.current_animation != &"run":
+		return
+	var target_scale := _get_run_animation_target_scale(absf(get_real_velocity().x))
+	var adjustment_rate := (
+		run_animation_acceleration
+		if target_scale > animation_player.speed_scale
+		else run_animation_deceleration
+	)
+	animation_player.speed_scale = move_toward(
+		animation_player.speed_scale,
+		target_scale,
+		maxf(adjustment_rate, 0.01) * maxf(delta, 0.0)
+	)
+
+
+func _get_run_animation_target_scale(actual_horizontal_speed: float) -> float:
+	var minimum_scale := minf(run_animation_min_speed_scale, run_animation_max_speed_scale)
+	var maximum_scale := maxf(run_animation_min_speed_scale, run_animation_max_speed_scale)
+	return clampf(
+		maxf(actual_horizontal_speed, 0.0) / maxf(level_one_run_speed, 0.001),
+		minimum_scale,
+		maximum_scale
+	)
 
 
 func _sync_player_animation_visual(animation_name: StringName) -> void:
@@ -663,6 +753,8 @@ func take_damage(
 		damage_events.call("emit_damage_dealt", damage_taken, damage_source, self)
 	if player_hud != null:
 		player_hud.set_hp(hp)
+	if damage_taken > 0.0:
+		_play_damage_feedback()
 
 	if hp <= 0:
 		_defeat()
@@ -674,6 +766,24 @@ func take_damage(
 	apply_knockout(knockout_damage)
 	if not is_downed:
 		apply_knockback(damage_source_position)
+
+
+func _play_damage_feedback() -> void:
+	if not damage_flash_enabled:
+		return
+	var visuals: Array[CanvasItem] = [sprite_2d, movement_sprite]
+	_damage_flash.play(
+		self,
+		visuals,
+		damage_flash_peak_color,
+		damage_flash_fade_color,
+		damage_flash_peak_seconds,
+		damage_flash_fade_seconds
+	)
+
+
+func _stop_damage_flash() -> void:
+	_damage_flash.stop()
 
 
 func _defeat() -> void:

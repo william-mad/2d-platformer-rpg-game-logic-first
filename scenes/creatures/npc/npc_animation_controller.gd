@@ -42,9 +42,9 @@ enum LocomotionIntent {
 @export var run_animation_name: StringName = &"run"
 @export var locomotion_idle_animation_name: StringName = &"idle"
 @export_range(0.0, 100.0, 0.5, "suffix:px/s") var locomotion_stop_speed: float = 4.0
-@export_range(0.0, 3000.0, 1.0, "suffix:px/s") var run_enter_speed: float = 120.0
-@export_range(0.0, 3000.0, 1.0, "suffix:px/s") var run_exit_speed: float = 100.0
-@export_range(1.0, 3000.0, 1.0, "suffix:px/s") var walk_reference_speed: float = 77.0
+@export_range(0.0, 3000.0, 1.0, "suffix:px/s") var run_enter_speed: float = 150.0
+@export_range(0.0, 3000.0, 1.0, "suffix:px/s") var run_exit_speed: float = 135.0
+@export_range(1.0, 3000.0, 1.0, "suffix:px/s") var walk_reference_speed: float = 120.0
 @export_range(1.0, 3000.0, 1.0, "suffix:px/s") var run_reference_speed: float = 161.0
 
 @export_group("Ground Locomotion Playback")

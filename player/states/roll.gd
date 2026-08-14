@@ -80,7 +80,7 @@ func physics_update_before_move(_delta: float) -> void:
 func _get_current_roll_speed() -> float:
 	var progress := clampf(elapsed / maxf(roll_duration, 0.001), 0.0, 1.0)
 	var eased_progress := pow(progress, maxf(speed_ease_power, 0.01))
-	var exit_speed := player.move_speed * maxf(roll_exit_speed_multiplier, 0.0)
+	var exit_speed := player.get_run_speed() * maxf(roll_exit_speed_multiplier, 0.0)
 	return lerpf(entry_speed, exit_speed, eased_progress)
 
 
