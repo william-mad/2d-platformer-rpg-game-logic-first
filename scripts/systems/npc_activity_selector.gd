@@ -82,6 +82,13 @@ static func find_best_candidate(
 				if definition.need_maximum >= 0.0 and current_value > definition.need_maximum:
 					continue
 				urgency = current_value - effective_threshold
+		var social_affinity := get_social_affinity_score(
+			definition,
+			npc_id,
+			runtime
+		)
+		if not bool(social_affinity.get("group_compatible", true)):
+			continue
 		var candidate := {
 			"definition": definition,
 			"schedule_decision": schedule_decision.duplicate(true),
@@ -90,6 +97,11 @@ static func find_best_candidate(
 				definition.priority
 			)),
 			"urgency": urgency,
+			"social_affinity": social_affinity,
+			"social_affinity_bonus": float(social_affinity.get(
+				"social_bonus",
+				0.0
+			)),
 		}
 		if _candidate_comes_before(candidate, best_candidate):
 			best_candidate = candidate
@@ -108,15 +120,59 @@ static func _candidate_comes_before(
 		return candidate_priority > best_priority
 	var candidate_urgency := float(candidate.get("urgency", 0.0))
 	var best_urgency := float(current_best.get("urgency", 0.0))
-	if not is_equal_approx(candidate_urgency, best_urgency):
-		return candidate_urgency > best_urgency
 	var candidate_definition := candidate.get("definition", null) as NpcSpotDefinition
 	var best_definition := current_best.get("definition", null) as NpcSpotDefinition
 	if candidate_definition == null:
 		return false
 	if best_definition == null:
 		return true
+	if (
+		candidate_definition.state_name == best_definition.state_name
+		and candidate_definition.state_name in [&"Rest", &"Recreation"]
+	):
+		var candidate_location_score := candidate_urgency + float(
+			candidate.get("social_affinity_bonus", 0.0)
+		)
+		var best_location_score := best_urgency + float(
+			current_best.get("social_affinity_bonus", 0.0)
+		)
+		if not is_equal_approx(candidate_location_score, best_location_score):
+			return candidate_location_score > best_location_score
+	elif not is_equal_approx(candidate_urgency, best_urgency):
+		return candidate_urgency > best_urgency
 	return String(candidate_definition.spot_id) < String(best_definition.spot_id)
+
+
+static func get_social_affinity_bonus(
+	definition: NpcSpotDefinition,
+	npc_id: StringName,
+	runtime
+) -> float:
+	return float(get_social_affinity_score(
+		definition,
+		npc_id,
+		runtime
+	).get("social_bonus", 0.0))
+
+
+static func get_social_affinity_score(
+	definition: NpcSpotDefinition,
+	npc_id: StringName,
+	runtime
+) -> Dictionary:
+	if (
+		definition == null
+		or definition.state_name not in [&"Rest", &"Recreation"]
+		or runtime == null
+		or not runtime.has_method("score_activity_spot_social_affinity")
+	):
+		return {}
+	var score = runtime.score_activity_spot_social_affinity(
+		npc_id,
+		definition.spot_id,
+		definition.state_name
+	)
+	return score if score is Dictionary else {}
 
 
 static func get_effective_need_threshold(

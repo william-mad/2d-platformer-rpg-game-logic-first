@@ -234,6 +234,21 @@ func find_weighted_casual_spot(
 		var weight := 1.0
 		if spot.has_method("get_npc_preference_weight"):
 			weight = maxf(float(spot.call("get_npc_preference_weight", npc)), 0.0)
+		if machine != null and machine.has_method("get_activity_spot_social_affinity"):
+			var social_affinity: Dictionary = machine.call(
+				"get_activity_spot_social_affinity",
+				spot,
+				requested_state_name
+			)
+			if not bool(social_affinity.get("group_compatible", true)):
+				continue
+			weight += float(social_affinity.get("social_bonus", 0.0))
+		elif machine != null and machine.has_method("get_activity_spot_social_bonus"):
+			weight += float(machine.call(
+				"get_activity_spot_social_bonus",
+				spot,
+				requested_state_name
+			))
 		if weight <= 0.0:
 			continue
 

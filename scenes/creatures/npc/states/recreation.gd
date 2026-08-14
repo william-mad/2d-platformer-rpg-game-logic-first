@@ -1,5 +1,9 @@
 class_name NpcStateRecreation extends NpcState
 
+const RecreationInvitationCoordinator = preload(
+	"res://scripts/systems/npc_behavior/npc_recreation_invitation_coordinator.gd"
+)
+
 @export var recreation_target_path: NodePath
 @export var recreation_value_name: StringName = &"boredom"
 @export_range(0.0, 100.0, 0.1, "suffix:/h") var boredom_drop_per_game_hour: float = 25.0
@@ -9,6 +13,7 @@ class_name NpcStateRecreation extends NpcState
 var active_recreation_target: Node2D
 var progress_elapsed: float = 0.0
 var choice_rng := RandomNumberGenerator.new()
+var invitation_coordinator := RecreationInvitationCoordinator.new()
 
 
 func on_action_session_refreshed() -> void:
@@ -28,6 +33,7 @@ func enter() -> void:
 	if active_recreation_target == null:
 		machine.call_deferred("request_state", &"Idle", null, "missing_recreation_spot", 20)
 		return
+	call_deferred("_try_invite_recreation_partner", action_session_id)
 	if not is_close_to(active_recreation_target.global_position, machine.stop_distance):
 		machine.call_deferred(
 			"request_active_action_approach", action_session_id, "walk_to_recreation", 20
@@ -35,6 +41,10 @@ func enter() -> void:
 		return
 
 	stop_horizontal()
+
+
+func _try_invite_recreation_partner(expected_session_id: String) -> void:
+	invitation_coordinator.try_invite(machine, expected_session_id)
 
 
 func physics_process(delta: float) -> NpcState:

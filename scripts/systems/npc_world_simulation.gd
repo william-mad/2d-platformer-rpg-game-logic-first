@@ -35,6 +35,9 @@ const NpcActionSessionModel = preload("res://scripts/systems/npc_action_session.
 const NpcBehaviorIntentModel = preload(
 	"res://scripts/systems/npc_behavior/npc_behavior_intent.gd"
 )
+const NpcActivitySocialAffinityPolicy = preload(
+	"res://scripts/systems/npc_behavior/npc_activity_social_affinity_policy.gd"
+)
 const NpcSocialConfigurationValidator = preload(
 	"res://scripts/systems/npc_behavior/npc_social_configuration_validator.gd"
 )
@@ -3552,6 +3555,21 @@ func _start_planned_scheduled_activity(
 		schedule_decision,
 		effective_priority
 	)
+	var social_affinity = candidate.get("social_affinity", {})
+	if social_affinity is Dictionary:
+		var social_metadata := (
+			NpcActivitySocialAffinityPolicy.build_selected_activity_metadata(
+				social_affinity,
+				npc_id,
+				definition.spot_id,
+				definition.state_name
+			)
+		)
+		if not social_metadata.is_empty():
+			activity.merge(social_metadata, true)
+			var activity_metadata: Dictionary = activity.get("metadata", {})
+			activity_metadata.merge(social_metadata, true)
+			activity["metadata"] = activity_metadata
 	if definition.state_name == INVITE_PLAYER_STATE:
 		activity["lesson_phase"] = "inviting"
 		activity["lesson_scene_path"] = definition.scene_path
@@ -5318,6 +5336,29 @@ func get_spot_reservations(spot_id: StringName) -> Array[Dictionary]:
 		if String(reservation.get("spot_id", "")) == String(spot_id):
 			reservations.append(reservation.duplicate(true))
 	return reservations
+
+
+func score_activity_spot_social_affinity(
+	npc_id: StringName,
+	spot_id: StringName,
+	activity_kind: StringName,
+	memory: NpcShortTermMemory = null,
+	now_game_hours: float = -1.0
+) -> Dictionary:
+	var evaluated_at := (
+		_get_current_total_hours()
+		if now_game_hours < 0.0
+		else maxf(now_game_hours, 0.0)
+	)
+	return NpcActivitySocialAffinityPolicy.score_reserved_participants(
+		npc_id,
+		activity_kind,
+		get_spot_reservations(spot_id),
+		get_node_or_null("/root/NpcLocations"),
+		get_node_or_null("/root/Relationships"),
+		memory,
+		evaluated_at
+	)
 
 
 func get_spot_reservation_diagnostics(spot_id: StringName) -> Dictionary:

@@ -27,6 +27,9 @@ const NpcSocialConfigurationValidator = preload(
 const NpcTargetMemoryPolicyModel = preload(
 	"res://scripts/systems/npc_behavior/npc_target_memory_policy.gd"
 )
+const NpcActivitySocialAffinityPolicy = preload(
+	"res://scripts/systems/npc_behavior/npc_activity_social_affinity_policy.gd"
+)
 const NpcPlayerInteractionMemoryPolicyModel = preload(
 	"res://scripts/systems/npc_behavior/npc_player_interaction_memory_policy.gd"
 )
@@ -1368,6 +1371,16 @@ func request_behavior_intent(
 		return _reject_state_request(&"", "invalid_behavior_intent")
 	var submitted := intent.refreshed_copy()
 	var context := request_context.duplicate(true)
+	var forwarded_metadata := submitted.metadata.duplicate(true)
+	for context_key in context:
+		var context_key_text := String(context_key)
+		if (
+			context_key_text.begins_with("shared_activity_")
+			or context_key_text.begins_with("activity_social_")
+		):
+			forwarded_metadata[context_key_text] = context[context_key]
+	if forwarded_metadata != submitted.metadata:
+		submitted = submitted.refreshed_copy({"metadata": forwarded_metadata})
 	context["request_source"] = submitted.source
 	context["explicit_behavior_intent"] = true
 	context["behavior_source"] = submitted.source
@@ -1723,7 +1736,11 @@ func _build_behavior_candidate(
 		"legacy_derived": legacy_derived,
 	}
 	for metadata_key in action_metadata_for_intent:
-		if String(metadata_key).begins_with("schedule_"):
+		if (
+			String(metadata_key).begins_with("schedule_")
+			or String(metadata_key).begins_with("shared_activity_")
+			or String(metadata_key).begins_with("activity_social_")
+		):
 			metadata[String(metadata_key)] = action_metadata_for_intent[metadata_key]
 	if request_context.has("arrival_state"):
 		metadata["arrival_state"] = String(request_context["arrival_state"])
@@ -2855,6 +2872,13 @@ func _consume_or_build_action_session(
 	]:
 		if request_context.has(behavior_key):
 			behavior_metadata[behavior_key] = request_context[behavior_key]
+	for request_key in request_context:
+		var request_key_text := String(request_key)
+		if (
+			request_key_text.begins_with("shared_activity_")
+			or request_key_text.begins_with("activity_social_")
+		):
+			behavior_metadata[request_key_text] = request_context[request_key]
 	if request_context.has("scripted_claim_token"):
 		behavior_metadata["scripted_claim_token"] = int(
 			request_context["scripted_claim_token"]
@@ -5155,6 +5179,12 @@ func evaluate_value_reactions(
 		)).strip_edges()
 		if not selected_target_id.is_empty():
 			request_context["target_persistent_id"] = selected_target_id
+		var selected_activity_metadata = target_selection.get(
+			"activity_metadata",
+			{}
+		)
+		if selected_activity_metadata is Dictionary:
+			request_context.merge(selected_activity_metadata, true)
 		if bool(target_selection.get("in_place", false)):
 			request_context["autonomous_in_place_target"] = true
 	else:
@@ -6179,6 +6209,19 @@ func _prepare_memory_informed_rule_target(
 		state_name,
 		candidates
 	)
+	if bool(selection.get("selected", false)) and state_name in [&"Rest", &"Recreation"]:
+		var selected_spot := selection.get("target_node", null) as Node2D
+		var affinity := get_activity_spot_social_affinity(selected_spot, state_name)
+		var descriptor: Dictionary = selection.get("descriptor", {})
+		var social_context := NpcActivitySocialAffinityPolicy.build_selected_activity_context(
+			affinity,
+			StringName(_get_action_owner_id()),
+			_get_stable_spot_id(selected_spot),
+			state_name
+		)
+		descriptor.merge(social_context.get("debug", {}), true)
+		selection["activity_metadata"] = social_context.get("metadata", {})
+		selection["descriptor"] = descriptor
 	selection["handled"] = true
 	return selection
 
@@ -6414,6 +6457,13 @@ func _get_weighted_casual_candidate_order(
 				"get_npc_preference_weight",
 				npc
 			)), 0.0)
+		var social_affinity := get_activity_spot_social_affinity(
+			spot,
+			logical_action
+		)
+		if not bool(social_affinity.get("group_compatible", true)):
+			continue
+		weight += float(social_affinity.get("social_bonus", 0.0))
 		if weight <= 0.0:
 			continue
 		candidates.append(spot)
@@ -6441,6 +6491,41 @@ func _get_weighted_casual_candidate_order(
 		candidates.remove_at(selected_index)
 		weights.remove_at(selected_index)
 	return ordered
+
+
+func get_activity_spot_social_bonus(
+	spot: Node2D,
+	logical_action: StringName
+) -> float:
+	return maxf(float(get_activity_spot_social_affinity(
+		spot,
+		logical_action
+	).get("social_bonus", 0.0)), 0.0)
+
+
+func get_activity_spot_social_affinity(
+	spot: Node2D,
+	logical_action: StringName
+) -> Dictionary:
+	if spot == null or logical_action not in [&"Rest", &"Recreation"]:
+		return {}
+	var spot_id := _get_stable_spot_id(spot)
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if (
+		spot_id == &""
+		or simulator == null
+		or not simulator.has_method("score_activity_spot_social_affinity")
+	):
+		return {}
+	var score: Dictionary = simulator.call(
+		"score_activity_spot_social_affinity",
+		StringName(_get_action_owner_id()),
+		spot_id,
+		logical_action,
+		short_term_memory,
+		_get_world_total_hours()
+	)
+	return score
 
 
 func _get_activity_configured_target_path(
@@ -7273,7 +7358,9 @@ func get_feedback_descriptor() -> Dictionary:
 
 func set_target_selection_feedback(descriptor: Dictionary) -> void:
 	var next_feedback: Dictionary = {}
-	if (
+	if float(descriptor.get("social_affinity_bonus", 0.0)) > 0.0:
+		next_feedback = descriptor.duplicate(true)
+	elif (
 		bool(descriptor.get("all_suppressed", false))
 		and String(descriptor.get("reason_code", ""))
 			== "all_targets_recently_failed"
@@ -7293,6 +7380,8 @@ func get_target_selection_debug_descriptor() -> Dictionary:
 func _get_active_target_selection_feedback() -> Dictionary:
 	if _target_selection_feedback.is_empty():
 		return {}
+	if float(_target_selection_feedback.get("social_affinity_bonus", 0.0)) > 0.0:
+		return _target_selection_feedback.duplicate(true)
 	var retry_game_hours := float(_target_selection_feedback.get(
 		"earliest_retry_game_hours",
 		0.0

@@ -5,6 +5,7 @@
 [node name="NpcRecreationSpot" type="Node2D"]
 script = ExtResource("1_casual_spot")
 activity_state_name = &"Recreation"
+reservation_capacity = 4
 
 [node name="ZoneVisual" type="Polygon2D" parent="."]
 color = Color(0.18, 0.68, 0.78, 0.32)

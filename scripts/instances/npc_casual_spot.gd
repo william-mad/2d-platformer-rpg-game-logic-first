@@ -44,8 +44,31 @@ func can_serve_npc_casual_activity(
 		return false
 	if not _owner_allows_npc(npc_node):
 		return false
+	if not _reservation_capacity_allows_npc(npc_node):
+		return false
 
 	return _npc_has_required_tags(npc_node)
+
+
+func _reservation_capacity_allows_npc(npc_node: Node2D) -> bool:
+	var effective_spot_id := get_persistent_spot_id()
+	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if (
+		effective_spot_id == &""
+		or simulator == null
+		or not simulator.has_method("get_spot_reservation_diagnostics")
+	):
+		return true
+	var diagnostics: Dictionary = simulator.call(
+		"get_spot_reservation_diagnostics",
+		effective_spot_id
+	)
+	var npc_id := String(_get_npc_id(npc_node))
+	for reservation in diagnostics.get("reservations", []):
+		if reservation is Dictionary and String(reservation.get("npc_id", "")) == npc_id:
+			return true
+	var capacity := int(diagnostics.get("capacity", reservation_capacity))
+	return capacity <= 0 or int(diagnostics.get("occupancy", 0)) < capacity
 
 
 func get_npc_preference_weight(npc_node: Node2D) -> float:
