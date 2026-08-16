@@ -71,6 +71,69 @@ func test_catalog_maps_codes_and_keeps_localization_separate() -> void:
 	)
 
 
+func test_player_refusal_catalog_maps_existing_reasons_and_silences_incapacity() -> void:
+	assert_eq(
+		Catalog.get_player_interaction_refusal_category(&"requester_favor_too_low"),
+		&"opinion",
+		"directed-opinion rejection remains identifiable"
+	)
+	assert_eq(
+		Catalog.get_player_interaction_refusal_category(&"npc_ignoring_player"),
+		&"repeated",
+		"the existing interaction cooldown maps to repetition"
+	)
+	assert_eq(
+		Catalog.get_player_interaction_refusal_category(&"protected_primary_activity"),
+		&"busy",
+		"protected activity maps to temporary unavailability"
+	)
+	assert_eq(
+		Catalog.get_player_interaction_refusal_category(&"npc_dead"),
+		&"",
+		"dead NPCs remain silent"
+	)
+	assert_eq(
+		Catalog.get_player_interaction_refusal_category(&"npc_knocked_out"),
+		&"",
+		"unconscious NPCs remain silent"
+	)
+
+	var cue: Cue = Catalog.create_player_interaction_refusal_cue(
+		&"requester_anger_too_high"
+	)
+	assert_not_null(cue, "a presentable opinion reason creates an existing feedback cue")
+	if cue != null:
+		assert_true(
+			Catalog.get_player_interaction_refusal_lines(&"opinion").has(
+				cue.fallback_text
+			),
+			"randomized text stays inside the opinion response pool"
+		)
+		assert_eq(cue.icon_key, &"", "spoken refusal feedback uses plain text")
+		assert_eq(
+			cue.metadata.get("reason_code"),
+			&"requester_anger_too_high",
+			"presentation retains the original detailed reason"
+		)
+	assert_null(
+		Catalog.create_player_interaction_refusal_cue(&"npc_downed"),
+		"silent reasons create no cue"
+	)
+	var softened_cue: Cue = Catalog.create_player_interaction_refusal_cue(
+		&"requester_anger_too_high",
+		{"softened": true, "directed_favor": 70.0}
+	)
+	assert_not_null(softened_cue, "high-favor refusals still create feedback")
+	if softened_cue != null:
+		assert_true(
+			Catalog.get_player_interaction_refusal_lines(&"opinion", true).has(
+				softened_cue.fallback_text
+			),
+			"favor 70 selects the gentler opinion response pool"
+		)
+		assert_eq(softened_cue.metadata.get("refusal_tone"), &"soft")
+
+
 func test_presenter_starts_expires_and_dismisses_idempotently() -> void:
 	var fixture := _presenter_fixture()
 	var presenter: Presenter = fixture.presenter
@@ -89,6 +152,35 @@ func test_presenter_starts_expires_and_dismisses_idempotently() -> void:
 		"cue hides after its duration"
 	)
 	assert_false(presenter.dismiss_current(), "dismissal is idempotent when empty")
+
+
+func test_presenter_fades_during_the_end_of_visible_duration() -> void:
+	var presenter: Presenter = _presenter_fixture().presenter
+	var cue: Cue = Cue.create(&"fade_probe", {
+		"fallback_text": "Not now.",
+		"duration_seconds": 1.0,
+		"maximum_lifetime_seconds": 2.0,
+	})
+	presenter.submit_cue(cue)
+	assert_eq(
+		presenter._visual.label.text,
+		"Not now.",
+		"the spoken refusal reaches the NPC feedback label"
+	)
+	assert_true(
+		presenter._visual.panel.size.x > 20.0,
+		"the refusal text keeps its natural width instead of collapsing to a square"
+	)
+	assert_true(
+		is_equal_approx(presenter._visual.modulate.a, 1.0),
+		"feedback begins fully visible"
+	)
+	presenter._process(0.8)
+	assert_true(
+		presenter._visual.modulate.a > 0.0
+		and presenter._visual.modulate.a < 1.0,
+		"feedback fades near the end instead of disappearing abruptly"
+	)
 
 
 func test_presenter_deduplicates_and_prioritizes_problem_cues() -> void:

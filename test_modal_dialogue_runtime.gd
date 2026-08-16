@@ -29,7 +29,8 @@ func _initialize() -> void:
 	_expect(definition != null, "Mom explicitly exposes her dialogue definition")
 	_expect(definition != null and definition.get_validation_error().is_empty(), "Mom dialogue resource validates")
 
-	# Start through the actual interaction option to cover the clean menu handoff.
+	# Exercise the clean internal menu handoff. Authored dialogue remains available
+	# to scripted callers, but is no longer exposed as a player menu option.
 	var interactor = player.get_node("NpcTalkInteractor")
 	interactor.nearby_npcs.append(mom)
 	interactor.interaction_applied.connect(_on_old_interaction_applied)
@@ -37,11 +38,20 @@ func _initialize() -> void:
 	_expect(interactor.active_menu == &"interaction", "normal interaction menu opens")
 	_expect(
 		interactor.menu_option_labels.size() > 0
-		and String(interactor.menu_option_labels[0].text).contains("Dialogue"),
-		"Mom's first interaction option is resource-backed Dialogue"
+		and String(interactor.menu_option_labels[0].text).contains("Talk"),
+		"Mom's first interaction option opens the player-facing Talk menu"
 	)
-	interactor.call("_handle_interaction_option", 0)
-	_expect(bool(controller.call("is_dialogue_active")), "interaction option starts modal dialogue")
+	_expect(
+		interactor.interaction_menu_actions.size() > 1
+		and interactor.interaction_menu_actions[1] == &"actions",
+		"Mom's second interaction option is the Actions placeholder"
+	)
+	_expect(
+		not interactor.interaction_menu_actions.has(&"dialogue"),
+		"Special Dialogue is absent from the player menu"
+	)
+	interactor.call("_try_begin_modal_dialogue", definition)
+	_expect(bool(controller.call("is_dialogue_active")), "internal handoff starts modal dialogue")
 	_expect(interactor.active_menu == &"", "old interaction menu closes for handoff")
 	_expect(is_zero_approx(interactor.cooldown), "modal handoff adds no local cooldown")
 	_expect(old_interaction_effect_count == 0, "modal handoff applies no old timed Talk effect")

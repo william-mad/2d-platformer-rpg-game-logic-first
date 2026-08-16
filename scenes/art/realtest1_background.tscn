@@ -27,15 +27,15 @@ layer = -99
 [node name="MountainStrip" type="Node2D" parent="MountainLayer"]
 
 [node name="Left" type="Sprite2D" parent="MountainLayer/MountainStrip"]
-position = Vector2(-512, 221)
+position = Vector2(-512, 205)
 texture = ExtResource("2_mountains")
 
 [node name="Center" type="Sprite2D" parent="MountainLayer/MountainStrip"]
-position = Vector2(576, 221)
+position = Vector2(576, 205)
 texture = ExtResource("2_mountains")
 
 [node name="Right" type="Sprite2D" parent="MountainLayer/MountainStrip"]
-position = Vector2(1664, 221)
+position = Vector2(1664, 205)
 texture = ExtResource("2_mountains")
 
 [node name="SkyOverlay" type="CanvasLayer" parent="."]

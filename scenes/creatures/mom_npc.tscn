@@ -20,6 +20,8 @@
 [ext_resource type="Texture2D" path="res://images/sprites/characters/mom/run_start_1_mom.png" id="17_run_start_texture"]
 [ext_resource type="Texture2D" path="res://images/sprites/characters/mom/run_1_mom.png" id="18_run_texture"]
 [ext_resource type="Texture2D" path="res://images/sprites/characters/mom/jump_1_mom.png" id="19_jump_texture"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_autonomous_dialogue_profile.tres" id="20_autonomous_dialogue"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_player_talk_dialogue_profile.tres" id="21_player_talk_dialogue"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_agoec"]
 radius = 15.0
@@ -761,6 +763,8 @@ display_name = "Mom"
 npc_tags = Array[StringName]([&"mom", &"family"])
 location_id = &"mom"
 npc_scene_path = "res://scenes/creatures/mom_npc.tscn"
+autonomous_dialogue_profile = ExtResource("20_autonomous_dialogue")
+player_talk_dialogue_profile = ExtResource("21_player_talk_dialogue")
 metadata/default_dialogue_definition = ExtResource("15_dialogue")
 
 [node name="NpcInventory" type="Node" parent="." unique_id=721636258]

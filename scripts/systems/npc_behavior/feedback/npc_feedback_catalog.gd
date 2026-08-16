@@ -4,6 +4,76 @@ const Cue = preload(
 	"res://scripts/systems/npc_behavior/feedback/npc_feedback_cue.gd"
 )
 
+const PLAYER_REFUSAL_OPINION: StringName = &"opinion"
+const PLAYER_REFUSAL_REPEATED: StringName = &"repeated"
+const PLAYER_REFUSAL_BUSY: StringName = &"busy"
+
+const PLAYER_INTERACTION_REFUSAL_LINES := {
+	PLAYER_REFUSAL_OPINION: [
+		"Not now.",
+		"Leave me alone.",
+		"No.",
+	],
+	PLAYER_REFUSAL_REPEATED: [
+		"Again?!",
+		"We just talked.",
+	],
+	PLAYER_REFUSAL_BUSY: [
+		"I'm busy.",
+		"Not right now.",
+	],
+}
+
+const PLAYER_INTERACTION_REFUSAL_SOFT_LINES := {
+	PLAYER_REFUSAL_OPINION: [
+		"Please, not right now.",
+		"I just need a little space.",
+	],
+	PLAYER_REFUSAL_REPEATED: [
+		"Let's talk again in a bit.",
+		"Give me just a moment.",
+	],
+	PLAYER_REFUSAL_BUSY: [
+		"Sorry, give me a minute.",
+		"We'll talk soon.",
+	],
+}
+
+const PLAYER_INTERACTION_REFUSAL_CATEGORIES := {
+	"npc_recently_harmed_by_player": PLAYER_REFUSAL_OPINION,
+	"recently_harmed_by_requester": PLAYER_REFUSAL_OPINION,
+	"requester_favor_too_low": PLAYER_REFUSAL_OPINION,
+	"requester_anger_too_high": PLAYER_REFUSAL_OPINION,
+	"requester_fear_too_high": PLAYER_REFUSAL_OPINION,
+	"mutual_favor_too_low": PLAYER_REFUSAL_OPINION,
+	"npc_ignoring_player": PLAYER_REFUSAL_REPEATED,
+	"player_interaction_cooldown": PLAYER_REFUSAL_REPEATED,
+	"recently_talked_with_requester": PLAYER_REFUSAL_REPEATED,
+	"recent_conversation_refusal": PLAYER_REFUSAL_REPEATED,
+	"npc_scripted_controlled": PLAYER_REFUSAL_BUSY,
+	"npc_fighting": PLAYER_REFUSAL_BUSY,
+	"npc_fleeing": PLAYER_REFUSAL_BUSY,
+	"npc_roped": PLAYER_REFUSAL_BUSY,
+	"npc_invitation_reserved": PLAYER_REFUSAL_BUSY,
+	"npc_invitation_approach": PLAYER_REFUSAL_BUSY,
+	"npc_travel_transition": PLAYER_REFUSAL_BUSY,
+	"npc_scene_handoff": PLAYER_REFUSAL_BUSY,
+	"npc_state_unavailable": PLAYER_REFUSAL_BUSY,
+	"npc_scheduled_activity": PLAYER_REFUSAL_BUSY,
+	"npc_lesson_or_class_handoff": PLAYER_REFUSAL_BUSY,
+	"interaction_hold_rejected": PLAYER_REFUSAL_BUSY,
+	"talk_request_rejected": PLAYER_REFUSAL_BUSY,
+	"talker_cannot_enter_talk": PLAYER_REFUSAL_BUSY,
+	"active_interaction": PLAYER_REFUSAL_BUSY,
+	"existing_social_session": PLAYER_REFUSAL_BUSY,
+	"protected_primary_activity": PLAYER_REFUSAL_BUSY,
+	"protected_intention": PLAYER_REFUSAL_BUSY,
+	"protected_action": PLAYER_REFUSAL_BUSY,
+	"talk_incompatible_primary_state": PLAYER_REFUSAL_BUSY,
+	"talk_state_incompatible": PLAYER_REFUSAL_BUSY,
+	"npc_gate_rejected": PLAYER_REFUSAL_BUSY,
+}
+
 const ENTRIES := {
 	"hunger_high": {
 		"fallback_text": "Hungry",
@@ -42,6 +112,36 @@ const ENTRIES := {
 		"duration_seconds": 1.75,
 		"maximum_lifetime_seconds": 4.0,
 		"cooldown_seconds": 8.0,
+		"category": Cue.CATEGORY_SOCIAL,
+		"replace_policy": Cue.IGNORE_IF_DUPLICATE,
+	},
+	"player_interaction_refused_opinion": {
+		"fallback_text": "Not now.",
+		"icon_key": &"",
+		"priority": 85,
+		"duration_seconds": 1.6,
+		"maximum_lifetime_seconds": 3.0,
+		"cooldown_seconds": 0.75,
+		"category": Cue.CATEGORY_SOCIAL,
+		"replace_policy": Cue.IGNORE_IF_DUPLICATE,
+	},
+	"player_interaction_refused_repeated": {
+		"fallback_text": "Again?!",
+		"icon_key": &"",
+		"priority": 80,
+		"duration_seconds": 1.6,
+		"maximum_lifetime_seconds": 3.0,
+		"cooldown_seconds": 0.75,
+		"category": Cue.CATEGORY_SOCIAL,
+		"replace_policy": Cue.IGNORE_IF_DUPLICATE,
+	},
+	"player_interaction_refused_busy": {
+		"fallback_text": "I'm busy.",
+		"icon_key": &"",
+		"priority": 75,
+		"duration_seconds": 1.6,
+		"maximum_lifetime_seconds": 3.0,
+		"cooldown_seconds": 0.75,
 		"category": Cue.CATEGORY_SOCIAL,
 		"replace_policy": Cue.IGNORE_IF_DUPLICATE,
 	},
@@ -190,6 +290,69 @@ const ENTRIES := {
 
 static func has_code(cue_code: StringName) -> bool:
 	return ENTRIES.has(String(cue_code))
+
+
+static func get_player_interaction_refusal_category(
+	reason_code: StringName
+) -> StringName:
+	var reason := String(reason_code).strip_edges()
+	if PLAYER_INTERACTION_REFUSAL_CATEGORIES.has(reason):
+		return PLAYER_INTERACTION_REFUSAL_CATEGORIES[reason]
+	if reason.begins_with("npc_state_"):
+		return PLAYER_REFUSAL_BUSY
+	if reason.begins_with("partner_social_decline:"):
+		return PLAYER_REFUSAL_OPINION
+	if reason.begins_with("partner_temporarily_unavailable:"):
+		return PLAYER_REFUSAL_BUSY
+	return &""
+
+
+static func get_player_interaction_refusal_lines(
+	category: StringName,
+	softened: bool = false
+) -> PackedStringArray:
+	var pools := (
+		PLAYER_INTERACTION_REFUSAL_SOFT_LINES
+		if softened
+		else PLAYER_INTERACTION_REFUSAL_LINES
+	)
+	var lines_value: Variant = pools.get(
+		category,
+		[]
+	)
+	return PackedStringArray(lines_value) if lines_value is Array else PackedStringArray()
+
+
+static func is_player_interaction_refusal_presentable(
+	reason_code: StringName
+) -> bool:
+	return get_player_interaction_refusal_category(reason_code) != &""
+
+
+static func create_player_interaction_refusal_cue(
+	reason_code: StringName,
+	context: Dictionary = {}
+) -> Cue:
+	var category := get_player_interaction_refusal_category(reason_code)
+	var softened := bool(context.get("softened", false))
+	var lines := get_player_interaction_refusal_lines(category, softened)
+	if category == &"" or lines.is_empty():
+		return null
+	var cue_code := StringName("player_interaction_refused_%s" % String(category))
+	var selected_text := lines[randi() % lines.size()]
+	var identity_key := "player_interaction_refusal:%s" % String(category)
+	return create_cue(cue_code, {
+		"fallback_text": selected_text,
+		"icon_key": &"",
+		"metadata": {
+			"identity_key": identity_key,
+			"cooldown_key": identity_key,
+			"reason_code": reason_code,
+			"refusal_category": category,
+			"refusal_tone": &"soft" if softened else &"standard",
+			"directed_favor": float(context.get("directed_favor", -1.0)),
+		},
+	})
 
 
 static func resolve(cue_code: StringName) -> Dictionary:

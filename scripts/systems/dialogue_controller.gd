@@ -22,6 +22,8 @@ const TALK_ANIMATION := &"talk"
 const IDLE_ANIMATION := &"idle"
 const SESSION_MODE_WORLD := &"world"
 const SESSION_MODE_MODAL := &"modal"
+const SESSION_MODE_AUTONOMOUS_TALK := &"autonomous_talk"
+const SESSION_MODE_PLAYER_TALK := &"player_talk"
 const ALLOWED_PRIMARY_STATES := {
 	"Idle": true,
 	"Rest": true,
@@ -65,10 +67,31 @@ func _process(_delta: float) -> void:
 	if not is_dialogue_active() or _cleanup_in_progress:
 		return
 	var session_id := current_session_id
-	if current_session_mode == SESSION_MODE_MODAL:
+	if current_session_mode in [
+		SESSION_MODE_MODAL,
+		SESSION_MODE_AUTONOMOUS_TALK,
+		SESSION_MODE_PLAYER_TALK,
+	]:
 		if not _modal_owner_is_live():
 			_terminal_cleanup("modal_owner_removed", false, session_id)
 			return
+		if current_session_mode in [
+			SESSION_MODE_AUTONOMOUS_TALK,
+			SESSION_MODE_PLAYER_TALK,
+		]:
+			if not _participant_is_live(current_npc):
+				_terminal_cleanup("npc_removed", false, session_id)
+				return
+			if not _talk_owned_session_is_live():
+				_terminal_cleanup("talk_session_lost", false, session_id)
+				return
+		if player_control_claim_token != 0:
+			if not _participant_is_live(current_player):
+				_terminal_cleanup("player_removed", false, session_id)
+				return
+			if not _player_claim_is_exact(current_player, player_control_claim_token):
+				_terminal_cleanup("token_lost", false, session_id)
+				return
 		if not _world_lock_is_exact(world_progression_lock_token):
 			_terminal_cleanup("token_lost", false, session_id)
 		return
@@ -150,6 +173,7 @@ func begin_dialogue(player: Node, npc: Node, definition: Resource) -> Dictionary
 		return _reject_started_session("scripted_talk_animation_rejected")
 
 	current_node = current_definition.get_node(current_definition.entry_node_id)
+	_ui.configure_portrait_presentation(&"", {})
 	dialogue_session_started.emit(current_session_id, current_definition.dialogue_id)
 	if not _display_current_node():
 		return _reject_started_session("entry_node_display_rejected")
@@ -170,12 +194,15 @@ func begin_dialogue(player: Node, npc: Node, definition: Resource) -> Dictionary
 	return _dialogue_result(true, "")
 
 
+## Scripted callers may omit player; in-world modal interactions pass one so the
+## dialogue owns the same ui_only Player control claim as NPC dialogue.
 func begin_modal_dialogue(
 	owner: Object,
 	definition: Resource,
-	speaker_names: Dictionary = {}
+	speaker_names: Dictionary = {},
+	player: Node2D = null
 ) -> Dictionary:
-	var rejection_reason := _get_modal_begin_rejection_reason(owner, definition)
+	var rejection_reason := _get_modal_begin_rejection_reason(owner, definition, player)
 	if not rejection_reason.is_empty():
 		_debug_log("Dialogue rejected: reason=%s" % rejection_reason)
 		return _dialogue_result(false, rejection_reason)
@@ -184,7 +211,7 @@ func begin_modal_dialogue(
 	current_definition = definition as DialogueDefinition
 	current_node = null
 	current_npc = null
-	current_player = null
+	current_player = player
 	choice_committed = false
 	current_session_mode = SESSION_MODE_MODAL
 	selected_choice_ids.clear()
@@ -198,18 +225,139 @@ func begin_modal_dialogue(
 	))
 	if world_progression_lock_token == 0:
 		return _reject_started_session("world_lock_rejected")
+	if current_player != null:
+		player_control_claim_token = int(gameplay_flow.call(
+			"acquire_player_control_claim",
+			self,
+			current_player,
+			CLAIM_REASON,
+			PLAYER_CONTROL_MODE
+		))
+		if player_control_claim_token == 0:
+			return _reject_started_session("player_claim_rejected")
 
 	current_node = current_definition.get_node(current_definition.entry_node_id)
+	_ui.configure_portrait_presentation(&"", {})
 	dialogue_session_started.emit(current_session_id, current_definition.dialogue_id)
 	if not _display_current_node():
 		return _reject_started_session("entry_node_display_rejected")
 
 	_debug_log(
-		"Standalone modal dialogue accepted: session=%s dialogue=%s world=%d"
+		"Standalone modal dialogue accepted: session=%s dialogue=%s world=%d player=%d"
 		% [
 			String(current_session_id),
 			String(current_definition.dialogue_id),
 			world_progression_lock_token,
+			player_control_claim_token,
+		]
+	)
+	return _dialogue_result(true, "")
+
+
+## Presents dialogue for a live autonomous Talk without claiming scripted NPC
+## control. The Talk overlay remains the social-action authority throughout.
+func begin_autonomous_talk_dialogue(
+	owner: Object,
+	player: Node,
+	npc: Node,
+	definition: Resource,
+	speaker_names: Dictionary = {},
+	portrait_presentation: Dictionary = {}
+) -> Dictionary:
+	return _begin_talk_owned_dialogue(
+		SESSION_MODE_AUTONOMOUS_TALK,
+		owner,
+		player,
+		npc,
+		definition,
+		speaker_names,
+		portrait_presentation
+	)
+
+
+## Player-selected dialogue uses the same modal presentation while its existing
+## Talk overlay remains the authority for approach, cancellation, and rewards.
+func begin_player_talk_dialogue(
+	owner: Object,
+	player: Node,
+	npc: Node,
+	definition: Resource,
+	speaker_names: Dictionary = {},
+	portrait_presentation: Dictionary = {}
+) -> Dictionary:
+	return _begin_talk_owned_dialogue(
+		SESSION_MODE_PLAYER_TALK,
+		owner,
+		player,
+		npc,
+		definition,
+		speaker_names,
+		portrait_presentation
+	)
+
+
+func _begin_talk_owned_dialogue(
+	session_mode: StringName,
+	owner: Object,
+	player: Node,
+	npc: Node,
+	definition: Resource,
+	speaker_names: Dictionary,
+	portrait_presentation: Dictionary
+) -> Dictionary:
+	var rejection_reason := _get_talk_owned_begin_rejection_reason(
+		owner, player, npc, definition
+	)
+	if not rejection_reason.is_empty():
+		_debug_log("Talk-owned dialogue rejected: reason=%s" % rejection_reason)
+		return _dialogue_result(false, rejection_reason)
+
+	current_session_id = _take_session_id()
+	current_definition = definition as DialogueDefinition
+	current_node = null
+	current_npc = npc as Node2D
+	current_player = player as Node2D
+	choice_committed = false
+	current_session_mode = session_mode
+	selected_choice_ids.clear()
+	_modal_owner_ref = weakref(owner)
+	_speaker_names = speaker_names.duplicate()
+	_cleanup_in_progress = false
+
+	var gameplay_flow := _get_gameplay_flow()
+	world_progression_lock_token = int(gameplay_flow.call(
+		"acquire_world_progression_lock", self, CLAIM_REASON
+	))
+	if world_progression_lock_token == 0:
+		return _reject_started_session("world_lock_rejected")
+
+	player_control_claim_token = int(gameplay_flow.call(
+		"acquire_player_control_claim",
+		self,
+		current_player,
+		CLAIM_REASON,
+		PLAYER_CONTROL_MODE
+	))
+	if player_control_claim_token == 0:
+		return _reject_started_session("player_claim_rejected")
+
+	current_node = current_definition.get_node(current_definition.entry_node_id)
+	_ui.configure_portrait_presentation(
+		current_definition.dialogue_id,
+		portrait_presentation
+	)
+	dialogue_session_started.emit(current_session_id, current_definition.dialogue_id)
+	if not _display_current_node():
+		return _reject_started_session("entry_node_display_rejected")
+
+	_debug_log(
+		"Talk-owned dialogue accepted: mode=%s session=%s dialogue=%s world=%d player=%d"
+		% [
+			String(current_session_mode),
+			String(current_session_id),
+			String(current_definition.dialogue_id),
+			world_progression_lock_token,
+			player_control_claim_token,
 		]
 	)
 	return _dialogue_result(true, "")
@@ -242,7 +390,14 @@ func choose(choice_id: StringName) -> bool:
 		% [String(session_id), String(choice.choice_id), choice.favor_delta]
 	)
 
-	if current_session_mode == SESSION_MODE_WORLD and not is_zero_approx(choice.favor_delta):
+	if (
+		current_session_mode in [
+			SESSION_MODE_WORLD,
+			SESSION_MODE_AUTONOMOUS_TALK,
+			SESSION_MODE_PLAYER_TALK,
+		]
+		and not is_zero_approx(choice.favor_delta)
+	):
 		if not _participant_is_live(current_npc) or not _participant_is_live(current_player):
 			_terminal_cleanup("participant_lost_before_choice_effect", false, session_id)
 			return false
@@ -300,6 +455,15 @@ func cancel_dialogue(reason: String = "player_cancelled") -> bool:
 	if not is_dialogue_active():
 		return false
 	return _terminal_cleanup(reason, false, current_session_id)
+
+
+func cancel_dialogue_session(
+	expected_session_id: StringName,
+	reason: String = "player_cancelled"
+) -> bool:
+	if expected_session_id == &"" or expected_session_id != current_session_id:
+		return false
+	return _terminal_cleanup(reason, false, expected_session_id)
 
 
 func is_dialogue_active() -> bool:
@@ -403,7 +567,11 @@ func _get_begin_rejection_reason(player: Node, npc: Node, definition: Resource) 
 	return ""
 
 
-func _get_modal_begin_rejection_reason(owner: Object, definition: Resource) -> String:
+func _get_modal_begin_rejection_reason(
+	owner: Object,
+	definition: Resource,
+	player: Node2D = null
+) -> String:
 	if is_dialogue_active():
 		return "dialogue_already_active"
 	if owner == null or not is_instance_valid(owner):
@@ -416,6 +584,55 @@ func _get_modal_begin_rejection_reason(owner: Object, definition: Resource) -> S
 	var definition_error := dialogue_definition.get_validation_error()
 	if not definition_error.is_empty():
 		return definition_error
+	if player != null:
+		if not _participant_is_live(player):
+			return "invalid_player"
+		if not player.has_method("can_accept_player_control_claim"):
+			return "player_claim_eligibility_missing"
+		var player_gate = player.call("can_accept_player_control_claim", PLAYER_CONTROL_MODE)
+		if not (player_gate is Dictionary) or not bool(player_gate.get("accepted", false)):
+			return String(player_gate.get("reason", "player_claim_rejected")) if player_gate is Dictionary else "player_claim_rejected"
+	if _get_gameplay_flow() == null:
+		return "gameplay_flow_missing"
+	if _ui == null or not is_instance_valid(_ui):
+		return "dialogue_ui_missing"
+	return ""
+
+
+func _get_talk_owned_begin_rejection_reason(
+	owner: Object,
+	player: Node,
+	npc: Node,
+	definition: Resource
+) -> String:
+	if is_dialogue_active():
+		return "dialogue_already_active"
+	if owner == null or not is_instance_valid(owner):
+		return "invalid_talk_owner"
+	if owner is Node and not (owner as Node).is_inside_tree():
+		return "talk_owner_outside_tree"
+	if not _participant_is_live(player):
+		return "invalid_player"
+	if not _participant_is_live(npc):
+		return "invalid_npc"
+	var dialogue_definition := definition as DialogueDefinition
+	if dialogue_definition == null:
+		return "invalid_dialogue_definition"
+	var definition_error := dialogue_definition.get_validation_error()
+	if not definition_error.is_empty():
+		return definition_error
+	if not player.has_method("can_accept_player_control_claim"):
+		return "player_claim_eligibility_missing"
+	var player_gate = player.call("can_accept_player_control_claim", PLAYER_CONTROL_MODE)
+	if not (player_gate is Dictionary) or not bool(player_gate.get("accepted", false)):
+		return String(player_gate.get("reason", "player_claim_rejected")) if player_gate is Dictionary else "player_claim_rejected"
+	var machine := _get_npc_machine(npc)
+	if machine == null:
+		return "npc_state_machine_missing"
+	if not machine.has_method("is_talking_with") or not bool(machine.call("is_talking_with", player)):
+		return "autonomous_talk_not_active"
+	if not owner.has_method("is_talking_with") or not bool(owner.call("is_talking_with", player)):
+		return "autonomous_talk_owner_mismatch"
 	if _get_gameplay_flow() == null:
 		return "gameplay_flow_missing"
 	if _ui == null or not is_instance_valid(_ui):
@@ -436,6 +653,7 @@ func _display_current_node() -> bool:
 			current_node.node_id,
 			current_node.speaker_id
 		)
+		_ui.reveal_portrait_presentation(current_session_id)
 		_debug_log(
 			"Dialogue node displayed: session=%s node=%s"
 			% [String(current_session_id), String(current_node.node_id)]
@@ -725,7 +943,11 @@ func _get_current_speaker_display_name() -> String:
 	if current_node == null:
 		return "Speaker"
 	var speaker_id := current_node.speaker_id
-	if current_session_mode == SESSION_MODE_MODAL:
+	if current_session_mode in [
+		SESSION_MODE_MODAL,
+		SESSION_MODE_AUTONOMOUS_TALK,
+		SESSION_MODE_PLAYER_TALK,
+	]:
 		var configured_name := String(_speaker_names.get(speaker_id, "")).strip_edges()
 		if not configured_name.is_empty():
 			return configured_name
@@ -734,6 +956,17 @@ func _get_current_speaker_display_name() -> String:
 	if speaker_id == &"player":
 		return _get_participant_display_name(current_player, "Player")
 	return _get_participant_display_name(current_npc, "NPC")
+
+
+func _talk_owned_session_is_live() -> bool:
+	if not _participant_is_live(current_npc) or not _participant_is_live(current_player):
+		return false
+	var owner: Object = _modal_owner_ref.get_ref() if _modal_owner_ref != null else null
+	if owner == null or not is_instance_valid(owner):
+		return false
+	if not owner.has_method("is_talking_with"):
+		return false
+	return bool(owner.call("is_talking_with", current_player))
 
 
 func _get_participant_display_name(participant: Node, fallback: String) -> String:

@@ -277,6 +277,8 @@ func _is_valid_combat_target(candidate: Node2D) -> bool:
 		return false
 	if _candidate_is_dead(candidate):
 		return false
+	if not _candidate_allows_monster_targeting(candidate):
+		return false
 	if candidate.is_in_group("monster") and not _target_groups_include_monsters():
 		return false
 
@@ -301,6 +303,15 @@ func _target_groups_include_monsters() -> bool:
 			return true
 
 	return false
+
+
+func _candidate_allows_monster_targeting(candidate: Node2D) -> bool:
+	if candidate.has_method("can_be_targeted_by_monster"):
+		return bool(candidate.call("can_be_targeted_by_monster"))
+	if candidate.has_method("is_hidden_from_monsters"):
+		return not bool(candidate.call("is_hidden_from_monsters"))
+
+	return not bool(candidate.get_meta("hidden_from_monsters", false))
 
 
 func _candidate_is_dead(candidate: Node) -> bool:

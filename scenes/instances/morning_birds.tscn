@@ -1,0 +1,13 @@
+[gd_scene format=3 uid="uid://c7fv1exax4udq"]
+
+[ext_resource type="Script" uid="uid://bm3xqwa5jv2su" path="res://scripts/audio/world_time_ambient_audio.gd" id="1_ambient"]
+[ext_resource type="AudioStream" uid="uid://brj46n6bnd7sh" path="res://sounds/birds.mp3" id="2_birds"]
+
+[node name="MorningBirds" type="AudioStreamPlayer"]
+stream = ExtResource("2_birds")
+script = ExtResource("1_ambient")
+start_hour = 6.0
+end_hour = 13.0
+volume_ratio = 0.5
+fade_seconds = 12.0
+allowed_scene_paths = PackedStringArray("res://scenes/testscenes/realhometest.tscn", "res://scenes/testscenes/realtest1.tscn")

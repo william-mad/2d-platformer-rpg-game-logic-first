@@ -143,6 +143,12 @@ const STAT_KEY_ALIASES := {
 @export_group("State Machine")
 @export var use_state_machine_when_available: bool = true
 
+@export_group("Autonomous Dialogue")
+@export var autonomous_dialogue_profile: NpcAutonomousDialogueProfile
+
+@export_group("Player Talk Dialogue")
+@export var player_talk_dialogue_profile: NpcPlayerTalkDialogueProfile
+
 @onready var body_visual: Polygon2D = %BodyVisual
 @onready var sight_pivot: Node2D = %SightPivot
 @onready var sight_area: Area2D = %SightArea
@@ -181,6 +187,12 @@ var neutral_body_color: Color = Color.WHITE
 var _reported_is_roped: bool = false
 var _reported_is_being_dragged: bool = false
 var _damage_flash := DamageFlash.new()
+var _autonomous_dialogue_rng := RandomNumberGenerator.new()
+var _last_autonomous_dialogue_id: StringName = &""
+var _active_autonomous_dialogue_session_id: StringName = &""
+var _active_autonomous_talk_session_id: String = ""
+var _active_autonomous_talk_ref: WeakRef
+var _active_autonomous_player_ref: WeakRef
 
 
 func _ready() -> void:
@@ -210,13 +222,167 @@ func _ready() -> void:
 	sight_area.body_exited.connect(_on_sight_area_body_exited)
 	_setup_state_machine()
 	_setup_event_bus()
+	_setup_autonomous_dialogue()
 
 
 func _exit_tree() -> void:
+	_cancel_active_autonomous_dialogue("npc_exit")
 	_stop_damage_flash()
 	_unregister_location_tracking()
 	_disconnect_event_bus()
 	player_relationship_presentation.unbind()
+
+
+func on_npc_talk_started(
+	partner: Node2D,
+	talk_state: NpcStateTalk,
+	_action_name: StringName
+) -> void:
+	if autonomous_dialogue_profile == null:
+		return
+	# Player-selected Talk content is presented by PlayerNpcTalkInteractor. This
+	# hook only owns conversations initiated by the autonomous social AI.
+	if talk_state != null and talk_state.terminal_source != "social_ai":
+		return
+	if partner == null or not is_instance_valid(partner) or not partner.is_in_group("player"):
+		return
+	if talk_state == null or not talk_state.is_talking_with(partner):
+		return
+	if _active_autonomous_dialogue_session_id != &"":
+		if _active_autonomous_talk_ref != null and _active_autonomous_talk_ref.get_ref() == talk_state:
+			return
+		talk_state.cancel_talk_session("autonomous_dialogue_already_active")
+		return
+
+	var profile_error := autonomous_dialogue_profile.get_validation_error()
+	if not profile_error.is_empty():
+		push_warning("Autonomous dialogue profile rejected for %s: %s" % [name, profile_error])
+		talk_state.cancel_talk_session("autonomous_dialogue_profile_invalid")
+		return
+	var definition := autonomous_dialogue_profile.choose_conversation(
+		_autonomous_dialogue_rng,
+		_last_autonomous_dialogue_id
+	)
+	if definition == null:
+		talk_state.cancel_talk_session("autonomous_dialogue_unavailable")
+		return
+
+	var dialogue_controller := get_node_or_null("/root/DialogueController")
+	if (
+		dialogue_controller == null
+		or not dialogue_controller.has_method("begin_autonomous_talk_dialogue")
+	):
+		talk_state.cancel_talk_session("autonomous_dialogue_controller_missing")
+		return
+	var result: Dictionary = dialogue_controller.call(
+		"begin_autonomous_talk_dialogue",
+		talk_state,
+		partner,
+		self,
+		definition,
+		autonomous_dialogue_profile.get_speaker_names(),
+		autonomous_dialogue_profile.get_portrait_presentation()
+	)
+	if not bool(result.get("accepted", false)):
+		talk_state.cancel_talk_session(
+			"autonomous_dialogue_start_%s" % String(result.get("reason", "rejected"))
+		)
+		return
+
+	_active_autonomous_dialogue_session_id = StringName(result.get("session_id", &""))
+	_active_autonomous_talk_session_id = talk_state.terminal_session_id
+	_active_autonomous_talk_ref = weakref(talk_state)
+	_active_autonomous_player_ref = weakref(partner)
+	_last_autonomous_dialogue_id = definition.dialogue_id
+	if talk_state.wait_for_external_completion():
+		return
+
+	dialogue_controller.call(
+		"cancel_dialogue_session",
+		_active_autonomous_dialogue_session_id,
+		"talk_wait_rejected"
+	)
+
+
+func on_npc_talk_cancelled(
+	_partner: Node2D,
+	talk_state: NpcStateTalk,
+	reason: String
+) -> void:
+	if _active_autonomous_dialogue_session_id == &"":
+		return
+	if _active_autonomous_talk_ref == null or _active_autonomous_talk_ref.get_ref() != talk_state:
+		return
+	_cancel_active_autonomous_dialogue("talk_cancelled_%s" % reason)
+
+
+func _setup_autonomous_dialogue() -> void:
+	_autonomous_dialogue_rng.randomize()
+	if autonomous_dialogue_profile == null:
+		return
+	var dialogue_controller := get_node_or_null("/root/DialogueController")
+	if dialogue_controller == null:
+		return
+	var callback := Callable(self, "_on_autonomous_dialogue_session_finished")
+	if not dialogue_controller.dialogue_session_finished.is_connected(callback):
+		dialogue_controller.dialogue_session_finished.connect(callback)
+
+
+func _on_autonomous_dialogue_session_finished(result: Dictionary) -> void:
+	if (
+		_active_autonomous_dialogue_session_id == &""
+		or StringName(result.get("session_id", &""))
+			!= _active_autonomous_dialogue_session_id
+	):
+		return
+
+	var talk_state := (
+		_active_autonomous_talk_ref.get_ref() as NpcStateTalk
+		if _active_autonomous_talk_ref != null
+		else null
+	)
+	var player := (
+		_active_autonomous_player_ref.get_ref() as Node2D
+		if _active_autonomous_player_ref != null
+		else null
+	)
+	var talk_session_matches := (
+		talk_state != null
+		and is_instance_valid(talk_state)
+		and talk_state.terminal_session_id == _active_autonomous_talk_session_id
+	)
+	_clear_active_autonomous_dialogue()
+	if not talk_session_matches or player == null or not is_instance_valid(player):
+		return
+	if bool(result.get("completed", false)):
+		talk_state.complete_talk_with(player, "dialogue_completed")
+		return
+	talk_state.cancel_talk_session(
+		"dialogue_%s" % String(result.get("reason", "cancelled"))
+	)
+
+
+func _cancel_active_autonomous_dialogue(reason: String) -> void:
+	if _active_autonomous_dialogue_session_id == &"":
+		return
+	var dialogue_controller := get_node_or_null("/root/DialogueController")
+	if dialogue_controller == null or not dialogue_controller.has_method("cancel_dialogue_session"):
+		_clear_active_autonomous_dialogue()
+		return
+	var cancelled := bool(dialogue_controller.call(
+		"cancel_dialogue_session",
+		_active_autonomous_dialogue_session_id,
+		reason
+	))
+	if not cancelled:
+		_clear_active_autonomous_dialogue()
+
+
+func _clear_active_autonomous_dialogue() -> void:
+	_active_autonomous_dialogue_session_id = &""
+	_active_autonomous_talk_session_id = ""
+	_active_autonomous_talk_ref = null
+	_active_autonomous_player_ref = null
 
 
 func _physics_process(delta: float) -> void:

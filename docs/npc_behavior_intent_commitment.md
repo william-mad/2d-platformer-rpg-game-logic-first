@@ -147,6 +147,40 @@ input and physics interactions feel rough even when the interaction subsystem is
 not the source. The rope system is deliberately outside this contract and is not
 modified by these fixes.
 
+### Live-resume action cleanup
+
+When a committed offscreen activity resumes on a live NPC, the state machine may
+first cancel a stale need or social action. Cancellation publishes that old
+session with a terminal status before the scheduled replacement becomes active.
+The terminal publication is lifecycle cleanup; it is not an accepted replacement
+owner and must not clear the separately committed activity or release its spot.
+
+`NpcLocations.sync_live_action_descriptor()` therefore allows a different
+session to supersede a committed activity only when the incoming descriptor is
+`active`. A mismatching failed, completed, cancelling, or cleared descriptor is
+ignored at the persistent ownership boundary. A genuinely active emergency or
+scripted action still clears the activity and releases its claim atomically.
+
+The former failure signature was:
+
+```text
+activity_superseded released=1
+NPC action names a spot without owning it
+LookForTalkTarget reason=moving_to_target
+live_seek_rejected
+new scheduled activity committed
+```
+
+In that sequence, social search was not the cause. The persistent activity had
+already been deleted by the stale action's terminal callback, so the planner saw
+an apparently idle record while the live state machine was still moving. It tried
+social search, correctly received `moving_to_target`, then fell back to scheduling
+the same routine again under a new session. The breadcrumb
+`npc_locations:activity_preserved_on_action_cleanup` now records any protected
+cleanup handoff without adding normal console noise. The focused regression lives
+in `test_scheduled_activity_transaction_runtime.gd` and exercises the complete
+stale-live-action to committed-schedule resume path.
+
 ## Developer feedback
 
 The overhead label is formatted by `NpcBehaviorFeedbackFormatter`, which has no

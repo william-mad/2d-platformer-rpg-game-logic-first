@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_apologize"]
+script = ExtResource("3_choice")
+choice_id = &"apologize"
+text = "Back down and apologize."
+next_node_id = &"apology"
+
+[sub_resource type="Resource" id="Choice_double"]
+script = ExtResource("3_choice")
+choice_id = &"double_down"
+text = "Double down."
+next_node_id = &"double"
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"mom"
+speaker_text = "Well. You certainly woke up brave today. Was there a point hiding inside that remark, or did you just want to hear the room go cold?"
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_apologize"), SubResource("Choice_double")])
+
+[sub_resource type="Resource" id="Node_apology"]
+script = ExtResource("2_node")
+node_id = &"apology"
+speaker_id = &"mom"
+speaker_text = "Good. Keep the apology, lose the performance, and we'll call this a lesson cheaply learned."
+terminal = true
+
+[sub_resource type="Resource" id="Node_double"]
+script = ExtResource("2_node")
+node_id = &"double"
+speaker_id = &"mom"
+speaker_text = "There it is—the terrible decision after the bad one. Come back when you've found your manners."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"mom_player_talk_insult_brave"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_apology"), SubResource("Node_double")])

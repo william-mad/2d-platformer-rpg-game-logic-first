@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://b8sms613vkv4"
+path="res://.godot/imported/night cricket ambience.mp3-2a5335a23d8c0c6d6b1b40a26fe5f946.mp3str"
+
+[deps]
+
+source_file="res://sounds/night cricket ambience.mp3"
+dest_files=["res://.godot/imported/night cricket ambience.mp3-2a5335a23d8c0c6d6b1b40a26fe5f946.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

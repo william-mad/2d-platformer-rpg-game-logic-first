@@ -499,6 +499,40 @@ func _test_authored_scene_contract(routes: Node) -> void:
 		HOME_SCENE,
 		&"household.mom_bedroom_to_realhometest"
 	)
+	var home_bedroom_owner_ids = _property_value(home_to_bedroom, &"owner_ids", [])
+	_expect(
+		_id_list_contains(home_bedroom_owner_ids, &"mom")
+		and not _id_list_contains(home_bedroom_owner_ids, &"player"),
+		"home-to-bedroom owner access permits Mom and rejects the Player"
+	)
+	var home_bedroom_door := home_to_bedroom as NpcTravelDoor
+	var home_player := home.get_node_or_null("Player") as Node2D
+	if home_bedroom_door != null and home_player != null:
+		home_bedroom_door.active_player = home_player
+		home_bedroom_door.player_inside = true
+		_expect(
+			not home_bedroom_door.can_interact(home_player),
+			"home-to-bedroom door rejects live Player interaction"
+		)
+	_expect(
+		home_bedroom_door != null and home_bedroom_door.can_npc_id_use(&"mom"),
+		"Mom remains authorized by the bedroom route edge"
+	)
+	var bedroom_home_owner_ids = _property_value(bedroom_to_home, &"owner_ids", [])
+	_expect(
+		_id_list_contains(bedroom_home_owner_ids, &"mom")
+		and _id_list_contains(bedroom_home_owner_ids, &"player"),
+		"bedroom-to-home owner access still permits Mom and Player exit"
+	)
+	var bedroom_home_door := bedroom_to_home as NpcTravelDoor
+	var bedroom_player := bedroom.get_node_or_null("Player") as Node2D
+	if bedroom_home_door != null and bedroom_player != null:
+		bedroom_home_door.active_player = bedroom_player
+		bedroom_home_door.player_inside = true
+		_expect(
+			bedroom_home_door.can_interact(bedroom_player),
+			"bedroom-to-home door allows live Player exit interaction"
+		)
 	var home_player_arrival := home.get_node_or_null("PlayerSpawnFromYard") as Node2D
 	var yard_player_arrival := yard.get_node_or_null("PlayerSpawnFromHome") as Node2D
 	_expect(

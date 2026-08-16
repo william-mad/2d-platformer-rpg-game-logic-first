@@ -2,7 +2,8 @@ class_name NpcStateLookForMonster extends NpcState
 
 @export var search_duration: float = -1.0
 @export var target_groups: Array[StringName] = [&"monster", &"monsters", &"enemy", &"enemies"]
-@export var require_visibility: bool = true
+# This state intentionally searches beyond normal sight; individual NPCs can opt back in.
+@export var require_visibility: bool = false
 @export var end_state_name: StringName = &"Idle"
 @export_range(0, 1000, 1) var reaction_priority: int = 94
 

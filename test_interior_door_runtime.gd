@@ -39,6 +39,7 @@ func _initialize() -> void:
 	await _validate_player_interaction_and_cleanup()
 	await _validate_npc_and_independent_passage()
 	await _validate_turnaround_disappearance_and_timeout()
+	await _validate_realhome_bathroom_privacy()
 	await _validate_realhometest_player_slice()
 	_validate_no_forbidden_integration_calls()
 	_finish()
@@ -297,6 +298,62 @@ func _validate_turnaround_disappearance_and_timeout() -> void:
 
 	door.queue_free()
 	timeout_npc.queue_free()
+	await process_frame
+
+
+func _validate_realhome_bathroom_privacy() -> void:
+	var home_scene := load("res://scenes/testscenes/realhometest.tscn") as PackedScene
+	var home := home_scene.instantiate()
+	home.name = "BathroomPrivacyRuntimeTest"
+	root.add_child(home)
+	await physics_frame
+	await physics_frame
+
+	var door := home.get_node_or_null("HallBathroomInteriorDoor") as InteriorDoor
+	var privacy := home.get_node_or_null("BathroomPrivacy")
+	var player := home.get_node_or_null("Player") as CharacterBody2D
+	_expect(door != null and privacy != null, "realhometest wires bathroom privacy to its InteriorDoor")
+	if door == null or privacy == null or player == null:
+		home.queue_free()
+		await process_frame
+		return
+
+	door.clearance_area.monitoring = false
+	_expect(door.allow_player and door.can_actor_use(player), "bathroom starts available to the Player")
+
+	var mom := TestNpc.new(&"mom")
+	mom.name = "BathroomPrivacyTestMom"
+	mom.position = Vector2(door.position.x - door.clearance_distance - 80.0, door.position.y)
+	home.add_child(mom)
+	await process_frame
+	privacy.call("reconcile_from_live_state")
+	_expect(door.allow_player, "live Hall-side reconciliation clears a stale bathroom lock")
+
+	var entry_result: Dictionary = door.request_passage(mom)
+	_expect(bool(entry_result.get("accepted", false)), "Mom is granted bathroom entry")
+	mom.global_position.x = door.global_position.x + door.clearance_distance + 1.0
+	door.call("_physics_process", 0.0)
+	_expect(not door.allow_player and not door.can_actor_use(player), "Mom completing passage into Bathroom disables Player access")
+	_expect(door.can_actor_use(mom), "disabled Player access does not disable Mom's access")
+
+	var exit_result: Dictionary = door.request_passage(mom)
+	_expect(bool(exit_result.get("accepted", false)), "Mom remains authorized to leave the locked bathroom")
+	mom.global_position.x = door.global_position.x - door.clearance_distance - 1.0
+	door.call("_physics_process", 0.0)
+	_expect(door.allow_player and door.can_actor_use(player), "Mom completing passage into Hall restores Player access")
+
+	door.allow_player = false
+	privacy.call("reconcile_from_live_state")
+	_expect(door.allow_player, "Hall-side live state cannot leave a stale bathroom lock")
+	mom.global_position.x = door.global_position.x + door.clearance_distance + 80.0
+	privacy.call("reconcile_from_live_state")
+	_expect(not door.allow_player, "live initialization reconciliation locks when Mom is already inside Bathroom")
+	mom.queue_free()
+	await process_frame
+	await process_frame
+	_expect(door.allow_player, "removing live Mom reconciles away a stale bathroom lock")
+
+	home.queue_free()
 	await process_frame
 
 

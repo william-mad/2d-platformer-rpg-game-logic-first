@@ -128,6 +128,7 @@ var talk_elapsed_seconds: float = 0.0
 var terminal_session_id: String = ""
 var terminal_partner_identity: String = "none"
 var terminal_source: String = "social_ai"
+var external_completion_pending: bool = false
 
 
 func init() -> void:
@@ -147,6 +148,7 @@ func enter() -> void:
 	talk_started_handled = false
 	talk_finished_handled = false
 	talk_completed_successfully = false
+	external_completion_pending = false
 	talk_elapsed_seconds = 0.0
 	terminal_session_id = machine.get_active_interaction_session_id() if machine != null else ""
 	terminal_partner_identity = _target_label(talk_partner)
@@ -200,6 +202,10 @@ func exit() -> void:
 func physics_process(delta: float) -> NpcState:
 	# The timed window continues while the NPC slowly follows a drifting partner.
 	talk_elapsed_seconds += maxf(delta, 0.0)
+	# Dialogue can finish or cancel Talk between state-machine ticks. Surface that
+	# terminal result immediately so the overlay/session lifecycle can close normally.
+	if talk_finished_handled:
+		return _get_after_talk_state()
 	if require_talk_partner and not _is_valid_talk_partner(talk_partner):
 		_cancel_talk_action("missing_partner")
 		return _get_after_talk_state()
@@ -224,6 +230,12 @@ func physics_process(delta: float) -> NpcState:
 	if _talk_is_outside_active_range():
 		if static_task_talk:
 			_start_static_partner_wait()
+		return next_state
+	if external_completion_pending:
+		# A modal conversation is now the completion condition. Keep Talk alive as
+		# the social-action authority, but never let its fallback timer pay out below it.
+		stop_horizontal()
+		_hide_talk_progress()
 		return next_state
 
 	if talk_timer <= 0.0:
@@ -266,6 +278,19 @@ func complete_talk_with(candidate: Node2D, reason: String = "completed") -> void
 	if not is_talking_with(candidate):
 		return
 	_finish_talk_action(reason)
+
+
+func wait_for_external_completion() -> bool:
+	if not talk_started_handled or talk_finished_handled:
+		return false
+	external_completion_pending = true
+	stop_horizontal()
+	_hide_talk_progress()
+	return true
+
+
+func is_waiting_for_external_completion() -> bool:
+	return external_completion_pending and not talk_finished_handled
 
 
 func refresh_overlay_presentation() -> void:
@@ -342,6 +367,7 @@ func _finish_talk_action(reason: String = "completed") -> void:
 
 	stop_horizontal()
 	_hide_talk_progress()
+	external_completion_pending = false
 	talk_finished_handled = true
 	talk_completed_successfully = true
 	var changed_values := {}
@@ -390,6 +416,7 @@ func _cancel_talk_action(reason: String) -> void:
 	approaching_partner = false
 	following_partner = false
 	_hide_talk_progress()
+	external_completion_pending = false
 	talk_finished_handled = true
 	talk_completed_successfully = false
 	var talk_need_before := _get_talk_need_value()
@@ -1070,7 +1097,11 @@ func _ensure_talk_progress_ring() -> void:
 
 
 func _update_talk_progress() -> void:
-	if not show_talk_limits or not _is_valid_talk_partner(talk_partner):
+	if (
+		external_completion_pending
+		or not show_talk_limits
+		or not _is_valid_talk_partner(talk_partner)
+	):
 		_hide_talk_progress()
 		return
 

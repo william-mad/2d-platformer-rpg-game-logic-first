@@ -1,0 +1,13 @@
+[gd_scene format=3 uid="uid://d30u5sk6ncyvl"]
+
+[ext_resource type="Script" uid="uid://bm3xqwa5jv2su" path="res://scripts/audio/world_time_ambient_audio.gd" id="1_ambient"]
+[ext_resource type="AudioStream" uid="uid://b8sms613vkv4" path="res://sounds/night cricket ambience.mp3" id="2_crickets"]
+
+[node name="NightCrickets" type="AudioStreamPlayer"]
+stream = ExtResource("2_crickets")
+script = ExtResource("1_ambient")
+start_hour = 19.0
+end_hour = 5.0
+volume_ratio = 0.5
+fade_seconds = 12.0
+allowed_scene_paths = PackedStringArray("res://scenes/testscenes/realhometest.tscn", "res://scenes/testscenes/realtest1.tscn")

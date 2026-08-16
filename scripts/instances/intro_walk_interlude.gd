@@ -78,11 +78,7 @@ enum Phase {
 
 @export_category("Montage Dialogue")
 @export var montage_dialogue_definition: DialogueDefinition
-@export var montage_speaker_names: Dictionary = {
-	&"memory": "...",
-	&"mom": "Mom",
-	&"player": "Player",
-}
+@export var montage_speaker_names: Dictionary = {&"memory": "..."}
 
 @export_category("Exit")
 @export_range(0.1, 4.0, 0.05, "suffix:s") var exit_fade_seconds: float = 2.0
@@ -110,7 +106,6 @@ enum Phase {
 @onready var impact_illustration: TextureRect = %ImpactIllustration
 @onready var memory_image: TextureRect = %MemoryImage
 @onready var memory_image_incoming: TextureRect = %MemoryImageIncoming
-@onready var memory_portrait_presenter: IntroMemoryPortraitPresenter = %MemoryPortraitPresentation
 @onready var fade_overlay: ColorRect = %InterludeFadeOverlay
 
 var current_phase: Phase = Phase.WALKING
@@ -587,9 +582,9 @@ func _on_final_image_view_finished() -> void:
 	var locked_session_id := _final_view_locked_session_id
 	_final_view_locked_session_id = &""
 	if locked_session_id != &"":
-		memory_portrait_presenter.reveal_session(locked_session_id)
-		_set_montage_dialogue_visible(locked_session_id, true)
-		_set_montage_dialogue_input_enabled(locked_session_id, true)
+		if not _complete_hidden_final_montage_node(locked_session_id):
+			_set_montage_dialogue_visible(locked_session_id, true)
+			_set_montage_dialogue_input_enabled(locked_session_id, true)
 	if _dialogue_finished_waiting_for_final_view:
 		_dialogue_finished_waiting_for_final_view = false
 		_begin_exit()
@@ -607,6 +602,17 @@ func _set_montage_dialogue_visible(session_id: StringName, should_show: bool) ->
 	if dialogue_controller == null or not dialogue_controller.has_method("set_session_ui_visible"):
 		return false
 	return bool(dialogue_controller.call("set_session_ui_visible", session_id, should_show))
+
+
+func _complete_hidden_final_montage_node(session_id: StringName) -> bool:
+	var dialogue_controller := get_node_or_null("/root/DialogueController")
+	if (
+		dialogue_controller == null
+		or not dialogue_controller.has_method("advance")
+		or StringName(dialogue_controller.get("current_session_id")) != session_id
+	):
+		return false
+	return bool(dialogue_controller.call("advance"))
 
 
 func _start_birds_fade_in() -> void:

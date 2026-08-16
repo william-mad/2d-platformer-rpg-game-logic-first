@@ -422,6 +422,9 @@ func _initialize() -> void:
 	_test_stale_resume_rejects_replaced_live_body(
 		locations, simulator, machine, npc, spot, idle_state
 	)
+	_test_resume_replacement_keeps_committed_activity(
+		locations, simulator, machine, npc, spot, idle_state
+	)
 	_test_permitted_supersession_releases_activity_claim(
 		locations, simulator, npc
 	)
@@ -497,6 +500,82 @@ func _test_permitted_supersession_releases_activity_claim(
 		int(simulator.spot_claim_counts.get(TEST_SPOT_ID, 0)) == 0,
 		"permitted replacement releases the superseded claim immediately"
 	)
+
+
+func _test_resume_replacement_keeps_committed_activity(
+	locations: Node,
+	simulator: Node,
+	machine: NpcStateMachine,
+	npc: TestNpc,
+	spot: TestSpot,
+	idle_state: NpcState
+) -> void:
+	_clear_active_action(machine, "resume_replacement_fixture_reset")
+	machine.state_history = [idle_state]
+	locations.live_npcs[TEST_NPC_ID] = npc
+
+	var stale_action := _make_work_action("resume-replacement-stale-live")
+	stale_action["source"] = "need"
+	stale_action["priority"] = 0
+	stale_action["spot_id"] = ""
+	stale_action["target_persistent_id"] = ""
+	_expect(
+		machine.restore_action_descriptor(stale_action),
+		"resume-replacement fixture restores its stale live action"
+	)
+
+	var scheduled_session := "resume-replacement-schedule"
+	var claim: Dictionary = simulator.call(
+		"try_claim_spot",
+		StringName(TEST_NPC_ID),
+		scheduled_session,
+		TEST_SPOT_ID,
+		&"activity"
+	)
+	_expect(bool(claim.get("accepted", false)), "resume-replacement fixture owns its spot")
+	var reservation_id := String(claim.get("reservation_id", ""))
+	var activity := _make_work_activity(scheduled_session)
+	activity["reservation_ids"] = [reservation_id]
+	var action := _make_work_action(scheduled_session)
+	action["reservation_ids"] = [reservation_id]
+	var committed_record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	committed_record["scene_path"] = TEST_SCENE_PATH
+	committed_record["activity"] = activity
+	committed_record["action"] = action
+	committed_record["pending_travel"] = {}
+	locations.npc_records[TEST_NPC_ID] = committed_record
+
+	simulator.call("resume_live_activity", StringName(TEST_NPC_ID), npc)
+	var resumed_record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	_expect(
+		String((resumed_record.get("activity", {}) as Dictionary).get(
+			"session_id", ""
+		)) == scheduled_session,
+		"replacing a stale live action during resume keeps the committed activity"
+	)
+	_expect(
+		machine.get_active_action_session_id() == scheduled_session,
+		"resume replacement installs the committed schedule session live"
+	)
+	_expect(
+		int(simulator.spot_claim_counts.get(TEST_SPOT_ID, 0)) == 1,
+		"resume replacement keeps the committed activity claim"
+	)
+
+	if not reservation_id.is_empty():
+		simulator.call(
+			"release_spot_reservation",
+			reservation_id,
+			StringName(TEST_NPC_ID),
+			scheduled_session
+		)
+	_clear_active_action(machine, "resume_replacement_fixture_cleanup")
+	machine.state_history = [idle_state]
+	var cleaned_record: Dictionary = locations.get_record_snapshot(TEST_NPC_ID)
+	cleaned_record["activity"] = {}
+	cleaned_record["action"] = {}
+	cleaned_record["pending_travel"] = {}
+	locations.npc_records[TEST_NPC_ID] = cleaned_record
 
 
 func _test_save_repair_is_session_safe(

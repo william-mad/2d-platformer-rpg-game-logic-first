@@ -1,11 +1,60 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/modal_dialogue_ui.gd" id="1_ui"]
+[ext_resource type="Script" path="res://scripts/instances/intro_memory_portrait_presenter.gd" id="2_portrait_presenter"]
 
 [node name="ModalDialogueUI" type="CanvasLayer"]
 layer = 90
 visible = false
 script = ExtResource("1_ui")
+
+[node name="AutonomousPortraitPresentation" type="Control" parent="."]
+unique_name_in_owner = true
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("2_portrait_presenter")
+dialogue_id = &""
+
+[node name="MemoryDialogueBackdropMute" type="ColorRect" parent="AutonomousPortraitPresentation"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.035, 0.045, 0.06, 0.22)
+
+[node name="PortraitSlot" type="Control" parent="AutonomousPortraitPresentation"]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -248.0
+offset_top = -496.0
+grow_horizontal = 0
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="MemoryDialoguePortrait" type="TextureRect" parent="AutonomousPortraitPresentation/PortraitSlot"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
 
 [node name="Panel" type="PanelContainer" parent="."]
 unique_name_in_owner = true

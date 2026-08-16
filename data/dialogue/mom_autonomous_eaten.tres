@@ -1,0 +1,78 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" load_steps=12 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_yes"]
+script = ExtResource("3_choice")
+choice_id = &"ate_already"
+text = "Yes, I ate."
+next_node_id = &"player_yes"
+
+[sub_resource type="Resource" id="Choice_no"]
+script = ExtResource("3_choice")
+choice_id = &"forgot_to_eat"
+text = "Not yet. I forgot."
+next_node_id = &"player_no"
+
+[sub_resource type="Resource" id="Choice_snack"]
+script = ExtResource("3_choice")
+choice_id = &"snack_counts"
+text = "Does a suspicious snack count?"
+next_node_id = &"player_snack"
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"food_check"
+speaker_id = &"mom"
+speaker_text = "Important household inspection: have you eaten anything that qualifies as food?"
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_yes"), SubResource("Choice_no"), SubResource("Choice_snack")])
+
+[sub_resource type="Resource" id="Node_player_yes"]
+script = ExtResource("2_node")
+node_id = &"player_yes"
+speaker_id = &"player"
+speaker_text = "I ate. A real meal, with ingredients and everything."
+next_node_id = &"mom_yes"
+
+[sub_resource type="Resource" id="Node_mom_yes"]
+script = ExtResource("2_node")
+node_id = &"mom_yes"
+speaker_id = &"mom"
+speaker_text = "Look at you, making responsible choices without a committee meeting."
+terminal = true
+
+[sub_resource type="Resource" id="Node_player_no"]
+script = ExtResource("2_node")
+node_id = &"player_no"
+speaker_id = &"player"
+speaker_text = "Not yet. The day ran away with my appetite."
+next_node_id = &"mom_no"
+
+[sub_resource type="Resource" id="Node_mom_no"]
+script = ExtResource("2_node")
+node_id = &"mom_no"
+speaker_id = &"mom"
+speaker_text = "Catch it before it gets farther. I'll help you find something easy."
+terminal = true
+
+[sub_resource type="Resource" id="Node_player_snack"]
+script = ExtResource("2_node")
+node_id = &"player_snack"
+speaker_id = &"player"
+speaker_text = "I had a snack. Its legal status as a meal is... under review."
+next_node_id = &"mom_snack"
+
+[sub_resource type="Resource" id="Node_mom_snack"]
+script = ExtResource("2_node")
+node_id = &"mom_snack"
+speaker_id = &"mom"
+speaker_text = "The court finds you hungry. Sentence: one proper plate."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"mom_autonomous_eaten"
+entry_node_id = &"food_check"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_player_yes"), SubResource("Node_mom_yes"), SubResource("Node_player_no"), SubResource("Node_mom_no"), SubResource("Node_player_snack"), SubResource("Node_mom_snack")])

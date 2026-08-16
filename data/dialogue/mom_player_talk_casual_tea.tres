@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_stay"]
+script = ExtResource("3_choice")
+choice_id = &"stay_a_while"
+text = "Stay and talk a while."
+next_node_id = &"stay"
+
+[sub_resource type="Resource" id="Choice_busy"]
+script = ExtResource("3_choice")
+choice_id = &"just_passing"
+text = "Say you were just passing by."
+next_node_id = &"busy"
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"mom"
+speaker_text = "There you are. I was beginning to think the house had swallowed you. My day has been quiet—suspiciously quiet."
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_stay"), SubResource("Choice_busy")])
+
+[sub_resource type="Resource" id="Node_stay"]
+script = ExtResource("2_node")
+node_id = &"stay"
+speaker_id = &"mom"
+speaker_text = "Good. Sit with me for a minute. The chores can survive without either of us."
+terminal = true
+
+[sub_resource type="Resource" id="Node_busy"]
+script = ExtResource("2_node")
+node_id = &"busy"
+speaker_id = &"mom"
+speaker_text = "Mm-hm. And yet you stopped. I'll take the small victory."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"mom_player_talk_casual_tea"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_stay"), SubResource("Node_busy")])

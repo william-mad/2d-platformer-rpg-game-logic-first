@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_memory_reach_out"]
+script = ExtResource("3_choice")
+choice_id = &"memory_reach_out"
+text = "[Reach out.]"
+terminal = true
+
+[sub_resource type="Resource" id="Choice_memory_stay_silent"]
+script = ExtResource("3_choice")
+choice_id = &"memory_stay_silent"
+text = "[Stay silent.]"
+terminal = true
+
+[sub_resource type="Resource" id="Node_home_memory_01"]
+script = ExtResource("2_node")
+node_id = &"home_memory_01"
+speaker_id = &"mom"
+speaker_text = "[Mom's first post-arrival dialogue beat placeholder.]"
+next_node_id = &"home_memory_02"
+
+[sub_resource type="Resource" id="Node_home_memory_02"]
+script = ExtResource("2_node")
+node_id = &"home_memory_02"
+speaker_id = &"mom"
+speaker_text = "[Mom's second post-arrival dialogue beat placeholder.]"
+next_node_id = &"home_memory_choice"
+
+[sub_resource type="Resource" id="Node_home_memory_choice"]
+script = ExtResource("2_node")
+node_id = &"home_memory_choice"
+speaker_id = &"player"
+speaker_text = "[Post-arrival choice placeholder.]"
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_memory_reach_out"), SubResource("Choice_memory_stay_silent")])
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"intro_memory_home_epilogue"
+entry_node_id = &"home_memory_01"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_home_memory_01"), SubResource("Node_home_memory_02"), SubResource("Node_home_memory_choice")])

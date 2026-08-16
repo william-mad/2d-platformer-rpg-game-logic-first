@@ -13,29 +13,37 @@ enum State {
 @export_range(24.0, 1600.0, 1.0, "suffix:px") var chase_radius: float = 260.0
 @export_range(0.1, 30.0, 0.1, "suffix:s") var focus_refresh_seconds: float = 3.0
 
+@export_group("Decision Timing")
+@export_range(0.05, 5.0, 0.05, "suffix:s") var decision_interval_seconds: float = 0.5
+@export_range(0.0, 5.0, 0.05, "suffix:s") var state_commit_seconds: float = 0.9
+@export_range(0.0, 10.0, 0.1, "suffix:s") var minimum_state_seconds: float = 1.5
+@export_range(0.0, 1.0, 0.01) var idle_turn_chance_per_decision: float = 0.12
+
 @export_group("Movement")
 @export var gravity: float = 1500.0
-@export var idle_ground_speed: float = 20.0
-@export var idle_ground_acceleration: float = 90.0
-@export var idle_hop_horizontal_speed: float = 55.0
-@export var idle_hop_vertical_speed: float = 125.0
-@export var idle_hop_interval_seconds: float = 2.1
-@export var alert_hop_horizontal_speed: float = 95.0
-@export var alert_hop_vertical_speed: float = 185.0
-@export var alert_hop_interval_seconds: float = 1.15
-@export var chase_hop_horizontal_speed: float = 245.0
-@export var chase_hop_vertical_speed: float = 335.0
-@export var chase_hop_interval_seconds: float = 0.82
+@export var idle_ground_speed: float = 5.0
+@export var idle_ground_acceleration: float = 180.0
+@export var idle_hop_horizontal_speed: float = 90.0
+@export var idle_hop_vertical_speed: float = 220.0
+@export var idle_hop_interval_seconds: float = 3.4
+@export var alert_hop_horizontal_speed: float = 220.0
+@export var alert_hop_vertical_speed: float = 380.0
+@export var alert_hop_interval_seconds: float = 2.25
+@export var chase_hop_horizontal_speed: float = 420.0
+@export var chase_hop_vertical_speed: float = 560.0
+@export var chase_hop_interval_seconds: float = 1.55
 
 @export_group("Timing")
-@export_range(0.0, 1.0, 0.01, "suffix:s") var jump_windup_seconds: float = 0.22
-@export_range(0.0, 1.0, 0.01, "suffix:s") var chase_jump_extra_windup_seconds: float = 0.08
-@export_range(0.0, 1.0, 0.01, "suffix:s") var landing_recovery_seconds: float = 0.12
-@export_range(0.0, 1.0, 0.01, "suffix:s") var state_transition_windup_seconds: float = 0.18
-@export_range(0.0, 1.0, 0.01) var hop_timing_jitter_ratio: float = 0.35
+@export_range(0.0, 1.0, 0.01, "suffix:s") var jump_windup_seconds: float = 0.42
+@export_range(0.0, 1.0, 0.01, "suffix:s") var chase_jump_extra_windup_seconds: float = 0.18
+@export_range(0.0, 1.0, 0.01, "suffix:s") var landing_recovery_seconds: float = 0.28
+@export_range(0.0, 1.0, 0.01) var landing_horizontal_retention: float = 0.08
+@export var landing_horizontal_deceleration: float = 1800.0
+@export_range(0.0, 1.0, 0.01, "suffix:s") var state_transition_windup_seconds: float = 0.4
+@export_range(0.0, 1.0, 0.01) var hop_timing_jitter_ratio: float = 0.3
 
 @export_group("Hurt")
-@export_range(0.0, 2.0, 0.01, "suffix:s") var hurt_stagger_seconds: float = 0.18
+@export_range(0.0, 2.0, 0.01, "suffix:s") var hurt_stagger_seconds: float = 0.3
 @export var hurt_stagger_deceleration: float = 900.0
 
 @export_group("Visual Indicator")
@@ -59,6 +67,11 @@ enum State {
 var state: State = State.IDLE
 var focus_target: Node2D
 var focus_refresh_timer: float = 0.0
+var decision_timer: float = 0.0
+var state_elapsed_seconds: float = 0.0
+var pending_state: State = State.IDLE
+var pending_state_timer: float = 0.0
+var has_pending_state: bool = false
 var hop_timer: float = 0.0
 var windup_timer: float = 0.0
 var landing_recovery_timer: float = 0.0
@@ -79,6 +92,7 @@ func _ready() -> void:
 	rng.seed = Time.get_ticks_usec() + get_instance_id()
 	idle_direction = -1.0 if rng.randf() < 0.5 else 1.0
 	_set_state(State.IDLE, true)
+	decision_timer = rng.randf_range(0.0, maxf(decision_interval_seconds, 0.05))
 	hop_timer = _jittered_interval(idle_hop_interval_seconds)
 
 
@@ -93,7 +107,7 @@ func _physics_process(delta: float) -> void:
 
 	if hurt_stagger_timer <= 0.0:
 		_refresh_focus_target(delta)
-		_update_state_from_proximity()
+		_process_behavior_decision(delta)
 		_process_hop_state(delta)
 
 	_move_and_slide_with_rope(delta, velocity_after_gravity)
@@ -118,25 +132,64 @@ func _refresh_focus_target(delta: float) -> void:
 		focus_target = null
 		focus_refresh_timer = 0.0
 
-	if focus_refresh_timer > 0.0 and focus_target != null and is_valid_target(focus_target):
+	# A missed scan owns the same cooldown so idle slimes do not query groups every frame.
+	if focus_refresh_timer > 0.0:
 		return
 
 	focus_refresh_timer = maxf(focus_refresh_seconds, 0.05)
 	focus_target = get_closest_target(alert_radius)
 
 
-func _update_state_from_proximity() -> void:
-	if focus_target == null or not is_valid_target(focus_target):
-		_set_state(State.IDLE)
+func _process_behavior_decision(delta: float) -> void:
+	state_elapsed_seconds += delta
+	decision_timer = maxf(decision_timer - delta, 0.0)
+	if has_pending_state:
+		pending_state_timer = maxf(pending_state_timer - delta, 0.0)
+	if decision_timer > 0.0:
 		return
+
+	decision_timer = maxf(decision_interval_seconds, 0.05)
+	var desired_state := _get_desired_state_from_proximity()
+	if desired_state == state:
+		_clear_pending_state()
+		_maybe_change_idle_direction()
+		return
+
+	if not has_pending_state or pending_state != desired_state:
+		pending_state = desired_state
+		pending_state_timer = maxf(state_commit_seconds, 0.0)
+		has_pending_state = true
+		return
+
+	if pending_state_timer > 0.0 or state_elapsed_seconds < minimum_state_seconds:
+		return
+
+	_set_state(desired_state)
+
+
+func _get_desired_state_from_proximity() -> State:
+	if focus_target == null or not is_valid_target(focus_target):
+		return State.IDLE
 
 	var distance := global_position.distance_to(focus_target.global_position)
 	if distance <= chase_radius:
-		_set_state(State.CHASE)
-	elif distance <= alert_radius:
-		_set_state(State.ALERT)
-	else:
-		_set_state(State.IDLE)
+		return State.CHASE
+	if distance <= alert_radius:
+		return State.ALERT
+	return State.IDLE
+
+
+func _clear_pending_state() -> void:
+	has_pending_state = false
+	pending_state = state
+	pending_state_timer = 0.0
+
+
+func _maybe_change_idle_direction() -> void:
+	if state != State.IDLE:
+		return
+	if rng.randf() < clampf(idle_turn_chance_per_decision, 0.0, 1.0):
+		idle_direction *= -1.0
 
 
 func _process_hop_state(delta: float) -> void:
@@ -153,12 +206,13 @@ func _process_hop_state(delta: float) -> void:
 
 	if airborne_from_jump:
 		airborne_from_jump = false
+		velocity.x *= clampf(landing_horizontal_retention, 0.0, 1.0)
 		landing_recovery_timer = maxf(landing_recovery_seconds, 0.0)
 		_play_state_animation(&"land")
 
 	if landing_recovery_timer > 0.0:
 		landing_recovery_timer = maxf(landing_recovery_timer - delta, 0.0)
-		velocity.x = move_toward(velocity.x, 0.0, idle_ground_acceleration * delta)
+		velocity.x = move_toward(velocity.x, 0.0, landing_horizontal_deceleration * delta)
 		_apply_visual_squish(1.1, 0.88, _get_state_color())
 		return
 
@@ -184,7 +238,7 @@ func _process_ground_idle(delta: float) -> void:
 		_restore_visual_shape()
 		return
 
-	if is_on_wall() or rng.randf() < 0.004:
+	if is_on_wall():
 		idle_direction *= -1.0
 
 	velocity.x = move_toward(
@@ -265,6 +319,8 @@ func _set_state(new_state: State, force: bool = false) -> void:
 		return
 
 	state = new_state
+	state_elapsed_seconds = 0.0
+	_clear_pending_state()
 	if state != State.DEAD:
 		state_transition_timer = maxf(state_transition_windup_seconds, 0.0)
 		hop_timer = minf(hop_timer, _jittered_interval(_get_hop_interval_for_state()))

@@ -1,4 +1,4 @@
-[gd_scene load_steps=19 format=3]
+[gd_scene load_steps=17 format=3]
 
 [ext_resource type="Script" path="res://scripts/instances/intro_walk_interlude.gd" id="1_controller"]
 [ext_resource type="PackedScene" uid="uid://by1aphre1t601" path="res://player/player.tscn" id="2_player"]
@@ -11,8 +11,6 @@
 [ext_resource type="AudioStream" uid="uid://dq47ji4lxx7bq" path="res://sounds/hummmmm.mp3" id="9_hum"]
 [ext_resource type="AudioStream" uid="uid://brj46n6bnd7sh" path="res://sounds/birds.mp3" id="10_birds"]
 [ext_resource type="Resource" path="res://data/dialogue/intro_memory_montage.tres" id="11_montage_dialogue"]
-[ext_resource type="Script" path="res://scripts/instances/intro_memory_portrait_presenter.gd" id="12_memory_portrait_presenter"]
-[ext_resource type="Texture2D" path="res://images/dialog/mom/portrait_1_mom7.png" id="13_memory_portrait"]
 
 [sub_resource type="RectangleShape2D" id="PlatformShape"]
 size = Vector2(3600, 40)
@@ -214,59 +212,6 @@ grow_vertical = 2
 mouse_filter = 2
 expand_mode = 1
 stretch_mode = 6
-
-[node name="MemoryDialogueBackdropLayer" type="CanvasLayer" parent="."]
-layer = 70
-
-[node name="MemoryDialogueBackdropMute" type="ColorRect" parent="MemoryDialogueBackdropLayer"]
-unique_name_in_owner = true
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-color = Color(0.035, 0.045, 0.06, 0.22)
-
-[node name="MemoryPortraitLayer" type="CanvasLayer" parent="."]
-layer = 80
-
-[node name="MemoryPortraitPresentation" type="Control" parent="MemoryPortraitLayer"]
-unique_name_in_owner = true
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-script = ExtResource("12_memory_portrait_presenter")
-
-[node name="MemoryDialoguePortraitSlot" type="Control" parent="MemoryPortraitLayer/MemoryPortraitPresentation"]
-layout_mode = 1
-anchors_preset = 3
-anchor_left = 1.0
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = -248.0
-offset_top = -496.0
-grow_horizontal = 0
-grow_vertical = 0
-mouse_filter = 2
-
-[node name="MemoryDialoguePortrait" type="TextureRect" parent="MemoryPortraitLayer/MemoryPortraitPresentation/MemoryDialoguePortraitSlot"]
-unique_name_in_owner = true
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-texture = ExtResource("13_memory_portrait")
-expand_mode = 1
-stretch_mode = 5
 
 [node name="FadeLayer" type="CanvasLayer" parent="."]
 layer = 100

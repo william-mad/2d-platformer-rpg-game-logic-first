@@ -1,8 +1,13 @@
 class_name MomNpcFightState extends NpcStateFight
 
+const FightDecisionCommitment = preload(
+	"res://scenes/creatures/npc/states/fight_decision_commitment.gd"
+)
+
 enum MomAttackMode {
 	NONE,
 	MELEE,
+	MELEE_DASH,
 	PROJECTILE,
 	SCREAM,
 	MELEE_STAGGER_PROJECTILE,
@@ -31,8 +36,21 @@ enum ProjectileHitFollowup {
 @export var melee_swing_visual_color: Color = Color(1.0, 0.9, 0.35, 0.9)
 
 @export_group("Mom Fight Movement")
-@export var match_target_move_speed: bool = true
-@export var fallback_fight_move_speed: float = 700.0
+@export var match_target_move_speed: bool = false
+@export var fallback_fight_move_speed: float = 161.0
+@export_range(0.1, 2.0, 0.01) var fight_chase_speed_multiplier: float = 1.15
+
+@export_group("Mom Melee Dash")
+@export var melee_dash_enabled: bool = true
+@export_range(0.1, 1.0, 0.01, "suffix:s") var melee_dash_windup_seconds: float = 0.55
+@export_range(0.05, 0.5, 0.01, "suffix:s") var melee_dash_seconds: float = 0.28
+@export_range(1.0, 5.0, 0.05) var melee_dash_speed_multiplier: float = 3.5
+@export_range(0.05, 3.0, 0.05, "suffix:s") var melee_dash_cooldown_seconds: float = 0.95
+
+@export_group("Mom Fight Stability")
+@export_range(0.05, 0.5, 0.01, "suffix:s") var combat_decision_commitment_seconds: float = 0.15
+@export_range(0.0, 0.5, 0.01, "suffix:s") var combat_facing_commitment_seconds: float = 0.12
+@export_range(0.0, 64.0, 1.0, "suffix:px") var combat_facing_flip_deadzone: float = 12.0
 
 @export_group("Mom Bystander Safety")
 @export var avoid_bystanders_before_attack: bool = true
@@ -96,8 +114,11 @@ var melee_hit_followup_queued: bool = false
 var melee_swing_index: int = 0
 var melee_swing_timer: float = 0.0
 var ranged_followup_air_lunge_timer: float = 0.0
+var melee_dash_direction: float = 0.0
+var melee_dash_cooldown_timer: float = 0.0
 var current_aim_position: Vector2 = Vector2.ZERO
 var aim_indicator: Line2D
+var combat_decision := FightDecisionCommitment.new()
 
 
 func enter() -> void:
@@ -108,7 +129,12 @@ func enter() -> void:
 	melee_swing_index = 0
 	melee_swing_timer = 0.0
 	ranged_followup_air_lunge_timer = 0.0
+	melee_dash_direction = 0.0
+	melee_dash_cooldown_timer = 0.0
+	_configure_combat_decision_commitment()
+	combat_decision.reset()
 	super.enter()
+	_refresh_combat_decision()
 	_ensure_aim_indicator()
 	_set_aim_indicator_visible(false)
 
@@ -118,12 +144,19 @@ func exit() -> void:
 	melee_sequence_active = false
 	melee_hit_followup_queued = false
 	ranged_followup_air_lunge_timer = 0.0
+	melee_dash_direction = 0.0
+	melee_dash_cooldown_timer = 0.0
+	combat_decision.reset()
 	_set_aim_indicator_visible(false)
 	super.exit()
 
 
 func _update_chase() -> void:
 	if _is_winding_up_attack():
+		if active_attack_mode == MomAttackMode.MELEE_DASH:
+			_update_melee_dash_movement()
+			return
+
 		if active_attack_mode == MomAttackMode.SCREAM:
 			_move_toward_scream_target()
 			return
@@ -148,32 +181,27 @@ func _update_chase() -> void:
 	if npc == null or fight_target == null:
 		return
 
-	if _has_clear_attack_option():
-		stop_horizontal()
-		return
-
-	var blocking_bystander := _get_movement_blocking_bystander()
-	if blocking_bystander != null:
-		_move_toward_scream_target()
-		return
-
-	var distance := _get_target_distance()
-	_face_fight_target()
-
-	if distance <= _get_melee_reach_distance():
-		stop_horizontal()
-		return
-
-	if distance >= projectile_distance_threshold and distance <= attack_range:
-		stop_horizontal()
-		return
-
-	var chase_stop_distance := maxf(_get_melee_reach_distance() * 0.9, machine.stop_distance)
-	var chase_speed := _get_fight_move_speed()
-	move_toward_position(fight_target.global_position, chase_speed, chase_stop_distance)
+	_ensure_combat_decision()
+	match combat_decision.movement_mode:
+		FightDecisionCommitment.MovementMode.HOLD:
+			stop_horizontal()
+		FightDecisionCommitment.MovementMode.CLOSE_FOR_SCREAM:
+			_move_toward_scream_target()
+		_:
+			var chase_stop_distance := maxf(
+				combat_decision.melee_reach * 0.9,
+				machine.stop_distance
+			)
+			move_toward_position(
+				fight_target.global_position,
+				combat_decision.move_speed,
+				chase_stop_distance
+			)
+			_face_fight_target()
 
 
 func _update_attack(delta: float) -> void:
+	_advance_combat_decision_commitment(delta)
 	if _is_winding_up_attack():
 		_update_attack_windup(delta)
 		return
@@ -181,23 +209,26 @@ func _update_attack(delta: float) -> void:
 	if ranged_followup_air_lunge_timer > 0.0:
 		_continue_ranged_followup_air_lunge(delta)
 
+	melee_dash_cooldown_timer = maxf(melee_dash_cooldown_timer - delta, 0.0)
 	attack_cooldown_timer -= delta
+	if fight_target == null or not is_instance_valid(fight_target):
+		return
+	if (
+		combat_decision.attack_mode == MomAttackMode.MELEE_DASH
+		and melee_dash_cooldown_timer <= 0.0
+	):
+		_start_melee_dash()
+		return
 	if attack_cooldown_timer > 0.0:
 		return
 
-	if fight_target == null or not is_instance_valid(fight_target):
-		return
-
-	if _can_start_melee_attack():
-		_start_melee_attack()
-		return
-
-	if _can_start_projectile_attack():
-		_start_projectile_attack()
-		return
-
-	if _get_movement_blocking_bystander() != null:
-		_start_scream_attack()
+	match combat_decision.attack_mode:
+		MomAttackMode.MELEE:
+			_start_melee_attack()
+		MomAttackMode.PROJECTILE:
+			_start_projectile_attack()
+		MomAttackMode.SCREAM:
+			_start_scream_attack()
 
 
 func _start_melee_attack() -> void:
@@ -208,14 +239,43 @@ func _start_melee_attack() -> void:
 	melee_swing_index = 0
 	melee_swing_timer = 0.0
 	_set_aim_indicator_visible(false)
-	_face_fight_target()
+	_face_fight_target(true)
 	stop_horizontal()
+
+
+func _start_melee_dash() -> void:
+	active_attack_mode = MomAttackMode.MELEE_DASH
+	attack_windup_timer = (
+		maxf(melee_dash_windup_seconds, 0.0)
+		+ maxf(melee_dash_seconds, 0.05)
+	)
+	melee_sequence_active = false
+	melee_hit_followup_queued = false
+	_set_aim_indicator_visible(false)
+	_face_fight_target(true)
+	melee_dash_direction = _get_direction_to_target()
+	stop_horizontal()
+
+
+func _update_melee_dash_movement() -> void:
+	if npc == null:
+		return
+	if attack_windup_timer > maxf(melee_dash_seconds, 0.05):
+		stop_horizontal()
+		return
+
+	face_x_direction(melee_dash_direction)
+	npc.velocity.x = (
+		melee_dash_direction
+		* combat_decision.move_speed
+		* maxf(melee_dash_speed_multiplier, 1.0)
+	)
 
 
 func _start_projectile_attack() -> void:
 	active_attack_mode = MomAttackMode.PROJECTILE
 	attack_windup_timer = maxf(projectile_aim_windup_seconds, 0.0)
-	_face_fight_target()
+	_face_fight_target(true)
 	stop_horizontal()
 	_update_projectile_aim()
 	_set_aim_indicator_visible(true)
@@ -229,7 +289,7 @@ func _start_scream_attack() -> void:
 	attack_windup_timer = maxf(scream_charge_seconds, 0.0)
 	melee_sequence_active = false
 	_set_aim_indicator_visible(false)
-	_face_fight_target()
+	_face_fight_target(true)
 	_move_toward_scream_target()
 
 
@@ -248,6 +308,7 @@ func _start_melee_hit_followup() -> void:
 	attack_windup_timer = maxf(melee_followup_backstep_seconds, 0.0)
 	melee_sequence_active = false
 	_set_aim_indicator_visible(true)
+	_face_fight_target(true)
 	_update_projectile_aim()
 	_move_back_during_melee_followup()
 
@@ -268,7 +329,7 @@ func _start_ranged_hit_followup() -> void:
 	melee_sequence_active = false
 	melee_hit_followup_queued = false
 	_set_aim_indicator_visible(true)
-	_face_fight_target()
+	_face_fight_target(true)
 	npc.velocity.y = minf(npc.velocity.y, -absf(ranged_followup_jump_velocity))
 	ranged_followup_air_lunge_timer = maxf(ranged_followup_jump_lunge_seconds, ranged_followup_delay_seconds)
 	_tilt_jump_toward_target()
@@ -291,7 +352,7 @@ func _start_straight_hit_melee_followup() -> void:
 	melee_sequence_active = false
 	melee_hit_followup_queued = false
 	_set_aim_indicator_visible(false)
-	_face_fight_target()
+	_face_fight_target(true)
 	_walk_toward_straight_hit_melee()
 
 
@@ -300,6 +361,7 @@ func _update_attack_windup(delta: float) -> void:
 		not melee_sequence_active
 		and active_attack_mode != MomAttackMode.NONE
 		and active_attack_mode != MomAttackMode.SCREAM
+		and active_attack_mode != MomAttackMode.MELEE_DASH
 		and active_attack_mode != MomAttackMode.MELEE_STAGGER_PROJECTILE
 		and active_attack_mode != MomAttackMode.RANGED_JUMP_PROJECTILE
 		and active_attack_mode != MomAttackMode.STRAIGHT_HIT_MELEE
@@ -331,6 +393,14 @@ func _update_attack_windup(delta: float) -> void:
 	match active_attack_mode:
 		MomAttackMode.MELEE:
 			_begin_melee_sequence()
+		MomAttackMode.MELEE_DASH:
+			stop_horizontal()
+			if _get_attack_blocking_bystander_for_mode(MomAttackMode.MELEE) == null:
+				_do_melee_attack(0.0, false)
+			attack_cooldown_timer = maxf(melee_dash_cooldown_seconds, 0.05)
+			melee_dash_cooldown_timer = maxf(melee_dash_cooldown_seconds, 0.05)
+			active_attack_mode = MomAttackMode.NONE
+			melee_dash_direction = 0.0
 		MomAttackMode.PROJECTILE:
 			_throw_aimed_projectile(false, ProjectileHitFollowup.RANGED_JUMP)
 			attack_cooldown_timer = maxf(projectile_cooldown_seconds, 0.05)
@@ -652,18 +722,120 @@ func _is_winding_up_attack() -> bool:
 	return active_attack_mode != MomAttackMode.NONE
 
 
-func _face_fight_target() -> void:
-	var direction_x := _get_direction_to_target()
-	if direction_x != 0.0:
-		face_x_direction(direction_x)
+func _configure_combat_decision_commitment() -> void:
+	combat_decision.configure(
+		combat_decision_commitment_seconds,
+		combat_facing_commitment_seconds,
+		combat_facing_flip_deadzone
+	)
+
+
+func _advance_combat_decision_commitment(delta: float) -> void:
+	combat_decision.advance(delta)
+	if active_attack_mode == MomAttackMode.NONE:
+		_ensure_combat_decision()
+
+
+func _ensure_combat_decision() -> void:
+	if combat_decision.needs_decision(fight_target):
+		_refresh_combat_decision()
+
+
+func _refresh_combat_decision() -> void:
+	var melee_reach := _get_melee_reach_distance()
+	var move_speed := _get_fight_move_speed()
+	# Make the stable body metrics available to safety checks performed while the
+	# rest of this snapshot is being assembled.
+	combat_decision.melee_reach = melee_reach
+	combat_decision.move_speed = move_speed
+	if npc == null or fight_target == null or not is_instance_valid(fight_target):
+		combat_decision.commit_decision(
+			fight_target,
+			FightDecisionCommitment.MovementMode.CHASE,
+			MomAttackMode.NONE,
+			melee_reach,
+			move_speed
+		)
+		return
+
+	var distance := _get_target_distance()
+	var melee_ready := distance <= melee_reach
+	var projectile_reachable := distance >= attack_min_range and distance <= attack_range
+	var projectile_ready := (
+		distance >= projectile_distance_threshold
+		and distance <= attack_range
+	)
+	var melee_blocker: Node2D
+	if melee_ready:
+		melee_blocker = _get_attack_blocking_bystander_for_mode(MomAttackMode.MELEE)
+
+	var attack_decision: int = MomAttackMode.NONE
+	if melee_ready and melee_blocker == null:
+		attack_decision = MomAttackMode.MELEE
+	elif (
+		melee_dash_enabled
+		and not melee_ready
+		and melee_dash_cooldown_timer <= 0.0
+		and distance < projectile_distance_threshold
+		and distance <= attack_range
+	):
+		attack_decision = MomAttackMode.MELEE_DASH
+
+	var projectile_blocker: Node2D
+	if projectile_reachable and attack_decision == MomAttackMode.NONE:
+		projectile_blocker = _get_attack_blocking_bystander_for_mode(
+			MomAttackMode.PROJECTILE
+		)
+		if (
+			(projectile_ready or (allow_projectile_when_melee_blocked and melee_ready))
+			and projectile_blocker == null
+		):
+			attack_decision = MomAttackMode.PROJECTILE
+
+	var movement_blocked := (
+		(melee_ready and melee_blocker != null)
+		or (projectile_reachable and projectile_blocker != null)
+	)
+	var movement_decision := FightDecisionCommitment.MovementMode.CHASE
+	if attack_decision != MomAttackMode.NONE:
+		movement_decision = FightDecisionCommitment.MovementMode.HOLD
+	elif movement_blocked:
+		movement_decision = FightDecisionCommitment.MovementMode.CLOSE_FOR_SCREAM
+	elif melee_ready or projectile_ready:
+		movement_decision = FightDecisionCommitment.MovementMode.HOLD
+	var committed_attack_decision := attack_decision
+	if committed_attack_decision == MomAttackMode.NONE and movement_blocked:
+		committed_attack_decision = MomAttackMode.SCREAM
+	combat_decision.commit_decision(
+		fight_target,
+		movement_decision,
+		committed_attack_decision,
+		melee_reach,
+		move_speed
+	)
+
+
+func _face_fight_target(force: bool = false) -> void:
+	var horizontal_distance := _get_target_horizontal_distance()
+	var direction_x := combat_decision.commit_facing(
+		signf(horizontal_distance),
+		horizontal_distance,
+		force
+	)
+	face_x_direction(direction_x)
 
 
 func _get_direction_to_target() -> float:
-	if npc == null or fight_target == null or not is_instance_valid(fight_target):
-		return 1.0
+	var raw_direction := signf(_get_target_horizontal_distance())
+	return combat_decision.get_facing_direction(
+		raw_direction if raw_direction != 0.0 else 1.0
+	)
 
-	var direction_x := signf(fight_target.global_position.x - npc.global_position.x)
-	return direction_x if direction_x != 0.0 else 1.0
+
+func _get_target_horizontal_distance() -> float:
+	if npc == null or fight_target == null or not is_instance_valid(fight_target):
+		return 0.0
+	return fight_target.global_position.x - npc.global_position.x
 
 
 func _victim_is_current_target(victim: Node) -> bool:
@@ -681,42 +853,6 @@ func _get_target_distance() -> float:
 		return INF
 
 	return npc.global_position.distance_to(fight_target.global_position)
-
-
-func _has_clear_attack_option() -> bool:
-	return _can_start_melee_attack() or _can_start_projectile_attack()
-
-
-func _can_start_melee_attack() -> bool:
-	if not _target_is_melee_attack_ready():
-		return false
-
-	return _get_attack_blocking_bystander_for_mode(MomAttackMode.MELEE) == null
-
-
-func _can_start_projectile_attack() -> bool:
-	if not _target_is_projectile_reachable():
-		return false
-	if (
-		not _target_is_projectile_attack_ready()
-		and not (allow_projectile_when_melee_blocked and _target_is_melee_attack_ready())
-	):
-		return false
-
-	return _get_attack_blocking_bystander_for_mode(MomAttackMode.PROJECTILE) == null
-
-
-func _get_movement_blocking_bystander() -> Node2D:
-	if _has_clear_attack_option():
-		return null
-	if _target_is_melee_attack_ready():
-		var melee_blocker := _get_attack_blocking_bystander_for_mode(MomAttackMode.MELEE)
-		if melee_blocker != null:
-			return melee_blocker
-	if _target_is_projectile_reachable():
-		return _get_attack_blocking_bystander_for_mode(MomAttackMode.PROJECTILE)
-
-	return null
 
 
 func _get_attack_blocking_bystander_for_mode(attack_mode: int) -> Node2D:
@@ -754,10 +890,6 @@ func _get_attack_blocking_bystander_for_mode(attack_mode: int) -> Node2D:
 	return closest_bystander
 
 
-func _get_attack_blocking_bystander() -> Node2D:
-	return _get_movement_blocking_bystander()
-
-
 func _get_bystander_group_for_target() -> StringName:
 	if fight_target == null or not is_instance_valid(fight_target):
 		return &""
@@ -792,20 +924,17 @@ func _bystander_blocks_attack_mode(candidate: Node2D, attack_mode: int) -> bool:
 
 
 func _get_bystander_melee_safe_distance() -> float:
-	return _get_melee_reach_distance() + maxf(bystander_melee_safe_padding, 0.0)
-
-
-func _target_is_in_attack_window() -> bool:
-	return _target_is_melee_attack_ready() or _target_is_projectile_reachable()
+	var melee_reach := combat_decision.melee_reach
+	if melee_reach <= 0.0:
+		melee_reach = _get_melee_reach_distance()
+	return melee_reach + maxf(bystander_melee_safe_padding, 0.0)
 
 
 func _target_is_melee_attack_ready() -> bool:
-	return _get_target_distance() <= _get_melee_reach_distance()
-
-
-func _target_is_projectile_attack_ready() -> bool:
-	var distance := _get_target_distance()
-	return distance >= projectile_distance_threshold and distance <= attack_range
+	var melee_reach := combat_decision.melee_reach
+	if melee_reach <= 0.0:
+		melee_reach = _get_melee_reach_distance()
+	return _get_target_distance() <= melee_reach
 
 
 func _target_is_projectile_reachable() -> bool:
@@ -839,9 +968,12 @@ func _move_toward_scream_target() -> void:
 	if npc == null or fight_target == null or not is_instance_valid(fight_target):
 		return
 
-	var close_speed := _get_fight_move_speed() * clampf(scream_close_speed_multiplier, 0.0, 1.0)
-	var close_distance := maxf(_get_melee_reach_distance() * 0.8, machine.stop_distance)
+	var close_speed := combat_decision.move_speed * clampf(
+		scream_close_speed_multiplier, 0.0, 1.0
+	)
+	var close_distance := maxf(combat_decision.melee_reach * 0.8, machine.stop_distance)
 	move_toward_position(fight_target.global_position, close_speed, close_distance)
+	_face_fight_target()
 
 
 func _move_back_during_melee_followup() -> void:
@@ -854,7 +986,9 @@ func _move_back_during_melee_followup() -> void:
 	if away_direction == 0.0:
 		away_direction = -_get_direction_to_target()
 
-	var backstep_speed := _get_fight_move_speed() * clampf(melee_followup_backstep_speed_multiplier, 0.0, 1.0)
+	var backstep_speed := combat_decision.move_speed * clampf(
+		melee_followup_backstep_speed_multiplier, 0.0, 1.0
+	)
 	npc.velocity.x = away_direction * backstep_speed
 
 
@@ -894,9 +1028,12 @@ func _walk_toward_straight_hit_melee() -> void:
 		stop_horizontal()
 		return
 
-	var walk_speed := _get_fight_move_speed() * clampf(straight_hit_melee_speed_multiplier, 0.0, 1.0)
-	var stop_distance := maxf(_get_melee_reach_distance() * 0.85, machine.stop_distance)
+	var walk_speed := combat_decision.move_speed * clampf(
+		straight_hit_melee_speed_multiplier, 0.0, 1.0
+	)
+	var stop_distance := maxf(combat_decision.melee_reach * 0.85, machine.stop_distance)
 	move_toward_position(fight_target.global_position, walk_speed, stop_distance)
+	_face_fight_target()
 
 
 func _do_scream_attack() -> void:
@@ -1019,12 +1156,17 @@ func _cancel_attack_for_bystander() -> void:
 
 
 func _get_fight_move_speed() -> float:
+	var base_speed := maxf(fallback_fight_move_speed, 0.0)
+	if machine != null:
+		var npc_run_speed := machine.get_effective_run_speed()
+		if npc_run_speed > 0.0:
+			base_speed = npc_run_speed
 	if match_target_move_speed:
 		var target_move_speed := _get_float_property(fight_target, &"move_speed", -1.0)
 		if target_move_speed > 0.0:
-			return target_move_speed
+			base_speed = target_move_speed
 
-	return maxf(fallback_fight_move_speed, 0.0)
+	return base_speed * clampf(fight_chase_speed_multiplier, 0.1, 2.0)
 
 
 func _get_float_property(node: Node, property_name: StringName, fallback: float) -> float:

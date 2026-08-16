@@ -2,12 +2,125 @@
 
 [ext_resource type="Script" path="res://scripts/instances/movable_hidden_object.gd" id="1_movable"]
 [ext_resource type="PackedScene" path="res://scenes/art/props/box_big.tscn" id="2_box_big"]
+[ext_resource type="Texture2D" path="res://images/sprites/assets/moving box..png" id="3_moving_box"]
+[ext_resource type="Texture2D" path="res://images/sprites/assets/box_big.png" id="4_idle_box"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_body"]
 size = Vector2(41, 34)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_hide_area"]
 size = Vector2(56, 45)
+
+[sub_resource type="Animation" id="Animation_box_idle"]
+resource_name = "idle"
+length = 0.001
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("BoxBig/Sprite2D:texture")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [ExtResource("4_idle_box")]
+}
+tracks/1/type = "value"
+tracks/1/imported = false
+tracks/1/enabled = true
+tracks/1/path = NodePath("BoxBig/Sprite2D:hframes")
+tracks/1/interp = 1
+tracks/1/loop_wrap = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [1]
+}
+tracks/2/type = "value"
+tracks/2/imported = false
+tracks/2/enabled = true
+tracks/2/path = NodePath("BoxBig/Sprite2D:frame")
+tracks/2/interp = 1
+tracks/2/loop_wrap = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [0]
+}
+tracks/3/type = "value"
+tracks/3/imported = false
+tracks/3/enabled = true
+tracks/3/path = NodePath("BoxBig/Sprite2D:position")
+tracks/3/interp = 1
+tracks/3/loop_wrap = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [Vector2(0, -25)]
+}
+
+[sub_resource type="Animation" id="Animation_box_move"]
+resource_name = "move"
+length = 0.5
+loop_mode = 1
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("BoxBig/Sprite2D:texture")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [ExtResource("3_moving_box")]
+}
+tracks/1/type = "value"
+tracks/1/imported = false
+tracks/1/enabled = true
+tracks/1/path = NodePath("BoxBig/Sprite2D:hframes")
+tracks/1/interp = 1
+tracks/1/loop_wrap = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [5]
+}
+tracks/2/type = "value"
+tracks/2/imported = false
+tracks/2/enabled = true
+tracks/2/path = NodePath("BoxBig/Sprite2D:frame")
+tracks/2/interp = 0
+tracks/2/loop_wrap = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0, 0.1, 0.2, 0.3, 0.4),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 1,
+"values": [0, 1, 2, 3, 4]
+}
+tracks/3/type = "value"
+tracks/3/imported = false
+tracks/3/enabled = true
+tracks/3/path = NodePath("BoxBig/Sprite2D:position")
+tracks/3/interp = 1
+tracks/3/loop_wrap = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [Vector2(0, -32)]
+}
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_box"]
+_data = {
+&"idle": SubResource("Animation_box_idle"),
+&"move": SubResource("Animation_box_move")
+}
 
 [node name="BigBoxHiddenSpot" type="CharacterBody2D" groups=["hidden_spot", "rope_attachable"]]
 z_index = -10
@@ -16,6 +129,7 @@ collision_mask = 1
 safe_margin = 0.04
 floor_snap_length = 4.0
 script = ExtResource("1_movable")
+hidden_movement_sprite_path = NodePath("BoxBig/Sprite2D")
 
 [node name="BoxBig" parent="." instance=ExtResource("2_box_big")]
 
@@ -34,6 +148,8 @@ position = Vector2(0, -22.5)
 shape = SubResource("RectangleShape2D_hide_area")
 
 [node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+libraries/ = SubResource("AnimationLibrary_box")
+autoplay = &"idle"
 
 [node name="RopeAttachPoint" type="Marker2D" parent="."]
 unique_name_in_owner = true

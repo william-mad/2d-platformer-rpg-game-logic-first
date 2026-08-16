@@ -10,9 +10,15 @@ const MENU_TALK := &"talk"
 const MENU_GOSSIP := &"gossip"
 const MENU_NPC_PROMPT := &"npc_prompt"
 const DEFAULT_DIALOGUE_METADATA := &"default_dialogue_definition"
+const DEFAULT_PLAYER_TALK_PROFILE := preload(
+	"res://data/dialogue/generic_player_talk_dialogue_profile.tres"
+)
 const NpcIdentity = preload("res://scripts/systems/npc_identity.gd")
 const SocialStateSchema = preload(
 	"res://scripts/systems/npc_social_state_schema.gd"
+)
+const FeedbackCatalog = preload(
+	"res://scripts/systems/npc_behavior/feedback/npc_feedback_catalog.gd"
 )
 
 @export_group("Interaction")
@@ -38,33 +44,39 @@ const SocialStateSchema = preload(
 	"Cancel"
 ]
 @export var talk_option_texts: PackedStringArray = [
-	"Friendly check-in",
-	"Tell a joke",
-	"Comfort",
-	"Gossip",
-	"Awkward question"
+	"Casual",
+	"Compliment",
+	"Flirt",
+	"Insult",
+	"Gossip"
 ]
-@export_range(1, 5, 1) var gossip_talk_option_number: int = 4
+@export var talk_option_ids: Array[StringName] = [
+	&"casual",
+	&"compliment",
+	&"flirt",
+	&"insult",
+	&"gossip",
+]
+@export_range(1, 5, 1) var gossip_talk_option_number: int = 5
 @export var talk_option_deltas: Array[Dictionary] = [
 	{
-		"talk_need": -35.0,
-		"boredom": -8.0,
-		"trust": 2.0
-	},
-	{
-		"boredom": -20.0,
 		"trust": 1.0
 	},
 	{
-		"lonely": -10.0,
-		"trust": 4.0
+		"favor": 3.0,
+		"trust": 2.0
 	},
 	{
-		"talk_need": -20.0
+		"favor": 2.0,
+		"love": 3.0
 	},
 	{
-		"trust": -3.0,
-		"boredom": -5.0
+		"favor": -6.0,
+		"trust": -5.0,
+		"anger": 12.0
+	},
+	{
+		"trust": 1.0
 	}
 ]
 @export var close_menu_when_target_exits: bool = true
@@ -110,15 +122,26 @@ var prompt_completed: bool = false
 var menu_target_can_trade: bool = false
 var interaction_menu_actions: Array[StringName] = []
 var menu_hold_machine: NpcStateMachine
+var _player_talk_rng := RandomNumberGenerator.new()
+var _last_player_talk_dialogue_ids: Dictionary = {}
+var _active_player_talk: Dictionary = {}
 
 
 func _ready() -> void:
 	player = get_parent() as Node2D
 	body_entered.connect(_on_body_entered)
 	body_exited.connect(_on_body_exited)
+	interaction_blocked.connect(_on_interaction_blocked_feedback)
+	_player_talk_rng.randomize()
+	var dialogue_controller := get_node_or_null("/root/DialogueController")
+	if dialogue_controller != null:
+		var callback := Callable(self, "_on_player_talk_dialogue_finished")
+		if not dialogue_controller.dialogue_session_finished.is_connected(callback):
+			dialogue_controller.dialogue_session_finished.connect(callback)
 
 
 func _exit_tree() -> void:
+	_cancel_active_player_talk("interactor_exit")
 	if player != null and is_instance_valid(player) and player.has_method("unregister_interaction_candidate"):
 		player.call("unregister_interaction_candidate", self)
 	# The UI may disappear during a scene change; never leave its NPC paused behind.
@@ -155,7 +178,15 @@ func can_interact(actor: Node) -> bool:
 	if _player_gameplay_control_is_claimed():
 		return false
 	var target_npc := _get_closest_npc()
-	return target_npc != null and _get_block_reason(target_npc).is_empty()
+	if target_npc == null:
+		return false
+	var block_reason := _get_block_reason(target_npc)
+	return (
+		block_reason.is_empty()
+		or FeedbackCatalog.is_player_interaction_refusal_presentable(
+			StringName(block_reason)
+		)
+	)
 
 
 func interact(actor: Node) -> bool:
@@ -208,6 +239,23 @@ func _try_open_interaction_menu() -> bool:
 	_show_interaction_menu("")
 	cooldown = cooldown_seconds
 	return _menu_is_open()
+
+
+func _on_interaction_blocked_feedback(
+	actor: Node2D,
+	target_npc: Node2D,
+	_blocked_interaction_id: StringName,
+	reason: String
+) -> void:
+	if target_npc == null or not is_instance_valid(target_npc):
+		return
+	var machine := _get_machine(target_npc)
+	if machine != null and machine.has_method("present_player_interaction_refusal"):
+		machine.call(
+			"present_player_interaction_refusal",
+			StringName(reason),
+			actor
+		)
 
 
 func show_npc_prompt(
@@ -278,9 +326,8 @@ func _show_interaction_menu(feedback: String = "") -> void:
 		and menu_target_npc.has_method("can_trade_with_player")
 		and bool(menu_target_npc.call("can_trade_with_player", player))
 	)
-	var has_modal_dialogue := _get_dialogue_definition(menu_target_npc) != null
-	var options := PackedStringArray(["Dialogue" if has_modal_dialogue else "Talk"])
-	interaction_menu_actions = [&"talk"]
+	var options := PackedStringArray(["Talk", "Actions"])
+	interaction_menu_actions = [&"talk", &"actions"]
 	if menu_target_can_trade:
 		options.append("Trade")
 		interaction_menu_actions.append(&"trade")
@@ -418,12 +465,11 @@ func _handle_interaction_option(selected_index: int) -> void:
 		return
 	var selected_action := interaction_menu_actions[selected_index]
 	if selected_action == &"talk":
-		var definition := _get_dialogue_definition(menu_target_npc)
-		if definition != null:
-			_try_begin_modal_dialogue(definition)
-			return
 		active_menu = MENU_TALK
 		_show_talk_menu("")
+		return
+	if selected_action == &"actions":
+		_show_interaction_menu("Actions: To be implemented.")
 		return
 
 	if selected_action == &"trade":
@@ -468,23 +514,13 @@ func _handle_talk_option(selected_index: int) -> void:
 		_open_gossip_menu()
 		return
 
-	var option_delta := _get_talk_option_delta(selected_index)
-	var selected_interaction_id := StringName("talk_option_%d" % [selected_index + 1])
-	var target_npc := menu_target_npc
-	var acceptance := _request_social_interaction_acceptance(target_npc)
-	if not bool(acceptance.get("accepted", false)):
-		_reject_social_interaction(
-			target_npc,
-			selected_interaction_id,
-			String(acceptance.get("reason", "talk_request_rejected"))
-		)
-		return
-
-	interaction_started.emit(player, target_npc, selected_interaction_id)
-	_apply_interaction_effects(target_npc, option_delta, set_values, selected_interaction_id)
-	interaction_applied.emit(player, target_npc, selected_interaction_id)
-	_finish_menu_attempt("", true)
-	cooldown = cooldown_seconds
+	var category := _get_talk_option_id(selected_index)
+	var selected_interaction_id := StringName("talk_%s" % String(category))
+	_begin_player_talk_response(
+		category,
+		_get_talk_option_delta(selected_index),
+		selected_interaction_id
+	)
 
 
 func _handle_gossip_option(selected_index: int) -> void:
@@ -499,22 +535,12 @@ func _handle_gossip_option(selected_index: int) -> void:
 	var gossip_option_index := _get_gossip_talk_option_index()
 	var option_delta := _get_talk_option_delta(gossip_option_index)
 	var selected_interaction_id := &"talk_gossip"
-	var target_npc := menu_target_npc
-	var acceptance := _request_social_interaction_acceptance(target_npc)
-	if not bool(acceptance.get("accepted", false)):
-		_reject_social_interaction(
-			target_npc,
-			selected_interaction_id,
-			String(acceptance.get("reason", "talk_request_rejected"))
-		)
-		return
-
-	interaction_started.emit(player, target_npc, selected_interaction_id)
-	_apply_interaction_effects(target_npc, option_delta, set_values, selected_interaction_id)
-	_call_gossip_hook(target_npc, gossip_subject, option_delta)
-	interaction_applied.emit(player, target_npc, selected_interaction_id)
-	_finish_menu_attempt("", true)
-	cooldown = cooldown_seconds
+	_begin_player_talk_response(
+		&"gossip",
+		option_delta,
+		selected_interaction_id,
+		gossip_subject
+	)
 
 
 func _handle_npc_prompt_option(selected_index: int) -> void:
@@ -534,6 +560,326 @@ func _get_talk_option_delta(selected_index: int) -> Dictionary:
 			return option_delta.duplicate(true)
 
 	return stat_delta.duplicate(true)
+
+
+func _get_talk_option_id(selected_index: int) -> StringName:
+	if selected_index >= 0 and selected_index < talk_option_ids.size():
+		return talk_option_ids[selected_index]
+	return StringName("option_%d" % [selected_index + 1])
+
+
+func _begin_player_talk_response(
+	category: StringName,
+	effect_delta: Dictionary,
+	selected_interaction_id: StringName,
+	gossip_subject: Dictionary = {}
+) -> void:
+	var target_npc := menu_target_npc
+	if target_npc == null or not is_instance_valid(target_npc):
+		_close_menu()
+		return
+	if not _active_player_talk.is_empty():
+		interaction_blocked.emit(
+			player, target_npc, selected_interaction_id, "player_talk_already_active"
+		)
+		return
+
+	var profile := _get_player_talk_dialogue_profile(target_npc)
+	var profile_error := profile.get_validation_error() if profile != null else "player_talk_profile_missing"
+	if not profile_error.is_empty():
+		interaction_blocked.emit(player, target_npc, selected_interaction_id, profile_error)
+		_show_talk_menu("No responses are configured for this NPC.")
+		return
+
+	var repeat_key := "%s|%s" % [String(_get_npc_id(target_npc)), String(category)]
+	var previous_dialogue_id := StringName(_last_player_talk_dialogue_ids.get(repeat_key, &""))
+	var template := profile.choose_response(category, _player_talk_rng, previous_dialogue_id)
+	if template == null:
+		interaction_blocked.emit(
+			player, target_npc, selected_interaction_id, "player_talk_response_missing"
+		)
+		_show_talk_menu("That kind of conversation is unavailable.")
+		return
+	var context := {
+		"npc_name": _get_npc_label(target_npc),
+		"target_name": String(gossip_subject.get("label", "someone")),
+	}
+	var definition := template.instantiate_with_context(context)
+	if definition == null or not definition.get_validation_error().is_empty():
+		interaction_blocked.emit(
+			player, target_npc, selected_interaction_id, "player_talk_response_invalid"
+		)
+		_show_talk_menu("That response could not be opened.")
+		return
+
+	var machine := _get_machine(target_npc)
+	var talk_state := machine.get_state(&"Talk") as NpcStateTalk if machine != null else null
+	if talk_state == null:
+		interaction_blocked.emit(
+			player, target_npc, selected_interaction_id, "talk_state_missing"
+		)
+		_show_talk_menu("This NPC cannot begin a conversation.")
+		return
+
+	_active_player_talk = {
+		"category": category,
+		"definition": definition,
+		"effect_delta": effect_delta.duplicate(true),
+		"effect_set_values": set_values.duplicate(true),
+		"gossip_subject": gossip_subject.duplicate(true),
+		"interaction_id": selected_interaction_id,
+		"profile": profile,
+		"repeat_key": repeat_key,
+		"talk_ref": weakref(talk_state),
+		"talk_session_id": "",
+		"target_ref": weakref(target_npc),
+		"dialogue_session_id": &"",
+	}
+	if not talk_state.talk_started.is_connected(_on_player_talk_started):
+		talk_state.talk_started.connect(_on_player_talk_started)
+	if not talk_state.talk_cancelled.is_connected(_on_player_talk_cancelled):
+		talk_state.talk_cancelled.connect(_on_player_talk_cancelled)
+
+	# This reserves the existing Talk action. Its normal completion path remains
+	# responsible for talk_need, boredom, action-session, and memory rewards.
+	var acceptance := _request_social_interaction_acceptance(target_npc, false)
+	if not bool(acceptance.get("accepted", false)):
+		_clear_active_player_talk()
+		_reject_social_interaction(
+			target_npc,
+			selected_interaction_id,
+			String(acceptance.get("reason", "talk_request_rejected"))
+		)
+		return
+
+	if not _active_player_talk.is_empty():
+		_active_player_talk["talk_session_id"] = talk_state.terminal_session_id
+	if _menu_is_open():
+		_end_target_menu_hold(target_npc)
+		_close_menu(false)
+	if (
+		not _active_player_talk.is_empty()
+		and talk_state.talk_started_handled
+		and StringName(_active_player_talk.get("dialogue_session_id", &"")) == &""
+	):
+		_on_player_talk_started(target_npc, player)
+	cooldown = cooldown_seconds
+
+
+func _on_player_talk_started(_talker: Node2D, partner: Node2D) -> void:
+	if _active_player_talk.is_empty() or partner != player:
+		return
+	var talk_state := _get_active_player_talk_state()
+	var target_npc := _get_active_player_talk_target()
+	if (
+		talk_state == null
+		or target_npc == null
+		or not talk_state.is_talking_with(player)
+		or talk_state.terminal_source != "player"
+		or StringName(_active_player_talk.get("dialogue_session_id", &"")) != &""
+	):
+		return
+	_active_player_talk["talk_session_id"] = talk_state.terminal_session_id
+	if _menu_is_open():
+		_end_target_menu_hold(target_npc)
+		_close_menu(false)
+
+	var profile := _active_player_talk.get("profile") as NpcPlayerTalkDialogueProfile
+	var definition := _active_player_talk.get("definition") as DialogueDefinition
+	var controller := get_node_or_null("/root/DialogueController")
+	if controller == null or not controller.has_method("begin_player_talk_dialogue"):
+		_fail_active_player_talk("dialogue_controller_missing")
+		return
+	var speaker_names := profile.get_speaker_names()
+	speaker_names[profile.speaker_id] = _get_npc_label(target_npc)
+	var result: Dictionary = controller.call(
+		"begin_player_talk_dialogue",
+		talk_state,
+		player,
+		target_npc,
+		definition,
+		speaker_names,
+		_get_player_talk_portrait_presentation(target_npc, profile)
+	)
+	if not bool(result.get("accepted", false)):
+		_fail_active_player_talk(
+			"dialogue_start_%s" % String(result.get("reason", "rejected"))
+		)
+		return
+
+	var dialogue_session_id := StringName(result.get("session_id", &""))
+	_active_player_talk["dialogue_session_id"] = dialogue_session_id
+	_last_player_talk_dialogue_ids[String(_active_player_talk.get("repeat_key", ""))] = (
+		definition.dialogue_id
+	)
+	interaction_started.emit(
+		player,
+		target_npc,
+		StringName(_active_player_talk.get("interaction_id", &"talk"))
+	)
+	if not talk_state.wait_for_external_completion():
+		controller.call(
+			"cancel_dialogue_session", dialogue_session_id, "talk_wait_rejected"
+		)
+
+
+func _on_player_talk_dialogue_finished(result: Dictionary) -> void:
+	if _active_player_talk.is_empty():
+		return
+	var session_id := StringName(result.get("session_id", &""))
+	if session_id != StringName(_active_player_talk.get("dialogue_session_id", &"")):
+		return
+
+	var talk_state := _get_active_player_talk_state()
+	var target_npc := _get_active_player_talk_target()
+	var talk_session_id := String(_active_player_talk.get("talk_session_id", ""))
+	var interaction_id := StringName(_active_player_talk.get("interaction_id", &"talk"))
+	var effect_delta: Dictionary = _active_player_talk.get("effect_delta", {}).duplicate(true)
+	var effect_set_values: Dictionary = _active_player_talk.get(
+		"effect_set_values", {}
+	).duplicate(true)
+	var gossip_subject: Dictionary = _active_player_talk.get(
+		"gossip_subject", {}
+	).duplicate(true)
+	var talk_is_current := (
+		talk_state != null
+		and target_npc != null
+		and talk_state.terminal_session_id == talk_session_id
+		and talk_state.is_talking_with(player)
+		and talk_state.is_waiting_for_external_completion()
+	)
+	_clear_active_player_talk()
+
+	if bool(result.get("completed", false)) and talk_is_current:
+		_apply_interaction_effects(
+			target_npc, effect_delta, effect_set_values, interaction_id
+		)
+		if not gossip_subject.is_empty():
+			_call_gossip_hook(target_npc, gossip_subject, effect_delta)
+		talk_state.complete_talk_with(player, "player_dialogue_completed")
+		interaction_applied.emit(player, target_npc, interaction_id)
+	elif talk_is_current:
+		talk_state.cancel_talk_session(
+			"dialogue_%s" % String(result.get("reason", "cancelled"))
+		)
+
+	if target_npc != null and is_instance_valid(target_npc):
+		_start_target_interaction_cooldown(target_npc)
+	cooldown = cooldown_seconds
+
+
+func _on_player_talk_cancelled(
+	_talker: Node2D,
+	_partner: Node2D,
+	reason: String
+) -> void:
+	if _active_player_talk.is_empty():
+		return
+	var target_npc := _get_active_player_talk_target()
+	var interaction_id := StringName(_active_player_talk.get("interaction_id", &"talk"))
+	var dialogue_session_id := StringName(
+		_active_player_talk.get("dialogue_session_id", &"")
+	)
+	_clear_active_player_talk()
+	var controller := get_node_or_null("/root/DialogueController")
+	if dialogue_session_id != &"" and controller != null:
+		controller.call(
+			"cancel_dialogue_session",
+			dialogue_session_id,
+			"talk_cancelled_%s" % reason
+		)
+	if target_npc != null and is_instance_valid(target_npc):
+		interaction_blocked.emit(player, target_npc, interaction_id, reason)
+		_start_target_interaction_cooldown(target_npc)
+	cooldown = cooldown_seconds
+
+
+func _fail_active_player_talk(reason: String) -> void:
+	var talk_state := _get_active_player_talk_state()
+	var target_npc := _get_active_player_talk_target()
+	var interaction_id := StringName(_active_player_talk.get("interaction_id", &"talk"))
+	_clear_active_player_talk()
+	if talk_state != null:
+		talk_state.cancel_talk_session(reason)
+	if target_npc != null and is_instance_valid(target_npc):
+		interaction_blocked.emit(player, target_npc, interaction_id, reason)
+		_start_target_interaction_cooldown(target_npc)
+	cooldown = cooldown_seconds
+
+
+func _cancel_active_player_talk(reason: String) -> void:
+	if _active_player_talk.is_empty():
+		return
+	var talk_state := _get_active_player_talk_state()
+	var dialogue_session_id := StringName(
+		_active_player_talk.get("dialogue_session_id", &"")
+	)
+	_clear_active_player_talk()
+	var controller := get_node_or_null("/root/DialogueController")
+	if dialogue_session_id != &"" and controller != null:
+		controller.call("cancel_dialogue_session", dialogue_session_id, reason)
+	if talk_state != null:
+		talk_state.cancel_talk_session(reason)
+
+
+func _clear_active_player_talk() -> void:
+	_active_player_talk.clear()
+
+
+func _get_active_player_talk_state() -> NpcStateTalk:
+	var reference := _active_player_talk.get("talk_ref", null) as WeakRef
+	return reference.get_ref() as NpcStateTalk if reference != null else null
+
+
+func _get_active_player_talk_target() -> Node2D:
+	var reference := _active_player_talk.get("target_ref", null) as WeakRef
+	return reference.get_ref() as Node2D if reference != null else null
+
+
+func _get_player_talk_dialogue_profile(
+	target_npc: Node
+) -> NpcPlayerTalkDialogueProfile:
+	if (
+		target_npc != null
+		and is_instance_valid(target_npc)
+		and NpcIdentity.has_property(target_npc, &"player_talk_dialogue_profile")
+	):
+		var configured := target_npc.get(
+			"player_talk_dialogue_profile"
+		) as NpcPlayerTalkDialogueProfile
+		if configured != null:
+			return configured
+	return DEFAULT_PLAYER_TALK_PROFILE as NpcPlayerTalkDialogueProfile
+
+
+func _get_player_talk_portrait_presentation(
+	target_npc: Node,
+	profile: NpcPlayerTalkDialogueProfile
+) -> Dictionary:
+	var presentation := profile.get_portrait_presentation()
+	if presentation.get("portrait", null) is Texture2D:
+		return presentation
+
+	# A generic response profile may still reuse an NPC's autonomous portrait.
+	# Normalize speaker IDs to the active response resource before presenting it.
+	if (
+		target_npc != null
+		and is_instance_valid(target_npc)
+		and NpcIdentity.has_property(target_npc, &"autonomous_dialogue_profile")
+	):
+		var autonomous_profile := target_npc.get(
+			"autonomous_dialogue_profile"
+		) as NpcAutonomousDialogueProfile
+		if autonomous_profile != null and autonomous_profile.portrait != null:
+			presentation["portrait"] = autonomous_profile.portrait
+			return presentation
+	if target_npc != null and target_npc.has_meta(&"dialogue_portrait"):
+		var metadata_portrait := target_npc.get_meta(
+			&"dialogue_portrait"
+		) as Texture2D
+		if metadata_portrait != null:
+			presentation["portrait"] = metadata_portrait
+	return presentation
 
 
 func _get_gossip_talk_option_index() -> int:
@@ -686,7 +1032,10 @@ func _apply_interaction_effects(
 		)
 
 
-func _request_social_interaction_acceptance(target_npc: Node2D) -> Dictionary:
+func _request_social_interaction_acceptance(
+	target_npc: Node2D,
+	prepay_talk_reward: bool = skip_requested_talk_state_need_payout
+) -> Dictionary:
 	# The menu gate has already validated range and identity. Reserve Talk before any effects run.
 	if target_npc == null or not is_instance_valid(target_npc):
 		return {"accepted": false, "reason": "invalid_target"}
@@ -711,7 +1060,7 @@ func _request_social_interaction_acceptance(target_npc: Node2D) -> Dictionary:
 				rejection_reason = machine_reason
 		return {"accepted": false, "reason": rejection_reason}
 
-	if skip_requested_talk_state_need_payout:
+	if prepay_talk_reward:
 		machine.mark_next_talk_need_payout_applied()
 	return {"accepted": true, "reason": ""}
 
@@ -1128,8 +1477,17 @@ func _get_block_reason(target_npc: Node2D) -> String:
 	var authoritative_gate := _get_authoritative_interaction_gate(target_npc)
 	if not bool(authoritative_gate.get("accepted", false)):
 		return String(authoritative_gate.get("reason", "npc_gate_rejected"))
+	var favor_bypass := StringName(authoritative_gate.get(
+		"favor_bypass",
+		&""
+	))
+	if favor_bypass == &"all":
+		return ""
 
-	if _target_is_ignoring_player_interaction(target_npc):
+	if (
+		favor_bypass == &""
+		and _target_is_ignoring_player_interaction(target_npc)
+	):
 		return "npc_ignoring_player"
 
 	if not _npc_id_is_allowed(target_npc):

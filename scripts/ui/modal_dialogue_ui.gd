@@ -13,11 +13,14 @@ signal cancel_requested(session_id: StringName)
 @onready var speaker_label: Label = %SpeakerName
 @onready var dialogue_label: Label = %DialogueText
 @onready var choice_container: VBoxContainer = %Choices
+@onready var portrait_presenter: IntroMemoryPortraitPresenter = %AutonomousPortraitPresentation
+@onready var portrait_texture: TextureRect = %MemoryDialoguePortrait
 
 var active_session_id: StringName = &""
 var input_enabled: bool = false
 var _revealed_characters: float = 0.0
 var _text_character_count: int = 0
+var _portrait_revealed_session_id: StringName = &""
 
 
 func _ready() -> void:
@@ -118,6 +121,43 @@ func set_session_visible(session_id: StringName, should_show: bool) -> bool:
 	if panel != null:
 		panel.visible = should_show
 	return true
+
+
+func configure_portrait_presentation(
+	dialogue_id: StringName,
+	presentation: Dictionary
+) -> void:
+	if portrait_presenter == null or portrait_texture == null:
+		return
+	_portrait_revealed_session_id = &""
+	var texture := presentation.get("portrait", null) as Texture2D
+	if dialogue_id == &"" or texture == null:
+		portrait_presenter.dialogue_id = &""
+		portrait_presenter.visible = false
+		portrait_texture.texture = null
+		return
+
+	portrait_presenter.dialogue_id = dialogue_id
+	portrait_presenter.portrait_speaker_id = StringName(
+		presentation.get("speaker_id", &"npc")
+	)
+	portrait_presenter.player_speaker_id = StringName(
+		presentation.get("player_speaker_id", &"player")
+	)
+	portrait_texture.texture = texture
+
+
+func reveal_portrait_presentation(session_id: StringName) -> bool:
+	if portrait_presenter == null or portrait_texture == null:
+		return false
+	if portrait_texture.texture == null:
+		return false
+	if _portrait_revealed_session_id == session_id:
+		return true
+	var revealed := portrait_presenter.reveal_session(session_id)
+	if revealed:
+		_portrait_revealed_session_id = session_id
+	return revealed
 
 
 func hide_and_clear() -> void:

@@ -17,7 +17,12 @@ func set_content(text: String, texture: Texture2D = null) -> void:
 		label.text = text
 	icon.texture = texture
 	icon.visible = texture != null
+	set_opacity(1.0)
 	call_deferred("_center_panel")
+
+
+func set_opacity(opacity: float) -> void:
+	modulate.a = clampf(opacity, 0.0, 1.0)
 
 
 func clear_content() -> void:
@@ -28,6 +33,7 @@ func clear_content() -> void:
 		label.text = ""
 	icon.texture = null
 	icon.visible = false
+	set_opacity(1.0)
 	visible = false
 
 

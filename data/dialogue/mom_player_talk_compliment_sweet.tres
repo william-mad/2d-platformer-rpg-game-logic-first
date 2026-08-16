@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_mean"]
+script = ExtResource("3_choice")
+choice_id = &"meant_it"
+text = "Insist you meant it."
+next_node_id = &"meant"
+
+[sub_resource type="Resource" id="Choice_tease"]
+script = ExtResource("3_choice")
+choice_id = &"dont_get_used_to_it"
+text = "Tell her not to get used to it."
+next_node_id = &"tease"
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"mom"
+speaker_text = "Oh. That was unexpectedly sweet. Give me a moment—I had a clever reply, but you knocked it clean out of my head."
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_mean"), SubResource("Choice_tease")])
+
+[sub_resource type="Resource" id="Node_meant"]
+script = ExtResource("2_node")
+node_id = &"meant"
+speaker_id = &"mom"
+speaker_text = "Then I'll keep it. Thank you, darling. That means more than I want to admit."
+terminal = true
+
+[sub_resource type="Resource" id="Node_tease"]
+script = ExtResource("2_node")
+node_id = &"tease"
+speaker_id = &"mom"
+speaker_text = "Too late. My standards have risen. You'll have to be charming at least twice a week now."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"mom_player_talk_compliment_sweet"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_meant"), SubResource("Node_tease")])

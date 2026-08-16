@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"npc"
+speaker_text = "Well... thank you. I wasn't expecting that, but I'm not going to pretend I didn't like hearing it."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"generic_player_talk_compliment"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry")])

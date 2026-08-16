@@ -1072,6 +1072,22 @@ func sync_live_action_descriptor(npc_id: String, npc: Node, descriptor: Dictiona
 			not activity_session_id.is_empty()
 			and action_session_id != activity_session_id
 		):
+			var action_status := String(descriptor.get("status", "")).to_lower()
+			if action_session_id.is_empty() or action_status != "active":
+				# Replacing a stale live action publishes that old session's terminal
+				# descriptor before the accepted replacement becomes active. That is
+				# lifecycle cleanup, not a new owner of the NPC, so it cannot erase a
+				# separately committed scheduled activity during live resume.
+				_breadcrumb(
+					"npc_locations:activity_preserved_on_action_cleanup",
+					"%s activity=%s action=%s status=%s" % [
+						npc_id,
+						activity_session_id,
+						action_session_id,
+						action_status if not action_status.is_empty() else "cleared",
+					]
+				)
+				return true
 			# A different live owner may legitimately supersede the scheduled action
 			# (for example combat or scripted control), but clearing the record without
 			# releasing its claim leaves an orphan for the periodic repair pass. Make the

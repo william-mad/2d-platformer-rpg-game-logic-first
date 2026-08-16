@@ -224,6 +224,9 @@ enum MonsterSightReaction {
 @export_range(0.0, 30.0, 0.1, "suffix:s") var default_player_interaction_hold_seconds: float = 5.0
 @export_range(0.0, 120.0, 0.1, "suffix:s") var default_player_interaction_cooldown_seconds: float = 20.0
 @export_range(0.0, 24.0, 0.01, "suffix:h") var recent_harm_interaction_delay_game_hours: float = 0.5
+@export_range(0.0, 100.0, 0.1) var player_interaction_soft_refusal_minimum_favor: float = 40.0
+@export_range(0.0, 100.0, 0.1) var player_interaction_repeat_bypass_minimum_favor: float = 70.0
+@export_range(0.0, 100.0, 0.1) var player_interaction_all_refusal_bypass_above_favor: float = 95.0
 
 @export_group("Relationship Fear Decay")
 @export var fear_decay_enabled: bool = true
@@ -3835,9 +3838,21 @@ func can_begin_player_interaction(actor: Node2D = null) -> Dictionary:
 		return {"accepted": false, "reason": "invalid_player"}
 	if not active or npc == null or not is_instance_valid(npc):
 		return {"accepted": false, "reason": "npc_inactive"}
+	var directed_favor := _get_player_interaction_directed_favor(actor)
+	if _player_interaction_bypasses_all_refusals(actor, directed_favor):
+		return {
+			"accepted": true,
+			"reason": "",
+			"favor_bypass": &"all",
+			"directed_favor": directed_favor,
+		}
 	if _has_scripted_control_claim():
 		return {"accepted": false, "reason": "npc_scripted_controlled"}
-	if actor != null and is_ignoring_player_interaction(actor):
+	if (
+		actor != null
+		and is_ignoring_player_interaction(actor)
+		and not _player_interaction_bypasses_repeat_limits(actor)
+	):
 		return {"accepted": false, "reason": "npc_ignoring_player"}
 	if get_value(&"hp", 1.0) <= 0.0:
 		return {"accepted": false, "reason": "npc_dead"}
@@ -3879,7 +3894,109 @@ func can_begin_player_interaction(actor: Node2D = null) -> Dictionary:
 			"memory_policy": memory_decision.duplicate(true),
 		}
 
-	return {"accepted": true, "reason": ""}
+	var social_decision := _evaluate_player_interaction_social_acceptance(
+		actor,
+		StringName(actor_id),
+		StringName(remembering_npc_id)
+	)
+	if not bool(social_decision.get("accepted", true)):
+		return {
+			"accepted": false,
+			"reason": String(social_decision.get(
+				"reason_code",
+				&"player_social_request_rejected"
+			)),
+			"social_acceptance": social_decision.duplicate(true),
+		}
+
+	var accepted_result := {"accepted": true, "reason": ""}
+	if (
+		directed_favor
+		>= player_interaction_repeat_bypass_minimum_favor
+	):
+		accepted_result["favor_bypass"] = &"repeat"
+		accepted_result["directed_favor"] = directed_favor
+	return accepted_result
+
+
+func _evaluate_player_interaction_social_acceptance(
+	actor: Node2D,
+	actor_id: StringName,
+	remembering_npc_id: StringName
+) -> Dictionary:
+	if actor == null or actor_id == &"" or remembering_npc_id == &"":
+		return {"accepted": true, "reason_code": &""}
+	var conversation_memory := _social_memory_policy.evaluate_candidate(
+		short_term_memory,
+		actor_id,
+		_get_world_total_hours(),
+		{
+			"remembering_npc_id": remembering_npc_id,
+			"recent_refusal_retry_delay_game_hours": 0.0,
+			"recent_harm_social_delay_game_hours": 0.0,
+			"recent_conversation_repeat_delay_game_hours": (
+				0.0
+				if _player_interaction_bypasses_repeat_limits(actor)
+				else recent_conversation_repeat_delay_game_hours
+			),
+		}
+	)
+	var relationships := get_node_or_null("/root/Relationships")
+	var npc_relationship_id := _get_relationship_id_for_actor(
+		relationships,
+		npc,
+		String(remembering_npc_id)
+	)
+	var actor_relationship_id := _get_relationship_id_for_actor(
+		relationships,
+		actor,
+		String(actor_id)
+	)
+	return _social_acceptance_policy.evaluate(
+		actor_id,
+		remembering_npc_id,
+		{
+			"social_memory_decision": conversation_memory,
+			"relationship": _get_directed_relationship_snapshot(
+				relationships,
+				npc_relationship_id,
+				actor_relationship_id
+			),
+			"minimum_favor": npc_social_acceptance_minimum_favor,
+			"maximum_anger": npc_social_acceptance_maximum_anger,
+			"maximum_fear": npc_social_acceptance_maximum_fear,
+		}
+	)
+
+
+func present_player_interaction_refusal(
+	reason_code: StringName,
+	actor: Node2D = null
+) -> Dictionary:
+	if (
+		get_value(&"hp", 1.0) <= 0.0
+		or get_value(&"disabled", 0.0) >= 1.0
+		or _npc_is_knocked_out()
+		or _current_state_is(&"Collapse")
+	):
+		return {"accepted": false, "reason": &"npc_cannot_speak"}
+	if (
+		feedback_adapter == null
+		or not feedback_adapter.has_method("present_player_interaction_refusal")
+	):
+		return {"accepted": false, "reason": &"feedback_adapter_missing"}
+	var directed_favor := _get_player_interaction_directed_favor(actor)
+	return feedback_adapter.call(
+		"present_player_interaction_refusal",
+		reason_code,
+		{
+			"softened": (
+				directed_favor
+				>= player_interaction_soft_refusal_minimum_favor
+			),
+			"directed_favor": directed_favor,
+		}
+	)
 
 
 func get_player_interaction_memory_debug_descriptor() -> Dictionary:
@@ -4192,11 +4309,19 @@ func _request_talk_state(
 	require_mutual_handshake: bool,
 	initiating_source: StringName
 ) -> bool:
-	if _has_scripted_control_claim():
+	var talk_source := _resolve_talk_initiating_source(
+		initiating_source, new_target, reason
+	)
+	var is_player_request := talk_source == &"player"
+	var bypass_all_refusals := (
+		is_player_request
+		and _player_interaction_bypasses_all_refusals(new_target)
+	)
+	if _has_scripted_control_claim() and not bypass_all_refusals:
 		return _reject_claimed_autonomous_request(&"Talk", initiating_source)
 	if new_target == null or not is_instance_valid(new_target) or new_target == npc:
 		return _reject_state_request(&"Talk", "invalid_talk_target")
-	if _current_state_is(&"LookForTalkTarget"):
+	if _current_state_is(&"LookForTalkTarget") and not bypass_all_refusals:
 		if not _current_look_for_talk_target_matches(new_target):
 			return _reject_state_request(&"Talk", "talk_search_partner_mismatch")
 		var idle_state := get_state(&"Idle")
@@ -4208,7 +4333,14 @@ func _request_talk_state(
 	if _talk_request_is_already_being_handled(new_target):
 		return true
 
-	if is_ignoring_player_interaction(new_target) and not is_talking_with(new_target):
+	if (
+		is_ignoring_player_interaction(new_target)
+		and not is_talking_with(new_target)
+		and not (
+			is_player_request
+			and _player_interaction_bypasses_repeat_limits(new_target)
+		)
+	):
 		return _reject_state_request(&"Talk", "player_interaction_cooldown")
 
 	var partner_machine := _get_talk_machine_for_target(new_target)
@@ -4220,12 +4352,11 @@ func _request_talk_state(
 	var priority := request_priority
 	if priority < 0:
 		priority = 0
-	var talk_source := _resolve_talk_initiating_source(
-		initiating_source, new_target, reason
-	)
-
 	if not is_npc_partner:
-		if not _can_enter_talk_with(new_target, priority):
+		if (
+			not bypass_all_refusals
+			and not _can_enter_talk_with(new_target, priority)
+		):
 			return _reject_state_request(&"Talk", "talker_cannot_enter_talk")
 		return _accept_talk_request(new_target, priority, reason, "", talk_source)
 
@@ -4314,7 +4445,11 @@ func _accept_talk_request(
 	requested_session_id: String = "",
 	initiating_source: StringName = &""
 ) -> bool:
-	if _has_scripted_control_claim():
+	var bypass_all_refusals := (
+		initiating_source == &"player"
+		and _player_interaction_bypasses_all_refusals(new_target)
+	)
+	if _has_scripted_control_claim() and not bypass_all_refusals:
 		return _reject_claimed_autonomous_request(&"Talk", initiating_source)
 	if _talk_request_is_already_being_handled(new_target):
 		return true
@@ -4322,7 +4457,14 @@ func _accept_talk_request(
 	var talk_state := get_state(&"Talk")
 	if talk_state == null:
 		return _reject_state_request(&"Talk", "missing_talk_overlay")
-	if not _can_enter_talk_with(new_target, request_priority):
+	if bypass_all_refusals and interaction_overlay != null:
+		_cancel_interaction_overlay("exceptional_player_favor_override")
+	if interaction_overlay != null:
+		return _reject_state_request(&"Talk", "interaction_overlay_cleanup_failed")
+	if (
+		not bypass_all_refusals
+		and not _can_enter_talk_with(new_target, request_priority)
+	):
 		return _reject_state_request(&"Talk", "talk_overlay_rejected")
 
 	# Commit the separate interaction session only after the primary and handshake accept.
@@ -4725,6 +4867,31 @@ func _process_player_interaction_hold() -> void:
 
 func _is_player_interaction_actor(actor: Node2D) -> bool:
 	return actor != null and is_instance_valid(actor) and actor.is_in_group("player")
+
+
+func _get_player_interaction_directed_favor(actor: Node2D) -> float:
+	if not _is_player_interaction_actor(actor):
+		return -1.0
+	return clampf(_get_relationship_favor_for_target(actor), 0.0, 100.0)
+
+
+func _player_interaction_bypasses_repeat_limits(actor: Node2D) -> bool:
+	return (
+		_get_player_interaction_directed_favor(actor)
+		>= player_interaction_repeat_bypass_minimum_favor
+	)
+
+
+func _player_interaction_bypasses_all_refusals(
+	actor: Node2D,
+	directed_favor: float = -1.0
+) -> bool:
+	var favor := (
+		directed_favor
+		if directed_favor >= 0.0
+		else _get_player_interaction_directed_favor(actor)
+	)
+	return favor > player_interaction_all_refusal_bypass_above_favor
 
 
 func suppress_next_idle_value_reaction() -> void:

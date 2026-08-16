@@ -657,6 +657,14 @@ func _player_visual_is_hidden() -> bool:
 	return not states.is_empty() and current_state is PlayerStateHidden
 
 
+func is_hidden_from_monsters() -> bool:
+	return _player_visual_is_hidden()
+
+
+func can_be_targeted_by_monster() -> bool:
+	return not is_hidden_from_monsters()
+
+
 func _handle_rope_input(event: InputEvent) -> bool:
 	var end_id: StringName = &""
 	if (

@@ -1,0 +1,78 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" load_steps=12 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_charming"]
+script = ExtResource("3_choice")
+choice_id = &"naturally_charming"
+text = "I can't help being charming."
+next_node_id = &"player_charming"
+
+[sub_resource type="Resource" id="Choice_innocent"]
+script = ExtResource("3_choice")
+choice_id = &"completely_innocent"
+text = "I have no idea what you mean."
+next_node_id = &"player_innocent"
+
+[sub_resource type="Resource" id="Choice_counter"]
+script = ExtResource("3_choice")
+choice_id = &"learned_from_you"
+text = "I learned it from you."
+next_node_id = &"player_counter"
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"tease"
+speaker_id = &"mom"
+speaker_text = "That look again. Are you trying to distract me, or is it natural talent?"
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_charming"), SubResource("Choice_innocent"), SubResource("Choice_counter")])
+
+[sub_resource type="Resource" id="Node_player_charming"]
+script = ExtResource("2_node")
+node_id = &"player_charming"
+speaker_id = &"player"
+speaker_text = "Natural talent. A terrible burden, really."
+next_node_id = &"mom_charming"
+
+[sub_resource type="Resource" id="Node_mom_charming"]
+script = ExtResource("2_node")
+node_id = &"mom_charming"
+speaker_id = &"mom"
+speaker_text = "Brave of you to carry it so loudly. It almost worked, too."
+terminal = true
+
+[sub_resource type="Resource" id="Node_player_innocent"]
+script = ExtResource("2_node")
+node_id = &"player_innocent"
+speaker_id = &"player"
+speaker_text = "I am entirely innocent and deeply misunderstood."
+next_node_id = &"mom_innocent"
+
+[sub_resource type="Resource" id="Node_mom_innocent"]
+script = ExtResource("2_node")
+node_id = &"mom_innocent"
+speaker_id = &"mom"
+speaker_text = "Of course. I'll notify the historians immediately."
+terminal = true
+
+[sub_resource type="Resource" id="Node_player_counter"]
+script = ExtResource("2_node")
+node_id = &"player_counter"
+speaker_id = &"player"
+speaker_text = "I learned from the best. You make that same face."
+next_node_id = &"mom_counter"
+
+[sub_resource type="Resource" id="Node_mom_counter"]
+script = ExtResource("2_node")
+node_id = &"mom_counter"
+speaker_id = &"mom"
+speaker_text = "Careful. Flattery gets you everywhere, and then I expect results."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"mom_autonomous_teasing"
+entry_node_id = &"tease"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_player_charming"), SubResource("Node_mom_charming"), SubResource("Node_player_innocent"), SubResource("Node_mom_innocent"), SubResource("Node_player_counter"), SubResource("Node_mom_counter")])

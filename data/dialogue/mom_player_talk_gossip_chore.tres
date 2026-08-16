@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_saw"]
+script = ExtResource("3_choice")
+choice_id = &"saw_it"
+text = "Say you saw it yourself."
+next_node_id = &"saw"
+
+[sub_resource type="Resource" id="Choice_heard"]
+script = ExtResource("3_choice")
+choice_id = &"only_heard"
+text = "Admit that's only what you heard."
+next_node_id = &"heard"
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"mom"
+speaker_text = "{target_name} did all that just to avoid one chore? I almost respect the commitment. Almost."
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_saw"), SubResource("Choice_heard")])
+
+[sub_resource type="Resource" id="Node_saw"]
+script = ExtResource("2_node")
+node_id = &"saw"
+speaker_id = &"mom"
+speaker_text = "Then I want the full story later. Quietly. Preferably over tea."
+terminal = true
+
+[sub_resource type="Resource" id="Node_heard"]
+script = ExtResource("2_node")
+node_id = &"heard"
+speaker_id = &"mom"
+speaker_text = "Ah, secondhand scandal. Keep a little salt beside that story until we know more."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"mom_player_talk_gossip_chore"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_saw"), SubResource("Node_heard")])

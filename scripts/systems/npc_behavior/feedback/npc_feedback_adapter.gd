@@ -46,6 +46,18 @@ func bind(
 	_refresh_state_suppression()
 
 
+func present_player_interaction_refusal(
+	reason_code: StringName,
+	context: Dictionary = {}
+) -> Dictionary:
+	if _presenter == null:
+		return {"accepted": false, "reason": &"feedback_presenter_missing"}
+	var cue := Catalog.create_player_interaction_refusal_cue(reason_code, context)
+	if cue == null:
+		return {"accepted": false, "reason": &"silent_refusal"}
+	return _presenter.submit_cue(cue)
+
+
 func _bind_controller_signals() -> void:
 	if _controller == null:
 		return

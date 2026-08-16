@@ -1,0 +1,78 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" load_steps=12 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_exploring"]
+script = ExtResource("3_choice")
+choice_id = &"been_exploring"
+text = "Exploring. Mostly."
+next_node_id = &"player_exploring"
+
+[sub_resource type="Resource" id="Choice_working"]
+script = ExtResource("3_choice")
+choice_id = &"been_working"
+text = "Keeping busy."
+next_node_id = &"player_working"
+
+[sub_resource type="Resource" id="Choice_secret"]
+script = ExtResource("3_choice")
+choice_id = &"mysterious_business"
+text = "Mysterious business."
+next_node_id = &"player_secret"
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"where_been"
+speaker_id = &"mom"
+speaker_text = "There you are. Where have your boots been taking you lately?"
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_exploring"), SubResource("Choice_working"), SubResource("Choice_secret")])
+
+[sub_resource type="Resource" id="Node_player_exploring"]
+script = ExtResource("2_node")
+node_id = &"player_exploring"
+speaker_id = &"player"
+speaker_text = "Exploring. I only got a little lost, which is basically navigation."
+next_node_id = &"mom_exploring"
+
+[sub_resource type="Resource" id="Node_mom_exploring"]
+script = ExtResource("2_node")
+node_id = &"mom_exploring"
+speaker_id = &"mom"
+speaker_text = "Naturally. Just make sure your brilliant navigation brings you home."
+terminal = true
+
+[sub_resource type="Resource" id="Node_player_working"]
+script = ExtResource("2_node")
+node_id = &"player_working"
+speaker_id = &"player"
+speaker_text = "Keeping busy. There always seems to be one more thing to do."
+next_node_id = &"mom_working"
+
+[sub_resource type="Resource" id="Node_mom_working"]
+script = ExtResource("2_node")
+node_id = &"mom_working"
+speaker_id = &"mom"
+speaker_text = "Work has terrible manners. Don't let it take the whole day."
+terminal = true
+
+[sub_resource type="Resource" id="Node_player_secret"]
+script = ExtResource("2_node")
+node_id = &"player_secret"
+speaker_id = &"player"
+speaker_text = "Mysterious business. I can't compromise the operation."
+next_node_id = &"mom_secret"
+
+[sub_resource type="Resource" id="Node_mom_secret"]
+script = ExtResource("2_node")
+node_id = &"mom_secret"
+speaker_id = &"mom"
+speaker_text = "Mm-hm. Your operation had better be home by dinner."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"mom_autonomous_where_been"
+entry_node_id = &"where_been"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_player_exploring"), SubResource("Node_mom_exploring"), SubResource("Node_player_working"), SubResource("Node_mom_working"), SubResource("Node_player_secret"), SubResource("Node_mom_secret")])

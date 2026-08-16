@@ -177,6 +177,242 @@ func test_recent_completed_conversation_is_temporary_unavailability() -> void:
 	assert_true(requester.memory.get_recent_memories().is_empty())
 
 
+func test_player_gate_reuses_directed_opinion_and_conversation_memory() -> void:
+	var candidate := _npc_fixture(&"player_gate_candidate")
+	var player := TestActor.new(&"player")
+	player.name = "Player"
+	player.add_to_group("player")
+	add_child_autofree(player)
+	var relationships := root.get_node_or_null("Relationships")
+	assert_not_null(relationships)
+	if relationships == null:
+		return
+
+	assert_true(
+		bool(candidate.machine.can_begin_player_interaction(player).accepted),
+		"neutral Player interaction remains accepted"
+	)
+	relationships.set_favor(player, candidate.npc, 0.0, "opposite_direction")
+	assert_true(
+		bool(candidate.machine.can_begin_player_interaction(player).accepted),
+		"the Player's opinion of the NPC does not control the NPC's response"
+	)
+	relationships.set_favor(candidate.npc, player, 10.0, "player_gate_test")
+	assert_eq(
+		candidate.machine.can_begin_player_interaction(player).reason,
+		"requester_favor_too_low",
+		"low NPC-to-Player favor reuses the social-acceptance reason"
+	)
+	relationships.set_favor(candidate.npc, player, 50.0, "player_gate_test")
+	relationships.set_anger(candidate.npc, player, 70.0, "player_gate_test")
+	assert_eq(
+		candidate.machine.can_begin_player_interaction(player).reason,
+		"requester_anger_too_high",
+		"high directed anger refuses the Player"
+	)
+	relationships.set_anger(candidate.npc, player, 0.0, "player_gate_test")
+	relationships.set_fear(candidate.npc, player, 80.0, "player_gate_test")
+	assert_eq(
+		candidate.machine.can_begin_player_interaction(player).reason,
+		"requester_fear_too_high",
+		"high directed fear refuses the Player"
+	)
+	relationships.set_fear(candidate.npc, player, 0.0, "player_gate_test")
+	_remember(
+		candidate.memory,
+		MemoryPolicy.EVENT_CONVERSATION_COMPLETED,
+		&"__player__",
+		&"player_gate_candidate",
+		&"Talk"
+	)
+	assert_eq(
+		candidate.machine.can_begin_player_interaction(player).reason,
+		"recently_talked_with_requester",
+		"existing completed-conversation memory provides the repeat reason"
+	)
+
+
+func test_high_favor_bypasses_only_player_repeat_limits_from_70() -> void:
+	var candidate := _npc_fixture(&"high_favor_repeat_candidate")
+	var player := TestActor.new(&"player")
+	player.name = "Player"
+	player.add_to_group("player")
+	add_child_autofree(player)
+	var relationships := root.get_node_or_null("Relationships")
+	assert_not_null(relationships)
+	if relationships == null:
+		return
+	relationships.set_favor(candidate.npc, player, 69.9, "repeat_bypass_test")
+	candidate.machine.start_player_interaction_cooldown(player, 7.0)
+	assert_eq(
+		candidate.machine.can_begin_player_interaction(player).reason,
+		"npc_ignoring_player",
+		"favor below 70 still respects the real-time repeat cooldown"
+	)
+	candidate.machine.player_interaction_cooldown_timer = 0.0
+	_remember(
+		candidate.memory,
+		MemoryPolicy.EVENT_CONVERSATION_COMPLETED,
+		&"__player__",
+		&"high_favor_repeat_candidate",
+		&"Talk"
+	)
+	assert_eq(
+		candidate.machine.can_begin_player_interaction(player).reason,
+		"recently_talked_with_requester",
+		"favor below 70 still respects completed-conversation memory"
+	)
+	relationships.set_favor(candidate.npc, player, 70.0, "repeat_bypass_test")
+	candidate.machine.start_player_interaction_cooldown(player, 7.0)
+	assert_true(
+		candidate.machine.is_ignoring_player_interaction(player),
+		"the underlying cooldown remains intact for non-Player-initiated consumers"
+	)
+	var accepted_gate: Dictionary = candidate.machine.can_begin_player_interaction(player)
+	assert_true(
+		bool(accepted_gate.accepted),
+		"favor 70 bypasses recent-conversation memory"
+	)
+	assert_eq(
+		accepted_gate.get("favor_bypass"),
+		&"repeat",
+		"the repeat-only favor bypass is diagnosable"
+	)
+	var interactor := PlayerNpcTalkInteractor.new()
+	player.add_child(interactor)
+	assert_eq(
+		interactor._get_block_reason(candidate.npc),
+		"",
+		"the Player interactor honors the authoritative repeat bypass"
+	)
+	relationships.set_anger(candidate.npc, player, 70.0, "repeat_bypass_test")
+	assert_eq(
+		candidate.machine.can_begin_player_interaction(player).reason,
+		"requester_anger_too_high",
+		"the 70 tier does not bypass non-repeat refusal reasons"
+	)
+	relationships.set_favor(candidate.npc, player, 39.9, "soft_refusal_boundary")
+	candidate.machine.present_player_interaction_refusal(
+		&"requester_anger_too_high",
+		player
+	)
+	var refusal_cue: Dictionary = (
+		candidate.machine.feedback_presenter.get_current_cue_descriptor()
+	)
+	assert_eq(
+		refusal_cue.get("metadata", {}).get("refusal_tone"),
+		&"standard",
+		"favor below 40 retains standard refusal wording"
+	)
+	candidate.machine.feedback_presenter.clear_all(&"soft_refusal_boundary")
+	relationships.set_favor(candidate.npc, player, 40.0, "soft_refusal_boundary")
+	candidate.machine.present_player_interaction_refusal(
+		&"requester_anger_too_high",
+		player
+	)
+	refusal_cue = candidate.machine.feedback_presenter.get_current_cue_descriptor()
+	assert_eq(
+		refusal_cue.get("metadata", {}).get("refusal_tone"),
+		&"soft",
+		"favor 40 begins softer refusal presentation"
+	)
+
+
+func test_exceptional_favor_above_95_bypasses_all_npc_player_refusals() -> void:
+	var candidate := _npc_fixture(&"exceptional_favor_candidate")
+	var machine := candidate.machine as NpcStateMachine
+	var player := TestActor.new(&"player")
+	player.name = "Player"
+	player.add_to_group("player")
+	add_child_autofree(player)
+	var relationships := root.get_node_or_null("Relationships")
+	assert_not_null(relationships)
+	if relationships == null:
+		return
+	relationships.set_favor(player, candidate.npc, 100.0, "opposite_direction")
+	relationships.set_favor(candidate.npc, player, 95.0, "full_bypass_boundary")
+	relationships.set_anger(candidate.npc, player, 100.0, "full_bypass_boundary")
+	assert_eq(
+		candidate.machine.can_begin_player_interaction(player).reason,
+		"requester_anger_too_high",
+		"exactly 95 and the opposite relationship row do not activate the bypass"
+	)
+	relationships.set_favor(candidate.npc, player, 95.1, "full_bypass_test")
+	machine.scripted_control_claim_token = 9
+	machine.state_history = [machine.get_state(&"Fight")]
+	machine.values["hp"] = 0.0
+	var gate: Dictionary = machine.can_begin_player_interaction(player)
+	assert_true(bool(gate.accepted), "favor above 95 bypasses all NPC refusal gates")
+	assert_eq(gate.get("favor_bypass"), &"all", "the exceptional bypass is diagnosable")
+	var interactor := PlayerNpcTalkInteractor.new()
+	interactor.allowed_npc_ids = [&"some_other_npc"]
+	interactor.required_npc_tags = [&"missing_test_tag"]
+	player.add_child(interactor)
+	assert_eq(
+		interactor._get_block_reason(candidate.npc),
+		"",
+		"the exceptional bypass clears secondary Player-interactor refusal gates"
+	)
+	assert_false(
+		machine.request_talk(player, 60, false, &"social_ai"),
+		"the exceptional bypass does not leak into autonomous social requests"
+	)
+	assert_true(
+		machine.request_talk(player, 60, false, &"player"),
+		"the exceptional bypass reaches the downstream Player Talk overlay"
+	)
+	assert_true(
+		machine.is_talking_with(player),
+		"the Player Talk reservation is active despite the bypassed state gates"
+	)
+
+
+func test_one_blocked_player_attempt_submits_one_npc_anchored_cue() -> void:
+	var candidate := _npc_fixture(&"player_refusal_feedback")
+	var player := TestActor.new(&"player")
+	player.name = "Player"
+	player.add_to_group("player")
+	var interactor := PlayerNpcTalkInteractor.new()
+	interactor.name = "NpcTalkInteractor"
+	player.add_child(interactor)
+	add_child_autofree(player)
+	interactor.nearby_npcs.append(candidate.npc)
+	var relationships := root.get_node_or_null("Relationships")
+	assert_not_null(relationships)
+	if relationships == null:
+		return
+	relationships.set_favor(candidate.npc, player, 10.0, "feedback_test")
+	var blocked_count := {"value": 0}
+	interactor.interaction_blocked.connect(
+		func(_player: Node2D, _npc: Node2D, _id: StringName, _reason: String) -> void:
+			blocked_count.value += 1
+	)
+
+	assert_true(
+		interactor.can_interact(player),
+		"a presentable refusal remains an attemptable Talk target"
+	)
+	assert_false(interactor.interact(player), "the underlying interaction remains rejected")
+	assert_eq(blocked_count.value, 1, "one attempt emits one existing rejection event")
+	var cue: Dictionary = candidate.machine.feedback_presenter.get_current_cue_descriptor()
+	assert_eq(cue.get("cue_code"), &"player_interaction_refused_opinion")
+	assert_eq(
+		cue.get("metadata", {}).get("reason_code"),
+		&"requester_favor_too_low",
+		"the feedback cue preserves the authoritative gate reason"
+	)
+	assert_eq(
+		candidate.memory.get_recent_memories().size(),
+		0,
+		"showing the refusal creates no memory"
+	)
+	assert_eq(
+		relationships.get_opinion_metric(candidate.npc, player, &"favor", 50.0),
+		10.0,
+		"showing the refusal does not alter the relationship"
+	)
+
+
 func test_social_decline_creates_one_structured_requester_memory() -> void:
 	var requester := _npc_fixture(&"requester")
 	var candidate := _npc_fixture(&"candidate")

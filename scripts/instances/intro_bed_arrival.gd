@@ -7,11 +7,20 @@ extends CanvasLayer
 @export_range(0.1, 6.0, 0.1, "suffix:s") var player_fade_seconds: float = 3.0
 @export_range(0.1, 10.0, 0.1, "suffix:s") var birds_fade_out_seconds: float = 6.0
 @export_range(-80.0, -20.0, 1.0, "suffix:dB") var silent_volume_db: float = -60.0
+@export_category("Post-arrival Dialogue")
+@export var epilogue_dialogue_definition: DialogueDefinition
+@export var epilogue_speaker_names: Dictionary = {
+	&"mom": "Mom",
+	&"player": "Player",
+}
 
 @onready var overlay: ColorRect = %IntroBedArrivalOverlay
 @onready var birds: AudioStreamPlayer = %IntroBedArrivalBirds
+@onready var portrait_presenter: IntroMemoryPortraitPresenter = %MemoryPortraitPresentation
 
 var _player: Player
+var last_dialogue_result: Dictionary = {}
+var _dialogue_session_id: StringName = &""
 var _arrival_tween: Tween
 var _birds_tween: Tween
 
@@ -25,6 +34,9 @@ func _ready() -> void:
 		visible = false
 		return
 	_player.remove_meta(&"arrival_spawn_id")
+	var dialogue_controller := get_node_or_null("/root/DialogueController")
+	if dialogue_controller != null:
+		dialogue_controller.dialogue_session_finished.connect(_on_dialogue_session_finished)
 	var room_animation := get_parent().get_node_or_null("RoomVisibilityAnimation") as AnimationPlayer
 	if room_animation != null and room_animation.has_animation(&"bedroom"):
 		room_animation.play(&"bedroom")
@@ -59,6 +71,7 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	_cancel_owned_dialogue()
 	if _arrival_tween != null and _arrival_tween.is_valid():
 		_arrival_tween.kill()
 	if _birds_tween != null and _birds_tween.is_valid():
@@ -68,7 +81,58 @@ func _exit_tree() -> void:
 func _finish_player_arrival() -> void:
 	if _player == null or not is_instance_valid(_player):
 		return
+	overlay.visible = false
+	_start_epilogue_dialogue()
+
+
+func _start_epilogue_dialogue() -> void:
+	var dialogue_controller := get_node_or_null("/root/DialogueController")
+	if (
+		dialogue_controller == null
+		or not dialogue_controller.has_method("begin_modal_dialogue")
+		or epilogue_dialogue_definition == null
+	):
+		_restore_player_control()
+		return
+	var result = dialogue_controller.call(
+		"begin_modal_dialogue",
+		self,
+		epilogue_dialogue_definition,
+		epilogue_speaker_names
+	)
+	if not (result is Dictionary) or not bool(result.get("accepted", false)):
+		push_warning("Intro post-arrival dialogue was rejected.")
+		_restore_player_control()
+		return
+	_dialogue_session_id = StringName(result.get("session_id", &""))
+	portrait_presenter.reveal_session(_dialogue_session_id)
+
+
+func _on_dialogue_session_finished(result: Dictionary) -> void:
+	if StringName(result.get("session_id", &"")) != _dialogue_session_id:
+		return
+	_dialogue_session_id = &""
+	last_dialogue_result = result.duplicate(true)
+	_restore_player_control()
+
+
+func _restore_player_control() -> void:
+	if _player == null or not is_instance_valid(_player):
+		return
 	_player.set_process(true)
 	_player.set_physics_process(true)
 	_player.set_process_unhandled_input(true)
-	overlay.visible = false
+
+
+func _cancel_owned_dialogue() -> void:
+	if _dialogue_session_id == &"":
+		return
+	var dialogue_controller := get_node_or_null("/root/DialogueController")
+	if (
+		dialogue_controller != null
+		and dialogue_controller.has_method("is_dialogue_active")
+		and bool(dialogue_controller.call("is_dialogue_active"))
+		and StringName(dialogue_controller.get("current_session_id")) == _dialogue_session_id
+	):
+		dialogue_controller.call("cancel_dialogue", "intro_bed_arrival_removed")
+	_dialogue_session_id = &""

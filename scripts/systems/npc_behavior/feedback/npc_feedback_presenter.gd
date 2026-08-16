@@ -26,7 +26,8 @@ static var _emitted_configuration_warning_keys: Dictionary = {}
 @export_range(1, 3, 1) var maximum_queue_size: int = 3
 @export_range(32.0, 1024.0, 1.0, "suffix:px") var visibility_distance: float = 280.0
 @export_range(0.1, 1.0, 0.05, "suffix:s") var visibility_check_interval_seconds: float = 0.2
-@export var feedback_anchor_offset: Vector2 = Vector2(0.0, -134.0)
+@export_range(0.0, 1.0, 0.05, "suffix:s") var fade_out_seconds: float = 0.35
+@export var feedback_anchor_offset: Vector2 = Vector2(0.0, -205.0)
 @export var require_nearby_player: bool = true
 @export var icon_textures_by_key: Dictionary = {}
 
@@ -294,6 +295,7 @@ func _process(delta: float) -> void:
 		and _visual.is_visible_in_tree()
 	):
 		_current_visible_elapsed_seconds += safe_delta
+	_update_visual_fade()
 	_visibility_check_elapsed_seconds += safe_delta
 	if (
 		_visibility_check_elapsed_seconds
@@ -482,6 +484,27 @@ func _apply_current_visual() -> void:
 		return
 	var texture := _resolve_icon(current_cue.icon_key)
 	_visual.set_content(_resolve_display_text(current_cue), texture)
+	_update_visual_fade()
+
+
+func _update_visual_fade() -> void:
+	if _visual == null or not is_instance_valid(_visual):
+		return
+	if current_cue == null or not _current_currently_visible:
+		_visual.set_opacity(1.0)
+		return
+	var fade_duration := minf(
+		maxf(fade_out_seconds, 0.0),
+		current_cue.duration_seconds
+	)
+	if fade_duration <= 0.0:
+		_visual.set_opacity(1.0)
+		return
+	var remaining := maxf(
+		current_cue.duration_seconds - _current_visible_elapsed_seconds,
+		0.0
+	)
+	_visual.set_opacity(clampf(remaining / fade_duration, 0.0, 1.0))
 
 
 func _resolve_display_text(cue: Cue) -> String:
@@ -519,6 +542,7 @@ func _set_current_visibility(visible: bool) -> void:
 	if visible == _current_currently_visible:
 		return
 	_current_currently_visible = visible
+	_update_visual_fade()
 	if visible and not _current_has_been_presented:
 		_current_has_been_presented = true
 		_begin_cooldown(current_cue)
