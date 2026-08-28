@@ -42,6 +42,7 @@ func _ready() -> void:
 	_connect_progression_system()
 	_refresh_progression_widgets()
 	_update_mana_attack_color(mana_bar.value)
+	inventory_screen.close_requested.connect(close_inventory)
 	trade_screen.close_requested.connect(close_trade_screen)
 
 

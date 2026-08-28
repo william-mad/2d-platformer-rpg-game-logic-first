@@ -31,6 +31,7 @@ func _initialize() -> void:
 	_expect(profile != null, "Mom has a player-facing Talk dialogue profile")
 	_expect(profile != null and profile.get_validation_error().is_empty(), "player Talk profile validates")
 	_test_profile_content(profile)
+	_test_other_npc_dialogue_profiles()
 
 	var interactor := player.get_node("NpcTalkInteractor") as PlayerNpcTalkInteractor
 	interactor.nearby_npcs.append(mom)
@@ -97,6 +98,7 @@ func _initialize() -> void:
 		and dialogue_ui.portrait_texture.texture == profile.portrait,
 		"Mom's existing portrait slides in for her response"
 	)
+	_test_mom_portrait_animation(dialogue_ui, profile)
 	_complete_current_dialogue(controller)
 	_expect(talk_state.talk_completed_successfully, "dialogue completion completes normal Talk")
 	_expect_close(machine.get_value(&"talk_need"), 40.0, "normal Talk owns talk-need reward")
@@ -193,6 +195,151 @@ func _test_profile_content(profile: NpcPlayerTalkDialogueProfile) -> void:
 			previous_id = definition.dialogue_id
 			for node in definition.nodes:
 				_expect(node.speaker_id == &"mom", "%s remains a one-sided Mom response" % String(category))
+
+
+func _test_other_npc_dialogue_profiles() -> void:
+	var npc_cases: Array[Dictionary] = [
+		{
+			"name": "Dad",
+			"prefix": "dad_",
+			"scene": "res://scenes/creatures/dad_npc.tscn",
+		},
+		{
+			"name": "Maid",
+			"prefix": "maid_",
+			"scene": "res://scenes/creatures/maid_npc.tscn",
+		},
+		{
+			"name": "Bob",
+			"prefix": "bob_",
+			"scene": "res://scenes/creatures/bob_npc.tscn",
+		},
+	]
+	for npc_case in npc_cases:
+		var scene := load(String(npc_case["scene"])) as PackedScene
+		_expect(scene != null, "%s scene loads" % String(npc_case["name"]))
+		if scene == null:
+			continue
+		var npc := scene.instantiate() as SocialNpc
+		_expect(npc != null, "%s scene instantiates as a social NPC" % String(npc_case["name"]))
+		if npc == null:
+			continue
+
+		var player_profile := npc.player_talk_dialogue_profile as NpcPlayerTalkDialogueProfile
+		_expect(player_profile != null, "%s has an authored player Talk profile" % String(npc_case["name"]))
+		_expect(
+			player_profile != null and player_profile.get_validation_error().is_empty(),
+			"%s player Talk profile validates" % String(npc_case["name"])
+		)
+		if player_profile != null:
+			_expect(
+				player_profile.speaker_name == String(npc_case["name"]),
+				"%s responses use the NPC's name" % String(npc_case["name"])
+			)
+			var has_authored_response := false
+			var has_shared_response := false
+			for category in NpcPlayerTalkDialogueProfile.REQUIRED_CATEGORIES:
+				for definition in player_profile.get_responses(category):
+					var dialogue_id := String(definition.dialogue_id)
+					has_authored_response = (
+						has_authored_response
+						or dialogue_id.begins_with(String(npc_case["prefix"]))
+					)
+					has_shared_response = has_shared_response or dialogue_id.begins_with("generic_")
+			_expect(has_authored_response, "%s has character-authored player responses" % String(npc_case["name"]))
+			_expect(has_shared_response, "%s reuses neutral player responses" % String(npc_case["name"]))
+
+		var autonomous_profile := npc.autonomous_dialogue_profile as NpcAutonomousDialogueProfile
+		_expect(autonomous_profile != null, "%s has an autonomous dialogue profile" % String(npc_case["name"]))
+		_expect(
+			autonomous_profile != null and autonomous_profile.get_validation_error().is_empty(),
+			"%s autonomous dialogue profile validates" % String(npc_case["name"])
+		)
+		if autonomous_profile != null:
+			_expect(
+				autonomous_profile.conversations.size() == 3,
+				"%s has three approach conversations" % String(npc_case["name"])
+			)
+			var has_authored_conversation := false
+			var has_shared_conversation := false
+			for definition in autonomous_profile.conversations:
+				var dialogue_id := String(definition.dialogue_id)
+				has_authored_conversation = (
+					has_authored_conversation
+					or dialogue_id.begins_with(String(npc_case["prefix"]))
+				)
+				has_shared_conversation = (
+					has_shared_conversation
+					or dialogue_id.begins_with("generic_")
+				)
+			_expect(has_authored_conversation, "%s has an authored approach conversation" % String(npc_case["name"]))
+			_expect(has_shared_conversation, "%s reuses neutral approach conversations" % String(npc_case["name"]))
+		npc.free()
+
+
+func _test_mom_portrait_animation(
+	dialogue_ui: ModalDialogueUI,
+	profile: NpcPlayerTalkDialogueProfile
+) -> void:
+	if dialogue_ui == null or profile == null:
+		return
+	var animation := profile.portrait_animation
+	_expect(animation != null, "Mom has a layered portrait animation profile")
+	if animation == null:
+		return
+	_expect(animation.get_validation_error().is_empty(), "Mom portrait animation validates")
+	_expect(
+		animation.blink_sequence == PackedInt32Array([0, 1, 2, 3, 4, 3, 2, 1, 0]),
+		"Mom blink uses the authored 1-2-3-4-5-4-3-2-1 order"
+	)
+	_expect(
+		animation.talk_sequence == PackedInt32Array([0, 1, 2, 1, 3, 4, -1]),
+		"Mom mouth uses the authored 1-2-3-2-4-5-disappear order"
+	)
+	_expect_close(animation.blink_interval_seconds, 2.0, "Mom blink starts every two seconds")
+	_expect_close(animation.talk_duration_seconds, 1.5, "Mom mouth animation uses the shorter speaking window")
+
+	var presenter := dialogue_ui.portrait_presenter
+	_expect(presenter.blink_overlay != null, "dialogue UI has a blink overlay")
+	_expect(presenter.talk_overlay != null, "dialogue UI has a mouth overlay")
+	if presenter.blink_overlay == null or presenter.talk_overlay == null:
+		return
+	_expect(
+		presenter.blink_overlay.get_parent() == dialogue_ui.portrait_texture,
+		"blink overlay moves with the sliding portrait"
+	)
+	_expect(
+		presenter.talk_overlay.get_parent() == dialogue_ui.portrait_texture,
+		"mouth overlay moves with the sliding portrait"
+	)
+	var animation_report := presenter.get_portrait_animation_report()
+	_expect(bool(animation_report.get("talking", false)), "Mom starts speaking animation on her line")
+	_expect(
+		animation_report.get("talk_texture", null) == animation.talk_frames[0],
+		"Mom mouth starts on frame one"
+	)
+	presenter._process(animation.talk_frame_seconds + 0.001)
+	animation_report = presenter.get_portrait_animation_report()
+	_expect(
+		animation_report.get("talk_texture", null) == animation.talk_frames[1],
+		"Mom mouth advances to frame two"
+	)
+	presenter._process(animation.blink_interval_seconds)
+	animation_report = presenter.get_portrait_animation_report()
+	_expect(
+		int(animation_report.get("blink_sequence_index", -1)) == 0,
+		"Mom begins a blink after the configured interval"
+	)
+	presenter._process(animation.blink_frame_seconds + 0.001)
+	animation_report = presenter.get_portrait_animation_report()
+	_expect(
+		animation_report.get("blink_texture", null) == animation.blink_frames[1],
+		"Mom blink advances to frame two"
+	)
+	presenter._process(animation.talk_duration_seconds)
+	animation_report = presenter.get_portrait_animation_report()
+	_expect(not bool(animation_report.get("talking", true)), "Mom stops mouth animation after three seconds")
+	_expect(animation_report.get("talk_texture", null) == null, "Mom's mouth overlay disappears after speaking")
 
 
 func _open_talk_category_menu(interactor: PlayerNpcTalkInteractor) -> void:

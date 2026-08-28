@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_help"]
+script = ExtResource("3_choice")
+choice_id = &"offer_gear_help"
+text = "Offer to help with his gear."
+next_node_id = &"help"
+
+[sub_resource type="Resource" id="Choice_maid"]
+script = ExtResource("3_choice")
+choice_id = &"mention_maid"
+text = "Point out that he mentions the Maid often."
+next_node_id = &"maid"
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"npc"
+speaker_text = "I need to sort my gear before the next hunt. The Maid offered to help again. She has a good eye for damaged straps."
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_help"), SubResource("Choice_maid")])
+
+[sub_resource type="Resource" id="Node_help"]
+script = ExtResource("2_node")
+node_id = &"help"
+speaker_id = &"npc"
+speaker_text = "Thanks, but she already has it handled. We have a routine that works well."
+terminal = true
+
+[sub_resource type="Resource" id="Node_maid"]
+script = ExtResource("2_node")
+node_id = &"maid"
+speaker_id = &"npc"
+speaker_text = "Do I? She's diligent, and... easy to talk to. Don't make more of it than that."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"dad_autonomous_maid"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_help"), SubResource("Node_maid")])

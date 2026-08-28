@@ -221,8 +221,10 @@ func _make_context(session_id: String, config: ManaBalanceConfig) -> Dictionary:
 func _make_config() -> ManaBalanceConfig:
 	var config := ManaBalanceConfig.new()
 	config.orb_acceleration = 100.0
-	config.orb_drag = 20.0
+	config.orb_drag = 3.0
 	config.orb_maximum_speed = 200.0
+	config.orb_turn_acceleration_multiplier = 1.8
+	config.orb_stop_speed_threshold = 0.5
 	config.arena_size = Vector2(160.0, 120.0)
 	config.starting_force_strength = 90.0
 	config.force_increase_per_success = 8.0

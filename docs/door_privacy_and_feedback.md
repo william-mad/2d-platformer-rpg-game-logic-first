@@ -38,12 +38,17 @@ sound, and volume without duplicating presentation code. The lower-level
 When supporting another door implementation, extend only `_door_is_locked_for()` and keep
 the door itself authoritative. Do not duplicate access state in the feedback component.
 
-## Narrative side-room door
+## Narrative side-room door / Maid's off-screen room
 
 The unused painted door immediately before the bathroom is represented by
-`LockedSideRoomDoor`. Its `fake_scene_door.gd` interaction deliberately has no scene target:
-it starts the shared modal dialogue `locked_side_room` and leaves the current scene intact.
-The interacting Player is attached to that dialogue session, so the shared `ui_only` control
-claim blocks movement and combat until the line closes. The same interaction also calls the
-shared floating feedback helper with `Door locked.` The interaction area is aligned to the
-background door at `(528, 368)`.
+`LockedSideRoomDoor`. For the Player, its `fake_scene_door.gd` interaction deliberately has
+no scene target: it starts the shared modal dialogue `locked_side_room` and leaves the current
+scene intact. The interacting Player is attached to that dialogue session, so the shared
+`ui_only` control claim blocks movement and combat until the line closes. The same interaction
+also calls the shared floating feedback helper with `Door locked.`
+
+An invisible `MaidRoomNpcDoor` is nested at the same painted door position `(528, 368)`. It is
+route-authoritative for the Maid only and points to the simulated-only Maid room. This keeps
+Player privacy feedback and NPC scheduled travel separate even though they share one visual
+door. See `simulated_only_npc_locations.md` for the reusable off-screen-location contract and
+diagnostics.

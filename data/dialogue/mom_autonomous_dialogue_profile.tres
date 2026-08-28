@@ -1,7 +1,7 @@
-[gd_resource type="Resource" script_class="NpcAutonomousDialogueProfile" load_steps=10 format=3]
+[gd_resource type="Resource" script_class="NpcAutonomousDialogueProfile" load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://scripts/resources/dialogue/npc_autonomous_dialogue_profile.gd" id="1_profile"]
-[ext_resource type="Texture2D" path="res://images/dialog/mom/portrait_1_mom7.png" id="2_portrait"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/portrait_2_mom.png" id="2_portrait"]
 [ext_resource type="Resource" path="res://data/dialogue/mom_autonomous_check_in.tres" id="3_check_in"]
 [ext_resource type="Resource" path="res://data/dialogue/mom_autonomous_eaten.tres" id="4_eaten"]
 [ext_resource type="Resource" path="res://data/dialogue/mom_autonomous_house.tres" id="5_house"]
@@ -9,6 +9,7 @@
 [ext_resource type="Resource" path="res://data/dialogue/mom_autonomous_chores.tres" id="7_chores"]
 [ext_resource type="Resource" path="res://data/dialogue/mom_autonomous_teasing.tres" id="8_teasing"]
 [ext_resource type="Resource" path="res://data/dialogue/mom_autonomous_day.tres" id="9_day"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_dialogue_portrait_animation.tres" id="10_portrait_animation"]
 
 [resource]
 script = ExtResource("1_profile")
@@ -17,4 +18,5 @@ speaker_name = "Mom"
 player_speaker_id = &"player"
 player_speaker_name = "Player"
 portrait = ExtResource("2_portrait")
+portrait_animation = ExtResource("10_portrait_animation")
 conversations = Array[ExtResource("3_check_in")]([ExtResource("3_check_in"), ExtResource("4_eaten"), ExtResource("5_house"), ExtResource("6_where_been"), ExtResource("7_chores"), ExtResource("8_teasing"), ExtResource("9_day")])

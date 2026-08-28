@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="DialoguePortraitAnimationProfile" load_steps=12 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_portrait_animation_profile.gd" id="1_profile"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/portrait_2_mom_blink (1).png" id="2_blink_1"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/portrait_2_mom_blink (2).png" id="3_blink_2"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/portrait_2_mom_blink (3).png" id="4_blink_3"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/portrait_2_mom_blink (4).png" id="5_blink_4"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/portrait_2_mom_blink (5).png" id="6_blink_5"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/portrait_2_mom_talking1.png" id="7_talk_1"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/portrait_2_mom_talking2.png" id="8_talk_2"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/portrait_2_mom_talking3.png" id="9_talk_3"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/portrait_2_mom_talking4.png" id="10_talk_4"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/portrait_2_mom_talking5.png" id="11_talk_5"]
+
+[resource]
+script = ExtResource("1_profile")
+blink_frames = Array[Texture2D]([ExtResource("2_blink_1"), ExtResource("3_blink_2"), ExtResource("4_blink_3"), ExtResource("5_blink_4"), ExtResource("6_blink_5")])
+blink_sequence = PackedInt32Array(0, 1, 2, 3, 4, 3, 2, 1, 0)
+blink_interval_seconds = 2.0
+blink_frame_seconds = 0.045
+talk_frames = Array[Texture2D]([ExtResource("7_talk_1"), ExtResource("8_talk_2"), ExtResource("9_talk_3"), ExtResource("10_talk_4"), ExtResource("11_talk_5")])
+talk_sequence = PackedInt32Array(0, 1, 2, 1, 3, 4, -1)
+talk_frame_seconds = 0.14
+talk_duration_seconds = 1.5

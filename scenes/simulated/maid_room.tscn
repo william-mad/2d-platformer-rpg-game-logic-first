@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[node name="MaidRoomSimulatedOnly" type="Node"]
+process_mode = 4
+metadata/_npc_simulated_only = true
+metadata/location_id = &"maid_room"

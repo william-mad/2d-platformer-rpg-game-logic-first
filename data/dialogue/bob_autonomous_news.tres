@@ -1,0 +1,58 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_quiet"]
+script = ExtResource("3_choice")
+choice_id = &"town_is_straight"
+text = "Tell him the town isn't leaning."
+next_node_id = &"player_quiet"
+
+[sub_resource type="Resource" id="Choice_story"]
+script = ExtResource("3_choice")
+choice_id = &"go_home"
+text = "Suggest he go home."
+next_node_id = &"player_story"
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"npc"
+speaker_text = "There you are. Tell me honestly: is the town leaning, or have I had enough for today?"
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_quiet"), SubResource("Choice_story")])
+
+[sub_resource type="Resource" id="Node_player_quiet"]
+script = ExtResource("2_node")
+node_id = &"player_quiet"
+speaker_id = &"player"
+speaker_text = "The town is standing straight."
+next_node_id = &"npc_quiet"
+
+[sub_resource type="Resource" id="Node_npc_quiet"]
+script = ExtResource("2_node")
+node_id = &"npc_quiet"
+speaker_id = &"npc"
+speaker_text = "Thought so. That's usually my sign to stop. Usually."
+terminal = true
+
+[sub_resource type="Resource" id="Node_player_story"]
+script = ExtResource("2_node")
+node_id = &"player_story"
+speaker_id = &"player"
+speaker_text = "You should probably go home, Bob."
+next_node_id = &"npc_story"
+
+[sub_resource type="Resource" id="Node_npc_story"]
+script = ExtResource("2_node")
+node_id = &"npc_story"
+speaker_id = &"npc"
+speaker_text = "Sensible advice. I'll give it serious thought from somewhere with a chair."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"bob_autonomous_news"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_player_quiet"), SubResource("Node_npc_quiet"), SubResource("Node_player_story"), SubResource("Node_npc_story")])

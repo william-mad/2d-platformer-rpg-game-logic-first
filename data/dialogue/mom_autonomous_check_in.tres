@@ -1,8 +1,8 @@
-[gd_resource type="Resource" script_class="DialogueDefinition" load_steps=12 format=3]
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3 uid="uid://bbq7stms4rk7d"]
 
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+[ext_resource type="Script" uid="uid://bsmeen4ahl14e" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" uid="uid://csithy7k1fddw" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" uid="uid://cytm50bmpbyao" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
 
 [sub_resource type="Resource" id="Choice_okay"]
 script = ExtResource("3_choice")
@@ -26,49 +26,49 @@ next_node_id = &"player_suspicious"
 script = ExtResource("2_node")
 node_id = &"check_in"
 speaker_id = &"mom"
-speaker_text = "You've gone quiet in that very specific way. How are you, really?"
+speaker_text = "You've been quiet. How are you doing?"
 choices = Array[ExtResource("3_choice")]([SubResource("Choice_okay"), SubResource("Choice_overwhelmed"), SubResource("Choice_suspicious")])
 
 [sub_resource type="Resource" id="Node_player_okay"]
 script = ExtResource("2_node")
 node_id = &"player_okay"
 speaker_id = &"player"
-speaker_text = "I'm okay. My thoughts are just being louder than the room."
+speaker_text = "I'm okay. I just have a lot on my mind."
 next_node_id = &"mom_okay"
 
 [sub_resource type="Resource" id="Node_mom_okay"]
 script = ExtResource("2_node")
 node_id = &"mom_okay"
 speaker_id = &"mom"
-speaker_text = "All right. If they start shouting, you know where to find me."
+speaker_text = "All right. You don't have to talk about it, but I'm here if you want to."
 terminal = true
 
 [sub_resource type="Resource" id="Node_player_overwhelmed"]
 script = ExtResource("2_node")
 node_id = &"player_overwhelmed"
 speaker_id = &"player"
-speaker_text = "A little overwhelmed. Nothing is on fire, but everything feels noisy."
+speaker_text = "A little overwhelmed. There's a lot going on."
 next_node_id = &"mom_overwhelmed"
 
 [sub_resource type="Resource" id="Node_mom_overwhelmed"]
 script = ExtResource("2_node")
 node_id = &"mom_overwhelmed"
 speaker_id = &"mom"
-speaker_text = "Then we take it one small thing at a time. No heroics required."
+speaker_text = "I'm sorry. Take it one thing at a time, and ask me if you need help."
 terminal = true
 
 [sub_resource type="Resource" id="Node_player_suspicious"]
 script = ExtResource("2_node")
 node_id = &"player_suspicious"
 speaker_id = &"player"
-speaker_text = "Why do you ask? Am I making a face again?"
+speaker_text = "Why do you ask? Is it that obvious?"
 next_node_id = &"mom_suspicious"
 
 [sub_resource type="Resource" id="Node_mom_suspicious"]
 script = ExtResource("2_node")
 node_id = &"mom_suspicious"
 speaker_id = &"mom"
-speaker_text = "The face, the sigh, the dramatic stare into nowhere... subtle as thunder."
+speaker_text = "A little. I know you well enough to notice when something is on your mind."
 terminal = true
 
 [resource]

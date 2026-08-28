@@ -267,7 +267,7 @@ func _ensure_save_menu() -> void:
 	shade.name = "SaveFileMenuShade"
 	shade.mouse_filter = Control.MOUSE_FILTER_STOP
 	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
-	shade.color = Color(0.01, 0.012, 0.014, 0.82)
+	shade.color = Color(0.14902, 0.192157, 0.180392, 0.78)
 	root.add_child(shade)
 
 	var center := CenterContainer.new()
@@ -286,8 +286,8 @@ func _ensure_save_menu() -> void:
 	save_menu_title_label.name = "SaveFileMenuTitle"
 	save_menu_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	save_menu_title_label.add_theme_font_size_override("font_size", 26)
-	save_menu_title_label.add_theme_color_override("font_color", Color(0.98, 0.94, 0.82, 1.0))
-	save_menu_title_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.85))
+	save_menu_title_label.add_theme_color_override("font_color", Color(0.721569, 0.368627, 0.262745, 1.0))
+	save_menu_title_label.add_theme_color_override("font_shadow_color", Color(0.501961, 0.4, 0.278431, 0.24))
 	save_menu_title_label.add_theme_constant_override("shadow_offset_x", 2)
 	save_menu_title_label.add_theme_constant_override("shadow_offset_y", 2)
 	stack.add_child(save_menu_title_label)
@@ -359,9 +359,9 @@ func _create_save_menu_button(button_text: String) -> Button:
 	button.mouse_filter = Control.MOUSE_FILTER_STOP
 	button.custom_minimum_size = Vector2(390.0, 52.0)
 	button.add_theme_font_size_override("font_size", 17)
-	button.add_theme_color_override("font_color", Color(0.98, 0.94, 0.82, 1.0))
-	button.add_theme_color_override("font_hover_color", Color(1.0, 0.96, 0.78, 1.0))
-	button.add_theme_color_override("font_pressed_color", Color(0.54, 0.87, 0.68, 1.0))
-	button.add_theme_color_override("font_disabled_color", Color(0.48, 0.5, 0.5, 1.0))
+	button.add_theme_color_override("font_color", Color(0.14902, 0.192157, 0.180392, 1.0))
+	button.add_theme_color_override("font_hover_color", Color(1.0, 0.945098, 0.823529, 1.0))
+	button.add_theme_color_override("font_pressed_color", Color(1.0, 0.945098, 0.823529, 1.0))
+	button.add_theme_color_override("font_disabled_color", Color(0.352941, 0.396078, 0.368627, 0.62))
 	button.text = button_text
 	return button

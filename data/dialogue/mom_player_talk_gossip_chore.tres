@@ -1,8 +1,8 @@
-[gd_resource type="Resource" script_class="DialogueDefinition" load_steps=6 format=3]
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3 uid="uid://ce4uoh3bmra60"]
 
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+[ext_resource type="Script" uid="uid://bsmeen4ahl14e" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" uid="uid://csithy7k1fddw" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" uid="uid://cytm50bmpbyao" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
 
 [sub_resource type="Resource" id="Choice_saw"]
 script = ExtResource("3_choice")
@@ -20,21 +20,21 @@ next_node_id = &"heard"
 script = ExtResource("2_node")
 node_id = &"entry"
 speaker_id = &"mom"
-speaker_text = "{target_name} did all that just to avoid one chore? I almost respect the commitment. Almost."
+speaker_text = "If {target_name} really did that to avoid one chore, that's a lot of trouble for very little gain."
 choices = Array[ExtResource("3_choice")]([SubResource("Choice_saw"), SubResource("Choice_heard")])
 
 [sub_resource type="Resource" id="Node_saw"]
 script = ExtResource("2_node")
 node_id = &"saw"
 speaker_id = &"mom"
-speaker_text = "Then I want the full story later. Quietly. Preferably over tea."
+speaker_text = "Then I suppose it's true. Still, let's not spread it around."
 terminal = true
 
 [sub_resource type="Resource" id="Node_heard"]
 script = ExtResource("2_node")
 node_id = &"heard"
 speaker_id = &"mom"
-speaker_text = "Ah, secondhand scandal. Keep a little salt beside that story until we know more."
+speaker_text = "Then we should wait before believing it. Stories change quickly."
 terminal = true
 
 [resource]

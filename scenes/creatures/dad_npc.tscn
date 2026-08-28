@@ -1,0 +1,63 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/creatures/npc/blueprint_social_npc.tscn" id="1_npc"]
+[ext_resource type="Resource" path="res://data/dialogue/dad_autonomous_dialogue_profile.tres" id="2_autonomous_dialogue"]
+[ext_resource type="Resource" path="res://data/dialogue/dad_player_talk_dialogue_profile.tres" id="3_player_talk_dialogue"]
+
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_dad"]
+radius = 16.0
+height = 124.0
+
+[node name="DadNpc" instance=ExtResource("1_npc")]
+display_name = "Dad"
+npc_tags = Array[StringName]([&"dad", &"family"])
+location_id = &"dad"
+npc_scene_path = "res://scenes/creatures/dad_npc.tscn"
+autonomous_dialogue_profile = ExtResource("2_autonomous_dialogue")
+player_talk_dialogue_profile = ExtResource("3_player_talk_dialogue")
+
+[node name="BodyVisual" parent="."]
+position = Vector2(0, -62)
+color = Color(0.78, 0.62, 0.2, 1)
+polygon = PackedVector2Array(0, -62, 8, -60, 14, -54, 16, -46, 16, 46, 14, 54, 8, 60, 0, 62, -8, 60, -14, 54, -16, 46, -16, -46, -14, -54, -8, -60)
+
+[node name="CollisionShape2D" parent="."]
+position = Vector2(0, -62)
+shape = SubResource("CapsuleShape2D_dad")
+
+[node name="RopeAttachPoint" parent="."]
+position = Vector2(0, -78)
+
+[node name="Damage_Area" parent="."]
+position = Vector2(0, -62)
+
+[node name="CollisionShape2D" parent="Damage_Area"]
+shape = SubResource("CapsuleShape2D_dad")
+
+[node name="SightPivot" parent="."]
+position = Vector2(0, -50)
+
+[node name="FavorBar" parent="."]
+offset_left = -36.0
+offset_top = -137.0
+offset_right = 36.0
+offset_bottom = -129.0
+
+[node name="NameLabel" parent="."]
+offset_left = -80.0
+offset_top = -184.0
+offset_right = 80.0
+offset_bottom = -162.0
+text = "Dad"
+
+[node name="HPBar" parent="."]
+offset_left = -36.0
+offset_top = -144.0
+offset_right = 36.0
+offset_bottom = -138.0
+
+[node name="StateLabel" parent="."]
+offset_left = -46.0
+offset_top = -161.0
+offset_right = 46.0
+offset_bottom = -138.0

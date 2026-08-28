@@ -3,8 +3,13 @@ extends SceneTree
 const YARD_SCENE := "res://scenes/testscenes/realtest1.tscn"
 const HOME_SCENE := "res://scenes/testscenes/realhometest.tscn"
 const BEDROOM_SCENE := "res://scenes/testscenes/mom_bedroom.tscn"
+const MAID_ROOM_SCENE := "res://scenes/simulated/maid_room.tscn"
+const DAD_WORKPLACE_SCENE := "res://scenes/simulated/dad_workplace.tscn"
 const MOM_BED_DEFINITION := "res://data/npc_spots/mom_bed.tres"
+const DAD_BED_DEFINITION := "res://data/npc_spots/dad_bed.tres"
 const MOM_SHOWER_DEFINITION := "res://data/npc_spots/mom_shower.tres"
+const MAID_SLEEP_DEFINITION := "res://data/npc_spots/maid_room_sleep.tres"
+const DAD_WORK_DEFINITION := "res://data/npc_spots/dad_workplace_work.tres"
 
 var _failures: Array[String] = []
 
@@ -19,6 +24,8 @@ func _initialize() -> void:
 
 	_test_route_core_api(routes)
 	_test_mom_routes(routes)
+	_test_dad_routes(routes)
+	_test_simulated_only_routes(routes)
 	_test_pending_route_progression(routes)
 	_test_malformed_pending_bounds(routes)
 	_test_route_copy_safety(routes)
@@ -88,6 +95,90 @@ func _test_mom_routes(routes: Node) -> void:
 	_expect(String(cyclic_miss.get("reason", "")) == "route_not_found", "cyclic miss reports route_not_found")
 
 
+func _test_dad_routes(routes: Node) -> void:
+	var outbound := routes.call("plan_route", YARD_SCENE, BEDROOM_SCENE, &"dad") as Dictionary
+	_expect(bool(outbound.get("accepted", false)), "Dad can plan the two-hop route to the shared bedroom")
+	_expect(int(outbound.get("hop_count", -1)) == 2, "Dad's bedroom route has exactly two hops")
+	_expect(
+		_string_array(outbound.get("scene_paths", [])) == [YARD_SCENE, HOME_SCENE, BEDROOM_SCENE],
+		"Dad's outbound route crosses the shared home"
+	)
+	_expect(
+		_string_array(outbound.get("edge_ids", [])) == [
+			"household.realtest1_to_realhometest",
+			"household.realhometest_to_mom_bedroom",
+		],
+		"Dad's outbound route uses both authored household doors"
+	)
+
+	var reverse := routes.call("plan_route", BEDROOM_SCENE, YARD_SCENE, &"dad") as Dictionary
+	_expect(bool(reverse.get("accepted", false)), "Dad can plan the two-hop wake return route")
+	_expect(int(reverse.get("hop_count", -1)) == 2, "Dad's wake return has exactly two hops")
+	_expect(
+		_string_array(reverse.get("scene_paths", [])) == [BEDROOM_SCENE, HOME_SCENE, YARD_SCENE],
+		"Dad's wake return crosses the shared home"
+	)
+	_expect(
+		_string_array(reverse.get("edge_ids", [])) == [
+			"household.mom_bedroom_to_realhometest",
+			"household.realhometest_to_realtest1",
+		],
+		"Dad's wake return uses both authored household doors"
+	)
+
+
+func _test_simulated_only_routes(routes: Node) -> void:
+	var maid_outbound := routes.call(
+		"plan_route", YARD_SCENE, MAID_ROOM_SCENE, &"maid"
+	) as Dictionary
+	_expect(bool(maid_outbound.get("accepted", false)), "Maid can route from the yard to her off-screen room")
+	_expect(int(maid_outbound.get("hop_count", -1)) == 2, "Maid room route crosses the shared home")
+	_expect(
+		_string_array(maid_outbound.get("scene_paths", [])) == [
+			YARD_SCENE, HOME_SCENE, MAID_ROOM_SCENE,
+		],
+		"Maid uses the home as the intermediate scene"
+	)
+	var maid_return := routes.call(
+		"plan_route", MAID_ROOM_SCENE, YARD_SCENE, &"maid"
+	) as Dictionary
+	_expect(bool(maid_return.get("accepted", false)), "Maid can leave her room after waking")
+	_expect(int(maid_return.get("hop_count", -1)) == 2, "Maid wake route returns through the home")
+	var maid_denied := routes.call(
+		"plan_route", HOME_SCENE, MAID_ROOM_SCENE, &"dad"
+	) as Dictionary
+	_expect(not bool(maid_denied.get("accepted", false)), "Dad cannot use the Maid's private room route")
+
+	var work_outbound := routes.call(
+		"plan_route", YARD_SCENE, DAD_WORKPLACE_SCENE, &"dad"
+	) as Dictionary
+	_expect(bool(work_outbound.get("accepted", false)), "Dad can route from the yard to work")
+	_expect(int(work_outbound.get("hop_count", -1)) == 1, "Dad's workplace is one off-screen hop from the yard")
+	var work_return := routes.call(
+		"plan_route", DAD_WORKPLACE_SCENE, YARD_SCENE, &"dad"
+	) as Dictionary
+	_expect(bool(work_return.get("accepted", false)), "Dad can leave work at schedule end")
+	_expect(int(work_return.get("hop_count", -1)) == 1, "Dad returns from work in one off-screen hop")
+	var work_denied := routes.call(
+		"plan_route", YARD_SCENE, DAD_WORKPLACE_SCENE, &"maid"
+	) as Dictionary
+	_expect(not bool(work_denied.get("accepted", false)), "Maid cannot use Dad's work route")
+
+	var simulator := root.get_node_or_null("NpcWorldSimulation")
+	_expect(simulator != null, "NpcWorldSimulation autoload is available for location audits")
+	if simulator != null and simulator.has_method("audit_simulated_locations"):
+		var diagnostics := simulator.call("audit_simulated_locations") as Array
+		_expect(diagnostics.size() == 2, "both simulated-only locations have manifests")
+		for diagnostic_value in diagnostics:
+			var diagnostic: Dictionary = diagnostic_value
+			_expect(
+				bool(diagnostic.get("accepted", false)),
+				"simulated-only location '%s' passes its complete contract" % String(
+					diagnostic.get("location_id", "")
+				)
+			)
+
+
 func _test_pending_route_progression(routes: Node) -> void:
 	var plan := routes.call("plan_route", YARD_SCENE, BEDROOM_SCENE, &"mom") as Dictionary
 	if not bool(plan.get("accepted", false)):
@@ -121,7 +212,7 @@ func _test_pending_route_progression(routes: Node) -> void:
 	var first_hop := routes.call("get_current_hop", pending, YARD_SCENE, &"mom") as Dictionary
 	_expect(bool(first_hop.get("accepted", false)), "first outbound hop is ready")
 	_expect(String(first_hop.get("target_scene_path", "")) == HOME_SCENE, "first outbound hop targets the shared home")
-	_expect(first_hop.get("target_arrival_position", Vector2.ZERO) == Vector2(610.0, 368.0), "yard-to-home arrival is explicit")
+	_expect(first_hop.get("target_arrival_position", Vector2.ZERO) == Vector2(-21.0, 370.0), "yard-to-home arrival matches the player spawn")
 
 	var mismatch := routes.call(
 		"advance_pending_route",
@@ -159,7 +250,7 @@ func _test_pending_route_progression(routes: Node) -> void:
 	) as Dictionary
 	_expect(bool(first_advance.get("accepted", false)), "first outbound hop advances")
 	_expect(not bool(first_advance.get("complete", true)), "first outbound hop does not finish the route")
-	_expect(first_advance.get("arrival_position", Vector2.ZERO) == Vector2(610.0, 368.0), "first advance returns the home arrival")
+	_expect(first_advance.get("arrival_position", Vector2.ZERO) == Vector2(-21.0, 370.0), "first advance returns the player-aligned home arrival")
 	var after_first := _pending_from_advance(first_advance)
 	_expect(String(after_first.get("target_scene_path", "")) == BEDROOM_SCENE, "intermediate progress retains the final scene")
 	_expect(after_first.get("target_position", Vector2.ZERO) == Vector2(220.0, 420.0), "intermediate progress retains the bed position")
@@ -201,7 +292,7 @@ func _test_pending_route_progression(routes: Node) -> void:
 	) as Dictionary
 	var reverse_after_first := _pending_from_advance(reverse_first_result)
 	var reverse_second := routes.call("get_current_hop", reverse_after_first, HOME_SCENE, &"mom") as Dictionary
-	_expect(reverse_second.get("target_arrival_position", Vector2.ZERO) == Vector2(-240.0, 368.0), "home-to-yard arrival is explicit")
+	_expect(reverse_second.get("target_arrival_position", Vector2.ZERO) == Vector2(-318.0, 375.0), "home-to-yard arrival matches the player spawn")
 
 
 func _test_route_copy_safety(routes: Node) -> void:
@@ -224,8 +315,8 @@ func _test_route_copy_safety(routes: Node) -> void:
 	if snapshot_edges is Array:
 		snapshot_edges.clear()
 	var fresh_snapshot := routes.call("get_debug_snapshot") as Dictionary
-	_expect(int(fresh_snapshot.get("edge_count", 0)) == 4, "mutating a debug snapshot cannot alter the graph")
-	_expect((fresh_snapshot.get("edges", []) as Array).size() == 4, "debug edge descriptors are returned by copy")
+	_expect(int(fresh_snapshot.get("edge_count", 0)) == 8, "mutating a debug snapshot cannot alter the graph")
+	_expect((fresh_snapshot.get("edges", []) as Array).size() == 8, "debug edge descriptors are returned by copy")
 	_expect((fresh_snapshot.get("validation_errors", []) as Array).is_empty(), "authored route graph validates cleanly")
 
 
@@ -433,16 +524,32 @@ func _test_authored_scene_contract(routes: Node) -> void:
 	var yard := _instantiate_scene(YARD_SCENE)
 	var home := _instantiate_scene(HOME_SCENE)
 	var bedroom := _instantiate_scene(BEDROOM_SCENE)
-	if yard == null or home == null or bedroom == null:
+	var maid_room := _instantiate_scene(MAID_ROOM_SCENE)
+	var dad_workplace := _instantiate_scene(DAD_WORKPLACE_SCENE)
+	if (
+		yard == null
+		or home == null
+		or bedroom == null
+		or maid_room == null
+		or dad_workplace == null
+	):
 		_free_if_valid(yard)
 		_free_if_valid(home)
 		_free_if_valid(bedroom)
+		_free_if_valid(maid_room)
+		_free_if_valid(dad_workplace)
 		return
 
 	var yard_to_home := yard.get_node_or_null("RealHomeDoor")
 	var home_to_yard := home.get_node_or_null("OutsideDoor")
+	var home_player_arrival := home.get_node_or_null("PlayerSpawnFromYard") as Node2D
+	var yard_player_arrival := yard.get_node_or_null("PlayerSpawnFromHome") as Node2D
 	var home_to_bedroom := home.get_node_or_null("MomBedroomDoor")
 	var bedroom_to_home := bedroom.get_node_or_null("DoorToRealHome")
+	var home_to_maid_room := home.get_node_or_null(
+		"LockedSideRoomDoor/MaidRoomNpcDoor"
+	)
+	var yard_to_dad_work := yard.get_node_or_null("DadWorkExit")
 	_test_door_route_reference(
 		routes,
 		yard_to_home,
@@ -483,6 +590,24 @@ func _test_authored_scene_contract(routes: Node) -> void:
 		YARD_SCENE,
 		&"household.realhometest_to_realtest1"
 	)
+	var yard_to_home_edge := routes.call(
+		"get_edge_resource", &"household.realtest1_to_realhometest"
+	) as NpcSceneRouteEdge
+	var home_to_yard_edge := routes.call(
+		"get_edge_resource", &"household.realhometest_to_realtest1"
+	) as NpcSceneRouteEdge
+	_expect(
+		yard_to_home_edge != null
+		and home_player_arrival != null
+		and yard_to_home_edge.target_arrival_position == home_player_arrival.position,
+		"NPCs entering realhometest use the same arrival point as the player"
+	)
+	_expect(
+		home_to_yard_edge != null
+		and yard_player_arrival != null
+		and home_to_yard_edge.target_arrival_position == yard_player_arrival.position,
+		"NPCs entering realtest1 use the same arrival point as the player"
+	)
 	_test_door_route_reference(
 		routes,
 		home_to_bedroom,
@@ -499,11 +624,54 @@ func _test_authored_scene_contract(routes: Node) -> void:
 		HOME_SCENE,
 		&"household.mom_bedroom_to_realhometest"
 	)
+	_test_door_route_reference(
+		routes,
+		home_to_maid_room,
+		"locked side-room Maid route",
+		HOME_SCENE,
+		MAID_ROOM_SCENE,
+		&"household.realhometest_to_maid_room"
+	)
+	_test_door_route_reference(
+		routes,
+		yard_to_dad_work,
+		"yard to Dad workplace",
+		YARD_SCENE,
+		DAD_WORKPLACE_SCENE,
+		&"household.realtest1_to_dad_workplace"
+	)
+	_expect(
+		home_to_maid_room is CanvasItem and not (home_to_maid_room as CanvasItem).visible,
+		"the Maid's NPC route is invisible inside the locked painted door"
+	)
+	_expect(
+		yard_to_dad_work is CanvasItem and not (yard_to_dad_work as CanvasItem).visible,
+		"Dad's work exit has no door visual"
+	)
+	_expect(yard.get_node_or_null("DadWorkExitSign") != null, "Dad's left-edge work exit has a visible sign")
+	_expect(
+		bool(maid_room.get_meta(&"_npc_simulated_only", false))
+		and maid_room.get_child_count() == 0,
+		"Maid room stays an explicitly marked empty simulation scene"
+	)
+	_expect(
+		bool(dad_workplace.get_meta(&"_npc_simulated_only", false))
+		and dad_workplace.get_child_count() == 0,
+		"Dad workplace stays an explicitly marked empty simulation scene"
+	)
 	var home_bedroom_owner_ids = _property_value(home_to_bedroom, &"owner_ids", [])
 	_expect(
 		_id_list_contains(home_bedroom_owner_ids, &"mom")
+		and _id_list_contains(home_bedroom_owner_ids, &"dad")
 		and not _id_list_contains(home_bedroom_owner_ids, &"player"),
-		"home-to-bedroom owner access permits Mom and rejects the Player"
+		"home-to-bedroom owner access permits Mom and Dad but rejects the Player"
+	)
+	var yard_home_owner_ids = _property_value(yard_to_home, &"owner_ids", [])
+	var home_yard_owner_ids = _property_value(home_to_yard, &"owner_ids", [])
+	_expect(
+		_id_list_contains(yard_home_owner_ids, &"maid")
+		and _id_list_contains(home_yard_owner_ids, &"maid"),
+		"Maid can cross the shared exterior door on both legs of her sleep route"
 	)
 	var home_bedroom_door := home_to_bedroom as NpcTravelDoor
 	var home_player := home.get_node_or_null("Player") as Node2D
@@ -518,13 +686,22 @@ func _test_authored_scene_contract(routes: Node) -> void:
 		home_bedroom_door != null and home_bedroom_door.can_npc_id_use(&"mom"),
 		"Mom remains authorized by the bedroom route edge"
 	)
+	_expect(
+		home_bedroom_door != null and home_bedroom_door.can_npc_id_use(&"dad"),
+		"Dad is authorized by the shared-bedroom route edge"
+	)
 	var bedroom_home_owner_ids = _property_value(bedroom_to_home, &"owner_ids", [])
 	_expect(
 		_id_list_contains(bedroom_home_owner_ids, &"mom")
+		and _id_list_contains(bedroom_home_owner_ids, &"dad")
 		and _id_list_contains(bedroom_home_owner_ids, &"player"),
-		"bedroom-to-home owner access still permits Mom and Player exit"
+		"bedroom-to-home owner access permits Mom, Dad, and Player exit"
 	)
 	var bedroom_home_door := bedroom_to_home as NpcTravelDoor
+	_expect(
+		bedroom_home_door != null and bedroom_home_door.can_npc_id_use(&"dad"),
+		"Dad is authorized to leave the shared bedroom"
+	)
 	var bedroom_player := bedroom.get_node_or_null("Player") as Node2D
 	if bedroom_home_door != null and bedroom_player != null:
 		bedroom_home_door.active_player = bedroom_player
@@ -533,27 +710,29 @@ func _test_authored_scene_contract(routes: Node) -> void:
 			bedroom_home_door.can_interact(bedroom_player),
 			"bedroom-to-home door allows live Player exit interaction"
 		)
-	var home_player_arrival := home.get_node_or_null("PlayerSpawnFromYard") as Node2D
-	var yard_player_arrival := yard.get_node_or_null("PlayerSpawnFromHome") as Node2D
 	_expect(
 		home_player_arrival != null
 		and home_to_yard is Node2D
 		and absf(home_player_arrival.position.x - (home_to_yard as Node2D).position.x)
-			>= 64.0,
-		"yard-to-home player arrival stays outside the return door preload area"
+			<= 8.0,
+		"yard-to-home player arrival stays at the inside doorway"
 	)
 	_expect(
 		yard_player_arrival != null
 		and yard_to_home is Node2D
 		and absf(yard_player_arrival.position.x - (yard_to_home as Node2D).position.x)
-			>= 64.0,
-		"home-to-yard player arrival stays outside the return door preload area"
+			<= 8.0,
+		"home-to-yard player arrival stays at the outside doorway"
 	)
 
 	var bed_spot := bedroom.get_node_or_null("MomSleepSpot") as Node2D
+	var dad_bed_spot := bedroom.get_node_or_null("DadSleepSpot") as Node2D
 	var definition := load(MOM_BED_DEFINITION) as NpcSpotDefinition
+	var dad_definition := load(DAD_BED_DEFINITION) as NpcSpotDefinition
 	_expect(bed_spot != null, "Mom bedroom contains its live sleep spot")
+	_expect(dad_bed_spot != null, "shared bedroom contains Dad's live side of the bed")
 	_expect(definition != null, "Mom bed definition loads")
+	_expect(dad_definition != null, "Dad bed definition loads")
 	if bed_spot != null and definition != null:
 		_expect(definition.is_valid_definition(), "Mom bed definition passes strict validation")
 		var live_owner_ids = _property_value(bed_spot, &"owner_ids", [])
@@ -563,6 +742,20 @@ func _test_authored_scene_contract(routes: Node) -> void:
 		_expect(definition.scene_path == BEDROOM_SCENE, "Mom bed definition targets the bedroom")
 		_expect(definition.position == Vector2(220.0, 420.0), "Mom bed definition keeps its authored coordinates")
 		_expect(bed_spot.position == definition.position, "live Mom bed matches its definition coordinates")
+	if dad_bed_spot != null and dad_definition != null:
+		_expect(dad_definition.is_valid_definition(), "Dad bed definition passes strict validation")
+		var dad_live_owner_ids = _property_value(dad_bed_spot, &"owner_ids", [])
+		_expect(_id_list_contains(dad_live_owner_ids, &"dad"), "Dad's live bed side is owned by Dad")
+		_expect(dad_definition.allows_owner_id(&"dad"), "Dad bed definition is owned by Dad")
+		_expect(not dad_definition.allows_owner_id(&"mom"), "Dad's bed side does not consume Mom's reservation")
+		_expect(dad_definition.scene_path == BEDROOM_SCENE, "Dad bed definition targets the shared bedroom")
+		_expect(dad_definition.position == Vector2(292.0, 420.0), "Dad bed definition keeps its authored side")
+		_expect(dad_bed_spot.position == dad_definition.position, "live Dad bed side matches its definition coordinates")
+	if bed_spot != null and dad_bed_spot != null:
+		_expect(
+			absf(dad_bed_spot.position.x - bed_spot.position.x) >= 64.0,
+			"Mom and Dad have non-overlapping sleep targets on the same bed"
+		)
 
 	var shower_spot := home.get_node_or_null("MomShowerRoutineSpot") as Node2D
 	var shower_definition := load(MOM_SHOWER_DEFINITION) as NpcSpotDefinition
@@ -573,6 +766,20 @@ func _test_authored_scene_contract(routes: Node) -> void:
 			shower_spot.position == shower_definition.position,
 			"Mom shower definition matches its live coordinates"
 		)
+	var maid_sleep_definition := load(MAID_SLEEP_DEFINITION) as NpcSpotDefinition
+	var dad_work_definition := load(DAD_WORK_DEFINITION) as NpcSpotDefinition
+	_expect(maid_sleep_definition != null, "Maid simulated sleep definition loads")
+	_expect(dad_work_definition != null, "Dad simulated work definition loads")
+	if maid_sleep_definition != null:
+		_expect(maid_sleep_definition.is_valid_definition(), "Maid simulated sleep spot validates")
+		_expect(maid_sleep_definition.scene_path == MAID_ROOM_SCENE, "Maid sleep targets only her off-screen room")
+		_expect(maid_sleep_definition.allows_npc_id(&"maid"), "Maid is explicitly called to her sleep spot")
+		_expect(not maid_sleep_definition.allows_npc_id(&"dad"), "Maid sleep spot rejects Dad")
+	if dad_work_definition != null:
+		_expect(dad_work_definition.is_valid_definition(), "Dad simulated work spot validates")
+		_expect(dad_work_definition.scene_path == DAD_WORKPLACE_SCENE, "Dad work targets only his off-screen workplace")
+		_expect(dad_work_definition.allows_npc_id(&"dad"), "Dad is explicitly called to work")
+		_expect(not dad_work_definition.allows_npc_id(&"maid"), "Dad work spot rejects the Maid")
 	var bedroom_return_spawn := home.get_node_or_null("PlayerSpawnFromMomBedroom") as Node2D
 	_expect(bedroom_return_spawn != null, "home has a player spawn for the bedroom return door")
 	if bedroom_return_spawn != null:
@@ -584,6 +791,8 @@ func _test_authored_scene_contract(routes: Node) -> void:
 	yard.free()
 	home.free()
 	bedroom.free()
+	maid_room.free()
+	dad_workplace.free()
 
 
 func _test_door_route_reference(

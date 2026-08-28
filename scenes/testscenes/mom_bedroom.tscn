@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="PackedScene" uid="uid://by1aphre1t601" path="res://player/player.tscn" id="1_player"]
 [ext_resource type="Script" uid="uid://ctcqm70yhr0sv" path="res://scripts/systems/npc_location_scene.gd" id="2_location_scene"]
@@ -8,6 +8,7 @@
 [ext_resource type="Resource" uid="uid://cm4k0hn1nugkn" path="res://data/npc_spots/mom_bed.tres" id="6_mom_bed"]
 [ext_resource type="PackedScene" path="res://scenes/ui/character_stats_overlay.tscn" id="7_stats_overlay"]
 [ext_resource type="Resource" path="res://data/npc_routes/edges/mom_bedroom_to_realhometest.tres" id="8_bedroom_home_route"]
+[ext_resource type="Resource" path="res://data/npc_spots/dad_bed.tres" id="9_dad_bed"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_floor"]
 size = Vector2(960, 64)
@@ -114,7 +115,7 @@ position = Vector2(-400, 420)
 target_scene_path = "res://scenes/testscenes/realhometest.tscn"
 target_spawn_id = &"from_mom_bedroom"
 route_edge = ExtResource("8_bedroom_home_route")
-owner_ids = Array[StringName]([&"mom", &"player"])
+owner_ids = Array[StringName]([&"mom", &"dad", &"player"])
 
 [node name="PlayerSpawnFromRealHome" type="Marker2D" parent="."]
 position = Vector2(-320, 420)
@@ -138,5 +139,13 @@ save_id = "mom_bedroom_mom_bed"
 spot_id = &"mom_bed"
 world_definition = ExtResource("6_mom_bed")
 owner_ids = Array[StringName]([&"mom"])
+
+[node name="DadSleepSpot" parent="." instance=ExtResource("5_need_spot")]
+visible = false
+position = Vector2(292, 420)
+save_id = "mom_bedroom_dad_bed"
+spot_id = &"dad_bed"
+world_definition = ExtResource("9_dad_bed")
+owner_ids = Array[StringName]([&"dad"])
 
 [node name="CharacterStatsOverlay" parent="." instance=ExtResource("7_stats_overlay")]

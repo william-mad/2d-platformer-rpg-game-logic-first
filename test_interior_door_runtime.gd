@@ -89,8 +89,8 @@ func _validate_scene_structure_and_vertical_slice() -> void:
 	_expect(home_text.contains("[connection signal=\"area_entered\" from=\"RoomVisibilityTriggers/Hall\" to=\"RoomVisibilityAnimation\" method=\"play\" unbinds=1 binds= [&\"hall\"]]"), "Hall visibility connection is preserved")
 	_expect(home_text.contains("[connection signal=\"area_entered\" from=\"RoomVisibilityTriggers/Bedroom\" to=\"RoomVisibilityAnimation\" method=\"play\" unbinds=1 binds= [&\"bedroom\"]]"), "Bedroom visibility connection is preserved")
 	_expect(home_text.contains("[connection signal=\"area_entered\" from=\"RoomVisibilityTriggers/Bathroom\" to=\"RoomVisibilityAnimation\" method=\"play\" unbinds=1 binds= [&\"bathroom\"]]"), "Bathroom visibility connection is preserved")
-	_expect(home_text.contains("polygon = PackedVector2Array(-20, 200, 456, 200, 456, 4096, -20, 4096)"), "Kitchen visibility still ends at x=456")
-	_expect(home_text.contains("polygon = PackedVector2Array(456, 200, 715, 200, 715, 4096, 456, 4096)"), "Hall visibility still begins at x=456")
+	_expect(home_text.contains("polygon = PackedVector2Array(-20, 115, 456, 115, 456, 4096, -20, 4096)"), "Kitchen visibility still ends at x=456")
+	_expect(home_text.contains("polygon = PackedVector2Array(456, 115, 715, 115, 715, 4096, 456, 4096)"), "Hall visibility still begins at x=456")
 	_expect(home_text.count("color = Color(0, 0, 0, 0.7)") == 9, "all nine inactive room overlays are 70 percent dark")
 
 
@@ -369,6 +369,17 @@ func _validate_realhometest_player_slice() -> void:
 	var bedroom_door := home.get_node("BedroomClassroomInteriorDoor") as InteriorDoor
 	var outside_door := home.get_node("OutsideDoor") as Area2D
 	var stove := home.get_node("KitchenStove") as Area2D
+	var meal_storage := home.get_node("MealIngredientStorage") as Node2D
+	var meal_spot := home.get_node("MomMealCycleSpot") as Area2D
+	var meal_definition := meal_spot.get("world_definition") as NpcSpotDefinition
+	var meal_seats: Array[Node] = [
+		home.get_node("MomMealSeat"),
+		home.get_node("DadMealSeat"),
+		home.get_node("MaidMealSeat"),
+		home.get_node("PlayerMealSeat"),
+	]
+	var table_cleanup_spot := home.get_node("MealTableCleanupSpot") as Area2D
+	var table_cleanup_definition := table_cleanup_spot.get("world_definition") as NpcSpotDefinition
 	var sleep_spot := home.get_node("PlayerSleepSpot") as Area2D
 	var shower_spot := home.get_node("MomShowerRoutineSpot") as Area2D
 	var player := home.get_node("Player") as CharacterBody2D
@@ -387,6 +398,81 @@ func _validate_realhometest_player_slice() -> void:
 	_expect(door.request_area.overlaps_body(player), "realhometest player starts inside the InteriorDoor request area")
 	_expect(not outside_door.overlaps_body(player), "InteriorDoor start position does not overlap the outside transition door")
 	_expect(not stove.overlaps_body(player), "InteriorDoor start position does not overlap the stove interaction")
+	_expect(stove.position == Vector2(414.0, 363.0), "kitchen cooking interaction remains against the right wall")
+	_expect(
+		((stove.get_node("CollisionShape2D") as CollisionShape2D).shape as RectangleShape2D).size.x == 72.0,
+		"kitchen cooking interaction remains squeezed to 72 pixels"
+	)
+	_expect(meal_spot.position == Vector2(327.0, 347.0), "Mom meal-cycle spot sits on the counter left of the kitchen stove")
+	_expect(
+		((meal_spot.get_node("CollisionShape2D") as CollisionShape2D).shape as RectangleShape2D).size
+		== Vector2(68.0, 44.0),
+		"counter preparation and its cleanup half retain the edited 68 by 44 spot size"
+	)
+	_expect(
+		meal_definition != null
+		and meal_definition.scene_path == "res://scenes/testscenes/realhometest.tscn"
+		and meal_definition.position == meal_spot.position
+		and meal_spot.get("eat_world_definition") == null
+		and float(meal_definition.meal_cycle_cleanup_share) == 50.0,
+		"meal preparation stays at the counter with one 50-point cleanup half"
+	)
+	var expected_seat_ids := [&"mom_eat", &"dad_meal_eat", &"maid_meal_eat", &"player_meal_eat"]
+	var expected_seat_positions := [
+		Vector2(60.0, 347.0),
+		Vector2(95.0, 347.0),
+		Vector2(130.0, 347.0),
+		Vector2(165.0, 347.0),
+	]
+	for seat_index in meal_seats.size():
+		var seat := meal_seats[seat_index] as Area2D
+		var seat_definition := seat.get("world_definition") as NpcSpotDefinition
+		_expect(
+			seat_definition != null
+			and seat_definition.spot_id == expected_seat_ids[seat_index]
+			and seat.position == expected_seat_positions[seat_index]
+			and seat_definition.position == seat.position
+			and seat_definition.capacity == 1
+			and seat_definition.meal_cycle_controller_spot_id == &"mom_eat_prep",
+			"%s is a distinct controller-linked table seat" % seat.name
+		)
+	_expect(
+		table_cleanup_definition != null
+		and table_cleanup_spot.position == Vector2(105.0, 347.0)
+		and table_cleanup_definition.position == table_cleanup_spot.position
+		and table_cleanup_definition.meal_cycle_controller_spot_id == &"mom_eat_prep"
+		and float(table_cleanup_definition.meal_cycle_cleanup_share) == 50.0,
+		"table cleanup contributes the other 50 points at the table"
+	)
+	_expect(
+		not _collision_rect(meal_spot.get_node("CollisionShape2D")).intersects(
+			_collision_rect(stove.get_node("CollisionShape2D"))
+		),
+		"Mom meal-cycle and stove interaction boxes do not intersect"
+	)
+	_expect(meal_storage.position == Vector2(264.0, 371.0), "meal storage barrel sits left of the meal-cycle spot")
+	_expect(
+		meal_storage.get("controller_definition") == meal_definition
+		and bool(meal_storage.call("is_infinite_storage"))
+		and int(meal_storage.call("get_batches_per_prep")) == 4,
+		"meal storage represents the household's four-batch infinite pantry"
+	)
+	_expect(
+		meal_storage.get_node_or_null("Barrel/Sprite2D") is Sprite2D
+		and (meal_storage.get_node("Barrel/Sprite2D") as Sprite2D).texture != null,
+		"meal storage reuses the existing barrel artwork"
+	)
+	_expect(
+		meal_storage.z_index
+		+ (meal_storage.get_node("InfiniteLabel") as Label).z_index
+		< player.z_index,
+		"meal storage and its foremost decoration draw behind characters"
+	)
+	_expect(
+		not meal_storage.has_method("interact")
+		and not meal_storage.has_method("get_inventory"),
+		"meal storage exposes no character inventory transfer interaction"
+	)
 	_expect(not _collision_rect(door.get_node("RequestArea/CollisionShape2D")).intersects(_collision_rect(stove.get_node("CollisionShape2D"))), "Bathroom door and stove interaction boxes do not intersect")
 	_expect(not _collision_rect(door.get_node("RequestArea/CollisionShape2D")).intersects(_collision_rect(outside_door.get_node("CollisionShape2D"))), "Bathroom and outside-door Up boxes do not intersect")
 	_expect(not _collision_rect(door.get_node("RequestArea/CollisionShape2D")).intersects(_collision_rect(shower_spot.get_node("CollisionShape2D"))), "Bathroom door and shower interaction boxes do not intersect")
@@ -456,6 +542,9 @@ func _validate_realhometest_player_slice() -> void:
 	Input.action_release(&"right")
 	_expect(player.global_position.x > 770.0, "third live crossing succeeds without locking the player in")
 
+	meal_definition = null
+	table_cleanup_definition = null
+	meal_seats.clear()
 	home.queue_free()
 	await process_frame
 

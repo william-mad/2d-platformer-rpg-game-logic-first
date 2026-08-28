@@ -1,7 +1,7 @@
 [gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/pause_menu.gd" id="1_script"]
-[ext_resource type="Theme" path="res://ui/pause/pause_menu_theme.tres" id="2_theme"]
+[ext_resource type="Theme" path="res://ui/themes/sunlit_village_theme.tres" id="2_theme"]
 
 [node name="PauseMenu" type="CanvasLayer"]
 process_mode = 3
@@ -29,7 +29,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-color = Color(0.005, 0.008, 0.01, 0.78)
+color = Color(0.14902, 0.192157, 0.180392, 0.72)
 
 [node name="Center" type="CenterContainer" parent="PauseRoot"]
 layout_mode = 1
@@ -40,20 +40,20 @@ grow_horizontal = 2
 grow_vertical = 2
 
 [node name="MenuShell" type="PanelContainer" parent="PauseRoot/Center"]
-custom_minimum_size = Vector2(920, 510)
+custom_minimum_size = Vector2(730, 470)
 layout_mode = 2
 theme_type_variation = &"MenuShell"
 
 [node name="OuterMargin" type="MarginContainer" parent="PauseRoot/Center/MenuShell"]
 layout_mode = 2
-theme_override_constants/margin_left = 18
-theme_override_constants/margin_top = 14
-theme_override_constants/margin_right = 18
-theme_override_constants/margin_bottom = 14
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
 
 [node name="Layout" type="VBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin"]
 layout_mode = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 7
 
 [node name="Header" type="HBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout"]
 layout_mode = 2
@@ -80,51 +80,61 @@ layout_mode = 2
 [node name="Body" type="HBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout"]
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_constants/separation = 12
+theme_override_constants/separation = 8
 
 [node name="NavPanel" type="PanelContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body"]
-custom_minimum_size = Vector2(178, 0)
+custom_minimum_size = Vector2(138, 0)
 layout_mode = 2
 
 [node name="NavMargin" type="MarginContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/NavPanel"]
 layout_mode = 2
-theme_override_constants/margin_left = 10
-theme_override_constants/margin_top = 10
-theme_override_constants/margin_right = 10
-theme_override_constants/margin_bottom = 10
+theme_override_constants/margin_left = 7
+theme_override_constants/margin_top = 7
+theme_override_constants/margin_right = 7
+theme_override_constants/margin_bottom = 7
 
 [node name="Nav" type="VBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/NavPanel/NavMargin"]
 layout_mode = 2
-theme_override_constants/separation = 8
+theme_override_constants/separation = 5
 
 [node name="ResumeButton" type="Button" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/NavPanel/NavMargin/Nav"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 42)
+custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
+focus_neighbor_top = NodePath("../TitleButton")
+focus_neighbor_bottom = NodePath("../CharactersButton")
 text = "RESUME"
 
 [node name="CharactersButton" type="Button" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/NavPanel/NavMargin/Nav"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 42)
+custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
+focus_neighbor_top = NodePath("../ResumeButton")
+focus_neighbor_bottom = NodePath("../SaveButton")
 text = "CHARACTERS"
 
 [node name="SaveButton" type="Button" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/NavPanel/NavMargin/Nav"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 42)
+custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
+focus_neighbor_top = NodePath("../CharactersButton")
+focus_neighbor_bottom = NodePath("../LoadButton")
 text = "SAVE"
 
 [node name="LoadButton" type="Button" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/NavPanel/NavMargin/Nav"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 42)
+custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
+focus_neighbor_top = NodePath("../SaveButton")
+focus_neighbor_bottom = NodePath("../OptionsButton")
 text = "LOAD"
 
 [node name="OptionsButton" type="Button" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/NavPanel/NavMargin/Nav"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 42)
+custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
+focus_neighbor_top = NodePath("../LoadButton")
+focus_neighbor_bottom = NodePath("../TitleButton")
 text = "OPTIONS"
 
 [node name="NavSpacer" type="Control" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/NavPanel/NavMargin/Nav"]
@@ -133,9 +143,11 @@ size_flags_vertical = 3
 
 [node name="TitleButton" type="Button" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/NavPanel/NavMargin/Nav"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 42)
+custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
 theme_type_variation = &"DangerButton"
+focus_neighbor_top = NodePath("../OptionsButton")
+focus_neighbor_bottom = NodePath("../ResumeButton")
 text = "RETURN TO TITLE"
 
 [node name="ContentPanel" type="PanelContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body"]
@@ -144,13 +156,13 @@ size_flags_horizontal = 3
 
 [node name="ContentMargin" type="MarginContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel"]
 layout_mode = 2
-theme_override_constants/margin_left = 14
-theme_override_constants/margin_top = 12
-theme_override_constants/margin_right = 14
-theme_override_constants/margin_bottom = 12
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 8
 
 [node name="Views" type="Control" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin"]
-custom_minimum_size = Vector2(665, 390)
+custom_minimum_size = Vector2(530, 360)
 layout_mode = 2
 
 [node name="LandingView" type="VBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views"]
@@ -179,7 +191,7 @@ autowrap_mode = 2
 [node name="LandingHint" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/LandingView"]
 layout_mode = 2
 theme_type_variation = &"MutedLabel"
-text = "Arrow keys / controller / mouse to navigate  •  Esc to resume"
+text = "↑ / ↓ navigate  •  Z select  •  Esc resume"
 horizontal_alignment = 1
 
 [node name="CharactersView" type="HBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views"]
@@ -191,10 +203,10 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/separation = 12
+theme_override_constants/separation = 8
 
 [node name="OwnerPanel" type="PanelContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView"]
-custom_minimum_size = Vector2(158, 0)
+custom_minimum_size = Vector2(118, 0)
 layout_mode = 2
 
 [node name="OwnerMargin" type="MarginContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/OwnerPanel"]
@@ -254,7 +266,7 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(42, 34)
 layout_mode = 2
 tooltip_text = "Previous opinion subject"
-text = "<"
+text = "←"
 
 [node name="SubjectPageLabel" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/CharacterHeader"]
 unique_name_in_owner = true
@@ -270,13 +282,13 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(42, 34)
 layout_mode = 2
 tooltip_text = "Next opinion subject"
-text = ">"
+text = "→"
 
 [node name="DirectionLabel" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"DirectionLabel"
-text = "OWNER  ->  SUBJECT"
+text = "OWNER  →  SUBJECT"
 horizontal_alignment = 1
 
 [node name="CharacterSeparator" type="HSeparator" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail"]
@@ -288,7 +300,7 @@ size_flags_vertical = 3
 theme_override_constants/separation = 10
 
 [node name="ProfilePanel" type="PanelContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody"]
-custom_minimum_size = Vector2(170, 0)
+custom_minimum_size = Vector2(138, 0)
 layout_mode = 2
 
 [node name="ProfileMargin" type="MarginContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/ProfilePanel"]
@@ -303,7 +315,7 @@ layout_mode = 2
 theme_override_constants/separation = 5
 
 [node name="PortraitFrame" type="PanelContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/ProfilePanel/ProfileMargin/ProfileColumn"]
-custom_minimum_size = Vector2(152, 162)
+custom_minimum_size = Vector2(120, 126)
 layout_mode = 2
 
 [node name="Portrait" type="TextureRect" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/CharactersView/CharacterDetail/DetailBody/ProfilePanel/ProfileMargin/ProfileColumn/PortraitFrame"]
@@ -462,7 +474,7 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/separation = 14
+theme_override_constants/separation = 7
 
 [node name="OptionsTitle" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView"]
 layout_mode = 2
@@ -475,8 +487,9 @@ theme_type_variation = &"MutedLabel"
 text = "Changes are applied and saved automatically."
 
 [node name="VolumeLabel" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView"]
+unique_name_in_owner = true
 layout_mode = 2
-text = "Master volume"
+text = "MASTER VOLUME"
 
 [node name="VolumeRow" type="HBoxContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView"]
 layout_mode = 2
@@ -484,7 +497,7 @@ theme_override_constants/separation = 12
 
 [node name="MasterVolumeSlider" type="HSlider" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/VolumeRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(460, 32)
+custom_minimum_size = Vector2(320, 30)
 layout_mode = 2
 size_flags_horizontal = 3
 max_value = 100.0
@@ -501,21 +514,221 @@ vertical_alignment = 1
 
 [node name="FullscreenToggle" type="CheckButton" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 44)
+custom_minimum_size = Vector2(0, 36)
 layout_mode = 2
 text = "Fullscreen"
 
-[node name="OptionsSpacer" type="Control" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView"]
+[node name="OptionsSeparator" type="HSeparator" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView"]
 layout_mode = 2
-size_flags_vertical = 3
+
+[node name="ControlsTitle" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView"]
+layout_mode = 2
+theme_type_variation = &"SectionTitle"
+text = "CONTROLS"
+
+[node name="ControlsGrid" type="GridContainer" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView"]
+layout_mode = 2
+theme_override_constants/h_separation = 10
+theme_override_constants/v_separation = 3
+columns = 4
+
+[node name="MoveAction" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+custom_minimum_size = Vector2(112, 0)
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "MOVE"
+
+[node name="MoveKey" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+custom_minimum_size = Vector2(58, 0)
+layout_mode = 2
+text = "← / →"
+
+[node name="JumpAction" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+custom_minimum_size = Vector2(126, 0)
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "JUMP"
+
+[node name="JumpKey" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+layout_mode = 2
+text = "SPACE"
+
+[node name="VerticalAction" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+custom_minimum_size = Vector2(112, 0)
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "UP / CROUCH"
+
+[node name="VerticalKey" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+custom_minimum_size = Vector2(58, 0)
+layout_mode = 2
+text = "↑ / ↓"
+
+[node name="AttackAction" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+custom_minimum_size = Vector2(126, 0)
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "ATTACK / SELECT"
+
+[node name="AttackKey" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+layout_mode = 2
+text = "Z"
+
+[node name="RopeAction" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+custom_minimum_size = Vector2(112, 0)
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "ROPE"
+
+[node name="RopeKey" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+custom_minimum_size = Vector2(58, 0)
+layout_mode = 2
+text = "X"
+
+[node name="InteractAction" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+custom_minimum_size = Vector2(126, 0)
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "CHARM / INTERACT"
+
+[node name="InteractKey" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+layout_mode = 2
+text = "C"
+
+[node name="InventoryAction" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+custom_minimum_size = Vector2(112, 0)
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "INVENTORY"
+
+[node name="InventoryKey" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+custom_minimum_size = Vector2(58, 0)
+layout_mode = 2
+text = "I"
+
+[node name="StatsAction" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+custom_minimum_size = Vector2(126, 0)
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "CHARACTER STATS"
+
+[node name="StatsKey" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+layout_mode = 2
+text = "P"
+
+[node name="PauseAction" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+custom_minimum_size = Vector2(112, 0)
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "PAUSE / BACK"
+
+[node name="PauseKey" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+custom_minimum_size = Vector2(58, 0)
+layout_mode = 2
+text = "ESC"
+
+[node name="ChoicesAction" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+custom_minimum_size = Vector2(126, 0)
+layout_mode = 2
+theme_type_variation = &"MutedLabel"
+text = "DIALOGUE CHOICES"
+
+[node name="ChoicesKey" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView/ControlsGrid"]
+layout_mode = 2
+text = "1–5"
 
 [node name="OptionsHint" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout/Body/ContentPanel/ContentMargin/Views/OptionsView"]
 layout_mode = 2
 theme_type_variation = &"MutedLabel"
-text = "More settings can be added here without changing the pause navigation."
+text = "↑ / ↓ choose  •  ← / → adjust volume  •  Z select  •  changes save automatically"
 
 [node name="Footer" type="Label" parent="PauseRoot/Center/MenuShell/OuterMargin/Layout"]
 layout_mode = 2
 theme_type_variation = &"MutedLabel"
-text = "Esc: resume   •   Enter / A: select   •   Left / Right: browse opinions"
+text = "↑ / ↓: navigate   •   ← / →: move between panels   •   Z: select   •   Esc: resume"
 horizontal_alignment = 1
+
+[node name="TitleConfirmation" type="Control" parent="PauseRoot"]
+unique_name_in_owner = true
+visible = false
+z_index = 10
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Shade" type="ColorRect" parent="PauseRoot/TitleConfirmation"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+color = Color(0.14902, 0.192157, 0.180392, 0.62)
+
+[node name="Center" type="CenterContainer" parent="PauseRoot/TitleConfirmation"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Panel" type="PanelContainer" parent="PauseRoot/TitleConfirmation/Center"]
+custom_minimum_size = Vector2(390, 0)
+layout_mode = 2
+theme_type_variation = &"MenuShell"
+
+[node name="Margin" type="MarginContainer" parent="PauseRoot/TitleConfirmation/Center/Panel"]
+layout_mode = 2
+theme_override_constants/margin_left = 22
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 22
+theme_override_constants/margin_bottom = 18
+
+[node name="Content" type="VBoxContainer" parent="PauseRoot/TitleConfirmation/Center/Panel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="PauseRoot/TitleConfirmation/Center/Panel/Margin/Content"]
+layout_mode = 2
+theme_type_variation = &"MenuTitle"
+text = "RETURN TO TITLE?"
+horizontal_alignment = 1
+
+[node name="Question" type="Label" parent="PauseRoot/TitleConfirmation/Center/Panel/Margin/Content"]
+layout_mode = 2
+text = "Unsaved progress will be lost. Are you sure?"
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="Actions" type="HBoxContainer" parent="PauseRoot/TitleConfirmation/Center/Panel/Margin/Content"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="CancelTitleButton" type="Button" parent="PauseRoot/TitleConfirmation/Center/Panel/Margin/Content/Actions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_neighbor_left = NodePath("../ConfirmTitleButton")
+focus_neighbor_top = NodePath("../ConfirmTitleButton")
+focus_neighbor_right = NodePath("../ConfirmTitleButton")
+focus_neighbor_bottom = NodePath("../ConfirmTitleButton")
+text = "CANCEL"
+
+[node name="ConfirmTitleButton" type="Button" parent="PauseRoot/TitleConfirmation/Center/Panel/Margin/Content/Actions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"DangerButton"
+focus_neighbor_left = NodePath("../CancelTitleButton")
+focus_neighbor_top = NodePath("../CancelTitleButton")
+focus_neighbor_right = NodePath("../CancelTitleButton")
+focus_neighbor_bottom = NodePath("../CancelTitleButton")
+text = "RETURN TO TITLE"

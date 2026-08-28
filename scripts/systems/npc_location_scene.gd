@@ -61,8 +61,12 @@ func _apply_realtest1_node_switches() -> void:
 		return
 	if DebugToolsConfig.DEBUG_DISABLE_REALTEST1_MOM_NPC:
 		_queue_free_scene_node("MomNpc", "realtest1:mom_disabled")
-	if DebugToolsConfig.DEBUG_DISABLE_REALTEST1_TALK_PARTNER:
-		_queue_free_scene_node("TalkPartnerNpc", "realtest1:talk_partner_disabled")
+	if DebugToolsConfig.DEBUG_DISABLE_REALTEST1_BOB_NPC:
+		_queue_free_scene_node("BobNpc", "realtest1:bob_disabled")
+	if DebugToolsConfig.DEBUG_DISABLE_REALTEST1_DAD_NPC:
+		_queue_free_scene_node("DadNpc", "realtest1:dad_disabled")
+	if DebugToolsConfig.DEBUG_DISABLE_REALTEST1_MAID_NPC:
+		_queue_free_scene_node("MaidNpc", "realtest1:maid_disabled")
 
 
 func _queue_free_scene_node(node_name: String, reason: String) -> void:

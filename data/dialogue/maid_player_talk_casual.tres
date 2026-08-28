@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_busy"]
+script = ExtResource("3_choice")
+choice_id = &"ask_if_busy"
+text = "Ask whether she has been busy."
+next_node_id = &"busy"
+
+[sub_resource type="Resource" id="Choice_break"]
+script = ExtResource("3_choice")
+choice_id = &"suggest_break"
+text = "Suggest taking a break."
+next_node_id = &"break"
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"npc"
+speaker_text = "I finished most of today's work. I was... hoping I might see you before I started the next part."
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_busy"), SubResource("Choice_break")])
+
+[sub_resource type="Resource" id="Node_busy"]
+script = ExtResource("2_node")
+node_id = &"busy"
+speaker_id = &"npc"
+speaker_text = "A little, but I don't mind. Your mother always makes sure I don't take on too much."
+terminal = true
+
+[sub_resource type="Resource" id="Node_break"]
+script = ExtResource("2_node")
+node_id = &"break"
+speaker_id = &"npc"
+speaker_text = "I probably should. Maybe... if you aren't busy, you could sit with me for a minute."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"maid_player_talk_casual"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_busy"), SubResource("Node_break")])

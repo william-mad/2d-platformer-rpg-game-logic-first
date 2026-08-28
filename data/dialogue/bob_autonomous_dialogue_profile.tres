@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="NpcAutonomousDialogueProfile" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/npc_autonomous_dialogue_profile.gd" id="1_profile"]
+[ext_resource type="Resource" path="res://data/dialogue/generic_autonomous_check_in.tres" id="2_check_in"]
+[ext_resource type="Resource" path="res://data/dialogue/bob_autonomous_drink.tres" id="3_work"]
+[ext_resource type="Resource" path="res://data/dialogue/bob_autonomous_news.tres" id="4_authored"]
+
+[resource]
+script = ExtResource("1_profile")
+speaker_id = &"npc"
+speaker_name = "Bob"
+player_speaker_id = &"player"
+player_speaker_name = "Player"
+conversations = Array[ExtResource("2_check_in")]([ExtResource("2_check_in"), ExtResource("3_work"), ExtResource("4_authored")])

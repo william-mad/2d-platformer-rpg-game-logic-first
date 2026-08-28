@@ -6,6 +6,7 @@ extends Resource
 @export var player_speaker_id: StringName = &"player"
 @export var player_speaker_name: String = "Player"
 @export var portrait: Texture2D
+@export var portrait_animation: DialoguePortraitAnimationProfile
 @export var conversations: Array[DialogueDefinition] = []
 
 
@@ -47,6 +48,7 @@ func get_speaker_names() -> Dictionary:
 func get_portrait_presentation() -> Dictionary:
 	return {
 		"portrait": portrait,
+		"portrait_animation": portrait_animation,
 		"speaker_id": speaker_id,
 		"player_speaker_id": player_speaker_id,
 	}
@@ -61,6 +63,10 @@ func get_validation_error() -> String:
 		return "autonomous_dialogue_player_speaker_id_empty"
 	if player_speaker_name.strip_edges().is_empty():
 		return "autonomous_dialogue_player_speaker_name_empty"
+	if portrait_animation != null:
+		var animation_error := portrait_animation.get_validation_error()
+		if not animation_error.is_empty():
+			return animation_error
 	if conversations.is_empty():
 		return "autonomous_dialogue_conversations_empty"
 

@@ -155,6 +155,8 @@ func _initialize() -> void:
 	await process_frame
 	if OS.get_cmdline_user_args().has("--social-search-handoff-only"):
 		_test_social_search_handoff_completes_primary_action()
+	elif OS.get_cmdline_user_args().has("--social-start-viability-only"):
+		_test_social_search_checks_start_distance_before_talk()
 	elif OS.get_cmdline_user_args().has("--casual-target-only"):
 		_test_passive_casual_activities_ignore_social_actor()
 	elif OS.get_cmdline_user_args().has("--talk-ring-only"):
@@ -201,6 +203,7 @@ func _run_tests() -> void:
 	_test_move_to_talk_arrival_opens_overlay()
 	_test_far_talk_request_approaches_without_cancel_loop()
 	_test_social_search_handoff_completes_primary_action()
+	_test_social_search_checks_start_distance_before_talk()
 	_test_passive_casual_activities_ignore_social_actor()
 	_test_hungry_reaction_waits_without_usable_eat_spot()
 	_test_hungry_reaction_uses_available_eat_spot()
@@ -840,6 +843,49 @@ func _test_social_search_handoff_completes_primary_action() -> void:
 		["primary_transition_Fight"],
 		"emergency cancellation retains its primary-transition reason"
 	)
+	_free_setup(setup)
+
+
+func _test_social_search_checks_start_distance_before_talk() -> void:
+	var setup := _create_talk_setup(Vector2.ZERO, Vector2(0.0, -182.68))
+	var npc: CharacterBody2D = setup["npc"]
+	var partner: CharacterBody2D = setup["partner"]
+	var machine: NpcStateMachine = setup["machine"]
+	npc.add_to_group("npc")
+	partner.add_to_group("player")
+	machine.values["talk_need"] = 73.0
+	var talk_state := machine.get_state(&"Talk") as NpcStateTalk
+	var started_count := 0
+	talk_state.talk_started.connect(
+		func(_talker: Node2D, _partner: Node2D) -> void:
+			started_count += 1
+	)
+	var session_id := "social-start-distance-viability"
+
+	_expect_true(machine.request_action_from_descriptor({
+		"session_id": session_id,
+		"action_kind": "LookForTalkTarget",
+		"source": "social_ai",
+		"target_npc_id": "__player__",
+		"priority": 60,
+		"status": "proposed",
+	}, partner), "vertical social search starts before its distance preflight")
+	_expect_primary_state(machine, "LookForTalkTarget", "vertical target enters social search")
+
+	machine._physics_process(0.01)
+	_expect_primary_state(machine, "Idle", "nonviable vertical target returns to Idle")
+	_expect_true(machine.interaction_overlay == null, "nonviable target creates no Talk overlay")
+	_expect_equal(started_count, 0, "nonviable target emits no conversation start")
+	_expect_equal(
+		String(machine.get_active_action_descriptor().get("reason", "")),
+		"talk_target_outside_maximum_distance",
+		"social search records the preflight failure reason"
+	)
+	_expect_true(
+		machine.is_talk_refusal_on_cooldown(partner),
+		"existing Talk retry cooldown suppresses immediate reselection"
+	)
+	_expect_equal(machine.get_value(&"talk_need"), 73.0, "failed preflight does not pay Talk need")
 	_free_setup(setup)
 
 

@@ -1,7 +1,11 @@
-[gd_scene load_steps=25 format=3 uid="uid://b6uelg5wsy8in"]
+[gd_scene load_steps=29 format=3 uid="uid://b6uelg5wsy8in"]
 
 [ext_resource type="Script" path="res://scripts/instances/start_game_intro.gd" id="1_intro"]
-[ext_resource type="Texture2D" uid="uid://b4y6lscblr2u6" path="res://images/backgrounds/intro/fullscreen ilustration 1.png" id="2_background"]
+[ext_resource type="Texture2D" path="res://images/backgrounds/intro/fullscreen_illustration_intro1.png" id="2_intro_frame_1"]
+[ext_resource type="Texture2D" path="res://images/backgrounds/intro/fullscreen_illustration_intro2.png" id="19_intro_frame_2"]
+[ext_resource type="Texture2D" path="res://images/backgrounds/intro/fullscreen_illustration_intro3.png" id="20_intro_frame_3"]
+[ext_resource type="Texture2D" path="res://images/backgrounds/intro/fullscreen_illustration_intro4.png" id="21_intro_frame_4"]
+[ext_resource type="Texture2D" path="res://images/backgrounds/intro/fullscreen_illustration_intro5.png" id="22_intro_frame_5"]
 [ext_resource type="Texture2D" uid="uid://csftbdufw5ge3" path="res://images/square_imgs/story_ilustrations_1phone 1.png" id="3_phone_ready"]
 [ext_resource type="Texture2D" uid="uid://xpexoiq73rdp" path="res://images/square_imgs/story_ilustrations_1phone 2.png" id="4_phone_answered"]
 [ext_resource type="Texture2D" uid="uid://cot6120boq7d7" path="res://images/square_imgs/story_ilustrations1.png" id="5_phone_background_a"]
@@ -59,6 +63,7 @@ grow_vertical = 2
 mouse_filter = 2
 
 [node name="EstablishingIllustration" type="TextureRect" parent="EstablishingLayer/Screen"]
+unique_name_in_owner = true
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -66,7 +71,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-texture = ExtResource("2_background")
+texture = ExtResource("2_intro_frame_1")
 expand_mode = 1
 stretch_mode = 6
 
@@ -366,6 +371,9 @@ one_shot = true
 unique_name_in_owner = true
 one_shot = true
 
+[node name="EstablishingFrameTimer" type="Timer" parent="Timing"]
+unique_name_in_owner = true
+
 [node name="DialogueSlideTimer" type="Timer" parent="Timing"]
 unique_name_in_owner = true
 wait_time = 0.09
@@ -374,4 +382,5 @@ wait_time = 0.09
 unique_name_in_owner = true
 script = ExtResource("1_intro")
 next_scene_path = "res://scenes/levels/intro_walk_interlude.tscn"
+establishing_frames = Array[Texture2D]([ExtResource("2_intro_frame_1"), ExtResource("19_intro_frame_2"), ExtResource("20_intro_frame_3"), ExtResource("21_intro_frame_4"), ExtResource("22_intro_frame_5")])
 dialogue_definition = ExtResource("18_intro_dialogue")

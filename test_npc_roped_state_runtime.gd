@@ -128,7 +128,8 @@ class RecordingMachine:
 		actor: Node2D,
 		requires_actor_visibility: bool = true,
 		event_reason: String = "social_event",
-		event_context: Dictionary = {}
+		event_context: Dictionary = {},
+		_evaluate_reactions: bool = true
 	) -> Dictionary:
 		directed_events.append({
 			"local": local_stat_delta.duplicate(true),
@@ -169,10 +170,11 @@ func _test_scene_registration() -> void:
 		_expect(roped.animation_name == &"walk", "Roped uses walking as its struggle stand-in")
 		_expect(
 			roped.reaction_delay_seconds > 0.0
-			and roped.dragged_animation_name == &"run"
+			and roped.dragged_animation_name == &"walk"
+			and roped.struggle_speed_multiplier < 1.0
 			and roped.airborne_dangle_animation_name != &""
 			and roped.hard_air_drag_acceleration_threshold > 0.0,
-			"the reusable phase timing and reaction/run/dangle/impact hooks ship configured"
+			"the reusable phases ship with restrained hold-position presentation"
 		)
 		_expect(
 			not roped.stop_horizontal_on_enter,
@@ -375,14 +377,14 @@ func _test_reaction_air_and_hard_landing_phases() -> void:
 	roped.physics_process(0.02)
 	roped._physics_process(0.02)
 	_expect(
-		roped.get_roped_phase() == NpcStateRoped.RopedPhase.LIGHT_STRUGGLE
-		and animation_controller.fixed_requests.back() == &"walk",
-		"the reaction window hands off once to ordinary walking struggle"
+		roped.get_roped_phase() == NpcStateRoped.RopedPhase.REACTION
+		and animation_controller.fixed_requests.back() == &"rope_react",
+		"a slack rope remains passive after the initial reaction window"
 	)
 	roped.physics_process(0.25)
 	_expect(
-		is_equal_approx(npc.velocity.x, -20.0),
-		"grounded light struggle ramps toward the endpoint-opposing intent (got %.2f)"
+		is_zero_approx(npc.velocity.x),
+		"slack attachment does not author struggle movement (got %.2f)"
 		% npc.velocity.x
 	)
 
@@ -598,8 +600,8 @@ func _test_rope_session_behavior() -> void:
 	_expect(machine.is_primary_state(&"Roped"), "attaching enters Roped")
 	_expect(machine.current_state_priority == 95, "Roped enters at priority 95")
 	_expect(
-		animation_controller.fixed_requests == [&"walk"],
-		"Roped requests one stable walk animation on entry"
+		animation_controller.fixed_requests == [&"idle"],
+		"slack Roped attachment requests one stable passive animation on entry"
 	)
 
 	npc.set_rope_status(true, false)
@@ -611,8 +613,8 @@ func _test_rope_session_behavior() -> void:
 	npc.set_rope_status(true, true)
 	_expect(roped.dragged, "dragged status is exposed inside the same state")
 	_expect(
-		animation_controller.fixed_requests == [&"walk", &"run"],
-		"dragged hard struggle switches from the walk stand-in to run"
+		animation_controller.fixed_requests == [&"idle", &"walk"],
+		"load-bearing tension switches passive attachment to hard struggle"
 	)
 	_expect(
 		_count_reason(machine.directed_events, FIRST_DRAG_REASON) == 1,
@@ -670,11 +672,9 @@ func _test_rope_session_behavior() -> void:
 		"Roped's emergency intent protects it from schedule replacement"
 	)
 
-	# Airborne motion remains entirely with gravity/the rope. Once this floorless
-	# fixture reports grounded, private voluntary intent approaches the editable
-	# walk speed independently of rope-solved motion.
+	# Airborne motion remains entirely with gravity/the rope. Once grounded after
+	# displacement, private intent gently corrects toward the last slack point.
 	npc.velocity = Vector2(100.0, 17.0)
-	var position_before_struggle := npc.position
 	roped.test_grounded = false
 	roped.physics_process(0.25)
 	_expect(
@@ -682,10 +682,12 @@ func _test_rope_session_behavior() -> void:
 		"Roped does not inject struggle force into an airborne rope swing"
 	)
 	roped.test_grounded = true
+	npc.position.x = 20.0
+	var position_before_struggle := npc.position
 	roped.physics_process(0.25)
 	_expect(
-		is_equal_approx(npc.velocity.x, -20.0),
-		"struggle intent ramps smoothly without adopting rope-solved velocity"
+		is_equal_approx(npc.velocity.x, -14.0),
+		"position hold applies a capped correction toward the last slack point"
 	)
 	_expect(
 		is_equal_approx(npc.velocity.y, 17.0) and npc.position == position_before_struggle,
@@ -697,23 +699,23 @@ func _test_rope_session_behavior() -> void:
 	npc.velocity.x = 550.0
 	roped.physics_process(0.25)
 	_expect(
-		is_equal_approx(npc.velocity.x, -40.0),
-		"a prior rope yank cannot erase the NPC's opposing struggle intent"
+		is_equal_approx(npc.velocity.x, -14.0),
+		"a prior rope yank cannot become fresh NPC position-hold intent"
 	)
 	_expect(
 		animation_controller.latest_facing < 0.0,
-		"struggle faces away from an endpoint on the right"
+		"a displaced NPC faces back toward the held point"
 	)
 
 	# Repeated dash intent used to feed the shared rope result back into Roped and
 	# rapidly approach the unrestricted dash speed. A real taut 1:2 rope should
 	# keep resolving the same mass-weighted speed every frame instead.
-	rope_anchor.position.x = 101.0
+	rope_anchor.position.x = 121.0
 	var weighted_dash_speed := 0.0
 	for _frame in range(8):
 		roped.physics_process(1.0 / 60.0)
 		_expect(
-			is_equal_approx(npc.velocity.x, -40.0),
+			is_equal_approx(npc.velocity.x, -14.0),
 			"repeated rope solves never become fresh NPC movement intent"
 		)
 		rope_anchor.velocity = Rope.constrain_attached_velocity(
@@ -728,9 +730,9 @@ func _test_rope_session_behavior() -> void:
 		)
 		weighted_dash_speed = rope_anchor.velocity.x
 	_expect(
-		absf(weighted_dash_speed - 523.3333) <= 0.01
+		absf(weighted_dash_speed - 540.6667) <= 0.01
 		and absf(npc.velocity.x - weighted_dash_speed) <= 0.01,
-		"Mom's 2x rope weight keeps applying reciprocal resistance throughout a dash"
+		"Mom's weight and gentle position hold resist a dash without running away"
 	)
 	roped.physics_process(1.0 / 60.0)
 	rope_anchor.velocity = Rope.constrain_attached_velocity(
@@ -744,22 +746,25 @@ func _test_rope_session_behavior() -> void:
 		1.0 / 60.0
 	)
 	_expect(
-		rope_anchor.velocity.x < -20.0
+		rope_anchor.velocity.x < -5.0
 		and absf(npc.velocity.x - rope_anchor.velocity.x) <= 0.01,
-		"active NPC struggle applies reciprocal force to a stationary character"
+		"position holding applies bounded reciprocal resistance"
 	)
 
-	rope_anchor.position.x = -100.0
+	npc.position.x = -20.0
+	rope_anchor.position.x = -121.0
 	roped.physics_process(0.25)
 	_expect(
-		npc.velocity.x > -40.0 and animation_controller.latest_facing > 0.0,
-		"struggle reverses when the opposite endpoint crosses to the left"
+		npc.velocity.x > 0.0 and animation_controller.latest_facing > 0.0,
+		"position holding reverses only after the NPC crosses the held point"
 	)
-	rope_anchor.position.x = 2.0
+	npc.position.x = -2.0
+	rope_anchor.position.x = -103.0
 	roped.physics_process(0.25)
 	_expect(
-		animation_controller.latest_facing > 0.0,
-		"the endpoint deadzone preserves facing instead of flickering at a crossing"
+		is_zero_approx(npc.velocity.x)
+		and animation_controller.latest_facing > 0.0,
+		"the hold-position deadzone settles without flickering facing"
 	)
 
 	npc.attached_ropes.clear()

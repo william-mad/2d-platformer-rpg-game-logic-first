@@ -6,7 +6,7 @@
 script = ExtResource("1_spot_definition")
 spot_id = &"mom_work"
 scene_path = "res://scenes/testscenes/realtest1.tscn"
-position = Vector2(1443, 322)
+position = Vector2(1443, 346)
 state_name = &"Work"
 value_name = &"boredom"
 need_threshold = 61.0
@@ -28,14 +28,14 @@ active_time_windows = Array[Dictionary]([{
 "grace_game_minutes": 30.0,
 "late_priority_bonus": 10,
 "maximum_overtime_game_minutes": 30.0,
-"start_policy": "flexible",
-"start_hour": 9.0
+"start_hour": 9.0,
+"start_policy": "flexible"
 }, {
 "completion_policy": "finish_current",
 "end_hour": 18.0,
 "grace_game_minutes": 30.0,
 "late_priority_bonus": 10,
 "maximum_overtime_game_minutes": 30.0,
-"start_policy": "flexible",
-"start_hour": 16.0
+"start_hour": 16.0,
+"start_policy": "flexible"
 }])

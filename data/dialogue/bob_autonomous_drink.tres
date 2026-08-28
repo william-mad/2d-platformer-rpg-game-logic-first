@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_water"]
+script = ExtResource("3_choice")
+choice_id = &"suggest_water"
+text = "Suggest some water."
+next_node_id = &"water"
+
+[sub_resource type="Resource" id="Choice_company"]
+script = ExtResource("3_choice")
+choice_id = &"offer_company"
+text = "Offer to keep him company."
+next_node_id = &"company"
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"npc"
+speaker_text = "I was going to have one drink. The trouble is, every drink after the first claims it's still the first."
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_water"), SubResource("Choice_company")])
+
+[sub_resource type="Resource" id="Node_water"]
+script = ExtResource("2_node")
+node_id = &"water"
+speaker_id = &"npc"
+speaker_text = "Water. Sensible, clear, and completely lacking ambition. Fine, you're probably right."
+terminal = true
+
+[sub_resource type="Resource" id="Node_company"]
+script = ExtResource("2_node")
+node_id = &"company"
+speaker_id = &"npc"
+speaker_text = "That's kind of you. Company lasts longer than a drink, if you choose it well."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"bob_autonomous_drink"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_water"), SubResource("Node_company")])

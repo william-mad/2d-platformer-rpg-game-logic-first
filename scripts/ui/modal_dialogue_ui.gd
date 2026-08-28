@@ -46,6 +46,7 @@ func _process(delta: float) -> void:
 		_text_character_count,
 		int(floor(_revealed_characters))
 	)
+	_reveal_choices_if_text_finished()
 
 
 func display_node(
@@ -66,8 +67,8 @@ func display_node(
 	input_enabled = true
 	visible = true
 	panel.visible = true
+	choice_container.visible = false
 
-	var first_button: Button
 	for choice in dialogue_node.choices:
 		if choice == null:
 			continue
@@ -77,15 +78,13 @@ func display_node(
 		button.text = choice.text
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.focus_mode = Control.FOCUS_ALL
+		button.disabled = true
 		button.pressed.connect(
 			_on_choice_button_pressed.bind(session_id, choice.choice_id)
 		)
 		choice_container.add_child(button)
-		if first_button == null:
-			first_button = button
 
-	if first_button != null:
-		call_deferred("_focus_first_choice", session_id, weakref(first_button))
+	_reveal_choices_if_text_finished()
 	return true
 
 
@@ -101,16 +100,7 @@ func enable_input(session_id: StringName) -> bool:
 	if session_id == &"" or session_id != active_session_id:
 		return false
 	input_enabled = true
-	var first_button: Button
-	for child in choice_container.get_children():
-		var button := child as Button
-		if button == null:
-			continue
-		button.disabled = false
-		if first_button == null:
-			first_button = button
-	if first_button != null:
-		call_deferred("_focus_first_choice", session_id, weakref(first_button))
+	_reveal_choices_if_text_finished()
 	return true
 
 
@@ -133,6 +123,7 @@ func configure_portrait_presentation(
 	var texture := presentation.get("portrait", null) as Texture2D
 	if dialogue_id == &"" or texture == null:
 		portrait_presenter.dialogue_id = &""
+		portrait_presenter.configure_portrait_animation(null)
 		portrait_presenter.visible = false
 		portrait_texture.texture = null
 		return
@@ -143,6 +134,9 @@ func configure_portrait_presentation(
 	)
 	portrait_presenter.player_speaker_id = StringName(
 		presentation.get("player_speaker_id", &"player")
+	)
+	portrait_presenter.configure_portrait_animation(
+		presentation.get("portrait_animation", null) as DialoguePortraitAnimationProfile
 	)
 	portrait_texture.texture = texture
 
@@ -171,6 +165,8 @@ func hide_and_clear() -> void:
 	if dialogue_label != null:
 		dialogue_label.text = ""
 		dialogue_label.visible_characters = -1
+	if choice_container != null:
+		choice_container.visible = false
 	_revealed_characters = 0.0
 	_text_character_count = 0
 	_clear_choices()
@@ -217,7 +213,12 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _on_choice_button_pressed(session_id: StringName, choice_id: StringName) -> void:
-	if not input_enabled or session_id == &"" or session_id != active_session_id:
+	if (
+		not input_enabled
+		or not _is_text_fully_revealed()
+		or session_id == &""
+		or session_id != active_session_id
+	):
 		return
 	disable_input()
 	choice_requested.emit(session_id, choice_id)
@@ -235,6 +236,7 @@ func _focus_first_choice(session_id: StringName, button_ref: WeakRef) -> void:
 func _clear_choices() -> void:
 	if choice_container == null:
 		return
+	choice_container.visible = false
 	for child in choice_container.get_children():
 		choice_container.remove_child(child)
 		child.queue_free()
@@ -252,3 +254,21 @@ func _get_first_choice_button() -> Button:
 		if button != null:
 			return button
 	return null
+
+
+func _reveal_choices_if_text_finished() -> void:
+	if choice_container == null or not _is_text_fully_revealed():
+		return
+	var first_button: Button
+	for child in choice_container.get_children():
+		var button := child as Button
+		if button == null:
+			continue
+		button.disabled = not input_enabled
+		if first_button == null:
+			first_button = button
+	choice_container.visible = first_button != null
+	if first_button != null and input_enabled:
+		call_deferred(
+			"_focus_first_choice", active_session_id, weakref(first_button)
+		)

@@ -2491,7 +2491,11 @@ func _realtest1_npc_is_disabled(npc_id: String) -> bool:
 		return false
 	if npc_id == "mom" and DebugToolsConfig.DEBUG_DISABLE_REALTEST1_MOM_NPC:
 		return true
-	if npc_id == "talk_partner_npc" and DebugToolsConfig.DEBUG_DISABLE_REALTEST1_TALK_PARTNER:
+	if npc_id == "bob" and DebugToolsConfig.DEBUG_DISABLE_REALTEST1_BOB_NPC:
+		return true
+	if npc_id == "dad" and DebugToolsConfig.DEBUG_DISABLE_REALTEST1_DAD_NPC:
+		return true
+	if npc_id == "maid" and DebugToolsConfig.DEBUG_DISABLE_REALTEST1_MAID_NPC:
 		return true
 	return false
 

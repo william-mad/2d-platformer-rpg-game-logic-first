@@ -1,6 +1,6 @@
-[gd_resource type="Resource" script_class="NpcSceneRouteEdge" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="NpcSceneRouteEdge" format=3 uid="uid://duft426rw1k6e"]
 
-[ext_resource type="Script" path="res://scripts/resources/npc_scene_route_edge.gd" id="1_edge"]
+[ext_resource type="Script" uid="uid://b2geeebgdxk5h" path="res://scripts/resources/npc_scene_route_edge.gd" id="1_edge"]
 
 [resource]
 resource_name = "Realhometest to Realtest1"
@@ -8,5 +8,5 @@ script = ExtResource("1_edge")
 edge_id = &"household.realhometest_to_realtest1"
 source_scene_path = "res://scenes/testscenes/realhometest.tscn"
 target_scene_path = "res://scenes/testscenes/realtest1.tscn"
-target_arrival_position = Vector2(-240, 368)
-allowed_npc_ids = Array[StringName]([&"mom"])
+target_arrival_position = Vector2(-318, 375)
+allowed_npc_ids = Array[StringName]([&"mom", &"dad", &"maid"])

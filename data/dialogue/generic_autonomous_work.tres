@@ -1,0 +1,58 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_busy"]
+script = ExtResource("3_choice")
+choice_id = &"keeping_busy"
+text = "I've been keeping busy."
+next_node_id = &"player_busy"
+
+[sub_resource type="Resource" id="Choice_rest"]
+script = ExtResource("3_choice")
+choice_id = &"taking_it_easy"
+text = "I'm taking it easy today."
+next_node_id = &"player_rest"
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"npc"
+speaker_text = "Have you been keeping busy?"
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_busy"), SubResource("Choice_rest")])
+
+[sub_resource type="Resource" id="Node_player_busy"]
+script = ExtResource("2_node")
+node_id = &"player_busy"
+speaker_id = &"player"
+speaker_text = "I've been keeping busy."
+next_node_id = &"npc_busy"
+
+[sub_resource type="Resource" id="Node_npc_busy"]
+script = ExtResource("2_node")
+node_id = &"npc_busy"
+speaker_id = &"npc"
+speaker_text = "That's good. Just don't wear yourself out."
+terminal = true
+
+[sub_resource type="Resource" id="Node_player_rest"]
+script = ExtResource("2_node")
+node_id = &"player_rest"
+speaker_id = &"player"
+speaker_text = "I'm taking it easy today."
+next_node_id = &"npc_rest"
+
+[sub_resource type="Resource" id="Node_npc_rest"]
+script = ExtResource("2_node")
+node_id = &"npc_rest"
+speaker_id = &"npc"
+speaker_text = "Nothing wrong with that. Everyone needs a quiet day sometimes."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"generic_autonomous_work"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_player_busy"), SubResource("Node_npc_busy"), SubResource("Node_player_rest"), SubResource("Node_npc_rest")])

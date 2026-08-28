@@ -7,12 +7,16 @@ const NpcRouteLocationCoordinator = preload(
 
 const MOM_ID := "mom"
 const MOM_BED_ID := &"mom_bed"
+const DAD_ID := "dad"
+const DAD_BED_ID := &"dad_bed"
 const YARD_SCENE := "res://scenes/testscenes/realtest1.tscn"
 const HOME_SCENE := "res://scenes/testscenes/realhometest.tscn"
 const BEDROOM_SCENE := "res://scenes/testscenes/mom_bedroom.tscn"
 const BED_POSITION := Vector2(220.0, 420.0)
+const DAD_BED_POSITION := Vector2(292.0, 420.0)
+const DAD_HOME_POSITION := Vector2(1460.0, 384.0)
 const YARD_RETURN_POSITION := Vector2(520.0, 368.0)
-const YARD_TO_HOME_ARRIVAL := Vector2(610.0, 368.0)
+const YARD_TO_HOME_ARRIVAL := Vector2(-21.0, 370.0)
 const BEDROOM_TO_HOME_ARRIVAL := Vector2(-680.0, 368.0)
 
 var _failures: Array[String] = []
@@ -121,6 +125,7 @@ func _initialize() -> void:
 	_test_start_and_finish_route_transactions(routes, locations, simulator)
 	_test_finish_replan_marker_recovery(routes, locations, simulator)
 	_test_offscreen_scheduler_routes(routes, locations, simulator)
+	_test_dad_offscreen_scheduler_routes(locations, simulator)
 	_test_live_scheduler_direct_door_kill_switch(routes, locations, simulator)
 	_test_wired_direct_door_kill_switch(routes, locations)
 	_test_actual_door_handoff_chain(routes, locations, simulator)
@@ -1007,6 +1012,148 @@ func _test_offscreen_scheduler_routes(
 	_expect(String(returned.get("scene_path", "")) == YARD_SCENE, "re-enabled offscreen finish follows Mom's validated return route")
 	_expect((returned.get("activity", {}) as Dictionary).is_empty(), "routed offscreen finish clears the sleep activity")
 	_expect(int(simulator.spot_claim_counts.get(MOM_BED_ID, 0)) == 0, "routed offscreen finish releases Mom's bed claim")
+	simulator.spot_definitions = original_definitions
+	simulator.live_spots = original_live_spots
+
+
+func _test_dad_offscreen_scheduler_routes(locations: Node, simulator: Node) -> void:
+	var original_definitions: Dictionary = simulator.spot_definitions
+	var original_live_spots: Dictionary = simulator.live_spots
+	var bed_definition := load("res://data/npc_spots/dad_bed.tres") as NpcSpotDefinition
+	var mom_bed_definition := load("res://data/npc_spots/mom_bed.tres") as NpcSpotDefinition
+	if bed_definition == null or mom_bed_definition == null:
+		_fail("shared offscreen sleep test requires both sides of the bed")
+		return
+
+	simulator.spot_definitions = {
+		MOM_BED_ID: mom_bed_definition,
+		DAD_BED_ID: bed_definition,
+	}
+	simulator.live_spots = {}
+	locations.active_scene_path = ""
+	locations.live_npcs.erase(MOM_ID)
+	locations.live_npcs.erase(DAD_ID)
+	var mom_record := _base_record(YARD_SCENE, YARD_RETURN_POSITION)
+	mom_record["node_state"] = {
+		"social_stats": {
+			"hp": 100.0,
+			"sleep_need": 90.0,
+		}
+	}
+	locations.npc_records[MOM_ID] = mom_record
+	simulator.call(
+		"_try_start_activity",
+		StringName(MOM_ID),
+		mom_record.duplicate(true),
+		47.0,
+		23.0,
+		locations,
+		{MOM_ID: mom_record.duplicate(true)}
+	)
+	var mom_sleeping: Dictionary = locations.get_record_snapshot(MOM_ID)
+	var mom_sleeping_activity: Dictionary = mom_sleeping.get("activity", {})
+	_expect(
+		String(mom_sleeping.get("scene_path", "")) == BEDROOM_SCENE
+		and String(mom_sleeping_activity.get("spot_id", "")) == String(MOM_BED_ID),
+		"offscreen Mom is already asleep on her side when Dad arrives"
+	)
+	_expect(
+		int(simulator.spot_claim_counts.get(MOM_BED_ID, 0)) == 1,
+		"Mom retains her own bed-side reservation"
+	)
+
+	var record := _base_record(YARD_SCENE, DAD_HOME_POSITION)
+	record["npc_id"] = DAD_ID
+	record["node_name"] = "DadNpc"
+	record["npc_scene_path"] = "res://scenes/creatures/dad_npc.tscn"
+	record["home_position"] = DAD_HOME_POSITION
+	record["last_position"] = DAD_HOME_POSITION
+	record["node_state"] = {
+		"social_stats": {
+			"hp": 100.0,
+			"sleep_need": 90.0,
+		}
+	}
+	locations.npc_records[DAD_ID] = record
+	var records := {DAD_ID: record.duplicate(true)}
+
+	simulator.call(
+		"_try_start_activity",
+		StringName(DAD_ID),
+		record.duplicate(true),
+		47.0,
+		23.0,
+		locations,
+		records
+	)
+	var sleeping: Dictionary = locations.get_record_snapshot(DAD_ID)
+	var sleeping_activity: Dictionary = sleeping.get("activity", {})
+	_expect(
+		String(sleeping.get("scene_path", "")) == BEDROOM_SCENE,
+		"offscreen Dad follows the validated two-hop route to the shared bedroom"
+	)
+	_expect(
+		String(sleeping_activity.get("spot_id", "")) == String(DAD_BED_ID),
+		"offscreen Dad commits sleep on his own side of the bed"
+	)
+	_expect(
+		sleeping.get("last_position", Vector2.ZERO) == DAD_BED_POSITION,
+		"offscreen Dad arrives at his authored bed position"
+	)
+	_expect(
+		(sleeping.get("pending_travel", {}) as Dictionary).is_empty(),
+		"offscreen Dad completes both path hops atomically"
+	)
+	_expect(
+		int(simulator.spot_claim_counts.get(DAD_BED_ID, 0)) == 1,
+		"offscreen Dad owns exactly one reservation on his bed side"
+	)
+	_expect(
+		int(simulator.spot_claim_counts.get(MOM_BED_ID, 0)) == 1,
+		"Dad can sleep beside Mom without taking her reservation"
+	)
+
+	simulator.call(
+		"_finish_activity",
+		StringName(DAD_ID),
+		sleeping.duplicate(true),
+		sleeping_activity.duplicate(true),
+		DAD_BED_ID,
+		locations
+	)
+	var returned: Dictionary = locations.get_record_snapshot(DAD_ID)
+	_expect(
+		String(returned.get("scene_path", "")) == YARD_SCENE,
+		"offscreen Dad follows the validated two-hop wake route home"
+	)
+	_expect(
+		returned.get("last_position", Vector2.ZERO) == DAD_HOME_POSITION,
+		"offscreen Dad returns to his own yard position after sleep"
+	)
+	_expect(
+		(returned.get("activity", {}) as Dictionary).is_empty(),
+		"Dad's completed sleep activity clears after the return"
+	)
+	_expect(
+		int(simulator.spot_claim_counts.get(DAD_BED_ID, 0)) == 0,
+		"Dad's bed-side reservation releases after the return"
+	)
+	_expect(
+		int(simulator.spot_claim_counts.get(MOM_BED_ID, 0)) == 1,
+		"Dad waking does not release Mom's separate reservation"
+	)
+	simulator.call(
+		"_finish_activity",
+		StringName(MOM_ID),
+		mom_sleeping.duplicate(true),
+		mom_sleeping_activity.duplicate(true),
+		MOM_BED_ID,
+		locations
+	)
+	_expect(
+		int(simulator.spot_claim_counts.get(MOM_BED_ID, 0)) == 0,
+		"Mom's reservation releases independently when she wakes"
+	)
 	simulator.spot_definitions = original_definitions
 	simulator.live_spots = original_live_spots
 

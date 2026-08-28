@@ -1,5 +1,7 @@
 extends CanvasLayer
 
+const TITLE_FONT := preload("res://fonts/theme_showcase/AlegreyaSC-Bold.ttf")
+
 # Autoload that listens for the player's player_defeated signal and shows a
 # minimal game-over overlay. Load Game reloads the last save; Title returns to
 # the main menu. Both reuse the existing SceneLoader + SaveSystem autoloads.
@@ -155,7 +157,7 @@ func _build_overlay() -> void:
 	overlay.name = "GameOverOverlay"
 	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	overlay.color = Color(0.03, 0.0, 0.0, 0.82)
+	overlay.color = Color(0.14902, 0.192157, 0.180392, 0.84)
 	root.add_child(overlay)
 
 	var wrapper := CenterContainer.new()
@@ -176,9 +178,10 @@ func _build_overlay() -> void:
 	title_label.name = "GameOverTitle"
 	title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_label.add_theme_font_override("font", TITLE_FONT)
 	title_label.add_theme_font_size_override("font_size", 40)
-	title_label.add_theme_color_override("font_color", Color(0.94, 0.22, 0.2, 1.0))
-	title_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9))
+	title_label.add_theme_color_override("font_color", Color(0.772549, 0.415686, 0.290196, 1.0))
+	title_label.add_theme_color_override("font_shadow_color", Color(0.501961, 0.4, 0.278431, 0.45))
 	title_label.add_theme_constant_override("shadow_offset_x", 2)
 	title_label.add_theme_constant_override("shadow_offset_y", 2)
 	title_label.text = "YOU DIED"

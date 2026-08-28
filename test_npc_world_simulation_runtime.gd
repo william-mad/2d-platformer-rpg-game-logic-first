@@ -2,6 +2,10 @@ extends SceneTree
 
 const PREP_SPOT_ID := &"mom_eat_prep"
 const FOOD_SPOT_ID := &"mom_eat"
+const DAD_FOOD_SPOT_ID := &"dad_meal_eat"
+const MAID_FOOD_SPOT_ID := &"maid_meal_eat"
+const PLAYER_FOOD_SPOT_ID := &"player_meal_eat"
+const TABLE_CLEANUP_SPOT_ID := &"mom_meal_table_cleanup"
 const STAGE_PREP := "prep_work"
 const STAGE_FOOD := "food"
 const STAGE_CLEANUP := "cleanup_work"
@@ -161,8 +165,20 @@ func _run_tests() -> void:
 
 	world_time.set("auto_advance", false)
 	_test_atomic_multi_item_transfer()
+	var prep_definition := simulator.call(
+		"get_spot_definition",
+		PREP_SPOT_ID
+	) as NpcSpotDefinition
+	if prep_definition == null:
+		_fail("Mom's meal-cycle controller definition is missing.")
+		return
+	var original_infinite_storage := prep_definition.meal_cycle_infinite_ingredient_storage
+	var original_storage_batches := prep_definition.meal_cycle_storage_batches_per_prep
+	_test_infinite_storage_supplies_and_spends(simulator, world_time)
+	prep_definition.meal_cycle_infinite_ingredient_storage = false
 	_test_no_ingredients_create_no_food(simulator, world_time)
 	_test_breakfast_stage_order(simulator, world_time)
+	_test_meal_specific_food_owners(simulator, world_time)
 	_test_late_food_calls_eaters(simulator, world_time)
 	_test_completion_after_cleanup_does_not_reopen_meal(simulator, world_time)
 	_test_recipe_quantity_above_100_is_not_clamped(simulator, world_time)
@@ -171,13 +187,18 @@ func _run_tests() -> void:
 	_test_skipped_time_forces_cleanup(simulator, world_time)
 	_test_cleanup_owner_filter(simulator, world_time)
 	_test_cleanup_work_is_faster_than_prep(simulator, world_time)
+	_test_shared_food_seats_and_split_cleanup(simulator, world_time)
+	_test_split_cleanup_save_load_and_legacy_restore(simulator, world_time)
 	_test_sated_meal_owner_is_not_called_again(simulator, world_time)
 	_test_offscreen_eating_consumes_food_one_to_one(simulator, world_time)
 	_test_live_eat_resume_revalidates_spot_and_hunger(simulator)
+	prep_definition.meal_cycle_infinite_ingredient_storage = original_infinite_storage
+	prep_definition.meal_cycle_storage_batches_per_prep = original_storage_batches
 	_test_activity_selector_delegate_matches_helper(simulator)
 	_test_sleep_wake_delegate_routes_home(simulator)
 	_test_sleep_window_skip_routes_to_bed(simulator)
 	_test_mom_bedtime_outprioritizes_midnight_social_need(simulator)
+	_test_dad_bedtime_selects_his_side(simulator)
 	_test_magic_lesson_can_interrupt_afternoon_work(simulator)
 	_test_magic_lesson_invite_targets_live_player_scene(simulator)
 	_test_accepted_magic_lesson_resume_assigns_invite_state(simulator, world_time, locations)
@@ -207,6 +228,74 @@ func _supply_meal_batches(simulator: Node, batch_count: int) -> InventoryModel:
 	) as InventoryResult
 	_expect_true(result != null and result.success, "meal recipe batches can be supplied")
 	return source
+
+
+func _complete_split_cleanup(simulator: Node) -> void:
+	simulator.call("set_meal_cycle_cleanup_spot_value", PREP_SPOT_ID, 0.0)
+	simulator.call("set_meal_cycle_cleanup_spot_value", TABLE_CLEANUP_SPOT_ID, 0.0)
+
+
+func _test_infinite_storage_supplies_and_spends(
+	simulator: Node,
+	world_time: Node
+) -> void:
+	var state := _reset_meal_cycle(simulator, world_time, 6.0)
+	_expect_true(bool(state.get("ingredient_storage_infinite", false)), "Mom meal prep uses infinite storage")
+	_expect_equal(int(state.get("ingredient_storage_batches_per_prep", 0)), 4, "storage restocks four batches per prep")
+	_expect_true(bool(state.get("work_call_active", false)), "storage stock starts scheduled preparation")
+	_expect_false(bool(state.get("waiting_for_ingredients", true)), "infinite storage never waits for character ingredients")
+	_expect_equal(int(state.get("reserved_recipe_batches", 0)), 4, "storage recipe stock is reserved through the existing pantry")
+
+	var pantry := InventoryModel.new()
+	var pantry_load := pantry.apply_save_data(state.get("ingredient_inventory", {}))
+	_expect_true(pantry_load.success, "infinite storage uses persistent InventoryModel data")
+	_expect_equal(pantry.get_quantity(&"raw_slime_meat"), 4, "storage contains exactly four prep batches")
+	_expect_equal(pantry.get_reserved_quantity(&"raw_slime_meat"), 4, "all restocked ingredients belong to active prep")
+
+	var character_inventory := InventoryModel.new()
+	character_inventory.add(&"raw_slime_meat", 1)
+	var supply_result = simulator.call(
+		"supply_meal_cycle_recipe_batches",
+		PREP_SPOT_ID,
+		character_inventory,
+		1
+	) as InventoryResult
+	_expect_false(supply_result != null and supply_result.success, "character inventory cannot supply configured infinite storage")
+	_expect_equal(character_inventory.get_quantity(&"raw_slime_meat"), 1, "rejected character supply transfers nothing")
+
+	var player := MockMealPlayer.new()
+	player.inventory.add(&"raw_slime_meat", 1)
+	var waiting_state := state.duplicate(true)
+	waiting_state["work_call_active"] = false
+	waiting_state["waiting_for_ingredients"] = true
+	var spot := NpcWorkSpot.new()
+	spot.world_definition = simulator.call("get_spot_definition", PREP_SPOT_ID)
+	spot.eat_world_definition = simulator.call("get_spot_definition", FOOD_SPOT_ID)
+	spot.call("_apply_meal_cycle_state", waiting_state)
+	_expect_false(bool(spot.call("_player_can_supply_meal_ingredients", player)), "meal spot offers no character-to-storage transfer")
+	spot.free()
+	player.free()
+
+	var saved: Dictionary = simulator.call("get_save_data")
+	simulator.call("apply_save_data", saved)
+	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_true(bool(state.get("work_call_active", false)), "active storage-backed prep survives save/load")
+	_expect_equal(int(state.get("reserved_recipe_batches", 0)), 4, "storage reservation survives save/load")
+
+	simulator.call("set_spot_value", PREP_SPOT_ID, 0.0)
+	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_equal(state.get("stage", ""), STAGE_FOOD, "storage-backed prep completes normally")
+	_expect_approx(float(state.get("food_value", 0.0)), 120.0, 0.001, "four storage batches create 120 meal points")
+	pantry = InventoryModel.new()
+	pantry_load = pantry.apply_save_data(state.get("ingredient_inventory", {}))
+	_expect_true(pantry_load.success, "spent storage remains valid persistent inventory data")
+	_expect_equal(pantry.get_quantity(&"raw_slime_meat"), 0, "preparation spends storage food")
+	_expect_equal(pantry.get_all_reservations().size(), 0, "preparation clears the storage reservation")
+
+	saved = simulator.call("get_save_data")
+	simulator.call("apply_save_data", saved)
+	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_approx(float(state.get("food_value", 0.0)), 120.0, 0.001, "larger storage-backed meal survives save/load")
 
 
 func _test_no_ingredients_create_no_food(simulator: Node, world_time: Node) -> void:
@@ -247,9 +336,9 @@ func _test_breakfast_stage_order(simulator: Node, world_time: Node) -> void:
 		"NPC food definition remains unavailable before the call"
 	)
 	var player := MockMealPlayer.new()
-	var spot := NpcWorkSpot.new()
-	spot.world_definition = simulator.call("get_spot_definition", PREP_SPOT_ID)
-	spot.eat_world_definition = food_definition
+	var spot := NpcMealPhaseSpot.new()
+	spot.world_definition = simulator.call("get_spot_definition", PLAYER_FOOD_SPOT_ID)
+	spot.eat_world_definition = spot.world_definition
 	spot.call("_apply_meal_cycle_state", state)
 	_expect_true(bool(spot.call("_player_can_eat", player)), "player may eat physical food before call")
 	spot.free()
@@ -262,7 +351,19 @@ func _test_breakfast_stage_order(simulator: Node, world_time: Node) -> void:
 	_expect_true(bool(state.get("meal_called", false)), "07:00 calls breakfast food owners")
 	var owner_data = state.get("owner_meal_data", {})
 	_expect_true(owner_data is Dictionary and owner_data.has("mom"), "breakfast stores mom meal data")
+	_expect_true(owner_data is Dictionary and owner_data.has("dad"), "breakfast stores dad meal data")
+	_expect_true(owner_data is Dictionary and owner_data.has("maid"), "breakfast stores maid meal data")
 	_expect_true(owner_data is Dictionary and owner_data.has("player"), "breakfast stores player meal data")
+	var dad_food_definition = simulator.call("get_spot_definition", DAD_FOOD_SPOT_ID)
+	var maid_food_definition = simulator.call("get_spot_definition", MAID_FOOD_SPOT_ID)
+	_expect_true(
+		bool(simulator.call("_meal_cycle_definition_can_start", dad_food_definition, &"dad", 7.0)),
+		"breakfast calls Dad to eat"
+	)
+	_expect_true(
+		bool(simulator.call("_meal_cycle_definition_can_start", maid_food_definition, &"maid", 7.0)),
+		"breakfast calls the Maid to eat"
+	)
 	if owner_data is Dictionary and owner_data.has("mom"):
 		_expect_false(bool(owner_data["mom"].get("has_had_breakfast", true)), "mom starts as not having breakfast")
 
@@ -275,7 +376,7 @@ func _test_breakfast_stage_order(simulator: Node, world_time: Node) -> void:
 	_expect_false(bool(state.get("food_available", true)), "cleanup clears food availability")
 	_expect_false(bool(state.get("meal_window_open", true)), "cleanup closes the meal window")
 
-	simulator.call("set_spot_value", PREP_SPOT_ID, 0.0)
+	_complete_split_cleanup(simulator)
 	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
 	_expect_equal(state.get("stage", ""), STAGE_PREP, "cleanup completion returns to prep stage")
 	_expect_equal(float(state.get("value", 0.0)), 100.0, "cleanup completion resets prep work")
@@ -300,6 +401,40 @@ func _test_late_food_calls_eaters(simulator: Node, world_time: Node) -> void:
 	_expect_equal(state.get("stage", ""), STAGE_FOOD, "late prep completion still creates food")
 	_expect_true(bool(state.get("meal_window_open", false)), "late food keeps the existing window open")
 	_expect_true(bool(state.get("meal_called", false)), "late food immediately calls NPC eaters")
+
+
+func _test_meal_specific_food_owners(simulator: Node, world_time: Node) -> void:
+	_reset_meal_cycle(simulator, world_time, 11.0)
+	_supply_meal_batches(simulator, 1)
+	simulator.call("set_spot_value", PREP_SPOT_ID, 0.0)
+	world_time.call("set_total_hours", 12.0)
+	simulator.call("_process_meal_cycle_schedule_until_snapshot", world_time.call("get_snapshot"))
+	var dad_food_definition = simulator.call("get_spot_definition", DAD_FOOD_SPOT_ID)
+	var maid_food_definition = simulator.call("get_spot_definition", MAID_FOOD_SPOT_ID)
+	_expect_false(
+		bool(simulator.call("_meal_cycle_definition_can_start", dad_food_definition, &"dad", 12.0)),
+		"lunch does not call Dad while he is working"
+	)
+	_expect_true(
+		bool(simulator.call("_meal_cycle_definition_can_start", maid_food_definition, &"maid", 12.0)),
+		"lunch calls the Maid to eat"
+	)
+
+	_reset_meal_cycle(simulator, world_time, 19.0)
+	_supply_meal_batches(simulator, 1)
+	simulator.call("set_spot_value", PREP_SPOT_ID, 0.0)
+	world_time.call("set_total_hours", 20.0)
+	simulator.call("_process_meal_cycle_schedule_until_snapshot", world_time.call("get_snapshot"))
+	dad_food_definition = simulator.call("get_spot_definition", DAD_FOOD_SPOT_ID)
+	maid_food_definition = simulator.call("get_spot_definition", MAID_FOOD_SPOT_ID)
+	_expect_true(
+		bool(simulator.call("_meal_cycle_definition_can_start", dad_food_definition, &"dad", 20.0)),
+		"dinner calls Dad to eat"
+	)
+	_expect_true(
+		bool(simulator.call("_meal_cycle_definition_can_start", maid_food_definition, &"maid", 20.0)),
+		"dinner calls the Maid to eat"
+	)
 
 
 func _test_completion_after_cleanup_does_not_reopen_meal(
@@ -497,6 +632,27 @@ func _test_cleanup_owner_filter(simulator: Node, world_time: Node) -> void:
 		bool(simulator.call("_meal_cycle_definition_can_start", prep_definition, &"player", 8.0)),
 		"player is a cleanup owner"
 	)
+	_expect_true(
+		bool(simulator.call("_meal_cycle_definition_can_start", prep_definition, &"maid", 8.0)),
+		"maid is a cleanup owner"
+	)
+	var maid_record := {
+		"node_state": {
+			"social_stats": {
+				"boredom": 0.0,
+			},
+		},
+	}
+	var maid_definition := simulator.call(
+		"_find_best_definition",
+		&"maid",
+		maid_record,
+		8.0
+	) as NpcSpotDefinition
+	_expect_true(
+		maid_definition != null and maid_definition.spot_id == PREP_SPOT_ID,
+		"cleanup duty calls the maid to the meal-cycle spot"
+	)
 
 
 func _test_cleanup_work_is_faster_than_prep(simulator: Node, world_time: Node) -> void:
@@ -527,6 +683,116 @@ func _test_cleanup_work_is_faster_than_prep(simulator: Node, world_time: Node) -
 	_expect_approx(float(state.get("value", 0.0)), 50.0, 0.001, "cleanup work clears twice as fast")
 
 
+func _test_shared_food_seats_and_split_cleanup(simulator: Node, world_time: Node) -> void:
+	_reset_meal_cycle(simulator, world_time, 6.0)
+	_supply_meal_batches(simulator, 4)
+	simulator.call("set_spot_value", PREP_SPOT_ID, 0.0)
+	world_time.call("set_total_hours", 7.0)
+	simulator.call("_process_meal_cycle_schedule_until_snapshot", world_time.call("get_snapshot"))
+
+	var seat_ids := [FOOD_SPOT_ID, DAD_FOOD_SPOT_ID, MAID_FOOD_SPOT_ID, PLAYER_FOOD_SPOT_ID]
+	var seat_positions: Array[Vector2] = []
+	for seat_id in seat_ids:
+		var seat_definition = simulator.call("get_spot_definition", seat_id) as NpcSpotDefinition
+		_expect_true(seat_definition != null, "%s table seat definition loads" % String(seat_id))
+		if seat_definition == null:
+			continue
+		_expect_equal(seat_definition.capacity, 1, "%s has one-seat capacity" % String(seat_id))
+		_expect_equal(
+			String(seat_definition.meal_cycle_controller_spot_id),
+			String(PREP_SPOT_ID),
+			"%s links to the meal controller" % String(seat_id)
+		)
+		_expect_false(seat_positions.has(seat_definition.position), "%s has a distinct table position" % String(seat_id))
+		seat_positions.append(seat_definition.position)
+		_expect_approx(
+			float(simulator.call("get_spot_value", seat_id, 0.0)),
+			120.0,
+			0.001,
+			"%s mirrors the shared prepared food" % String(seat_id)
+		)
+
+	simulator.call("set_spot_value", DAD_FOOD_SPOT_ID, 105.0)
+	for seat_id in seat_ids:
+		_expect_approx(
+			float(simulator.call("get_spot_value", seat_id, 0.0)),
+			105.0,
+			0.001,
+			"food consumed at one seat updates %s" % String(seat_id)
+		)
+	var dad_seat = simulator.call("get_spot_definition", DAD_FOOD_SPOT_ID)
+	_expect_false(
+		bool(simulator.call("_meal_cycle_definition_can_start", dad_seat, &"mom", 7.0)),
+		"Mom cannot claim Dad's table seat"
+	)
+
+	world_time.call("set_total_hours", 8.0)
+	simulator.call("_process_meal_cycle_schedule_until_snapshot", world_time.call("get_snapshot"))
+	var state: Dictionary = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	var remaining = state.get("cleanup_remaining_by_spot", {})
+	_expect_approx(float(remaining.get(String(PREP_SPOT_ID), 0.0)), 50.0, 0.001, "counter cleanup starts at 50")
+	_expect_approx(float(remaining.get(String(TABLE_CLEANUP_SPOT_ID), 0.0)), 50.0, 0.001, "table cleanup starts at 50")
+
+	var table_cleanup = simulator.call("get_spot_definition", TABLE_CLEANUP_SPOT_ID)
+	simulator.call("_apply_meal_cycle_work_progress", table_cleanup, 0.125, 8.125)
+	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_equal(state.get("stage", ""), STAGE_CLEANUP, "finishing table cleanup alone keeps cleanup active")
+	_expect_approx(float(state.get("value", 0.0)), 50.0, 0.001, "counter half remains after table cleanup")
+	_expect_false(
+		bool(simulator.call("_meal_cycle_definition_is_available", table_cleanup)),
+		"completed table cleanup is no longer offered"
+	)
+	_expect_true(
+		bool(simulator.call(
+			"_meal_cycle_definition_is_available",
+			simulator.call("get_spot_definition", PREP_SPOT_ID)
+		)),
+		"counter cleanup remains available"
+	)
+	simulator.call("set_meal_cycle_cleanup_spot_value", PREP_SPOT_ID, 0.0)
+	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_equal(state.get("stage", ""), STAGE_PREP, "finishing the second cleanup half resets the cycle")
+
+	_reset_meal_cycle(simulator, world_time, 6.0)
+	world_time.call("set_total_hours", 8.0)
+	simulator.call("_process_meal_cycle_schedule_until_snapshot", world_time.call("get_snapshot"))
+	simulator.call("set_meal_cycle_cleanup_spot_value", PREP_SPOT_ID, 0.0)
+	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_equal(state.get("stage", ""), STAGE_CLEANUP, "counter-first cleanup waits for the table")
+	simulator.call("set_meal_cycle_cleanup_spot_value", TABLE_CLEANUP_SPOT_ID, 0.0)
+	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_equal(state.get("stage", ""), STAGE_PREP, "table can finish a counter-first cleanup")
+
+
+func _test_split_cleanup_save_load_and_legacy_restore(simulator: Node, world_time: Node) -> void:
+	_reset_meal_cycle(simulator, world_time, 6.0)
+	world_time.call("set_total_hours", 8.0)
+	simulator.call("_process_meal_cycle_schedule_until_snapshot", world_time.call("get_snapshot"))
+	simulator.call("set_meal_cycle_cleanup_spot_value", PREP_SPOT_ID, 35.0)
+	simulator.call("set_meal_cycle_cleanup_spot_value", TABLE_CLEANUP_SPOT_ID, 20.0)
+	var saved: Dictionary = simulator.call("get_save_data")
+	simulator.call("apply_save_data", saved)
+	var state: Dictionary = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	var remaining = state.get("cleanup_remaining_by_spot", {})
+	_expect_approx(float(state.get("value", 0.0)), 55.0, 0.001, "split cleanup aggregate survives save/load")
+	_expect_approx(float(remaining.get(String(PREP_SPOT_ID), 0.0)), 35.0, 0.001, "counter cleanup survives save/load")
+	_expect_approx(float(remaining.get(String(TABLE_CLEANUP_SPOT_ID), 0.0)), 20.0, 0.001, "table cleanup survives save/load")
+
+	var legacy_states: Dictionary = (saved.get("spot_runtime_states", {}) as Dictionary).duplicate(true)
+	var legacy_controller: Dictionary = (legacy_states[String(PREP_SPOT_ID)] as Dictionary).duplicate(true)
+	legacy_controller.erase("cleanup_remaining_by_spot")
+	legacy_controller["stage"] = STAGE_CLEANUP
+	legacy_controller["value"] = 70.0
+	legacy_states[String(PREP_SPOT_ID)] = legacy_controller
+	legacy_states.erase(String(TABLE_CLEANUP_SPOT_ID))
+	simulator.call("apply_save_data", {"spot_runtime_states": legacy_states})
+	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	remaining = state.get("cleanup_remaining_by_spot", {})
+	_expect_approx(float(state.get("value", 0.0)), 70.0, 0.001, "legacy atomic cleanup total is preserved")
+	_expect_approx(float(remaining.get(String(PREP_SPOT_ID), 0.0)), 35.0, 0.001, "legacy cleanup distributes half to counter")
+	_expect_approx(float(remaining.get(String(TABLE_CLEANUP_SPOT_ID), 0.0)), 35.0, 0.001, "legacy cleanup distributes half to table")
+
+
 func _test_sated_meal_owner_is_not_called_again(simulator: Node, world_time: Node) -> void:
 	_reset_meal_cycle(simulator, world_time, 6.0)
 	_supply_meal_batches(simulator, 3)
@@ -545,15 +811,15 @@ func _test_sated_meal_owner_is_not_called_again(simulator: Node, world_time: Nod
 		"spot_id": String(FOOD_SPOT_ID),
 		"state_name": "Eat",
 		"value_name": "hunger",
-		"target_scene_path": "res://scenes/testscenes/realtest1.tscn",
-		"target_position": Vector2.ZERO,
+		"target_scene_path": food_definition.scene_path,
+		"target_position": food_definition.position,
 		"last_total_hours": 7.0,
 		"return_scene_path": "res://yard.tscn",
 		"return_position": Vector2(3.0, 4.0),
 	}
 	var record := {
-		"scene_path": "res://scenes/testscenes/realtest1.tscn",
-		"last_position": Vector2.ZERO,
+		"scene_path": food_definition.scene_path,
+		"last_position": food_definition.position,
 		"node_state": {
 			"social_stats": {
 				"hunger": 10.0,
@@ -587,7 +853,12 @@ func _test_sated_meal_owner_is_not_called_again(simulator: Node, world_time: Nod
 		"mom is not called again after reaching hunger zero"
 	)
 	_expect_true(
-		bool(simulator.call("_meal_cycle_definition_can_start", food_definition, &"player", 7.2)),
+		bool(simulator.call(
+			"_meal_cycle_definition_can_start",
+			simulator.call("get_spot_definition", PLAYER_FOOD_SPOT_ID),
+			&"player",
+			7.2
+		)),
 		"another food owner can still answer the meal call"
 	)
 
@@ -600,20 +871,21 @@ func _test_offscreen_eating_consumes_food_one_to_one(simulator: Node, world_time
 	world_time.call("set_total_hours", 7.0)
 	simulator.call("_process_meal_cycle_schedule_until_snapshot", world_time.call("get_snapshot"))
 	simulator.call("set_spot_value", FOOD_SPOT_ID, 15.0)
+	var food_definition = simulator.call("get_spot_definition", FOOD_SPOT_ID)
 
 	var activity := {
 		"spot_id": String(FOOD_SPOT_ID),
 		"state_name": "Eat",
 		"value_name": "hunger",
-		"target_scene_path": "res://scenes/testscenes/realtest1.tscn",
-		"target_position": Vector2.ZERO,
+		"target_scene_path": food_definition.scene_path,
+		"target_position": food_definition.position,
 		"last_total_hours": 7.0,
 		"return_scene_path": "res://yard.tscn",
 		"return_position": Vector2(3.0, 4.0),
 	}
 	var record := {
-		"scene_path": "res://scenes/testscenes/realtest1.tscn",
-		"last_position": Vector2.ZERO,
+		"scene_path": food_definition.scene_path,
+		"last_position": food_definition.position,
 		"node_state": {
 			"social_stats": {
 				"hunger": 30.0,
@@ -836,8 +1108,8 @@ func _test_magic_lesson_can_interrupt_afternoon_work(simulator: Node) -> void:
 		return
 
 	var record := {
-		"scene_path": "res://scenes/testscenes/realtest1.tscn",
-		"last_position": Vector2(1443.0, 322.0),
+		"scene_path": work_definition.scene_path,
+		"last_position": work_definition.position,
 		"node_state": {
 			"social_stats": {
 				"hp": 100.0,
@@ -1266,7 +1538,7 @@ func _make_loaded_afternoon_spot_states(last_schedule_total_hours: float) -> Dic
 			"daily_growth": 0.0,
 			"done_threshold": 0.0,
 			"food_available": false,
-			"food_owner_ids": ["mom", "player"],
+			"food_owner_ids": ["mom", "maid", "player"],
 			"food_ready_total_hours": -1.0,
 			"food_spot_id": "mom_eat",
 			"kind": "meal_cycle",
@@ -1380,6 +1652,26 @@ func _test_mom_bedtime_outprioritizes_midnight_social_need(simulator: Node) -> v
 		definition.priority > int(social_settings.get("priority", 60)),
 		"bedtime priority blocks midnight social seeking"
 	)
+
+
+func _test_dad_bedtime_selects_his_side(simulator: Node) -> void:
+	var record := {
+		"scene_path": "res://scenes/testscenes/realtest1.tscn",
+		"node_state": {
+			"social_stats": {
+				"sleep_need": 55.0,
+				"talk_need": 90.0,
+			},
+		},
+	}
+	var definition := simulator.call("_find_best_definition", &"dad", record, 0.0) as NpcSpotDefinition
+	_expect_true(definition != null, "Dad has a scheduled activity at midnight")
+	if definition == null:
+		return
+	_expect_equal(definition.spot_id, &"dad_bed", "Dad selects his side of the shared bed at midnight")
+	_expect_equal(definition.position, Vector2(292.0, 420.0), "Dad's simulated sleep target uses his authored bed side")
+	_expect_true(definition.allows_owner_id(&"dad"), "Dad's simulated sleep target recognizes Dad's ownership")
+	_expect_false(definition.allows_owner_id(&"mom"), "Dad's simulated sleep target keeps a separate reservation from Mom")
 
 
 func _expect_equal(actual, expected, message: String) -> void:

@@ -29,7 +29,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-color = Color(0.035, 0.045, 0.06, 0.22)
+color = Color(0.14902, 0.192157, 0.180392, 0.22)
 
 [node name="PortraitSlot" type="Control" parent="AutonomousPortraitPresentation"]
 layout_mode = 1
@@ -56,6 +56,30 @@ mouse_filter = 2
 expand_mode = 1
 stretch_mode = 5
 
+[node name="DialoguePortraitBlinkOverlay" type="TextureRect" parent="AutonomousPortraitPresentation/PortraitSlot/MemoryDialoguePortrait"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="DialoguePortraitTalkOverlay" type="TextureRect" parent="AutonomousPortraitPresentation/PortraitSlot/MemoryDialoguePortrait"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
 [node name="Panel" type="PanelContainer" parent="."]
 unique_name_in_owner = true
 anchors_preset = 12
@@ -68,6 +92,7 @@ offset_right = -120.0
 offset_bottom = -28.0
 grow_horizontal = 2
 grow_vertical = 0
+theme_type_variation = &"MenuShell"
 
 [node name="Margin" type="MarginContainer" parent="Panel"]
 theme_override_constants/margin_left = 18
@@ -80,7 +105,7 @@ theme_override_constants/separation = 8
 
 [node name="SpeakerName" type="Label" parent="Panel/Margin/Content"]
 unique_name_in_owner = true
-theme_override_font_sizes/font_size = 18
+theme_type_variation = &"DialogueSpeaker"
 text = "Mom"
 
 [node name="DialogueText" type="Label" parent="Panel/Margin/Content"]

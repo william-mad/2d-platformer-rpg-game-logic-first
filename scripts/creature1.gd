@@ -87,6 +87,14 @@ func get_rope_attach_point() -> Node2D:
 	return rope_attach_point
 
 
+func get_rope_weight() -> float:
+	return rope_weight
+
+
+func is_rope_immovable() -> bool:
+	return false
+
+
 func take_damage(
 	amount: float,
 	damage_source_position: Vector2 = Vector2.ZERO,

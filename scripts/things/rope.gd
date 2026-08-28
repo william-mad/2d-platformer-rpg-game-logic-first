@@ -1442,6 +1442,10 @@ static func _get_attached_ropes(body: Node2D) -> Array[Rope]:
 static func _get_rope_weight(body: Node2D) -> float:
 	if not _node_is_valid(body):
 		return 1.0
+	# Hot-path contract for moving rope bodies: implement get_rope_weight() and
+	# is_rope_immovable(). The property checks below remain for legacy/custom
+	# bodies, but require reflective property discovery and should not be used by
+	# bodies that solve rope movement every physics frame.
 	if body.has_method("get_rope_weight"):
 		return maxf(float(body.call("get_rope_weight")), MIN_WEIGHT)
 	if _has_property(body, &"rope_weight"):

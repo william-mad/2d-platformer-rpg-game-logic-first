@@ -1,8 +1,8 @@
-[gd_resource type="Resource" script_class="DialogueDefinition" load_steps=12 format=3]
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3 uid="uid://4y1k0ajj3wae"]
 
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+[ext_resource type="Script" uid="uid://bsmeen4ahl14e" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" uid="uid://csithy7k1fddw" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" uid="uid://cytm50bmpbyao" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
 
 [sub_resource type="Resource" id="Choice_good"]
 script = ExtResource("3_choice")
@@ -26,49 +26,49 @@ next_node_id = &"player_long"
 script = ExtResource("2_node")
 node_id = &"day_check"
 speaker_id = &"mom"
-speaker_text = "So. If today were a guest, would we invite it back?"
+speaker_text = "How has your day been?"
 choices = Array[ExtResource("3_choice")]([SubResource("Choice_good"), SubResource("Choice_strange"), SubResource("Choice_long")])
 
 [sub_resource type="Resource" id="Node_player_good"]
 script = ExtResource("2_node")
 node_id = &"player_good"
 speaker_id = &"player"
-speaker_text = "Yes. It behaved better than I expected."
+speaker_text = "Better than I expected."
 next_node_id = &"mom_good"
 
 [sub_resource type="Resource" id="Node_mom_good"]
 script = ExtResource("2_node")
 node_id = &"mom_good"
 speaker_id = &"mom"
-speaker_text = "Then we'll let it visit again. No promises about tomorrow's manners."
+speaker_text = "I'm glad. It's nice when a day goes better than planned."
 terminal = true
 
 [sub_resource type="Resource" id="Node_player_strange"]
 script = ExtResource("2_node")
 node_id = &"player_strange"
 speaker_id = &"player"
-speaker_text = "Maybe. It was strange, but at least it brought stories."
+speaker_text = "Strange, but interesting."
 next_node_id = &"mom_strange"
 
 [sub_resource type="Resource" id="Node_mom_strange"]
 script = ExtResource("2_node")
 node_id = &"mom_strange"
 speaker_id = &"mom"
-speaker_text = "Stories pay their rent. Strange can stay for supper."
+speaker_text = "Interesting is not always bad. You can tell me about it later if you want."
 terminal = true
 
 [sub_resource type="Resource" id="Node_player_long"]
 script = ExtResource("2_node")
 node_id = &"player_long"
 speaker_id = &"player"
-speaker_text = "No. It stayed too long and used all the good towels."
+speaker_text = "Long. Very long."
 next_node_id = &"mom_long"
 
 [sub_resource type="Resource" id="Node_mom_long"]
 script = ExtResource("2_node")
 node_id = &"mom_long"
 speaker_id = &"mom"
-speaker_text = "Rude. We'll send it home and keep the evening for ourselves."
+speaker_text = "Then take it easy tonight. You have done enough for one day."
 terminal = true
 
 [resource]

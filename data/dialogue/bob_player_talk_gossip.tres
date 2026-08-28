@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_heard"]
+script = ExtResource("3_choice")
+choice_id = &"heard_it_too"
+text = "Ask what he heard."
+next_node_id = &"heard"
+
+[sub_resource type="Resource" id="Choice_truth"]
+script = ExtResource("3_choice")
+choice_id = &"ask_if_true"
+text = "Ask whether he believes it."
+next_node_id = &"truth"
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"npc"
+speaker_text = "{target_name}? I've heard three versions of that story, and two came from the same man."
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_heard"), SubResource("Choice_truth")])
+
+[sub_resource type="Resource" id="Node_heard"]
+script = ExtResource("2_node")
+node_id = &"heard"
+speaker_id = &"npc"
+speaker_text = "Enough to know the tavern has improved it several times. Ask me again when everyone is sober."
+terminal = true
+
+[sub_resource type="Resource" id="Node_truth"]
+script = ExtResource("2_node")
+node_id = &"truth"
+speaker_id = &"npc"
+speaker_text = "Maybe half of it. In this town, half the truth is considered a very accurate rumor."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"bob_player_talk_gossip"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_heard"), SubResource("Node_truth")])

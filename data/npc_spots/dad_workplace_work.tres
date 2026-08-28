@@ -1,0 +1,26 @@
+[gd_resource type="Resource" script_class="NpcSpotDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/npc_spot_definition.gd" id="1_spot_definition"]
+
+[resource]
+resource_name = "Dad Workplace Work"
+script = ExtResource("1_spot_definition")
+spot_id = &"dad_workplace_work"
+scene_path = "res://scenes/simulated/dad_workplace.tscn"
+position = Vector2(0, 0)
+state_name = &"Work"
+value_name = &"boredom"
+need_threshold = 0.0
+value_delta_per_game_hour = -12.5
+priority = 90
+require_npc_value_threshold = false
+finish_when_npc_value_sated = false
+routine_animation_name = &"work_1"
+owner_ids = Array[StringName]([&"dad"])
+called_npc_ids = Array[StringName]([&"dad"])
+active_time_windows = Array[Dictionary]([{
+"completion_policy": "stop_at_window_end",
+"end_hour": 18.0,
+"start_policy": "hard",
+"start_hour": 10.0
+}])

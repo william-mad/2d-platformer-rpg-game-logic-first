@@ -15,6 +15,9 @@ const PAGE_SAVE := &"save"
 const PAGE_LOAD := &"load"
 const PAGE_OPTIONS := &"options"
 
+const FOCUS_COLOR := Color(0.721569, 0.368627, 0.262745, 1.0)
+const OPTION_LABEL_COLOR := Color(0.14902, 0.192157, 0.180392, 1.0)
+const FILLED_FOCUS_COLOR := Color(1.0, 0.945098, 0.823529, 1.0)
 const POSITIVE_METRIC_COLOR := Color(0.54, 0.87, 0.68, 1.0)
 const NEGATIVE_METRIC_COLOR := Color(0.9, 0.36, 0.3, 1.0)
 const CONDITION_METRIC_COLOR := Color(0.78, 0.68, 0.42, 1.0)
@@ -56,9 +59,13 @@ const MOOD_METRIC_COLOR := Color(0.42, 0.67, 0.94, 1.0)
 @onready var load_slots: VBoxContainer = %LoadSlots
 @onready var load_status: Label = %LoadStatus
 
+@onready var volume_label: Label = %VolumeLabel
 @onready var master_volume_slider: HSlider = %MasterVolumeSlider
 @onready var master_volume_value: Label = %MasterVolumeValue
 @onready var fullscreen_toggle: CheckButton = %FullscreenToggle
+@onready var title_confirmation: Control = %TitleConfirmation
+@onready var cancel_title_button: Button = %CancelTitleButton
+@onready var confirm_title_button: Button = %ConfirmTitleButton
 
 var current_page: StringName = PAGE_LANDING
 var social_view_model := ViewModel.new()
@@ -80,32 +87,68 @@ func _ready() -> void:
 	visible = false
 	_bind_default_services()
 	_connect_controls()
+	_configure_static_focus_navigation()
+	_configure_focus_cues()
 	_show_page(PAGE_LANDING, false)
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not visible or current_page != PAGE_CHARACTERS:
+	if not visible:
 		return
 	var key_event := event as InputEventKey
 	if key_event != null and key_event.echo:
 		return
+	if title_confirmation.visible:
+		var wants_to_cancel := event.is_action_pressed(&"ui_cancel")
+		if InputMap.has_action(&"pause"):
+			wants_to_cancel = wants_to_cancel or event.is_action_pressed(&"pause")
+		if wants_to_cancel:
+			_hide_title_confirmation()
+			get_viewport().set_input_as_handled()
+		return
+	var focused := get_viewport().gui_get_focus_owner()
+	if focused in owner_buttons:
+		if _move_owner_focus(focused as Button, event):
+			get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed(&"ui_right") and _is_navigation_control(focused):
+		if _focus_page_content():
+			get_viewport().set_input_as_handled()
+	elif event.is_action_pressed(&"ui_left") and _should_return_to_navigation(focused):
+		_defer_focus(_get_page_navigation_button())
+		get_viewport().set_input_as_handled()
+
+
+func _move_owner_focus(button: Button, event: InputEvent) -> bool:
+	var index := owner_buttons.find(button)
+	if index < 0:
+		return false
+	if event.is_action_pressed(&"ui_up"):
+		_defer_focus(owner_buttons[wrapi(index - 1, 0, owner_buttons.size())])
+		return true
+	if event.is_action_pressed(&"ui_down"):
+		_defer_focus(owner_buttons[wrapi(index + 1, 0, owner_buttons.size())])
+		return true
 	if event.is_action_pressed(&"ui_left"):
-		browse_subject(-1)
-		get_viewport().set_input_as_handled()
-	elif event.is_action_pressed(&"ui_right"):
-		browse_subject(1)
-		get_viewport().set_input_as_handled()
+		_defer_focus(characters_button)
+		return true
+	if event.is_action_pressed(&"ui_right") and not previous_subject_button.disabled:
+		_defer_focus(previous_subject_button)
+		return true
+	return false
 
 
 func show_menu() -> void:
 	_bind_default_services()
 	visible = true
+	title_confirmation.visible = false
 	_show_page(PAGE_LANDING, false)
 	_sync_options_controls()
 	_defer_focus(resume_button)
 
 
 func hide_menu() -> void:
+	title_confirmation.visible = false
 	visible = false
 
 
@@ -219,7 +262,9 @@ func _connect_controls() -> void:
 	save_button.pressed.connect(show_save_page)
 	load_button.pressed.connect(show_load_page)
 	options_button.pressed.connect(show_options_page)
-	title_button.pressed.connect(func() -> void: return_to_title_requested.emit())
+	title_button.pressed.connect(_show_title_confirmation)
+	cancel_title_button.pressed.connect(_hide_title_confirmation)
+	confirm_title_button.pressed.connect(_confirm_return_to_title)
 	previous_subject_button.pressed.connect(browse_subject.bind(-1))
 	next_subject_button.pressed.connect(browse_subject.bind(1))
 	master_volume_slider.value_changed.connect(_on_master_volume_changed)
@@ -246,6 +291,21 @@ func _show_page(page: StringName, focus_navigation: bool = true) -> void:
 			page_title.text = "Pause Menu"
 	if focus_navigation:
 		_focus_page_navigation(page)
+
+
+func _show_title_confirmation() -> void:
+	title_confirmation.visible = true
+	_defer_focus(cancel_title_button)
+
+
+func _hide_title_confirmation() -> void:
+	title_confirmation.visible = false
+	_defer_focus(title_button)
+
+
+func _confirm_return_to_title() -> void:
+	title_confirmation.visible = false
+	return_to_title_requested.emit()
 
 
 func _focus_page_navigation(page: StringName) -> void:
@@ -281,6 +341,7 @@ func _refresh_characters() -> void:
 		button.pressed.connect(select_owner.bind(owner_id))
 		owner_list.add_child(button)
 		owner_buttons.append(button)
+	_configure_owner_focus_navigation()
 
 	no_known_characters.visible = known_ids.is_empty()
 	if known_ids.is_empty():
@@ -302,7 +363,7 @@ func _show_empty_character_state() -> void:
 	owner_description.text = "Meet someone before their character page becomes available."
 	portrait.texture = null
 	portrait_placeholder.visible = true
-	direction_label.text = "OWNER  ->  SUBJECT"
+	direction_label.text = "OWNER  →  SUBJECT"
 	opinion_status.text = "No opinion recorded"
 	subject_page_label.text = "0 / 0"
 	previous_subject_button.disabled = true
@@ -328,7 +389,7 @@ func _refresh_character_detail() -> void:
 
 	var subject_id := get_selected_subject_id()
 	var opinion := social_view_model.get_opinion(selected_owner_id, subject_id)
-	direction_label.text = String(opinion.get("direction", "OWNER  ->  SUBJECT"))
+	direction_label.text = String(opinion.get("direction", "OWNER  →  SUBJECT"))
 	subject_page_label.text = "%d / %d" % [subject_index + 1, subject_ids.size()]
 	previous_subject_button.disabled = subject_ids.size() <= 1
 	next_subject_button.disabled = subject_ids.size() <= 1
@@ -435,11 +496,12 @@ func _refresh_save_slots() -> void:
 		var summary: Dictionary = summaries[index] if index < summaries.size() else {}
 		var button := Button.new()
 		button.name = "Save_%s" % _safe_node_name(slot)
-		button.custom_minimum_size = Vector2(0, 58)
+		button.custom_minimum_size = Vector2(0, 48)
 		button.text = _format_save_summary(summary, "Empty - select to save")
 		button.pressed.connect(_on_save_slot_pressed.bind(slot))
 		save_slots.add_child(button)
 		save_slot_buttons.append(button)
+	_configure_vertical_button_navigation(save_slot_buttons, save_button)
 
 
 func _refresh_load_slots() -> void:
@@ -456,7 +518,7 @@ func _refresh_load_slots() -> void:
 		var summary: Dictionary = summaries[index] if index < summaries.size() else {}
 		var button := Button.new()
 		button.name = "Load_%s" % _safe_node_name(slot)
-		button.custom_minimum_size = Vector2(0, 58)
+		button.custom_minimum_size = Vector2(0, 48)
 		button.text = _format_save_summary(summary, "Empty")
 		button.disabled = not (
 			bool(summary.get("exists", false))
@@ -465,6 +527,7 @@ func _refresh_load_slots() -> void:
 		button.pressed.connect(_on_load_slot_pressed.bind(slot))
 		load_slots.add_child(button)
 		load_slot_buttons.append(button)
+	_configure_vertical_button_navigation(load_slot_buttons, load_button)
 
 
 func _on_save_slot_pressed(slot: String) -> void:
@@ -558,6 +621,165 @@ func _focus_first_enabled_button(buttons: Array[Button], fallback: Button) -> vo
 			return
 	if fallback != null:
 		_defer_focus(fallback)
+
+
+func _configure_static_focus_navigation() -> void:
+	previous_subject_button.focus_neighbor_right = previous_subject_button.get_path_to(
+		next_subject_button
+	)
+	next_subject_button.focus_neighbor_left = next_subject_button.get_path_to(
+		previous_subject_button
+	)
+	master_volume_slider.focus_neighbor_top = master_volume_slider.get_path_to(options_button)
+	master_volume_slider.focus_neighbor_bottom = master_volume_slider.get_path_to(fullscreen_toggle)
+	fullscreen_toggle.focus_neighbor_top = fullscreen_toggle.get_path_to(master_volume_slider)
+	fullscreen_toggle.focus_neighbor_left = fullscreen_toggle.get_path_to(options_button)
+	fullscreen_toggle.focus_neighbor_bottom = fullscreen_toggle.get_path_to(options_button)
+
+
+func _configure_focus_cues() -> void:
+	for button in [
+		resume_button,
+		characters_button,
+		save_button,
+		load_button,
+		options_button,
+		title_button,
+		fullscreen_toggle,
+		cancel_title_button,
+		confirm_title_button,
+	]:
+		_register_focus_button(button)
+	master_volume_slider.focus_entered.connect(_on_volume_focus_entered)
+	master_volume_slider.focus_exited.connect(_on_volume_focus_exited)
+
+
+func _register_focus_button(button: Button) -> void:
+	if button == null or button.has_meta("focus_cue_registered"):
+		return
+	button.set_meta("focus_cue_registered", true)
+	var cue := Label.new()
+	cue.name = "FocusCue"
+	cue.text = "›"
+	cue.visible = false
+	cue.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cue.z_index = 1
+	cue.set_anchors_and_offsets_preset(Control.PRESET_LEFT_WIDE)
+	cue.offset_left = 7.0
+	cue.offset_right = 21.0
+	cue.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cue.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	cue.add_theme_color_override(
+		"font_color",
+		FOCUS_COLOR if button is CheckButton else FILLED_FOCUS_COLOR
+	)
+	button.add_child(cue)
+	button.set_meta("focus_cue_label", cue)
+	button.focus_entered.connect(_on_focus_button_entered.bind(button))
+	button.focus_exited.connect(_on_focus_button_exited.bind(button))
+
+
+func _on_focus_button_entered(button: Button) -> void:
+	var cue := button.get_meta("focus_cue_label") as Label
+	if cue != null:
+		cue.visible = true
+
+
+func _on_focus_button_exited(button: Button) -> void:
+	var cue := button.get_meta("focus_cue_label") as Label
+	if cue != null:
+		cue.visible = false
+
+
+func _on_volume_focus_entered() -> void:
+	volume_label.text = "▶  MASTER VOLUME"
+	volume_label.add_theme_color_override("font_color", FOCUS_COLOR)
+
+
+func _on_volume_focus_exited() -> void:
+	volume_label.text = "MASTER VOLUME"
+	volume_label.add_theme_color_override("font_color", OPTION_LABEL_COLOR)
+
+
+func _configure_owner_focus_navigation() -> void:
+	if owner_buttons.is_empty():
+		return
+	for index in owner_buttons.size():
+		var button := owner_buttons[index]
+		var previous := owner_buttons[wrapi(index - 1, 0, owner_buttons.size())]
+		var next := owner_buttons[wrapi(index + 1, 0, owner_buttons.size())]
+		button.focus_neighbor_top = button.get_path_to(previous)
+		button.focus_neighbor_bottom = button.get_path_to(next)
+		button.focus_neighbor_left = button.get_path_to(characters_button)
+		button.focus_neighbor_right = button.get_path_to(previous_subject_button)
+	previous_subject_button.focus_neighbor_left = previous_subject_button.get_path_to(
+		owner_buttons[0]
+	)
+
+
+func _configure_vertical_button_navigation(buttons: Array[Button], nav_button: Button) -> void:
+	for index in buttons.size():
+		var button := buttons[index]
+		var previous: Control = nav_button if index == 0 else buttons[index - 1]
+		var next: Control = nav_button if index == buttons.size() - 1 else buttons[index + 1]
+		button.focus_neighbor_top = button.get_path_to(previous)
+		button.focus_neighbor_bottom = button.get_path_to(next)
+		button.focus_neighbor_left = button.get_path_to(nav_button)
+
+
+func _focus_page_content() -> bool:
+	match current_page:
+		PAGE_CHARACTERS:
+			if not owner_buttons.is_empty():
+				_defer_focus(owner_buttons[0])
+				return true
+		PAGE_SAVE:
+			if not save_slot_buttons.is_empty():
+				_defer_focus(save_slot_buttons[0])
+				return true
+		PAGE_LOAD:
+			for button in load_slot_buttons:
+				if not button.disabled:
+					_defer_focus(button)
+					return true
+		PAGE_OPTIONS:
+			_defer_focus(master_volume_slider)
+			return true
+	return false
+
+
+func _get_page_navigation_button() -> Button:
+	match current_page:
+		PAGE_CHARACTERS:
+			return characters_button
+		PAGE_SAVE:
+			return save_button
+		PAGE_LOAD:
+			return load_button
+		PAGE_OPTIONS:
+			return options_button
+		_:
+			return resume_button
+
+
+func _is_navigation_control(control: Control) -> bool:
+	return control in [
+		resume_button,
+		characters_button,
+		save_button,
+		load_button,
+		options_button,
+		title_button,
+	]
+
+
+func _should_return_to_navigation(control: Control) -> bool:
+	return (
+		control in owner_buttons
+		or control in save_slot_buttons
+		or control in load_slot_buttons
+		or control == fullscreen_toggle
+	)
 
 
 func _defer_focus(control: Control) -> void:

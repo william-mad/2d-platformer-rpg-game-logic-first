@@ -1,55 +1,91 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://scripts/instances/title_screen.gd" id="1_title"]
-[ext_resource type="Texture2D" uid="uid://bah1k5445svuw" path="res://images/backgrounds/ChatGPT Image 21 de mai. de 2026, 15_17_54.png" id="2_bg"]
+[ext_resource type="Texture2D" uid="uid://bah1k5445svuw" path="res://images/backgrounds/ChatGPT Image 21 de mai. de 2026, 15_17_54.png" id="2_sky"]
+[ext_resource type="Texture2D" path="res://images/backgrounds/houses bg.png" id="3_village"]
+[ext_resource type="FontFile" path="res://fonts/theme_showcase/AlegreyaSC-Bold.ttf" id="4_title_font"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_title_panel"]
+bg_color = Color(0.917647, 0.85098, 0.678431, 0.94)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.501961, 0.4, 0.278431, 0.96)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+shadow_color = Color(0.14902, 0.192157, 0.180392, 0.42)
+shadow_size = 12
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_button_normal"]
-bg_color = Color(0.08, 0.1, 0.11, 0.92)
+bg_color = Color(0.862745, 0.796078, 0.619608, 0.97)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
-border_color = Color(0.78, 0.68, 0.42, 1)
+border_color = Color(0.501961, 0.4, 0.278431, 1)
 corner_radius_top_left = 4
 corner_radius_top_right = 4
 corner_radius_bottom_right = 4
 corner_radius_bottom_left = 4
+content_margin_left = 18.0
+content_margin_right = 18.0
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_button_hover"]
-bg_color = Color(0.16, 0.22, 0.2, 0.96)
+bg_color = Color(0.772549, 0.415686, 0.290196, 0.96)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
-border_color = Color(0.95, 0.78, 0.34, 1)
+border_color = Color(0.4, 0.501961, 0.376471, 1)
 corner_radius_top_left = 4
 corner_radius_top_right = 4
 corner_radius_bottom_right = 4
 corner_radius_bottom_left = 4
+content_margin_left = 18.0
+content_margin_right = 18.0
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_button_pressed"]
-bg_color = Color(0.05, 0.08, 0.08, 1)
+bg_color = Color(0.721569, 0.368627, 0.262745, 1)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
-border_color = Color(0.54, 0.87, 0.68, 1)
+border_color = Color(0.4, 0.501961, 0.376471, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+content_margin_left = 18.0
+content_margin_right = 18.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_button_focus"]
+bg_color = Color(0.721569, 0.368627, 0.262745, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.4, 0.501961, 0.376471, 1)
 corner_radius_top_left = 4
 corner_radius_top_right = 4
 corner_radius_bottom_right = 4
 corner_radius_bottom_left = 4
 
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_button_focus"]
-bg_color = Color(0, 0, 0, 0)
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_load_panel"]
+bg_color = Color(0.917647, 0.85098, 0.678431, 0.99)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
-border_color = Color(0.54, 0.87, 0.68, 1)
-corner_radius_top_left = 4
-corner_radius_top_right = 4
-corner_radius_bottom_right = 4
-corner_radius_bottom_left = 4
+border_color = Color(0.501961, 0.4, 0.278431, 1)
+corner_radius_top_left = 7
+corner_radius_top_right = 7
+corner_radius_bottom_right = 7
+corner_radius_bottom_left = 7
+shadow_color = Color(0.14902, 0.192157, 0.180392, 0.48)
+shadow_size = 14
 
 [node name="TitleScreen" type="Control"]
 layout_mode = 3
@@ -60,72 +96,151 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_title")
 start_scene_path = "res://scenes/levels/start_game_intro.tscn"
-playground_scene_path = "res://scenes/levels/playground.tscn"
 
-[node name="Background" type="TextureRect" parent="."]
+[node name="Sky" type="TextureRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-texture = ExtResource("2_bg")
+mouse_filter = 2
+texture = ExtResource("2_sky")
 expand_mode = 1
 stretch_mode = 6
 
-[node name="Shade" type="ColorRect" parent="."]
+[node name="Village" type="TextureRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-color = Color(0.02, 0.03, 0.035, 0.42)
+mouse_filter = 2
+texture = ExtResource("3_village")
+expand_mode = 1
+stretch_mode = 6
 
-[node name="Center" type="CenterContainer" parent="."]
+[node name="Atmosphere" type="ColorRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
+color = Color(1, 0.819608, 0.517647, 0.12)
 
-[node name="Stack" type="VBoxContainer" parent="Center"]
-layout_mode = 2
-theme_override_constants/separation = 22
+[node name="TopAccent" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 3.0
+grow_horizontal = 2
+mouse_filter = 2
+color = Color(0.772549, 0.415686, 0.290196, 0.9)
 
-[node name="Title" type="Label" parent="Center/Stack"]
+[node name="TitleCenter" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 16.0
+offset_bottom = -16.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MainPanel" type="PanelContainer" parent="TitleCenter"]
+custom_minimum_size = Vector2(474, 0)
 layout_mode = 2
-theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.72)
-theme_override_constants/shadow_offset_x = 2
-theme_override_constants/shadow_offset_y = 2
-theme_override_font_sizes/font_size = 36
-text = "2D PLATFORMER RPG"
+theme_override_styles/panel = SubResource("StyleBoxFlat_title_panel")
+
+[node name="MainMargin" type="MarginContainer" parent="TitleCenter/MainPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 32
+theme_override_constants/margin_top = 22
+theme_override_constants/margin_right = 32
+theme_override_constants/margin_bottom = 20
+
+[node name="TitleStack" type="VBoxContainer" parent="TitleCenter/MainPanel/MainMargin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Kicker" type="Label" parent="TitleCenter/MainPanel/MainMargin/TitleStack"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.501961, 0.376471, 1)
+theme_override_colors/font_shadow_color = Color(0.501961, 0.4, 0.278431, 0.22)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 13
+text = "A COMING-OF-AGE FANTASY RPG"
 horizontal_alignment = 1
 
-[node name="StartButton" type="Button" parent="Center/Stack"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(280, 62)
+[node name="Title" type="Label" parent="TitleCenter/MainPanel/MainMargin/TitleStack"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.98, 0.94, 0.82, 1)
-theme_override_colors/font_hover_color = Color(1, 0.96, 0.78, 1)
-theme_override_colors/font_pressed_color = Color(0.54, 0.87, 0.68, 1)
-theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(0.721569, 0.368627, 0.262745, 1)
+theme_override_colors/font_outline_color = Color(0.08, 0.06, 0.035, 0.95)
+theme_override_colors/font_shadow_color = Color(0.501961, 0.4, 0.278431, 0.26)
+theme_override_constants/outline_size = 3
+theme_override_constants/shadow_offset_x = 3
+theme_override_constants/shadow_offset_y = 3
+theme_override_fonts/font = ExtResource("4_title_font")
+theme_override_font_sizes/font_size = 58
+text = "E.B.F.L."
+horizontal_alignment = 1
+
+[node name="FullTitle" type="Label" parent="TitleCenter/MainPanel/MainMargin/TitleStack"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_colors/font_shadow_color = Color(0.501961, 0.4, 0.278431, 0.22)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 2
+theme_override_fonts/font = ExtResource("4_title_font")
+theme_override_font_sizes/font_size = 18
+text = "EVERY BOY'S FIRST LOVE"
+horizontal_alignment = 1
+
+[node name="Ornament" type="Label" parent="TitleCenter/MainPanel/MainMargin/TitleStack"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.501961, 0.4, 0.278431, 0.92)
+theme_override_font_sizes/font_size = 15
+text = "—  ◆  —"
+horizontal_alignment = 1
+
+[node name="MenuSpacer" type="Control" parent="TitleCenter/MainPanel/MainMargin/TitleStack"]
+custom_minimum_size = Vector2(0, 4)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="StartButton" type="Button" parent="TitleCenter/MainPanel/MainMargin/TitleStack"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(410, 48)
+layout_mode = 2
+focus_neighbor_top = NodePath("../OptionsButton")
+focus_neighbor_bottom = NodePath("../LoadButton")
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_colors/font_hover_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_pressed_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_focus_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_font_sizes/font_size = 19
 theme_override_styles/normal = SubResource("StyleBoxFlat_button_normal")
 theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_button_pressed")
 theme_override_styles/focus = SubResource("StyleBoxFlat_button_focus")
-text = "START GAME"
+text = "START NEW STORY"
 
-[node name="LoadButton" type="Button" parent="Center/Stack"]
+[node name="LoadButton" type="Button" parent="TitleCenter/MainPanel/MainMargin/TitleStack"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(280, 62)
+custom_minimum_size = Vector2(410, 48)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.98, 0.94, 0.82, 1)
-theme_override_colors/font_hover_color = Color(1, 0.96, 0.78, 1)
-theme_override_colors/font_pressed_color = Color(0.54, 0.87, 0.68, 1)
-theme_override_colors/font_disabled_color = Color(0.48, 0.5, 0.5, 1)
-theme_override_font_sizes/font_size = 22
+focus_neighbor_top = NodePath("../StartButton")
+focus_neighbor_bottom = NodePath("../OptionsButton")
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_colors/font_hover_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_pressed_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_focus_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_disabled_color = Color(0.352941, 0.396078, 0.368627, 0.62)
+theme_override_font_sizes/font_size = 19
 theme_override_styles/normal = SubResource("StyleBoxFlat_button_normal")
 theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_button_pressed")
@@ -133,31 +248,32 @@ theme_override_styles/focus = SubResource("StyleBoxFlat_button_focus")
 disabled = true
 text = "LOAD GAME"
 
-[node name="BottomArea" type="MarginContainer" parent="."]
-layout_mode = 1
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = 24.0
-offset_top = -92.0
-offset_right = -24.0
-offset_bottom = -24.0
-grow_horizontal = 2
-grow_vertical = 0
-
-[node name="PlaygroundButton" type="Button" parent="BottomArea"]
+[node name="OptionsButton" type="Button" parent="TitleCenter/MainPanel/MainMargin/TitleStack"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 54)
+custom_minimum_size = Vector2(410, 48)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.9, 0.96, 1, 1)
-theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
-theme_override_colors/font_pressed_color = Color(0.54, 0.87, 0.68, 1)
-theme_override_font_sizes/font_size = 18
+focus_neighbor_top = NodePath("../LoadButton")
+focus_neighbor_bottom = NodePath("../StartButton")
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_colors/font_hover_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_pressed_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_focus_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_font_sizes/font_size = 19
 theme_override_styles/normal = SubResource("StyleBoxFlat_button_normal")
 theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_button_pressed")
 theme_override_styles/focus = SubResource("StyleBoxFlat_button_focus")
-text = "PLAYGROUND"
+text = "OPTIONS"
+
+[node name="ControlsHint" type="Label" parent="TitleCenter/MainPanel/MainMargin/TitleStack"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.352941, 0.396078, 0.368627, 1)
+theme_override_colors/font_shadow_color = Color(0.501961, 0.4, 0.278431, 0.24)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 13
+text = "↑ / ↓  Choose     •     Z  Select"
+horizontal_alignment = 1
 
 [node name="SaveFileMenu" type="ColorRect" parent="."]
 unique_name_in_owner = true
@@ -169,7 +285,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 0
-color = Color(0.015, 0.018, 0.02, 0.88)
+color = Color(0.14902, 0.192157, 0.180392, 0.78)
 
 [node name="LoadMenuCenter" type="CenterContainer" parent="SaveFileMenu"]
 layout_mode = 1
@@ -179,85 +295,390 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="LoadMenuStack" type="VBoxContainer" parent="SaveFileMenu/LoadMenuCenter"]
-custom_minimum_size = Vector2(420, 0)
+[node name="LoadPanel" type="PanelContainer" parent="SaveFileMenu/LoadMenuCenter"]
+custom_minimum_size = Vector2(466, 0)
 layout_mode = 2
-theme_override_constants/separation = 14
+theme_override_styles/panel = SubResource("StyleBoxFlat_load_panel")
 
-[node name="LoadMenuTitle" type="Label" parent="SaveFileMenu/LoadMenuCenter/LoadMenuStack"]
+[node name="LoadMargin" type="MarginContainer" parent="SaveFileMenu/LoadMenuCenter/LoadPanel"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.98, 0.94, 0.82, 1)
-theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.72)
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 22
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 22
+
+[node name="LoadMenuStack" type="VBoxContainer" parent="SaveFileMenu/LoadMenuCenter/LoadPanel/LoadMargin"]
+custom_minimum_size = Vector2(418, 0)
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="LoadMenuTitle" type="Label" parent="SaveFileMenu/LoadMenuCenter/LoadPanel/LoadMargin/LoadMenuStack"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.721569, 0.368627, 0.262745, 1)
+theme_override_colors/font_shadow_color = Color(0.501961, 0.4, 0.278431, 0.24)
 theme_override_constants/shadow_offset_x = 2
 theme_override_constants/shadow_offset_y = 2
-theme_override_font_sizes/font_size = 30
-text = "LOAD GAME"
+theme_override_fonts/font = ExtResource("4_title_font")
+theme_override_font_sizes/font_size = 28
+text = "LOAD YOUR STORY"
 horizontal_alignment = 1
 
-[node name="NoSavesLabel" type="Label" parent="SaveFileMenu/LoadMenuCenter/LoadMenuStack"]
+[node name="LoadOrnament" type="Label" parent="SaveFileMenu/LoadMenuCenter/LoadPanel/LoadMargin/LoadMenuStack"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.501961, 0.4, 0.278431, 0.92)
+theme_override_font_sizes/font_size = 13
+text = "—  ◆  —"
+horizontal_alignment = 1
+
+[node name="NoSavesLabel" type="Label" parent="SaveFileMenu/LoadMenuCenter/LoadPanel/LoadMargin/LoadMenuStack"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_colors/font_color = Color(0.78, 0.84, 0.86, 1)
-theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.72)
+theme_override_colors/font_color = Color(0.352941, 0.396078, 0.368627, 1)
+theme_override_colors/font_shadow_color = Color(0.501961, 0.4, 0.278431, 0.24)
 theme_override_constants/shadow_offset_x = 1
 theme_override_constants/shadow_offset_y = 1
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 14
 text = "No saved games yet."
 horizontal_alignment = 1
 
-[node name="SaveSlot1Button" type="Button" parent="SaveFileMenu/LoadMenuCenter/LoadMenuStack"]
+[node name="SaveSlot1Button" type="Button" parent="SaveFileMenu/LoadMenuCenter/LoadPanel/LoadMargin/LoadMenuStack"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(420, 54)
+custom_minimum_size = Vector2(418, 48)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.98, 0.94, 0.82, 1)
-theme_override_colors/font_hover_color = Color(1, 0.96, 0.78, 1)
-theme_override_colors/font_pressed_color = Color(0.54, 0.87, 0.68, 1)
-theme_override_colors/font_disabled_color = Color(0.48, 0.5, 0.5, 1)
-theme_override_font_sizes/font_size = 17
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_colors/font_hover_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_pressed_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_focus_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_disabled_color = Color(0.352941, 0.396078, 0.368627, 0.62)
+theme_override_font_sizes/font_size = 16
 theme_override_styles/normal = SubResource("StyleBoxFlat_button_normal")
 theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_button_pressed")
 theme_override_styles/focus = SubResource("StyleBoxFlat_button_focus")
 text = "File 1 - Empty"
 
-[node name="SaveSlot2Button" type="Button" parent="SaveFileMenu/LoadMenuCenter/LoadMenuStack"]
+[node name="SaveSlot2Button" type="Button" parent="SaveFileMenu/LoadMenuCenter/LoadPanel/LoadMargin/LoadMenuStack"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(420, 54)
+custom_minimum_size = Vector2(418, 48)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.98, 0.94, 0.82, 1)
-theme_override_colors/font_hover_color = Color(1, 0.96, 0.78, 1)
-theme_override_colors/font_pressed_color = Color(0.54, 0.87, 0.68, 1)
-theme_override_colors/font_disabled_color = Color(0.48, 0.5, 0.5, 1)
-theme_override_font_sizes/font_size = 17
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_colors/font_hover_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_pressed_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_focus_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_disabled_color = Color(0.352941, 0.396078, 0.368627, 0.62)
+theme_override_font_sizes/font_size = 16
 theme_override_styles/normal = SubResource("StyleBoxFlat_button_normal")
 theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_button_pressed")
 theme_override_styles/focus = SubResource("StyleBoxFlat_button_focus")
 text = "File 2 - Empty"
 
-[node name="SaveSlot3Button" type="Button" parent="SaveFileMenu/LoadMenuCenter/LoadMenuStack"]
+[node name="SaveSlot3Button" type="Button" parent="SaveFileMenu/LoadMenuCenter/LoadPanel/LoadMargin/LoadMenuStack"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(420, 54)
+custom_minimum_size = Vector2(418, 48)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.98, 0.94, 0.82, 1)
-theme_override_colors/font_hover_color = Color(1, 0.96, 0.78, 1)
-theme_override_colors/font_pressed_color = Color(0.54, 0.87, 0.68, 1)
-theme_override_colors/font_disabled_color = Color(0.48, 0.5, 0.5, 1)
-theme_override_font_sizes/font_size = 17
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_colors/font_hover_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_pressed_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_focus_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_disabled_color = Color(0.352941, 0.396078, 0.368627, 0.62)
+theme_override_font_sizes/font_size = 16
 theme_override_styles/normal = SubResource("StyleBoxFlat_button_normal")
 theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_button_pressed")
 theme_override_styles/focus = SubResource("StyleBoxFlat_button_focus")
 text = "File 3 - Empty"
 
-[node name="CloseLoadMenuButton" type="Button" parent="SaveFileMenu/LoadMenuCenter/LoadMenuStack"]
+[node name="CloseLoadMenuButton" type="Button" parent="SaveFileMenu/LoadMenuCenter/LoadPanel/LoadMargin/LoadMenuStack"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(420, 54)
+custom_minimum_size = Vector2(418, 46)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.9, 0.96, 1, 1)
-theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
-theme_override_colors/font_pressed_color = Color(0.54, 0.87, 0.68, 1)
-theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_colors/font_hover_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_pressed_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_focus_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_font_sizes/font_size = 17
+theme_override_styles/normal = SubResource("StyleBoxFlat_button_normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_button_pressed")
+theme_override_styles/focus = SubResource("StyleBoxFlat_button_focus")
+text = "BACK"
+
+[node name="OptionsMenu" type="ColorRect" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+color = Color(0.14902, 0.192157, 0.180392, 0.82)
+
+[node name="OptionsCenter" type="CenterContainer" parent="OptionsMenu"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="OptionsPanel" type="PanelContainer" parent="OptionsMenu/OptionsCenter"]
+custom_minimum_size = Vector2(612, 0)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_load_panel")
+
+[node name="OptionsMargin" type="MarginContainer" parent="OptionsMenu/OptionsCenter/OptionsPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 22
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 22
+theme_override_constants/margin_bottom = 14
+
+[node name="OptionsStack" type="VBoxContainer" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin"]
+custom_minimum_size = Vector2(568, 0)
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="OptionsTitle" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.721569, 0.368627, 0.262745, 1)
+theme_override_colors/font_shadow_color = Color(0.501961, 0.4, 0.278431, 0.24)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_fonts/font = ExtResource("4_title_font")
+theme_override_font_sizes/font_size = 28
+text = "OPTIONS"
+horizontal_alignment = 1
+
+[node name="OptionsCopy" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.352941, 0.396078, 0.368627, 1)
+theme_override_font_sizes/font_size = 12
+text = "Changes are applied and saved automatically."
+horizontal_alignment = 1
+
+[node name="OptionsOrnament" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.501961, 0.4, 0.278431, 0.92)
+theme_override_font_sizes/font_size = 13
+text = "—  ◆  —"
+horizontal_alignment = 1
+
+[node name="VolumeRow" type="HBoxContainer" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="VolumeLabel" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/VolumeRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(130, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_font_sizes/font_size = 15
+text = "MASTER VOLUME"
+vertical_alignment = 1
+
+[node name="MasterVolumeSlider" type="HSlider" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/VolumeRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(330, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+focus_neighbor_top = NodePath("../../BackOptionsButton")
+focus_neighbor_bottom = NodePath("../../FullscreenToggle")
+max_value = 100.0
+step = 1.0
+value = 100.0
+
+[node name="MasterVolumeValue" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/VolumeRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(54, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.721569, 0.368627, 0.262745, 1)
+theme_override_font_sizes/font_size = 15
+text = "100%"
+horizontal_alignment = 2
+vertical_alignment = 1
+
+[node name="FullscreenToggle" type="CheckButton" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+focus_neighbor_top = NodePath("../VolumeRow/MasterVolumeSlider")
+focus_neighbor_bottom = NodePath("../BackOptionsButton")
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_colors/font_hover_color = Color(0.721569, 0.368627, 0.262745, 1)
+theme_override_colors/font_hover_pressed_color = Color(0.721569, 0.368627, 0.262745, 1)
+theme_override_colors/font_pressed_color = Color(0.721569, 0.368627, 0.262745, 1)
+theme_override_colors/font_focus_color = Color(0.721569, 0.368627, 0.262745, 1)
+theme_override_font_sizes/font_size = 15
+text = "FULLSCREEN"
+
+[node name="ControlsTitle" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.501961, 0.376471, 1)
+theme_override_font_sizes/font_size = 16
+text = "CONTROLS"
+
+[node name="ControlsGrid" type="GridContainer" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack"]
+layout_mode = 2
+theme_override_constants/h_separation = 12
+theme_override_constants/v_separation = 3
+columns = 4
+
+[node name="MoveAction" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+custom_minimum_size = Vector2(126, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.352941, 0.396078, 0.368627, 1)
+theme_override_font_sizes/font_size = 12
+text = "MOVE"
+
+[node name="MoveKey" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_font_sizes/font_size = 12
+text = "← / →"
+
+[node name="JumpAction" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+custom_minimum_size = Vector2(126, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.352941, 0.396078, 0.368627, 1)
+theme_override_font_sizes/font_size = 12
+text = "JUMP"
+
+[node name="JumpKey" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_font_sizes/font_size = 12
+text = "SPACE"
+
+[node name="VerticalAction" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+custom_minimum_size = Vector2(126, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.352941, 0.396078, 0.368627, 1)
+theme_override_font_sizes/font_size = 12
+text = "UP / CROUCH"
+
+[node name="VerticalKey" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_font_sizes/font_size = 12
+text = "↑ / ↓"
+
+[node name="AttackAction" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+custom_minimum_size = Vector2(126, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.352941, 0.396078, 0.368627, 1)
+theme_override_font_sizes/font_size = 12
+text = "ATTACK / SELECT"
+
+[node name="AttackKey" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_font_sizes/font_size = 12
+text = "Z"
+
+[node name="RopeAction" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+custom_minimum_size = Vector2(126, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.352941, 0.396078, 0.368627, 1)
+theme_override_font_sizes/font_size = 12
+text = "ROPE"
+
+[node name="RopeKey" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_font_sizes/font_size = 12
+text = "X"
+
+[node name="InteractAction" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+custom_minimum_size = Vector2(126, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.352941, 0.396078, 0.368627, 1)
+theme_override_font_sizes/font_size = 12
+text = "CHARM / INTERACT"
+
+[node name="InteractKey" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_font_sizes/font_size = 12
+text = "C"
+
+[node name="InventoryAction" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+custom_minimum_size = Vector2(126, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.352941, 0.396078, 0.368627, 1)
+theme_override_font_sizes/font_size = 12
+text = "INVENTORY"
+
+[node name="InventoryKey" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_font_sizes/font_size = 12
+text = "I"
+
+[node name="StatsAction" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+custom_minimum_size = Vector2(126, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.352941, 0.396078, 0.368627, 1)
+theme_override_font_sizes/font_size = 12
+text = "CHARACTER STATS"
+
+[node name="StatsKey" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_font_sizes/font_size = 12
+text = "P"
+
+[node name="PauseAction" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+custom_minimum_size = Vector2(126, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.352941, 0.396078, 0.368627, 1)
+theme_override_font_sizes/font_size = 12
+text = "PAUSE / BACK"
+
+[node name="PauseKey" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_font_sizes/font_size = 12
+text = "ESC"
+
+[node name="ChoicesAction" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+custom_minimum_size = Vector2(126, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.352941, 0.396078, 0.368627, 1)
+theme_override_font_sizes/font_size = 12
+text = "DIALOGUE CHOICES"
+
+[node name="ChoicesKey" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack/ControlsGrid"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_font_sizes/font_size = 12
+text = "1–5"
+
+[node name="OptionsHint" type="Label" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.352941, 0.396078, 0.368627, 1)
+theme_override_font_sizes/font_size = 12
+text = "↑ / ↓ choose    •    ← / → adjust    •    Z select    •    Esc close"
+horizontal_alignment = 1
+
+[node name="BackOptionsButton" type="Button" parent="OptionsMenu/OptionsCenter/OptionsPanel/OptionsMargin/OptionsStack"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(568, 42)
+layout_mode = 2
+focus_neighbor_top = NodePath("../FullscreenToggle")
+focus_neighbor_bottom = NodePath("../VolumeRow/MasterVolumeSlider")
+theme_override_colors/font_color = Color(0.14902, 0.192157, 0.180392, 1)
+theme_override_colors/font_hover_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_pressed_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_colors/font_focus_color = Color(1, 0.945098, 0.823529, 1)
+theme_override_font_sizes/font_size = 17
 theme_override_styles/normal = SubResource("StyleBoxFlat_button_normal")
 theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_button_pressed")

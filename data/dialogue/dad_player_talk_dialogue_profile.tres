@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="NpcPlayerTalkDialogueProfile" load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/npc_player_talk_dialogue_profile.gd" id="1_profile"]
+[ext_resource type="Resource" path="res://data/dialogue/dad_player_talk_casual.tres" id="2_casual"]
+[ext_resource type="Resource" path="res://data/dialogue/dad_player_talk_compliment.tres" id="3_compliment"]
+[ext_resource type="Resource" path="res://data/dialogue/dad_player_talk_flirt.tres" id="4_flirt"]
+[ext_resource type="Resource" path="res://data/dialogue/generic_player_talk_insult.tres" id="5_insult"]
+[ext_resource type="Resource" path="res://data/dialogue/generic_player_talk_gossip.tres" id="6_gossip"]
+
+[resource]
+script = ExtResource("1_profile")
+speaker_id = &"npc"
+speaker_name = "Dad"
+player_speaker_id = &"player"
+player_speaker_name = "Player"
+casual_responses = Array[ExtResource("2_casual")]([ExtResource("2_casual")])
+compliment_responses = Array[ExtResource("3_compliment")]([ExtResource("3_compliment")])
+flirt_responses = Array[ExtResource("4_flirt")]([ExtResource("4_flirt")])
+insult_responses = Array[ExtResource("5_insult")]([ExtResource("5_insult")])
+gossip_responses = Array[ExtResource("6_gossip")]([ExtResource("6_gossip")])

@@ -2,9 +2,11 @@ class_name ManaBalanceConfig
 extends Resource
 
 @export_group("Orb movement")
-@export var orb_acceleration: float = 500.0
-@export var orb_drag: float = 55.0
-@export var orb_maximum_speed: float = 180.0
+@export var orb_acceleration: float = 640.0
+@export var orb_drag: float = 3.2
+@export var orb_maximum_speed: float = 170.0
+@export var orb_turn_acceleration_multiplier: float = 1.8
+@export var orb_stop_speed_threshold: float = 0.75
 @export var arena_size: Vector2 = Vector2(300.0, 210.0)
 
 @export_group("Magical current")
@@ -35,6 +37,8 @@ func is_valid_config() -> bool:
 		orb_acceleration >= 0.0
 		and orb_drag >= 0.0
 		and orb_maximum_speed > 0.0
+		and orb_turn_acceleration_multiplier >= 1.0
+		and orb_stop_speed_threshold >= 0.0
 		and arena_size.x > warning_radius * 2.0
 		and arena_size.y > warning_radius * 2.0
 		and starting_force_strength >= 0.0
@@ -59,4 +63,6 @@ func get_orb_config() -> Dictionary:
 		"acceleration": orb_acceleration,
 		"drag": orb_drag,
 		"maximum_speed": orb_maximum_speed,
+		"turn_acceleration_multiplier": orb_turn_acceleration_multiplier,
+		"stop_speed_threshold": orb_stop_speed_threshold,
 	}

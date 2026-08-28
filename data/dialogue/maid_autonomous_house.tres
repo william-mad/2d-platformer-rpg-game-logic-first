@@ -1,0 +1,58 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_yes"]
+script = ExtResource("3_choice")
+choice_id = &"mom_likes_you"
+text = "Tell her Mom likes having her here."
+next_node_id = &"player_yes"
+
+[sub_resource type="Resource" id="Choice_help"]
+script = ExtResource("3_choice")
+choice_id = &"you_work_hard"
+text = "Tell her she works hard."
+next_node_id = &"player_help"
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"npc"
+speaker_text = "Your mother thanked me again today. She's always so kind to me... I hope she knows how much I appreciate it."
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_yes"), SubResource("Choice_help")])
+
+[sub_resource type="Resource" id="Node_player_yes"]
+script = ExtResource("2_node")
+node_id = &"player_yes"
+speaker_id = &"player"
+speaker_text = "She likes having you here."
+next_node_id = &"npc_yes"
+
+[sub_resource type="Resource" id="Node_npc_yes"]
+script = ExtResource("2_node")
+node_id = &"npc_yes"
+speaker_id = &"npc"
+speaker_text = "R-really? I'm glad. I like being here too... with both of you."
+terminal = true
+
+[sub_resource type="Resource" id="Node_player_help"]
+script = ExtResource("2_node")
+node_id = &"player_help"
+speaker_id = &"player"
+speaker_text = "You work hard. She notices."
+next_node_id = &"npc_help"
+
+[sub_resource type="Resource" id="Node_npc_help"]
+script = ExtResource("2_node")
+node_id = &"npc_help"
+speaker_id = &"npc"
+speaker_text = "Thank you. Hearing that from you makes the work feel much lighter."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"maid_autonomous_house"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_player_yes"), SubResource("Node_npc_yes"), SubResource("Node_player_help"), SubResource("Node_npc_help")])

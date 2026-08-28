@@ -5,8 +5,8 @@
 [resource]
 script = ExtResource("1_spot_definition")
 spot_id = &"mom_eat"
-scene_path = "res://scenes/testscenes/realtest1.tscn"
-position = Vector2(-1217, 325)
+scene_path = "res://scenes/testscenes/realhometest.tscn"
+position = Vector2(60, 347)
 state_name = &"Eat"
 value_name = &"hunger"
 need_threshold = 75.0
@@ -36,5 +36,6 @@ next_spot_id_when_done = &"mom_eat_prep"
 next_spot_value_when_done = 100.0
 meal_cycle_id = &"mom_meal_cycle"
 meal_cycle_stage = &"food"
-owner_ids = Array[StringName]([&"mom", &"player"])
-capacity = 0
+meal_cycle_controller_spot_id = &"mom_eat_prep"
+owner_ids = Array[StringName]([&"mom"])
+capacity = 1

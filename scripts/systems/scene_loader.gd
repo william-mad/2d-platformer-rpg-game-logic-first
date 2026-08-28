@@ -458,7 +458,7 @@ func _build_overlay() -> void:
 	overlay.name = "SceneLoaderOverlay"
 	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	overlay.color = Color(0.02, 0.025, 0.03, 0.78)
+	overlay.color = Color(0.14902, 0.192157, 0.180392, 0.78)
 	root.add_child(overlay)
 
 	var center := CenterContainer.new()
@@ -471,8 +471,8 @@ func _build_overlay() -> void:
 	loading_label.name = "SceneLoaderLabel"
 	loading_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	loading_label.add_theme_font_size_override("font_size", 18)
-	loading_label.add_theme_color_override("font_color", Color(0.94, 0.98, 1.0, 1.0))
-	loading_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9))
+	loading_label.add_theme_color_override("font_color", Color(1.0, 0.945098, 0.823529, 1.0))
+	loading_label.add_theme_color_override("font_shadow_color", Color(0.501961, 0.4, 0.278431, 0.5))
 	loading_label.add_theme_constant_override("shadow_offset_x", 1)
 	loading_label.add_theme_constant_override("shadow_offset_y", 1)
 	loading_label.text = "LOADING"

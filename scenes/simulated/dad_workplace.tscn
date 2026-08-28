@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[node name="DadWorkplaceSimulatedOnly" type="Node"]
+process_mode = 4
+metadata/_npc_simulated_only = true
+metadata/location_id = &"dad_workplace"

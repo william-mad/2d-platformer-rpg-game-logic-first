@@ -307,16 +307,6 @@ enum MonsterSightReaction {
 		"behavior_feedback_text": "Knocked down",
 		"behavior_origin_value": "knockout",
 	},
-	"anger_fight": {
-		"value": "anger",
-		"state": "Fight",
-		"at_least": 100.0,
-		"priority": 94,
-		"behavior_source": "event_reaction",
-		"behavior_reason_code": "anger_high",
-		"behavior_feedback_text": "Enraged",
-		"behavior_origin_value": "anger",
-	},
 	"sleep_collapse": {
 		"value": "sleep_need",
 		"state": "Collapse",
@@ -1440,9 +1430,15 @@ func _request_state_direct(
 		return _reject_state_request(state_name, "Missing state: %s" % String(state_name))
 	if String(requested_state.name) == "Talk":
 		var requested_partner := actor if actor != null else get_talk_target()
+		# Explicit behavior intents already carry their authority. Preserve that
+		# source instead of re-inferring a Player-owned request from the partner type.
+		var requested_source := StringName(String(request_context.get(
+			"request_source",
+			explicit_behavior_intent.source if explicit_behavior_intent != null else &""
+		)))
 		return _request_talk_state(
 			requested_partner, reason, request_priority, true,
-			_resolve_talk_initiating_source(&"", requested_partner, reason)
+			_resolve_talk_initiating_source(requested_source, requested_partner, reason)
 		)
 	if String(requested_state.name) == "LookForTalkTarget":
 		if (
@@ -3427,17 +3423,6 @@ func _maybe_fight_from_seen_target(seen_target: Node2D) -> bool:
 	if seen_target == null or not is_instance_valid(seen_target):
 		return false
 
-	var anger_fight_rule := _get_matching_anger_fight_rule(seen_target)
-	if not anger_fight_rule.is_empty():
-		if is_primary_state(&"Fight"):
-			return true
-		return request_state(
-			&"Fight",
-			seen_target,
-			"anger_seen_target",
-			int(anger_fight_rule.get("priority", _get_anger_fight_priority()))
-		)
-
 	var relationship_anger_requires_fight := false
 	if npc != null and npc.has_method("should_fight_actor"):
 		relationship_anger_requires_fight = bool(
@@ -3482,9 +3467,6 @@ func _maybe_flee_from_seen_player(seen_target: Node2D) -> bool:
 	if seen_player_flee_state_name == &"":
 		return false
 
-	if _anger_meets_fight_threshold():
-		return false
-
 	if (
 		npc == null
 		or not npc.has_method("should_flee_from_actor")
@@ -3502,8 +3484,6 @@ func _maybe_flee_from_seen_player(seen_target: Node2D) -> bool:
 
 func _maybe_flee_from_seen_npc(seen_target: Node2D) -> bool:
 	if seen_target == null or not seen_target.is_in_group("npc"):
-		return false
-	if _anger_meets_fight_threshold():
 		return false
 	if npc == null or not npc.has_method("should_flee_from_npc"):
 		return false
@@ -3622,17 +3602,10 @@ func evaluate_persistent_combat_reactions(actor: Node2D = null) -> bool:
 	var fight_actor := actor
 	if fight_actor == null:
 		fight_actor = get_selected_threat()
-
-	var anger_fight_rule := _get_matching_anger_fight_rule(fight_actor)
-	if anger_fight_rule.is_empty():
+	if fight_actor == null or not is_instance_valid(fight_actor):
 		return false
 
-	return request_state(
-		&"Fight",
-		_get_rule_request_actor(fight_actor, anger_fight_rule),
-		"persistent_anger",
-		int(anger_fight_rule.get("priority", _get_anger_fight_priority()))
-	)
+	return _maybe_fight_from_seen_target(fight_actor)
 
 
 func assign_move_target(new_target: Node2D, arrive_state_name: StringName = &"Idle") -> bool:
@@ -3806,7 +3779,8 @@ func request_talk(
 	new_target: Node2D,
 	request_priority: int = -1,
 	require_mutual_handshake: bool = true,
-	initiating_source: StringName = &""
+	initiating_source: StringName = &"",
+	talk_context: Dictionary = {}
 ) -> bool:
 	# Starts Talk with a known partner, using a two-sided handshake for NPC partners.
 	var priority := request_priority
@@ -3815,7 +3789,8 @@ func request_talk(
 
 	var source := _resolve_talk_initiating_source(initiating_source, new_target, "talk")
 	return _request_talk_state(
-		new_target, "talk", priority, require_mutual_handshake, source
+		new_target, "talk", priority, require_mutual_handshake, source,
+		talk_context
 	)
 
 
@@ -4307,12 +4282,16 @@ func _request_talk_state(
 	reason: String,
 	request_priority: int,
 	require_mutual_handshake: bool,
-	initiating_source: StringName
+	initiating_source: StringName,
+	talk_context: Dictionary = {}
 ) -> bool:
 	var talk_source := _resolve_talk_initiating_source(
 		initiating_source, new_target, reason
 	)
 	var is_player_request := talk_source == &"player"
+	var bypass_social_talk_refusal := bool(talk_context.get(
+		"bypass_social_talk_refusal", false
+	))
 	var bypass_all_refusals := (
 		is_player_request
 		and _player_interaction_bypasses_all_refusals(new_target)
@@ -4336,6 +4315,7 @@ func _request_talk_state(
 	if (
 		is_ignoring_player_interaction(new_target)
 		and not is_talking_with(new_target)
+		and not bypass_social_talk_refusal
 		and not (
 			is_player_request
 			and _player_interaction_bypasses_repeat_limits(new_target)
@@ -4358,7 +4338,9 @@ func _request_talk_state(
 			and not _can_enter_talk_with(new_target, priority)
 		):
 			return _reject_state_request(&"Talk", "talker_cannot_enter_talk")
-		return _accept_talk_request(new_target, priority, reason, "", talk_source)
+		return _accept_talk_request(
+			new_target, priority, reason, "", talk_source, talk_context
+		)
 
 	if (
 		require_mutual_handshake
@@ -4419,14 +4401,16 @@ func _request_talk_state(
 		return false
 
 	var partner_started := partner_machine._accept_talk_request(
-		npc, priority, "talk_handshake", shared_talk_session_id, talk_source
+		npc, priority, "talk_handshake", shared_talk_session_id, talk_source,
+		talk_context
 	)
 	if not partner_started:
 		_reject_state_request(&"Talk", "partner_talk_start_failed")
 		return false
 
 	var self_started := _accept_talk_request(
-		new_target, priority, reason, shared_talk_session_id, talk_source
+		new_target, priority, reason, shared_talk_session_id, talk_source,
+		talk_context
 	)
 	if not self_started:
 		_reject_state_request(&"Talk", "talker_start_failed")
@@ -4443,7 +4427,8 @@ func _accept_talk_request(
 	request_priority: int,
 	reason: String,
 	requested_session_id: String = "",
-	initiating_source: StringName = &""
+	initiating_source: StringName = &"",
+	talk_context: Dictionary = {}
 ) -> bool:
 	var bypass_all_refusals := (
 		initiating_source == &"player"
@@ -4493,6 +4478,12 @@ func _accept_talk_request(
 			talk_source,
 			&"Talk"
 		)
+	var interaction_metadata := {
+		"primary_session_id": get_active_action_session_id(),
+		"initiating_source": String(talk_source),
+	}
+	if not talk_context.is_empty():
+		interaction_metadata["talk_context"] = talk_context.duplicate(true)
 	active_interaction_session = NpcActionSessionModel.create(
 		_get_action_owner_id(),
 		&"Talk",
@@ -4503,10 +4494,7 @@ func _accept_talk_request(
 			"priority": interaction_overlay_priority,
 			"status": "active",
 			"phase": "executing",
-			"metadata": {
-				"primary_session_id": get_active_action_session_id(),
-				"initiating_source": String(talk_source),
-			},
+			"metadata": interaction_metadata,
 		}
 	)
 	talk_state.next_state = null
@@ -4769,6 +4757,16 @@ func get_active_interaction_source() -> StringName:
 	return active_interaction_session.source if active_interaction_session != null else &""
 
 
+func get_active_talk_context() -> Dictionary:
+	if (
+		active_interaction_session == null
+		or active_interaction_session.action_kind != &"Talk"
+	):
+		return {}
+	var context = active_interaction_session.metadata.get("talk_context", {})
+	return context.duplicate(true) if context is Dictionary else {}
+
+
 func _validate_talk_partner_session(partner: Node2D) -> void:
 	if not OS.is_debug_build() or partner == null or not partner.is_in_group("npc"):
 		return
@@ -4932,6 +4930,10 @@ func is_talk_refusal_on_cooldown(candidate: Node2D) -> bool:
 	return float(talk_refusal_cooldowns.get(key, 0.0)) > 0.0
 
 
+func defer_talk_retry(candidate: Node2D) -> void:
+	_start_talk_refusal_cooldown(candidate)
+
+
 func mark_next_talk_need_payout_applied(expected_session_id: String = "") -> bool:
 	# The player UI calls this before applying its effects. Keep it pending until a
 	# player-authored value change confirms that effects reached this exact session.
@@ -5039,7 +5041,8 @@ func apply_explicit_directed_social_event(
 	actor: Node2D,
 	requires_actor_visibility: bool = true,
 	event_reason: String = "social_event",
-	event_context: Dictionary = {}
+	event_context: Dictionary = {},
+	evaluate_reactions: bool = true
 ) -> Dictionary:
 	if requires_actor_visibility and actor != null and npc != null:
 		if npc.has_method("can_see") and not bool(npc.call("can_see", actor)):
@@ -5056,10 +5059,14 @@ func apply_explicit_directed_social_event(
 		event_reason,
 		route_context
 	)
-	return _apply_routed_social_event(routed, actor)
+	return _apply_routed_social_event(routed, actor, evaluate_reactions)
 
 
-func _apply_routed_social_event(routed: Dictionary, actor: Node2D) -> Dictionary:
+func _apply_routed_social_event(
+	routed: Dictionary,
+	actor: Node2D,
+	evaluate_reactions: bool = true
+) -> Dictionary:
 	var local_values: Dictionary = routed.get("local_values", {})
 	var local_applied := (
 		apply_value_delta(local_values, actor, false)
@@ -5093,7 +5100,11 @@ func _apply_routed_social_event(routed: Dictionary, actor: Node2D) -> Dictionary
 		# in the machine's owner-only value dictionary.
 		last_event_actor = actor
 		last_changed_values = reaction_changes.duplicate(true)
-		if not reaction_changes.is_empty() and _value_reactions_enabled():
+		if (
+			evaluate_reactions
+			and not reaction_changes.is_empty()
+			and _value_reactions_enabled()
+		):
 			evaluate_value_reactions(actor, reaction_changes)
 	return {
 		"applied": local_applied or directed_applied,
@@ -5802,25 +5813,6 @@ func _get_anger_fight_threshold() -> float:
 func _get_anger_fight_priority() -> int:
 	var rule := _get_anger_fight_rule()
 	return int(rule.get("priority", 94))
-
-
-func _anger_meets_fight_threshold() -> bool:
-	if anger_decay_value_name == &"":
-		return false
-
-	return get_value(anger_decay_value_name) >= _get_anger_fight_threshold()
-
-
-func _get_matching_anger_fight_rule(actor: Node2D = null) -> Dictionary:
-	var matching_rule := _find_best_matching_rule({}, actor)
-	if matching_rule.is_empty():
-		return {}
-	if String(matching_rule.get("state", "")) != "Fight":
-		return {}
-	if _canonical_value_key(matching_rule.get("value", "")) != _canonical_value_key(anger_decay_value_name):
-		return {}
-
-	return matching_rule
 
 
 func _higher_priority_value_reaction_blocks_combat(actor: Node2D, combat_priority: int) -> bool:

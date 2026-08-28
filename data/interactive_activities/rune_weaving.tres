@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="InteractiveActivityDefinition" format=3 uid="uid://dqgdx1ybue1dw"]
+
+[ext_resource type="Script" uid="uid://fprytbgpdfb2" path="res://scripts/activities/interactive_activity_definition.gd" id="1_definition"]
+[ext_resource type="PackedScene" path="res://scenes/activities/rune_weaving/rune_weaving_module.tscn" id="2_module"]
+[ext_resource type="Script" uid="uid://dn4xgtki34eno" path="res://scripts/activities/interactive_activity_input_profile.gd" id="3_profile"]
+[ext_resource type="Script" uid="uid://sxjjpy3amvuc" path="res://scripts/activities/rune_weaving/rune_weaving_config.gd" id="4_config"]
+
+[sub_resource type="Resource" id="InputProfile_rune_weaving"]
+script = ExtResource("3_profile")
+
+[sub_resource type="Resource" id="Config_rune_weaving"]
+script = ExtResource("4_config")
+
+[resource]
+script = ExtResource("1_definition")
+id = &"rune_weaving"
+display_name = "Rune Weaving"
+description = "Trace remembered rune paths by linking their nodes in order."
+module_scene = ExtResource("2_module")
+input_profile = SubResource("InputProfile_rune_weaving")
+module_config = SubResource("Config_rune_weaving")
+metadata = {
+"presentation_mount": "hud"
+}

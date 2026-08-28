@@ -93,6 +93,7 @@ func _build_menu(current: float) -> void:
 	var panel := PanelContainer.new()
 	panel.position = Vector2(28.0, 120.0)
 	panel.custom_minimum_size = Vector2(360.0, 220.0)
+	panel.theme_type_variation = &"MenuShell"
 	_label = Label.new()
 	_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_label.text = _menu_text(current)

@@ -1,0 +1,82 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3 uid="uid://ctjifvd72hju8"]
+
+[ext_resource type="Script" uid="uid://bsmeen4ahl14e" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" uid="uid://csithy7k1fddw" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" uid="uid://cytm50bmpbyao" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_apologize"]
+script = ExtResource("3_choice")
+choice_id = &"apologize"
+text = "Sorry."
+next_node_id = &"mom_apology"
+consequences = {
+"reprimand_outcome": &"apologize"
+}
+
+[sub_resource type="Resource" id="Choice_excuse"]
+script = ExtResource("3_choice")
+choice_id = &"did_not_see"
+text = "I didn't see you there."
+next_node_id = &"mom_excuse"
+consequences = {
+"reprimand_outcome": &"excuse"
+}
+
+[sub_resource type="Resource" id="Choice_justify"]
+script = ExtResource("3_choice")
+choice_id = &"aimed_at_slime"
+text = "I was trying to hit the slime."
+next_node_id = &"mom_justify"
+consequences = {
+"reprimand_outcome": &"justify"
+}
+
+[sub_resource type="Resource" id="Choice_defiant"]
+script = ExtResource("3_choice")
+choice_id = &"not_my_problem"
+text = "That's not my problem."
+next_node_id = &"mom_defiant"
+consequences = {
+"reprimand_outcome": &"defiant"
+}
+
+[sub_resource type="Resource" id="Node_question"]
+script = ExtResource("2_node")
+node_id = &"question"
+speaker_id = &"mom"
+speaker_text = "Ow—careful! You nearly hit me. Did you mean to do that?"
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_apologize"), SubResource("Choice_excuse"), SubResource("Choice_justify"), SubResource("Choice_defiant")])
+
+[sub_resource type="Resource" id="Node_apology"]
+script = ExtResource("2_node")
+node_id = &"mom_apology"
+speaker_id = &"mom"
+speaker_text = "All right. I know things get messy in a fight. Just watch your aim."
+terminal = true
+
+[sub_resource type="Resource" id="Node_excuse"]
+script = ExtResource("2_node")
+node_id = &"mom_excuse"
+speaker_id = &"mom"
+speaker_text = "I understand. Please look around before you swing again."
+terminal = true
+
+[sub_resource type="Resource" id="Node_justify"]
+script = ExtResource("2_node")
+node_id = &"mom_justify"
+speaker_id = &"mom"
+speaker_text = "I know. Just make sure I'm out of the way first."
+terminal = true
+
+[sub_resource type="Resource" id="Node_defiant"]
+script = ExtResource("2_node")
+node_id = &"mom_defiant"
+speaker_id = &"mom"
+speaker_text = "It is your problem if you're hurting the people beside you."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"mom_reprimand_attacked_me_slime"
+entry_node_id = &"question"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_question"), SubResource("Node_apology"), SubResource("Node_excuse"), SubResource("Node_justify"), SubResource("Node_defiant")])

@@ -6,8 +6,8 @@
 [resource]
 script = ExtResource("1_spot_definition")
 spot_id = &"mom_eat_prep"
-scene_path = "res://scenes/testscenes/realtest1.tscn"
-position = Vector2(-1217, 325)
+scene_path = "res://scenes/testscenes/realhometest.tscn"
+position = Vector2(327, 347)
 state_name = &"Work"
 value_name = &"boredom"
 need_threshold = 61.0
@@ -26,26 +26,34 @@ next_spot_value_when_done = 100.0
 meal_cycle_id = &"mom_meal_cycle"
 meal_cycle_stage = &"prep_work"
 meal_cycle_food_spot_id = &"mom_eat"
+meal_cycle_food_spot_ids = Array[StringName]([&"mom_eat", &"dad_meal_eat", &"maid_meal_eat", &"player_meal_eat"])
+meal_cycle_cleanup_spot_ids = Array[StringName]([&"mom_eat_prep", &"mom_meal_table_cleanup"])
+meal_cycle_cleanup_share = 50.0
 meal_cycle_recipe = ExtResource("2_meal_recipe")
 meal_cycle_schedule = Array[Dictionary]([{
 "call_hour": 7.0,
 "cleanup_hour": 8.0,
+"food_owner_ids": Array[StringName]([&"mom", &"dad", &"maid", &"player"]),
 "meal": "breakfast",
 "prep_hour": 6.0
 }, {
 "call_hour": 12.0,
 "cleanup_hour": 13.0,
+"food_owner_ids": Array[StringName]([&"mom", &"maid", &"player"]),
 "meal": "lunch",
 "prep_hour": 11.0
 }, {
 "call_hour": 20.0,
 "cleanup_hour": 21.0,
+"food_owner_ids": Array[StringName]([&"mom", &"dad", &"maid", &"player"]),
 "meal": "dinner",
 "prep_hour": 19.0
 }])
 meal_cycle_prep_owner_ids = Array[StringName]([&"mom", &"player"])
-meal_cycle_food_owner_ids = Array[StringName]([&"mom", &"player"])
-meal_cycle_cleanup_owner_ids = Array[StringName]([&"player"])
+meal_cycle_food_owner_ids = Array[StringName]([&"mom", &"dad", &"maid", &"player"])
+meal_cycle_cleanup_owner_ids = Array[StringName]([&"player", &"maid"])
 meal_cycle_cleanup_work_multiplier = 2.0
+meal_cycle_infinite_ingredient_storage = true
+meal_cycle_storage_batches_per_prep = 4
 owner_ids = Array[StringName]([&"mom", &"player"])
 capacity = 0

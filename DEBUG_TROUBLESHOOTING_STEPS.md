@@ -30,10 +30,11 @@ Breadcrumbs are written to `user://crash_breadcrumbs.log` and also printed. Each
 7. Set `DEBUG_DISABLE_PASSIVE_NEEDS = true`, then `DEBUG_DISABLE_VALUE_REACTIONS = true`.
    These isolate hunger/tired/talk/boredom growth and automatic state requests.
 8. Use the realtest1-specific switches:
-   - `DEBUG_DISABLE_REALTEST1_MEAL_SPOT = true`
-   - `DEBUG_DISABLE_REALTEST1_WORK_SPOT = true`
    - `DEBUG_DISABLE_REALTEST1_TALK_PARTNER = true`
    - `DEBUG_DISABLE_REALTEST1_MOM_NPC = true`
+9. Use `DEBUG_DISABLE_MOM_MEAL_SPOT = true` or
+   `DEBUG_DISABLE_MOM_WORK_SPOT = true` to isolate either authored spot regardless
+   of which scene currently contains it.
 
 ## Reading the Breadcrumbs
 

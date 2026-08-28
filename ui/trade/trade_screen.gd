@@ -26,6 +26,7 @@ var _quantity: SpinBox
 var _buy_button: Button
 var _sell_button: Button
 var _feedback: Label
+var _close_button: Button
 
 
 func _ready() -> void:
@@ -65,6 +66,71 @@ func is_open() -> bool:
 	return visible
 
 
+func _unhandled_input(event: InputEvent) -> void:
+	if not visible:
+		return
+	var key_event := event as InputEventKey
+	if key_event != null and key_event.echo:
+		return
+	var focused := get_viewport().gui_get_focus_owner()
+	if focused is InventoryItemSlot:
+		var no_slots: Array[InventoryItemSlot] = []
+		if focused in _buy_slots and _move_trade_slot_focus(focused, _buy_slots, _sell_slots, event):
+			get_viewport().set_input_as_handled()
+		elif focused in _sell_slots and _move_trade_slot_focus(focused, _sell_slots, no_slots, event):
+			get_viewport().set_input_as_handled()
+		return
+	if focused != _get_quantity_focus_control():
+		return
+	if event.is_action_pressed(&"ui_left"):
+		_quantity.value = maxf(_quantity.value - 1.0, _quantity.min_value)
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed(&"ui_right"):
+		_quantity.value = minf(_quantity.value + 1.0, _quantity.max_value)
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed(&"ui_up"):
+		_defer_focus(_get_selected_trade_slot() if _get_selected_trade_slot() != null else _close_button)
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed(&"ui_down"):
+		_defer_focus(_get_first_enabled_trade_button())
+		get_viewport().set_input_as_handled()
+
+
+func _move_trade_slot_focus(
+	slot: InventoryItemSlot,
+	slots: Array[InventoryItemSlot],
+	next_section: Array[InventoryItemSlot],
+	event: InputEvent
+) -> bool:
+	var index := slots.find(slot)
+	if index < 0:
+		return false
+	var column := index % 2
+	if event.is_action_pressed(&"ui_left"):
+		if column > 0:
+			_defer_focus(slots[index - 1])
+		elif slots == _sell_slots and not _buy_slots.is_empty():
+			_defer_focus(_buy_slots[mini(index, _buy_slots.size() - 1)])
+		else:
+			return false
+		return true
+	if event.is_action_pressed(&"ui_right"):
+		if index + 1 < slots.size() and column == 0:
+			_defer_focus(slots[index + 1])
+		elif not next_section.is_empty():
+			_defer_focus(next_section[mini(index, next_section.size() - 1)])
+		else:
+			_defer_focus(_get_quantity_focus_control())
+		return true
+	if event.is_action_pressed(&"ui_up"):
+		_defer_focus(slots[index - 2] if index >= 2 else _close_button)
+		return true
+	if event.is_action_pressed(&"ui_down"):
+		_defer_focus(slots[index + 2] if index + 2 < slots.size() else _close_button)
+		return true
+	return false
+
+
 func get_player_gold_text() -> String:
 	return _player_gold_label.text
 
@@ -84,15 +150,15 @@ func get_sell_item_count() -> int:
 func _build_interface() -> void:
 	var margin := MarginContainer.new()
 	for side: String in ["left", "top", "right", "bottom"]:
-		margin.add_theme_constant_override("margin_%s" % side, 42 if side in ["top", "bottom"] else 70)
+		margin.add_theme_constant_override("margin_%s" % side, 14 if side in ["top", "bottom"] else 18)
 	add_child(margin)
 	var root := VBoxContainer.new()
-	root.add_theme_constant_override("separation", 10)
+	root.add_theme_constant_override("separation", 7)
 	margin.add_child(root)
 	var title := Label.new()
 	title.text = "TRADE"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 28)
+	title.add_theme_font_size_override("font_size", 22)
 	root.add_child(title)
 	var gold_row := HBoxContainer.new()
 	root.add_child(gold_row)
@@ -105,7 +171,7 @@ func _build_interface() -> void:
 	gold_row.add_child(_merchant_gold_label)
 	var columns := HBoxContainer.new()
 	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	columns.add_theme_constant_override("separation", 18)
+	columns.add_theme_constant_override("separation", 10)
 	root.add_child(columns)
 	var buy_section := _make_grid_section("BUY — NPC stock")
 	columns.add_child(buy_section["root"])
@@ -116,10 +182,10 @@ func _build_interface() -> void:
 	_sell_grid = sell_section["grid"]
 	_sell_empty = sell_section["empty"]
 	var details_panel := VBoxContainer.new()
-	details_panel.custom_minimum_size = Vector2(260, 0)
+	details_panel.custom_minimum_size = Vector2(190, 0)
 	columns.add_child(details_panel)
 	_details = Label.new()
-	_details.custom_minimum_size = Vector2(260, 230)
+	_details.custom_minimum_size = Vector2(190, 150)
 	_details.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_details.text = "Select an item to view details."
 	details_panel.add_child(_details)
@@ -144,15 +210,15 @@ func _build_interface() -> void:
 	_feedback.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_feedback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	root.add_child(_feedback)
-	var close_button := Button.new()
-	close_button.text = "Close"
-	close_button.pressed.connect(func() -> void: close_requested.emit())
-	root.add_child(close_button)
+	_close_button = Button.new()
+	_close_button.text = "CLOSE"
+	_close_button.pressed.connect(func() -> void: close_requested.emit())
+	root.add_child(_close_button)
 
 
 func _make_grid_section(title_text: String) -> Dictionary:
 	var root := VBoxContainer.new()
-	root.custom_minimum_size = Vector2(340, 330)
+	root.custom_minimum_size = Vector2(230, 250)
 	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var title := Label.new()
 	title.text = title_text
@@ -168,9 +234,9 @@ func _make_grid_section(title_text: String) -> Dictionary:
 	empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	stack.add_child(empty)
 	var grid := GridContainer.new()
-	grid.columns = 3
-	grid.add_theme_constant_override("h_separation", 8)
-	grid.add_theme_constant_override("v_separation", 8)
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
 	stack.add_child(grid)
 	return {"root": root, "grid": grid, "empty": empty}
 
@@ -194,6 +260,7 @@ func _refresh() -> void:
 	if not _slot_exists(_sell_slots, _sell_selected_id):
 		_sell_selected_id = _sell_slots[0].item_id if not _sell_slots.is_empty() else &""
 	_refresh_controls()
+	_configure_focus_navigation()
 	_refreshing = false
 
 
@@ -245,6 +312,7 @@ func _show_slot_details(slot: InventoryItemSlot, buying: bool) -> void:
 	var lock_text := "\n%s" % slot.lock_reason if not slot.lock_reason.is_empty() else ""
 	_details.text = "%s\n%s\nTotal: %d | Available: %d | Reserved: %d\nType: %s | Base value: %d gold\n%s: %d gold%s" % [definition.display_name, definition.description, slot.total_quantity, slot.available_quantity, slot.reserved_quantity, String(definition.trade_group), definition.base_value, direction, slot.unit_price, lock_text]
 	_refresh_controls()
+	_configure_focus_navigation()
 
 
 func _refresh_controls() -> void:
@@ -343,3 +411,75 @@ func _focus_first_slot() -> void:
 		slot = _find_slot(_sell_slots, _sell_selected_id)
 	if slot != null:
 		slot.grab_focus.call_deferred()
+	elif _close_button != null:
+		_close_button.grab_focus.call_deferred()
+
+
+func _configure_focus_navigation() -> void:
+	if _close_button == null:
+		return
+	var first_detail := _get_quantity_focus_control()
+	var no_slots: Array[InventoryItemSlot] = []
+	_configure_trade_grid_navigation(_buy_slots, _sell_slots, first_detail)
+	_configure_trade_grid_navigation(_sell_slots, no_slots, first_detail)
+	var detail_controls: Array[Control] = [_get_quantity_focus_control()]
+	if not _buy_button.disabled:
+		detail_controls.append(_buy_button)
+	if not _sell_button.disabled:
+		detail_controls.append(_sell_button)
+	for index in detail_controls.size():
+		var control := detail_controls[index]
+		var previous: Control = _get_selected_trade_slot() if index == 0 else detail_controls[index - 1]
+		if previous == null:
+			previous = _close_button
+		var next: Control = _close_button if index == detail_controls.size() - 1 else detail_controls[index + 1]
+		control.focus_neighbor_top = control.get_path_to(previous)
+		control.focus_neighbor_bottom = control.get_path_to(next)
+	var all_slots: Array[InventoryItemSlot] = []
+	all_slots.append_array(_buy_slots)
+	all_slots.append_array(_sell_slots)
+	if not all_slots.is_empty():
+		_close_button.focus_neighbor_top = _close_button.get_path_to(all_slots[-1])
+		_close_button.focus_neighbor_bottom = _close_button.get_path_to(all_slots[0])
+
+
+func _configure_trade_grid_navigation(
+	slots: Array[InventoryItemSlot],
+	next_section: Array[InventoryItemSlot],
+	detail_control: Control
+) -> void:
+	for index in slots.size():
+		var slot := slots[index]
+		var column := index % 2
+		if index + 1 < slots.size() and column == 0:
+			slot.focus_neighbor_right = slot.get_path_to(slots[index + 1])
+		elif not next_section.is_empty():
+			slot.focus_neighbor_right = slot.get_path_to(next_section[mini(index, next_section.size() - 1)])
+		else:
+			slot.focus_neighbor_right = slot.get_path_to(detail_control)
+		if index + 2 >= slots.size():
+			slot.focus_neighbor_bottom = slot.get_path_to(_close_button)
+
+
+func _get_selected_trade_slot() -> InventoryItemSlot:
+	var slot := _find_slot(_buy_slots, _buy_selected_id)
+	if slot == null:
+		slot = _find_slot(_sell_slots, _sell_selected_id)
+	return slot
+
+
+func _get_first_enabled_trade_button() -> Control:
+	if not _buy_button.disabled:
+		return _buy_button
+	if not _sell_button.disabled:
+		return _sell_button
+	return _close_button
+
+
+func _defer_focus(control: Control) -> void:
+	if control != null:
+		control.grab_focus.call_deferred()
+
+
+func _get_quantity_focus_control() -> Control:
+	return _quantity.get_line_edit()

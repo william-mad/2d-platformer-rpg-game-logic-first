@@ -61,6 +61,21 @@ func physics_process(delta: float) -> NpcState:
 	if is_close_to(talk_target.global_position, approach_distance):
 		var talk_priority := machine.get_effective_task_priority() if machine != null else -1
 		var search_session_id := action_session_id
+		var talk_state := get_state(talk_state_name) as NpcStateTalk
+		if (
+			talk_state != null
+			and not talk_state.is_talk_start_distance_viable(talk_target)
+		):
+			machine.defer_talk_retry(talk_target)
+			machine.cancel_active_action(
+				search_session_id,
+				"talk_target_outside_maximum_distance"
+			)
+			_breadcrumb(
+				"npc_talk_search:start_not_viable",
+				"%s target=%s" % [_npc_label(), _target_label(talk_target)]
+			)
+			return get_state(end_state_name)
 		var initiating_source := &"social_ai"
 		if machine != null:
 			var search_descriptor := machine.get_active_action_descriptor()

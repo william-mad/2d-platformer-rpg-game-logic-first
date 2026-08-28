@@ -26,6 +26,9 @@ const INTRO_LOCK_REASON := &"phone_call_intro"
 @export_range(1.0, 16.0, 0.1, "suffix:s") var ambience_fade_in_seconds: float = 10.5
 @export_range(-80.0, -20.0, 1.0, "suffix:dB") var ambience_start_volume_db: float = -36.0
 @export_range(0.0, 5.0, 0.05, "suffix:s") var establishing_hold_seconds: float = 1.5
+@export_category("Establishing Illustration")
+@export var establishing_frames: Array[Texture2D] = []
+@export_range(0.2, 3.0, 0.05, "suffix:s") var establishing_frame_seconds: float = 0.5
 
 @export_category("Transitions")
 @export_range(0.05, 2.0, 0.05, "suffix:s") var answer_transition_seconds: float = 0.35
@@ -38,12 +41,14 @@ const INTRO_LOCK_REASON := &"phone_call_intro"
 }
 
 @onready var fade_overlay: ColorRect = %FadeOverlay
+@onready var establishing_illustration: TextureRect = %EstablishingIllustration
 @onready var opening_blur_overlay: ColorRect = %OpeningBlurOverlay
 @onready var dialogue_backdrop_mute: ColorRect = %DialogueBackdropMute
 @onready var phone_minigame_host: Control = %PhoneMinigameHost
 @onready var portrait_presentation: Control = %PortraitPresentation
 @onready var opening_visual_delay_timer: Timer = %OpeningVisualDelayTimer
 @onready var establishing_timer: Timer = %EstablishingTimer
+@onready var establishing_frame_timer: Timer = %EstablishingFrameTimer
 @onready var city_ambience: AudioStreamPlayer = %CityAmbience
 @onready var phone_ringing: AudioStreamPlayer = %PhoneRinging
 
@@ -59,6 +64,7 @@ var _exit_started: bool = false
 var _ambience_target_volume_db: float = -8.0
 var _visual_reveal_complete: bool = false
 var _ambience_fade_complete: bool = false
+var _establishing_frame_index: int = 0
 
 
 func _ready() -> void:
@@ -77,6 +83,7 @@ func _ready() -> void:
 
 	opening_visual_delay_timer.timeout.connect(_start_fade_in)
 	establishing_timer.timeout.connect(_on_establishing_timer_timeout)
+	establishing_frame_timer.timeout.connect(_advance_establishing_frame)
 	city_ambience.finished.connect(_on_city_ambience_finished)
 	phone_ringing.finished.connect(_on_phone_ringing_finished)
 	phone_minigame_host.connect(&"answered", _on_phone_minigame_answered)
@@ -85,11 +92,29 @@ func _ready() -> void:
 	_acquire_intro_lock()
 	_preload_next_scene()
 	_set_phase(Phase.FADE_IN)
+	_start_establishing_illustration_loop()
 	_start_ambience_fade_in()
 	if visual_start_delay_seconds > 0.0:
 		opening_visual_delay_timer.start(visual_start_delay_seconds)
 	else:
 		_start_fade_in()
+
+
+func _start_establishing_illustration_loop() -> void:
+	if establishing_frames.is_empty():
+		return
+	_establishing_frame_index = 0
+	establishing_illustration.texture = establishing_frames[_establishing_frame_index]
+	if establishing_frames.size() > 1:
+		establishing_frame_timer.start(establishing_frame_seconds)
+
+
+func _advance_establishing_frame() -> void:
+	if establishing_frames.is_empty():
+		establishing_frame_timer.stop()
+		return
+	_establishing_frame_index = (_establishing_frame_index + 1) % establishing_frames.size()
+	establishing_illustration.texture = establishing_frames[_establishing_frame_index]
 
 
 func _exit_tree() -> void:

@@ -1,8 +1,8 @@
-[gd_resource type="Resource" script_class="DialogueDefinition" load_steps=6 format=3]
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3 uid="uid://8wvkn33ubkf1"]
 
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+[ext_resource type="Script" uid="uid://bsmeen4ahl14e" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" uid="uid://csithy7k1fddw" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" uid="uid://cytm50bmpbyao" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
 
 [sub_resource type="Resource" id="Choice_apologize"]
 script = ExtResource("3_choice")
@@ -20,21 +20,21 @@ next_node_id = &"double"
 script = ExtResource("2_node")
 node_id = &"entry"
 speaker_id = &"mom"
-speaker_text = "Well. You certainly woke up brave today. Was there a point hiding inside that remark, or did you just want to hear the room go cold?"
+speaker_text = "That was unnecessary. Is something wrong, or are you just trying to upset me?"
 choices = Array[ExtResource("3_choice")]([SubResource("Choice_apologize"), SubResource("Choice_double")])
 
 [sub_resource type="Resource" id="Node_apology"]
 script = ExtResource("2_node")
 node_id = &"apology"
 speaker_id = &"mom"
-speaker_text = "Good. Keep the apology, lose the performance, and we'll call this a lesson cheaply learned."
+speaker_text = "Thank you for apologizing. Let's leave it there."
 terminal = true
 
 [sub_resource type="Resource" id="Node_double"]
 script = ExtResource("2_node")
 node_id = &"double"
 speaker_id = &"mom"
-speaker_text = "There it is—the terrible decision after the bad one. Come back when you've found your manners."
+speaker_text = "Then give me some space until you're ready to speak respectfully."
 terminal = true
 
 [resource]

@@ -1,0 +1,162 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/activities/rune_weaving/rune_weaving_module.gd" id="1_module"]
+[ext_resource type="PackedScene" path="res://scenes/activities/shared/activity_cursor.tscn" id="2_cursor"]
+[ext_resource type="PackedScene" path="res://scenes/activities/shared/sequential_target_controller.tscn" id="3_controller"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_panel"]
+bg_color = Color(0.055, 0.035, 0.105, 0.96)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.58, 0.35, 0.9, 0.92)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_field"]
+bg_color = Color(0.06, 0.065, 0.14, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.26, 0.32, 0.62, 0.8)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[node name="RuneWeavingModule" type="Node"]
+script = ExtResource("1_module")
+
+[node name="Presentation" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -300.0
+offset_top = -230.0
+offset_right = 300.0
+offset_bottom = 230.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Panel" type="Panel" parent="Presentation"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBox_panel")
+
+[node name="Title" type="Label" parent="Presentation/Panel"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 12.0
+offset_right = 580.0
+offset_bottom = 40.0
+theme_override_colors/font_color = Color(0.87, 0.77, 1, 1)
+theme_override_font_sizes/font_size = 22
+text = "RUNE WEAVING"
+horizontal_alignment = 1
+
+[node name="Instruction" type="Label" parent="Presentation/Panel"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 40.0
+offset_right = 580.0
+offset_bottom = 65.0
+text = "Move with the arrow keys. Press Z at the next rune node."
+horizontal_alignment = 1
+
+[node name="FieldFrame" type="Panel" parent="Presentation/Panel"]
+layout_mode = 0
+offset_left = 80.0
+offset_top = 78.0
+offset_right = 520.0
+offset_bottom = 348.0
+theme_override_styles/panel = SubResource("StyleBox_field")
+
+[node name="RuneField" type="Node2D" parent="Presentation/Panel/FieldFrame"]
+position = Vector2(220, 135)
+
+[node name="FieldBackground" type="ColorRect" parent="Presentation/Panel/FieldFrame/RuneField"]
+unique_name_in_owner = true
+mouse_filter = 2
+color = Color(0.045, 0.05, 0.115, 1)
+
+[node name="PreviewLine" type="Line2D" parent="Presentation/Panel/FieldFrame/RuneField"]
+unique_name_in_owner = true
+width = 2.0
+default_color = Color(0.52, 0.68, 1, 0.48)
+
+[node name="CompletedLine" type="Line2D" parent="Presentation/Panel/FieldFrame/RuneField"]
+unique_name_in_owner = true
+width = 4.0
+default_color = Color(0.34, 0.95, 0.67, 0.92)
+
+[node name="TargetVisuals" type="Node2D" parent="Presentation/Panel/FieldFrame/RuneField"]
+unique_name_in_owner = true
+
+[node name="ActivityCursor" parent="Presentation/Panel/FieldFrame/RuneField" instance=ExtResource("2_cursor")]
+unique_name_in_owner = true
+
+[node name="SequentialTargetController" parent="." instance=ExtResource("3_controller")]
+unique_name_in_owner = true
+
+[node name="PreviewLabel" type="Label" parent="Presentation/Panel"]
+unique_name_in_owner = true
+layout_mode = 0
+offset_left = 30.0
+offset_top = 363.0
+offset_right = 190.0
+offset_bottom = 389.0
+theme_override_colors/font_color = Color(0.75, 0.82, 1, 1)
+text = "Preview"
+
+[node name="ProgressLabel" type="Label" parent="Presentation/Panel"]
+unique_name_in_owner = true
+layout_mode = 0
+offset_left = 190.0
+offset_top = 363.0
+offset_right = 410.0
+offset_bottom = 389.0
+text = "Rune 1   Node 1 / 3"
+horizontal_alignment = 1
+
+[node name="StreakLabel" type="Label" parent="Presentation/Panel"]
+unique_name_in_owner = true
+layout_mode = 0
+offset_left = 410.0
+offset_top = 363.0
+offset_right = 570.0
+offset_bottom = 389.0
+text = "Streak  0"
+horizontal_alignment = 2
+
+[node name="ScoreLabel" type="Label" parent="Presentation/Panel"]
+unique_name_in_owner = true
+layout_mode = 0
+offset_left = 30.0
+offset_top = 400.0
+offset_right = 180.0
+offset_bottom = 428.0
+theme_override_colors/font_color = Color(0.9, 0.84, 1, 1)
+text = "Score  0"
+
+[node name="FeedbackLabel" type="Label" parent="Presentation/Panel"]
+unique_name_in_owner = true
+layout_mode = 0
+offset_left = 180.0
+offset_top = 400.0
+offset_right = 570.0
+offset_bottom = 428.0
+theme_override_colors/font_color = Color(0.74, 0.9, 1, 1)
+text = "Study the rune"
+horizontal_alignment = 2

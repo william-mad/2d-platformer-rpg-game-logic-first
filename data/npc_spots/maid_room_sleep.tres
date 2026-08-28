@@ -1,0 +1,27 @@
+[gd_resource type="Resource" script_class="NpcSpotDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/npc_spot_definition.gd" id="1_spot_definition"]
+
+[resource]
+resource_name = "Maid Room Sleep"
+script = ExtResource("1_spot_definition")
+spot_id = &"maid_room_sleep"
+scene_path = "res://scenes/simulated/maid_room.tscn"
+position = Vector2(0, 0)
+state_name = &"Sleep"
+value_name = &"sleep_need"
+need_threshold = 71.0
+need_maximum = 99.0
+value_delta_per_game_hour = -12.5
+priority = 90
+require_npc_value_threshold = false
+finish_when_npc_value_sated = false
+wake_at_home_position = false
+owner_ids = Array[StringName]([&"maid"])
+called_npc_ids = Array[StringName]([&"maid"])
+active_time_windows = Array[Dictionary]([{
+"completion_policy": "stop_at_window_end",
+"end_hour": 6.0,
+"start_policy": "hard",
+"start_hour": 22.0
+}])

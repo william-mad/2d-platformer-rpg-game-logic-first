@@ -234,7 +234,7 @@ func get_value_drop_per_full_work(requested_value_name: StringName) -> float:
 
 
 func has_work_needed() -> bool:
-	if _debug_realtest1_meal_spot_disabled() or _debug_realtest1_work_spot_disabled():
+	if _debug_mom_meal_spot_disabled() or _debug_mom_work_spot_disabled():
 		_log_debug_disabled_once()
 		return false
 	if meal_cycle_enabled and meal_cycle_stage == MEAL_STAGE_FOOD:
@@ -293,7 +293,7 @@ func perform_player_eat(player: Node2D) -> float:
 
 
 func can_player_work(player: Node2D) -> bool:
-	if _debug_realtest1_meal_spot_disabled() or _debug_realtest1_work_spot_disabled():
+	if _debug_mom_meal_spot_disabled() or _debug_mom_work_spot_disabled():
 		_log_debug_disabled_once()
 		return false
 	return (
@@ -355,7 +355,7 @@ func get_interaction_prompt(actor: Node) -> String:
 
 
 func _player_can_eat(player: Node2D) -> bool:
-	if _debug_realtest1_meal_spot_disabled():
+	if _debug_mom_meal_spot_disabled():
 		_log_debug_disabled_once()
 		return false
 	if player == null or not is_instance_valid(player):
@@ -380,6 +380,7 @@ func _player_can_supply_meal_ingredients(player: Node2D) -> bool:
 		or meal_cycle_food_available
 		or world_definition == null
 		or world_definition.meal_cycle_recipe == null
+		or world_definition.meal_cycle_infinite_ingredient_storage
 		or player == null
 		or not is_instance_valid(player)
 		or not player.is_in_group(String(player_group))
@@ -462,7 +463,13 @@ func apply_world_spot_value(changed_spot_id: StringName, new_value: float) -> vo
 
 
 func apply_world_meal_cycle_state(controller_spot_id: StringName, state: Dictionary) -> void:
-	if controller_spot_id != spot_id:
+	var configured_controller_id := spot_id
+	if (
+		world_definition != null
+		and world_definition.meal_cycle_controller_spot_id != &""
+	):
+		configured_controller_id = world_definition.meal_cycle_controller_spot_id
+	if controller_spot_id != configured_controller_id:
 		return
 
 	_apply_meal_cycle_state(state)
@@ -477,7 +484,7 @@ func get_food_available() -> float:
 
 
 func has_food_available() -> bool:
-	if _debug_realtest1_meal_spot_disabled():
+	if _debug_mom_meal_spot_disabled():
 		_log_debug_disabled_once()
 		return false
 	if meal_cycle_enabled:
@@ -493,7 +500,7 @@ func has_food_available() -> bool:
 
 func get_full_eat_game_hours(requested_hunger_drop: float) -> float:
 	# Eating time comes from the food phase's hunger rate, allowing per-spot meal lengths.
-	if _debug_realtest1_meal_spot_disabled():
+	if _debug_mom_meal_spot_disabled():
 		_log_debug_disabled_once()
 		return -1.0
 	if eat_world_definition == null:
@@ -506,7 +513,7 @@ func get_full_eat_game_hours(requested_hunger_drop: float) -> float:
 
 func consume_eat_amount(requested_hunger_amount: float) -> float:
 	# Food points are hunger points: 12 food consumed lowers hunger by 12.
-	if _debug_realtest1_meal_spot_disabled():
+	if _debug_mom_meal_spot_disabled():
 		_log_debug_disabled_once()
 		return 0.0
 	if eat_world_definition == null:
@@ -578,13 +585,13 @@ func can_serve_npc_need(
 	requested_state_name: StringName,
 	requested_value_name: StringName = &""
 ) -> bool:
-	if _debug_realtest1_meal_spot_disabled() and (
+	if _debug_mom_meal_spot_disabled() and (
 		String(requested_state_name) == "Eat"
 		or (meal_cycle_enabled and String(requested_state_name) == "Work")
 	):
 		_log_debug_disabled_once()
 		return false
-	if _debug_realtest1_work_spot_disabled() and String(requested_state_name) == "Work":
+	if _debug_mom_work_spot_disabled() and String(requested_state_name) == "Work":
 		_log_debug_disabled_once()
 		return false
 	if String(requested_state_name) == "Eat":
@@ -799,7 +806,7 @@ func _on_world_time_day_changed(_day: int, _snapshot: Dictionary) -> void:
 
 
 func _setup_world_work_state() -> bool:
-	if _debug_realtest1_meal_spot_disabled() or _debug_realtest1_work_spot_disabled():
+	if _debug_mom_meal_spot_disabled() or _debug_mom_work_spot_disabled():
 		_log_debug_disabled_once()
 		return false
 	if spot_id == &"":
@@ -825,7 +832,7 @@ func _uses_world_spot_state() -> bool:
 
 
 func _setup_world_food_state() -> void:
-	if _debug_realtest1_meal_spot_disabled():
+	if _debug_mom_meal_spot_disabled():
 		_log_debug_disabled_once()
 		food_available = 0.0
 		return
@@ -844,7 +851,7 @@ func _setup_world_food_state() -> void:
 
 
 func _sync_meal_cycle_state_from_world() -> void:
-	if _debug_realtest1_meal_spot_disabled():
+	if _debug_mom_meal_spot_disabled():
 		_log_debug_disabled_once()
 		meal_cycle_enabled = false
 		meal_cycle_food_available = false
@@ -867,7 +874,7 @@ func _sync_meal_cycle_state_from_world() -> void:
 
 
 func _apply_meal_cycle_state(state: Dictionary) -> void:
-	if _debug_realtest1_meal_spot_disabled():
+	if _debug_mom_meal_spot_disabled():
 		_log_debug_disabled_once()
 		meal_cycle_enabled = false
 		meal_cycle_food_available = false
@@ -908,8 +915,13 @@ func _apply_meal_cycle_state(state: Dictionary) -> void:
 	meal_cycle_food_available = meal_cycle_food_available and food_available > _get_food_done_threshold()
 
 	var previous_work_needed := work_needed
+	var state_work_value := float(state.get("value", work_needed))
+	if meal_cycle_stage == MEAL_STAGE_CLEANUP_WORK:
+		var cleanup_remaining = state.get("cleanup_remaining_by_spot", {})
+		if cleanup_remaining is Dictionary and cleanup_remaining.has(String(spot_id)):
+			state_work_value = float(cleanup_remaining[String(spot_id)])
 	work_needed = clampf(
-		float(state.get("value", work_needed)),
+		state_work_value,
 		_get_work_needed_floor(),
 		_get_work_needed_ceiling()
 	)
@@ -937,12 +949,20 @@ func _publish_world_work_state() -> void:
 	if spot_id == &"" or not is_inside_tree():
 		return
 	var simulator := get_node_or_null("/root/NpcWorldSimulation")
+	if (
+		meal_cycle_enabled
+		and meal_cycle_stage == MEAL_STAGE_CLEANUP_WORK
+		and simulator != null
+		and simulator.has_method("set_meal_cycle_cleanup_spot_value")
+	):
+		simulator.call("set_meal_cycle_cleanup_spot_value", spot_id, work_needed)
+		return
 	if simulator != null and simulator.has_method("set_work_spot_value"):
 		simulator.call("set_work_spot_value", spot_id, work_needed)
 
 
 func _register_world_spot() -> void:
-	if _debug_realtest1_meal_spot_disabled() or _debug_realtest1_work_spot_disabled():
+	if _debug_mom_meal_spot_disabled() or _debug_mom_work_spot_disabled():
 		_log_debug_disabled_once()
 		return
 	_breadcrumb("work_spot:register_work", "%s spot=%s" % [name, String(spot_id)])
@@ -957,7 +977,7 @@ func _unregister_world_spot() -> void:
 func _register_eat_world_spot() -> void:
 	if eat_world_definition == null or eat_world_definition.spot_id == &"":
 		return
-	if _debug_realtest1_meal_spot_disabled():
+	if _debug_mom_meal_spot_disabled():
 		_log_debug_disabled_once()
 		return
 	var simulator := get_node_or_null("/root/NpcWorldSimulation")
@@ -982,7 +1002,7 @@ func _unregister_eat_world_spot() -> void:
 
 
 func _can_serve_eat_phase(npc_node: Node2D, requested_value_name: StringName) -> bool:
-	if _debug_realtest1_meal_spot_disabled():
+	if _debug_mom_meal_spot_disabled():
 		_log_debug_disabled_once()
 		return false
 	if npc_node == null or eat_world_definition == null or not has_food_available():
@@ -996,6 +1016,7 @@ func _can_serve_eat_phase(npc_node: Node2D, requested_value_name: StringName) ->
 		var accepted := (
 			meal_cycle_meal_window_open
 			and meal_cycle_meal_called
+			and eat_world_definition.allows_npc_id(npc_id)
 			and _meal_cycle_owner_allows(MEAL_OWNER_FOOD, npc_id)
 			and not _meal_cycle_owner_has_had_current_meal(npc_id)
 			and _npc_has_required_tags(npc_node)
@@ -1031,7 +1052,7 @@ func _can_serve_meal_cycle_work_phase(
 	npc_node: Node2D,
 	requested_value_name: StringName
 ) -> bool:
-	if _debug_realtest1_meal_spot_disabled():
+	if _debug_mom_meal_spot_disabled():
 		_log_debug_disabled_once()
 		return false
 	if npc_node == null or not is_instance_valid(npc_node):
@@ -1083,7 +1104,10 @@ func _player_owner_is_allowed_for_eat(player: Node2D) -> bool:
 
 	var owner_id := _get_player_owner_id(player)
 	if meal_cycle_enabled:
-		return _meal_cycle_owner_allows(MEAL_OWNER_FOOD, owner_id)
+		return (
+			eat_world_definition.allows_owner_id(owner_id)
+			and _meal_cycle_owner_allows(MEAL_OWNER_FOOD, owner_id)
+		)
 
 	var eat_owner_ids := eat_world_definition.get_owner_ids()
 	if eat_owner_ids.is_empty():
@@ -1097,7 +1121,7 @@ func _player_owner_is_allowed_for_eat(player: Node2D) -> bool:
 
 
 func mark_npc_meal_sated(npc_node: Node2D, need_value_name: StringName = &"hunger") -> bool:
-	if _debug_realtest1_meal_spot_disabled():
+	if _debug_mom_meal_spot_disabled():
 		_log_debug_disabled_once()
 		return false
 	if not meal_cycle_enabled:
@@ -1427,37 +1451,23 @@ func _on_work_body_exited(body: Node2D) -> void:
 		_cancel_player_action()
 
 
-func _debug_realtest1_meal_spot_disabled() -> bool:
+func _debug_mom_meal_spot_disabled() -> bool:
 	return (
 		DebugToolsConfig.TROUBLESHOOTING_MODE
-		and DebugToolsConfig.DEBUG_DISABLE_REALTEST1_MEAL_SPOT
-		and _is_realtest1_scene()
-		and _is_realtest1_meal_spot()
+		and DebugToolsConfig.DEBUG_DISABLE_MOM_MEAL_SPOT
+		and _is_mom_meal_spot()
 	)
 
 
-func _debug_realtest1_work_spot_disabled() -> bool:
+func _debug_mom_work_spot_disabled() -> bool:
 	return (
 		DebugToolsConfig.TROUBLESHOOTING_MODE
-		and DebugToolsConfig.DEBUG_DISABLE_REALTEST1_WORK_SPOT
-		and _is_realtest1_scene()
-		and _is_realtest1_work_spot()
+		and DebugToolsConfig.DEBUG_DISABLE_MOM_WORK_SPOT
+		and _is_mom_work_spot()
 	)
 
 
-func _is_realtest1_scene() -> bool:
-	if is_inside_tree() and get_tree() != null:
-		var current_scene := get_tree().current_scene
-		if current_scene != null and current_scene.scene_file_path == "res://scenes/testscenes/realtest1.tscn":
-			return true
-	if owner != null and owner.scene_file_path == "res://scenes/testscenes/realtest1.tscn":
-		return true
-	return false
-
-
-func _is_realtest1_meal_spot() -> bool:
-	if name == "MomMealCycleSpot" or save_id == "realtest1_mom_meal_cycle":
-		return true
+func _is_mom_meal_spot() -> bool:
 	if spot_id == &"mom_eat_prep":
 		return true
 	if world_definition != null and world_definition.spot_id == &"mom_eat_prep":
@@ -1465,21 +1475,19 @@ func _is_realtest1_meal_spot() -> bool:
 	return eat_world_definition != null and eat_world_definition.spot_id == &"mom_eat"
 
 
-func _is_realtest1_work_spot() -> bool:
-	if name == "MomWorkNeedSpot" or save_id == "realtest1_mom_work":
-		return true
+func _is_mom_work_spot() -> bool:
 	if spot_id == &"mom_work":
 		return true
 	return world_definition != null and world_definition.spot_id == &"mom_work"
 
 
 func _log_debug_disabled_once() -> void:
-	if _debug_realtest1_meal_spot_disabled() and not debug_meal_spot_disabled_logged:
+	if _debug_mom_meal_spot_disabled() and not debug_meal_spot_disabled_logged:
 		debug_meal_spot_disabled_logged = true
-		_breadcrumb("work_spot:realtest1_meal_disabled", "%s spot=%s" % [name, String(spot_id)])
-	if _debug_realtest1_work_spot_disabled() and not debug_work_spot_disabled_logged:
+		_breadcrumb("work_spot:mom_meal_disabled", "%s spot=%s" % [name, String(spot_id)])
+	if _debug_mom_work_spot_disabled() and not debug_work_spot_disabled_logged:
 		debug_work_spot_disabled_logged = true
-		_breadcrumb("work_spot:realtest1_work_disabled", "%s spot=%s" % [name, String(spot_id)])
+		_breadcrumb("work_spot:mom_work_disabled", "%s spot=%s" % [name, String(spot_id)])
 
 
 func _breadcrumb(source: String, detail: String = "") -> void:

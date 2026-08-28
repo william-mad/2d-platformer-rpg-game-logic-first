@@ -115,6 +115,8 @@ func _try_hit(hit_node: Node) -> void:
 	if victim == null:
 		_stop_on_world_hit(hit_node)
 		return
+	if _should_ignore_person_bystander(victim):
+		return
 
 	has_hit = true
 	if hit_node is Damage_Area:
@@ -215,6 +217,26 @@ func _is_intended_target(victim: Node) -> bool:
 		intended_target != null
 		and is_instance_valid(intended_target)
 		and victim == intended_target
+	)
+
+
+func _should_ignore_person_bystander(victim: Node) -> bool:
+	# NPC combat shots may still intentionally target a Player or another NPC,
+	# but they pass through every other person. Player-originated attacks keep
+	# their unrestricted collision behavior.
+	if (
+		source_npc == null
+		or not is_instance_valid(source_npc)
+		or not source_npc.is_in_group("npc")
+		or victim == null
+		or not is_instance_valid(victim)
+		or not (victim.is_in_group("npc") or victim.is_in_group("player"))
+	):
+		return false
+	return (
+		intended_target == null
+		or not is_instance_valid(intended_target)
+		or victim != intended_target
 	)
 
 

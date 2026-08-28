@@ -3,24 +3,24 @@
 [ext_resource type="Script" path="res://ui/inventory/inventory_item_slot.gd" id="1_slot"]
 
 [sub_resource type="StyleBoxFlat" id="StyleNormal"]
-bg_color = Color(0.09, 0.11, 0.15, 1)
+bg_color = Color(0.862745, 0.796078, 0.619608, 1)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
-border_color = Color(0.28, 0.34, 0.43, 1)
+border_color = Color(0.501961, 0.4, 0.278431, 1)
 corner_radius_top_left = 6
 corner_radius_top_right = 6
 corner_radius_bottom_right = 6
 corner_radius_bottom_left = 6
 
 [sub_resource type="StyleBoxFlat" id="StyleFocus"]
-bg_color = Color(0.14, 0.18, 0.25, 1)
+bg_color = Color(0.721569, 0.368627, 0.262745, 1)
 border_width_left = 3
 border_width_top = 3
 border_width_right = 3
 border_width_bottom = 3
-border_color = Color(1, 0.78, 0.25, 1)
+border_color = Color(0.4, 0.501961, 0.376471, 1)
 corner_radius_top_left = 6
 corner_radius_top_right = 6
 corner_radius_bottom_right = 6
@@ -78,7 +78,7 @@ offset_top = 4.0
 offset_right = 40.0
 offset_bottom = 22.0
 mouse_filter = 2
-theme_override_colors/font_color = Color(1, 0.62, 0.25, 1)
+theme_override_colors/font_color = Color(0.721569, 0.368627, 0.262745, 1)
 text = "R1"
 
 [node name="PriceLabel" type="Label" parent="."]
@@ -90,7 +90,7 @@ offset_top = 60.0
 offset_right = 48.0
 offset_bottom = 80.0
 mouse_filter = 2
-theme_override_colors/font_color = Color(1, 0.84, 0.35, 1)
+theme_override_colors/font_color = Color(0.501961, 0.4, 0.278431, 1)
 text = "1g"
 
 [node name="LockOverlay" type="Label" parent="."]
@@ -103,8 +103,8 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-theme_override_colors/font_color = Color(1, 0.35, 0.32, 1)
-theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_colors/font_color = Color(0.698039, 0.317647, 0.258824, 1)
+theme_override_colors/font_shadow_color = Color(1, 0.945098, 0.823529, 1)
 theme_override_constants/shadow_offset_x = 1
 theme_override_constants/shadow_offset_y = 1
 theme_override_font_sizes/font_size = 13

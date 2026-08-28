@@ -40,13 +40,13 @@ func _initialize() -> void:
 	source._input(_action_event(&"right", false))
 	orb.configure({
 		"acceleration": 100.0,
-		"drag": 10.0,
+		"drag": 2.0,
 		"maximum_speed": 1000.0,
 	})
-	orb._physics_process(1.0)
+	orb._physics_process(0.5)
 	_expect(
-		is_equal_approx(orb.get_orb_speed(), 40.0),
-		"no input applies deterministic drag"
+		is_equal_approx(orb.get_orb_speed(), 50.0 * exp(-1.0)),
+		"no input applies smooth exponential damping"
 	)
 
 	orb.reset_orb(Vector2.ZERO)
@@ -61,8 +61,21 @@ func _initialize() -> void:
 		orb.get_orb_speed() <= 100.001,
 		"maximum speed is respected"
 	)
-
 	source._input(_action_event(&"right", false))
+	source._input(_action_event(&"left", true))
+	orb.configure({
+		"acceleration": 100.0,
+		"drag": 0.0,
+		"maximum_speed": 100.0,
+		"turn_acceleration_multiplier": 2.0,
+	})
+	orb._physics_process(0.5)
+	_expect(
+		is_zero_approx(orb.get_orb_speed()),
+		"opposite input receives stronger braking for responsive reversals"
+	)
+
+	source._input(_action_event(&"left", false))
 	orb.reset_orb(Vector2.ZERO)
 	orb.set_external_force(Vector2(20.0, 0.0))
 	orb._physics_process(0.5)

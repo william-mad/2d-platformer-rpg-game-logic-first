@@ -524,6 +524,8 @@ func _do_melee_attack(swing_angle_degrees: float, can_queue_hit_followup: bool =
 
 		if not _target_group_is_allowed(victim):
 			continue
+		if _should_ignore_person_bystander(victim):
+			continue
 
 		damaged_victims.append(victim)
 		victim.call("take_damage", melee_damage, npc.global_position, npc, melee_knockout_damage)
@@ -845,6 +847,25 @@ func _victim_is_current_target(victim: Node) -> bool:
 		and fight_target != null
 		and is_instance_valid(fight_target)
 		and victim == fight_target
+	)
+
+
+func _should_ignore_person_bystander(victim: Node) -> bool:
+	# Mom can still intentionally hit a Player or NPC, but a Fight swing does not
+	# turn another nearby person into an accidental combatant.
+	if (
+		npc == null
+		or not is_instance_valid(npc)
+		or not npc.is_in_group("npc")
+		or victim == null
+		or not is_instance_valid(victim)
+		or not (victim.is_in_group("npc") or victim.is_in_group("player"))
+	):
+		return false
+	return (
+		fight_target == null
+		or not is_instance_valid(fight_target)
+		or victim != fight_target
 	)
 
 

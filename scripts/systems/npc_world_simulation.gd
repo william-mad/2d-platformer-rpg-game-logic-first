@@ -8,8 +8,10 @@ signal scheduled_activity_entered_overtime(
 	activity: Dictionary,
 	continuation_decision: Dictionary
 )
+signal simulated_location_audited(location_id: StringName, result: Dictionary)
 
 const SPOT_DATA_DIRECTORY := "res://data/npc_spots"
+const SIMULATED_LOCATION_DATA_DIRECTORY := "res://data/npc_simulated_locations"
 const PLAYER_SOCIAL_TARGET_ID := "__player__"
 const DEFAULT_SLEEP_SKIP_WAKE_HUNGER_MAX := 60.0
 const STORED_ONLY_VALUE_KEYS := {
@@ -71,6 +73,7 @@ const SCHEDULE_METADATA_KEYS := [
 
 const PERFORMANCE_PROFILE_REPORT_WINDOW_CALLS := 30
 var spot_definitions: Dictionary = {}
+var simulated_location_definitions: Dictionary = {}
 var live_spots: Dictionary = {}
 # Authoritative reservation_id -> owned reservation record ledger.
 var spot_reservations: Dictionary = {}
@@ -117,12 +120,18 @@ var _performance_profile_records_applied_in_pass: int = 0
 var _logged_reservation_warnings: Dictionary = {}
 var _validated_social_world_profile_signatures: Dictionary = {}
 var _social_world_profile_validation_issues_by_npc: Dictionary = {}
+var _simulated_location_diagnostics: Array[Dictionary] = []
+var _logged_simulated_location_warning_keys: Dictionary = {}
 
 
 func _ready() -> void:
 	social_rng.randomize()
 	_load_spot_definitions()
+	_load_simulated_location_definitions()
 	_initialize_definition_runtime_states()
+	# Startup keeps the audit lightweight. Full door-scene inspection remains available
+	# explicitly for tests/debugging without making release startup instantiate playable maps.
+	call_deferred("audit_simulated_locations", false)
 	simulation_timer = simulation_interval_seconds
 	var world_time := get_node_or_null("/root/WorldTime")
 	if world_time != null and world_time.has_signal(&"day_changed"):
@@ -222,6 +231,26 @@ func get_spot_value(spot_id: StringName, fallback: float = 0.0) -> float:
 
 
 func apply_spot_value_delta(spot_id: StringName, delta: float) -> float:
+	var state = spot_runtime_states.get(String(spot_id), {})
+	if (
+		state is Dictionary
+		and bool(state.get("meal_cycle_enabled", false))
+		and String(state.get("stage", "")) == NpcMealCycleRuntime.MEAL_STAGE_CLEANUP_WORK
+	):
+		var cleanup_remaining = state.get("cleanup_remaining_by_spot", {})
+		if cleanup_remaining is Dictionary and cleanup_remaining.has(String(spot_id)):
+			var previous_cleanup_value := float(cleanup_remaining[String(spot_id)])
+			NpcMealCycleRuntime._set_meal_cycle_cleanup_spot_value(
+				self,
+				spot_id,
+				previous_cleanup_value + delta
+			)
+			var next_state = spot_runtime_states.get(String(spot_id), {})
+			if next_state is Dictionary:
+				var next_remaining = next_state.get("cleanup_remaining_by_spot", {})
+				if next_remaining is Dictionary:
+					return float(next_remaining.get(String(spot_id), 0.0)) - previous_cleanup_value
+			return -previous_cleanup_value
 	var previous_value := get_spot_value(spot_id)
 	set_spot_value(spot_id, previous_value + delta)
 	return get_spot_value(spot_id) - previous_value
@@ -231,6 +260,15 @@ func set_spot_value(spot_id: StringName, value: float, allow_cycle_transition: b
 	var state_key := String(spot_id)
 	var state = spot_runtime_states.get(state_key, {})
 	if not (state is Dictionary):
+		return
+	if String(state.get("kind", "")) == "meal_cleanup_contribution":
+		NpcMealCycleRuntime._set_meal_cycle_cleanup_spot_value(self, spot_id, value)
+		return
+	if (
+		bool(state.get("meal_cycle_enabled", false))
+		and String(state.get("stage", "")) == NpcMealCycleRuntime.MEAL_STAGE_CLEANUP_WORK
+	):
+		NpcMealCycleRuntime._set_meal_cycle_cleanup_spot_value(self, spot_id, value)
 		return
 
 	var previous_value := float(state.get("value", 0.0))
@@ -2115,6 +2153,307 @@ func get_arrival_position(from_scene_path: String, fallback: Vector2) -> Vector2
 	return fallback
 
 
+func audit_simulated_locations(validate_live_departure_scenes: bool = true) -> Array[Dictionary]:
+	_simulated_location_diagnostics.clear()
+	var route_manager := get_node_or_null("/root/NpcSceneRoutes")
+	var location_ids: Array[String] = []
+	for location_id_value in simulated_location_definitions.keys():
+		location_ids.append(String(location_id_value))
+	location_ids.sort()
+
+	for location_id in location_ids:
+		var definition := simulated_location_definitions.get(
+			StringName(location_id), null
+		) as NpcSimulatedLocationDefinition
+		if definition == null:
+			continue
+		var errors := definition.get_validation_errors()
+		_validate_simulated_location_scene_contract(definition, errors)
+		_validate_simulated_location_spots(definition, errors)
+		_validate_simulated_location_routes(
+			definition,
+			route_manager,
+			errors,
+			validate_live_departure_scenes
+		)
+		var result := definition.to_descriptor()
+		result["accepted"] = errors.is_empty()
+		result["errors"] = errors.duplicate()
+		result["live_departure_scenes_checked"] = validate_live_departure_scenes
+		_simulated_location_diagnostics.append(result)
+		simulated_location_audited.emit(definition.location_id, result.duplicate(true))
+		if not errors.is_empty():
+			_warn_simulated_location_once(
+				"configuration:%s:%s" % [location_id, "|".join(errors)],
+				"Simulated-only NPC location '%s' is misconfigured: %s" % [
+					location_id,
+					"; ".join(errors),
+				]
+			)
+	return get_simulated_location_diagnostics()
+
+
+func get_simulated_location_diagnostics() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for diagnostic in _simulated_location_diagnostics:
+		result.append(diagnostic.duplicate(true))
+	return result
+
+
+func get_simulated_location_runtime_status() -> Array[Dictionary]:
+	if _simulated_location_diagnostics.is_empty() and not simulated_location_definitions.is_empty():
+		audit_simulated_locations()
+	var records: Dictionary = {}
+	var locations := get_node_or_null("/root/NpcLocations")
+	if locations != null and locations.has_method("get_records_snapshot"):
+		records = locations.call("get_records_snapshot") as Dictionary
+
+	var result: Array[Dictionary] = []
+	for diagnostic in _simulated_location_diagnostics:
+		var status := diagnostic.duplicate(true)
+		var simulated_scene_path := String(status.get("scene_path", ""))
+		var configured_spot_ids := _variant_strings(status.get("spot_ids", []))
+		var configured_npc_ids := _variant_strings(status.get("npc_ids", []))
+		var npc_statuses: Array[Dictionary] = []
+		var runtime_issues: Array[String] = []
+		for npc_id in configured_npc_ids:
+			var record_value = records.get(npc_id, null)
+			if not (record_value is Dictionary):
+				npc_statuses.append({
+					"npc_id": npc_id,
+					"status": "record_missing",
+				})
+				runtime_issues.append("NPC '%s' has no persistent location record" % npc_id)
+				continue
+			var record: Dictionary = record_value
+			var activity_value = record.get("activity", {})
+			var activity: Dictionary = activity_value if activity_value is Dictionary else {}
+			var pending_value = record.get("pending_travel", {})
+			var pending: Dictionary = pending_value if pending_value is Dictionary else {}
+			var current_scene_path := String(record.get("scene_path", ""))
+			var activity_spot_id := String(activity.get("spot_id", ""))
+			var pending_target_scene_path := String(pending.get("target_scene_path", ""))
+			var state := "elsewhere"
+			if current_scene_path == simulated_scene_path:
+				if not pending.is_empty():
+					state = "leaving"
+				elif configured_spot_ids.has(activity_spot_id):
+					state = "active"
+				else:
+					state = "stranded"
+					runtime_issues.append(
+						"NPC '%s' is stranded in '%s' without its activity or return travel"
+						% [npc_id, String(status.get("location_id", ""))]
+					)
+			elif pending_target_scene_path == simulated_scene_path:
+				state = "travelling_to_location"
+			elif configured_spot_ids.has(activity_spot_id) and pending.is_empty():
+				state = "activity_scene_mismatch"
+				runtime_issues.append(
+					"NPC '%s' has simulated spot '%s' active in scene '%s'"
+					% [npc_id, activity_spot_id, current_scene_path]
+				)
+			npc_statuses.append({
+				"npc_id": npc_id,
+				"status": state,
+				"scene_path": current_scene_path,
+				"activity_spot_id": activity_spot_id,
+				"pending_target_scene_path": pending_target_scene_path,
+			})
+		status["runtime_ok"] = runtime_issues.is_empty()
+		status["runtime_issues"] = runtime_issues
+		status["npcs"] = npc_statuses
+		result.append(status)
+	return result
+
+
+func _load_simulated_location_definitions() -> void:
+	simulated_location_definitions.clear()
+	for file_name: String in ResourceLoader.list_directory(
+		SIMULATED_LOCATION_DATA_DIRECTORY
+	):
+		if file_name.ends_with("/") or file_name.get_extension().to_lower() != "tres":
+			continue
+		var resource_path := SIMULATED_LOCATION_DATA_DIRECTORY.path_join(file_name)
+		var definition := load(resource_path) as NpcSimulatedLocationDefinition
+		if definition == null:
+			push_warning("Invalid simulated-only NPC location resource: %s" % resource_path)
+			continue
+		var definition_errors := definition.get_validation_errors()
+		if not definition_errors.is_empty():
+			push_warning(
+				"Invalid simulated-only NPC location '%s': %s" % [
+					resource_path,
+					"; ".join(definition_errors),
+				]
+			)
+			continue
+		if simulated_location_definitions.has(definition.location_id):
+			push_warning(
+				"Duplicate simulated-only NPC location id '%s'; keeping the first definition."
+				% String(definition.location_id)
+			)
+			continue
+		simulated_location_definitions[definition.location_id] = definition
+
+
+func _validate_simulated_location_spots(
+	definition: NpcSimulatedLocationDefinition,
+	errors: Array[String]
+) -> void:
+	var covered_npc_ids: Dictionary = {}
+	for spot_id in definition.spot_ids:
+		var spot := spot_definitions.get(spot_id, null) as NpcSpotDefinition
+		if spot == null:
+			errors.append("spot '%s' is not loaded" % String(spot_id))
+			continue
+		if spot.scene_path != definition.scene_path:
+			errors.append(
+				"spot '%s' targets '%s' instead of '%s'" % [
+					String(spot_id),
+					spot.scene_path,
+					definition.scene_path,
+				]
+			)
+		for npc_id in definition.npc_ids:
+			if spot.allows_npc_id(npc_id):
+				covered_npc_ids[String(npc_id)] = true
+	for npc_id in definition.npc_ids:
+		if not covered_npc_ids.has(String(npc_id)):
+			errors.append(
+				"NPC '%s' is not allowed by any declared spot" % String(npc_id)
+			)
+
+
+func _validate_simulated_location_scene_contract(
+	definition: NpcSimulatedLocationDefinition,
+	errors: Array[String]
+) -> void:
+	var packed_scene := load(definition.scene_path) as PackedScene
+	if packed_scene == null:
+		return
+	var scene_root := packed_scene.instantiate()
+	if scene_root == null:
+		errors.append("scene cannot be instantiated for contract validation")
+		return
+	if not bool(scene_root.get_meta(&"_npc_simulated_only", false)):
+		errors.append("scene root is missing the _npc_simulated_only marker")
+	if StringName(String(scene_root.get_meta(&"location_id", &""))) != definition.location_id:
+		errors.append("scene root location_id does not match the manifest")
+	if scene_root.get_child_count() > 0:
+		errors.append("scene must remain empty; simulated behavior belongs in spot resources")
+	scene_root.free()
+
+
+func _validate_simulated_location_routes(
+	definition: NpcSimulatedLocationDefinition,
+	route_manager: Node,
+	errors: Array[String],
+	validate_live_departure_scenes: bool
+) -> void:
+	if route_manager == null or not route_manager.has_method("plan_route"):
+		errors.append("NpcSceneRoutes is unavailable")
+		return
+	for origin_scene_path in definition.expected_origin_scene_paths:
+		for npc_id in definition.npc_ids:
+			var inbound := route_manager.call(
+				"plan_route", origin_scene_path, definition.scene_path, npc_id
+			) as Dictionary
+			if not bool(inbound.get("accepted", false)):
+				errors.append(
+					"NPC '%s' has no route from '%s' to this location (%s)" % [
+						String(npc_id),
+						origin_scene_path,
+						String(inbound.get("reason", "route_rejected")),
+					]
+				)
+			elif validate_live_departure_scenes:
+				_validate_simulated_location_live_departures(
+					definition, inbound, npc_id, errors
+				)
+			var outbound := route_manager.call(
+				"plan_route", definition.scene_path, origin_scene_path, npc_id
+			) as Dictionary
+			if not bool(outbound.get("accepted", false)):
+				errors.append(
+					"NPC '%s' has no return route to '%s' (%s)" % [
+						String(npc_id),
+						origin_scene_path,
+						String(outbound.get("reason", "route_rejected")),
+					]
+				)
+			elif validate_live_departure_scenes:
+				_validate_simulated_location_live_departures(
+					definition, outbound, npc_id, errors
+				)
+
+
+func _validate_simulated_location_live_departures(
+	definition: NpcSimulatedLocationDefinition,
+	plan: Dictionary,
+	npc_id: StringName,
+	errors: Array[String]
+) -> void:
+	var edge_ids := _variant_strings(plan.get("edge_ids", []))
+	var scene_paths := _variant_strings(plan.get("scene_paths", []))
+	if scene_paths.size() != edge_ids.size() + 1:
+		errors.append("route plan has inconsistent edge and scene counts")
+		return
+	for edge_index in edge_ids.size():
+		var source_scene_path := scene_paths[edge_index]
+		var target_scene_path := scene_paths[edge_index + 1]
+		# A simulated-only source has no live body and advances its route directly.
+		if source_scene_path == definition.scene_path:
+			continue
+		var packed_source := load(source_scene_path) as PackedScene
+		if packed_source == null:
+			continue
+		var source_root := packed_source.instantiate()
+		if source_root == null:
+			continue
+		var matching_door_found := false
+		for candidate in source_root.find_children("*", "", true, false):
+			var door := candidate as Node
+			if door == null or not door.is_in_group(&"npc_travel_door"):
+				continue
+			if not _has_property(door, &"target_scene_path"):
+				continue
+			if String(door.get(&"target_scene_path")) != target_scene_path:
+				continue
+			var edge = door.get(&"route_edge") if _has_property(door, &"route_edge") else null
+			if edge == null or String(edge.get(&"edge_id")) != edge_ids[edge_index]:
+				continue
+			if edge.has_method("allows_npc") and not bool(edge.call("allows_npc", npc_id)):
+				continue
+			matching_door_found = true
+			break
+		source_root.free()
+		if not matching_door_found:
+			errors.append(
+				"NPC '%s' route edge '%s' has no matching live departure door in '%s'" % [
+					String(npc_id),
+					edge_ids[edge_index],
+					source_scene_path,
+				]
+			)
+
+
+func _warn_simulated_location_once(key: String, message: String) -> void:
+	if _logged_simulated_location_warning_keys.has(key):
+		return
+	_logged_simulated_location_warning_keys[key] = true
+	push_warning(message)
+
+
+func _variant_strings(values: Variant) -> Array[String]:
+	var result: Array[String] = []
+	if not (values is Array or values is PackedStringArray):
+		return result
+	for value in values:
+		result.append(String(value))
+	return result
+
+
 func _load_spot_definitions() -> void:
 	spot_definitions.clear()
 	for file_name: String in ResourceLoader.list_directory(SPOT_DATA_DIRECTORY):
@@ -2146,6 +2485,10 @@ func _initialize_definition_runtime_states() -> void:
 	for definition_value in spot_definitions.values():
 		var definition := definition_value as NpcSpotDefinition
 		if definition == null or definition.spot_value_name == &"":
+			continue
+		# Meal-cycle state is normalized below by its controller. Letting the generic
+		# mutable-spot pass touch it first would discard legacy aggregate cleanup values.
+		if NpcMealCycleRuntime._definition_is_meal_cycle_managed(definition):
 			continue
 
 		var state_key := String(definition.spot_id)
@@ -2373,6 +2716,10 @@ func _definition_is_meal_cycle_food(definition: NpcSpotDefinition) -> bool:
 	return NpcMealCycleRuntime._definition_is_meal_cycle_food(definition)
 
 
+func _definition_is_meal_cycle_cleanup(definition: NpcSpotDefinition) -> bool:
+	return NpcMealCycleRuntime._definition_is_meal_cycle_cleanup(definition)
+
+
 func _get_meal_cycle_controller_id_for_spot(spot_id: StringName) -> StringName:
 	return NpcMealCycleRuntime._get_meal_cycle_controller_id_for_spot(self, spot_id)
 
@@ -2389,6 +2736,18 @@ func _get_meal_cycle_controller_state(controller_id: StringName) -> Dictionary:
 
 func _get_meal_cycle_food_spot_id(controller: NpcSpotDefinition) -> StringName:
 	return NpcMealCycleRuntime._get_meal_cycle_food_spot_id(controller)
+
+
+func _get_meal_cycle_food_spot_ids(controller: NpcSpotDefinition) -> Array[StringName]:
+	return NpcMealCycleRuntime._get_meal_cycle_food_spot_ids(controller)
+
+
+func _get_meal_cycle_cleanup_spot_ids(controller: NpcSpotDefinition) -> Array[StringName]:
+	return NpcMealCycleRuntime._get_meal_cycle_cleanup_spot_ids(controller)
+
+
+func set_meal_cycle_cleanup_spot_value(spot_id: StringName, value: float) -> void:
+	NpcMealCycleRuntime._set_meal_cycle_cleanup_spot_value(self, spot_id, value)
 
 
 func _get_meal_cycle_food_definition_owner_ids(
@@ -5613,7 +5972,10 @@ func _apply_spot_runtime_progress(
 		return
 	if _definition_is_meal_cycle_food(definition):
 		return
-	if _definition_is_meal_cycle_controller(definition):
+	if (
+		_definition_is_meal_cycle_controller(definition)
+		or _definition_is_meal_cycle_cleanup(definition)
+	):
 		_apply_meal_cycle_work_progress(definition, game_hours, total_hours)
 		return
 	apply_spot_value_delta(
@@ -5714,18 +6076,13 @@ func _debug_definition_disabled(definition: NpcSpotDefinition) -> bool:
 		)
 	):
 		return true
-
-	if definition.scene_path != "res://scenes/testscenes/realtest1.tscn":
-		return false
-
-	if DebugToolsConfig.DEBUG_DISABLE_REALTEST1_WORK_SPOT and definition_spot_id == &"mom_work":
+	if DebugToolsConfig.DEBUG_DISABLE_MOM_WORK_SPOT and definition_spot_id == &"mom_work":
 		return true
-
-	if not DebugToolsConfig.DEBUG_DISABLE_REALTEST1_MEAL_SPOT:
-		return false
-	if definition_spot_id == &"mom_eat" or definition_spot_id == &"mom_eat_prep":
-		return true
-	return definition.meal_cycle_id == &"mom_meal_cycle"
+	if DebugToolsConfig.DEBUG_DISABLE_MOM_MEAL_SPOT:
+		if definition_spot_id == &"mom_eat" or definition_spot_id == &"mom_eat_prep":
+			return true
+		return definition.meal_cycle_id == &"mom_meal_cycle"
+	return false
 
 
 func _breadcrumb(source: String, detail: String = "") -> void:

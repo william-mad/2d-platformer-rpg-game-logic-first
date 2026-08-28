@@ -1,0 +1,63 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/creatures/npc/blueprint_social_npc.tscn" id="1_npc"]
+[ext_resource type="Resource" path="res://data/dialogue/bob_autonomous_dialogue_profile.tres" id="2_autonomous_dialogue"]
+[ext_resource type="Resource" path="res://data/dialogue/bob_player_talk_dialogue_profile.tres" id="3_player_talk_dialogue"]
+
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_bob"]
+radius = 25.0
+height = 100.0
+
+[node name="BobNpc" instance=ExtResource("1_npc")]
+display_name = "Bob"
+npc_tags = Array[StringName]([&"bob"])
+location_id = &"bob"
+npc_scene_path = "res://scenes/creatures/bob_npc.tscn"
+autonomous_dialogue_profile = ExtResource("2_autonomous_dialogue")
+player_talk_dialogue_profile = ExtResource("3_player_talk_dialogue")
+
+[node name="BodyVisual" parent="."]
+position = Vector2(0, -50)
+color = Color(0.86, 0.68, 0.22, 1)
+polygon = PackedVector2Array(0, -50, 13, -47, 22, -38, 25, -25, 25, 25, 22, 38, 13, 47, 0, 50, -13, 47, -22, 38, -25, 25, -25, -25, -22, -38, -13, -47)
+
+[node name="CollisionShape2D" parent="."]
+position = Vector2(0, -50)
+shape = SubResource("CapsuleShape2D_bob")
+
+[node name="RopeAttachPoint" parent="."]
+position = Vector2(0, -63)
+
+[node name="Damage_Area" parent="."]
+position = Vector2(0, -50)
+
+[node name="CollisionShape2D" parent="Damage_Area"]
+shape = SubResource("CapsuleShape2D_bob")
+
+[node name="SightPivot" parent="."]
+position = Vector2(0, -40)
+
+[node name="FavorBar" parent="."]
+offset_left = -36.0
+offset_top = -113.0
+offset_right = 36.0
+offset_bottom = -105.0
+
+[node name="NameLabel" parent="."]
+offset_left = -80.0
+offset_top = -160.0
+offset_right = 80.0
+offset_bottom = -138.0
+text = "Bob"
+
+[node name="HPBar" parent="."]
+offset_left = -36.0
+offset_top = -120.0
+offset_right = 36.0
+offset_bottom = -114.0
+
+[node name="StateLabel" parent="."]
+offset_left = -46.0
+offset_top = -137.0
+offset_right = 46.0
+offset_bottom = -114.0

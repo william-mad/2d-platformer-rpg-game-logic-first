@@ -11,6 +11,9 @@ const SAVED_ORIGIN_POSITION := Vector2(-640.0, -360.0)
 const MANA_BALANCE_DEFINITION := preload(
 	"res://data/interactive_activities/mana_balance.tres"
 )
+const RUNE_WEAVING_DEFINITION := preload(
+	"res://data/interactive_activities/rune_weaving.tres"
+)
 
 var _failures: Array[String] = []
 var _cancellation_count: int = 0
@@ -494,6 +497,7 @@ func _initialize() -> void:
 	)
 
 	var mana_definition := MANA_BALANCE_DEFINITION as InteractiveActivityDefinition
+	var rune_definition := RUNE_WEAVING_DEFINITION as InteractiveActivityDefinition
 	_expect(
 		mana_definition != null
 		and mana_definition.is_valid_definition()
@@ -501,10 +505,16 @@ func _initialize() -> void:
 		"Mana Balance definition is valid and carries typed module configuration"
 	)
 	_expect(
-		_real_home_has_mana_balance_assignment(),
-		"real Mom magic lesson scene assigns the Mana Balance definition"
+		rune_definition != null
+		and rune_definition.is_valid_definition()
+		and rune_definition.module_config is RuneWeavingConfig,
+		"Rune Weaving definition is valid and carries typed module configuration"
 	)
-	lesson_spot.interactive_activity_definitions = [mana_definition]
+	_expect(
+		_real_home_has_magic_training_assignments(),
+		"real Mom magic lesson scene assigns both magic-training definitions"
+	)
+	lesson_spot.interactive_activity_definitions = [mana_definition, rune_definition]
 	lesson_spot.interactive_activity_launch_options = _make_magic_training_launch_options()
 
 	var prepare_failure_session := "interactive-prepare-failure"
@@ -623,6 +633,7 @@ func _initialize() -> void:
 		String(interactive_host.title_label.text) == "Magic Training"
 		and String(interactive_host.options_label.text).contains("Choose what to train")
 		and String(interactive_host.options_label.text).contains("> Mana Balance")
+		and String(interactive_host.options_label.text).contains("Rune Weaving")
 		and String(interactive_host.help_label.text) == "Z: Begin",
 		"training menu clearly distinguishes selection from invitation consent"
 	)
@@ -693,6 +704,22 @@ func _initialize() -> void:
 		local_mom, player, interactive_cancel_session
 	)
 	_expect(bool(interactive_cancel_start.get("accepted", false)), "interactive cancellation fixture starts")
+	var rune_runner := lesson_spot.get_interactive_activity_runner()
+	var rune_host := rune_runner.get_presentation_host()
+	var rune_input := rune_runner.get_input_source()
+	rune_input._input(_action_event(&"crouch", true))
+	rune_host._process(0.0)
+	rune_input._input(_action_event(&"crouch", false))
+	rune_input.clear_one_frame_states()
+	rune_input._input(_action_event(&"attack", true))
+	rune_host._process(0.0)
+	_expect(
+		rune_host.get_active_module() is RuneWeavingModule
+		and rune_host.get_active_module().is_running()
+		and not rune_host.is_selecting(),
+		"magic-training selection launches Rune Weaving as the second option"
+	)
+	rune_input._input(_action_event(&"attack", false))
 	_expect(
 		lesson_spot.cancel_lesson(&"interactive_test_cancel", interactive_cancel_session),
 		"interactive lesson cancellation succeeds"
@@ -869,7 +896,7 @@ func _expect(condition: bool, message: String) -> void:
 		_failures.append(message)
 
 
-func _real_home_has_mana_balance_assignment() -> bool:
+func _real_home_has_magic_training_assignments() -> bool:
 	var packed_scene := load(LESSON_SCENE_PATH) as PackedScene
 	if packed_scene == null:
 		return false
@@ -878,6 +905,7 @@ func _real_home_has_mana_balance_assignment() -> bool:
 		if String(scene_state.get_node_name(node_index)) != "MomMagicLessonSpot":
 			continue
 		var has_mana_balance := false
+		var has_rune_weaving := false
 		var has_always_show := false
 		for property_index in scene_state.get_node_property_count(node_index):
 			var property_name := String(
@@ -885,11 +913,13 @@ func _real_home_has_mana_balance_assignment() -> bool:
 			)
 			var assigned = scene_state.get_node_property_value(node_index, property_index)
 			if property_name == "interactive_activity_definitions":
-				if assigned is Array and assigned.size() == 1:
-					var definition := assigned[0] as InteractiveActivityDefinition
-					has_mana_balance = (
-						definition != null and definition.id == &"mana_balance"
-					)
+				if assigned is Array and assigned.size() == 2:
+					for definition_value in assigned:
+						var definition := definition_value as InteractiveActivityDefinition
+						if definition == null:
+							continue
+						has_mana_balance = has_mana_balance or definition.id == &"mana_balance"
+						has_rune_weaving = has_rune_weaving or definition.id == &"rune_weaving"
 			elif property_name == "interactive_activity_launch_options":
 				var options := assigned as InteractiveActivityLaunchOptions
 				has_always_show = (
@@ -899,7 +929,7 @@ func _real_home_has_mana_balance_assignment() -> bool:
 					and options.get_menu_title() == "Magic Training"
 					and options.menu_prompt == "Choose what to train"
 				)
-		return has_mana_balance and has_always_show
+		return has_mana_balance and has_rune_weaving and has_always_show
 	return false
 
 

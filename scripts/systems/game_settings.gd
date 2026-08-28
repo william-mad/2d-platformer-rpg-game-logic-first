@@ -8,6 +8,7 @@ const DISPLAY_SECTION := "display"
 const MASTER_VOLUME_KEY := "master_volume"
 const FULLSCREEN_KEY := "fullscreen"
 const SILENT_DB := -80.0
+const WINDOWED_CLIENT_SIZE := Vector2i(754, 496)
 
 @export var settings_path: String = "user://game_settings.cfg"
 
@@ -98,11 +99,22 @@ func _apply_master_volume() -> void:
 func _apply_fullscreen() -> void:
 	if DisplayServer.get_name().to_lower() == "headless":
 		return
-	DisplayServer.window_set_mode(
-		DisplayServer.WINDOW_MODE_FULLSCREEN
-		if fullscreen
-		else DisplayServer.WINDOW_MODE_WINDOWED
-	)
+	if fullscreen:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+		return
+
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+	# Restore the client area after leaving fullscreen. The Windows title bar and
+	# frame then sit outside the 754x496 game surface instead of consuming it.
+	call_deferred("_restore_windowed_client_size")
+
+
+func _restore_windowed_client_size() -> void:
+	if fullscreen or DisplayServer.get_name().to_lower() == "headless":
+		return
+	if DisplayServer.window_get_mode() != DisplayServer.WINDOW_MODE_WINDOWED:
+		return
+	DisplayServer.window_set_size(WINDOWED_CLIENT_SIZE)
 
 
 func _window_is_fullscreen() -> bool:

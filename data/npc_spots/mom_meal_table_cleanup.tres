@@ -1,0 +1,27 @@
+[gd_resource type="Resource" script_class="NpcSpotDefinition" format=3 uid="uid://cnfxbl7dx8qmd"]
+
+[ext_resource type="Script" uid="uid://diuxbt87xbkkc" path="res://scripts/resources/npc_spot_definition.gd" id="1_spot_definition"]
+
+[resource]
+script = ExtResource("1_spot_definition")
+spot_id = &"mom_meal_table_cleanup"
+scene_path = "res://scenes/testscenes/realhometest.tscn"
+position = Vector2(105, 347)
+state_name = &"Work"
+value_name = &"boredom"
+need_threshold = 61.0
+value_delta_per_game_hour = -200.0
+priority = 40
+require_npc_value_threshold = false
+finish_when_npc_value_sated = false
+routine_animation_name = &"meal_cleanup_1"
+spot_value_name = &"work_needed"
+spot_value_initial = 50.0
+spot_value_maximum = 50.0
+spot_value_delta_per_game_hour = -200.0
+meal_cycle_id = &"mom_meal_cycle"
+meal_cycle_stage = &"cleanup_work"
+meal_cycle_controller_spot_id = &"mom_eat_prep"
+meal_cycle_cleanup_share = 50.0
+meal_cycle_cleanup_work_multiplier = 2.0
+owner_ids = Array[StringName]([&"player", &"maid"])

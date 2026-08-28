@@ -1,8 +1,8 @@
-[gd_resource type="Resource" script_class="DialogueDefinition" load_steps=6 format=3]
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3 uid="uid://c58q6wubupoc6"]
 
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+[ext_resource type="Script" uid="uid://bsmeen4ahl14e" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" uid="uid://csithy7k1fddw" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" uid="uid://cytm50bmpbyao" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
 
 [sub_resource type="Resource" id="Choice_worked"]
 script = ExtResource("3_choice")
@@ -20,21 +20,21 @@ next_node_id = &"better"
 script = ExtResource("2_node")
 node_id = &"entry"
 speaker_id = &"mom"
-speaker_text = "Is that your best line? Mm. A little reckless, a little obvious... and annoyingly close to charming."
+speaker_text = "You really know how to make me feel noticed. I like that."
 choices = Array[ExtResource("3_choice")]([SubResource("Choice_worked"), SubResource("Choice_better")])
 
 [sub_resource type="Resource" id="Node_worked"]
 script = ExtResource("2_node")
 node_id = &"worked"
 speaker_id = &"mom"
-speaker_text = "Don't look so triumphant. I said close. Though that grin may be doing the rest of the work."
+speaker_text = "It worked. Come here and enjoy your victory for a moment."
 terminal = true
 
 [sub_resource type="Resource" id="Node_better"]
 script = ExtResource("2_node")
 node_id = &"better"
 speaker_id = &"mom"
-speaker_text = "Oh? Then practice and come find me. I do appreciate dedication to a craft."
+speaker_text = "Then come find me when you're ready. I'll be listening."
 terminal = true
 
 [resource]

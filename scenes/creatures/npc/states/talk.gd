@@ -330,6 +330,16 @@ func get_talk_approach_distance() -> float:
 	return maxf(talk_range * preferred_talk_distance_ratio, 0.0)
 
 
+func is_talk_start_distance_viable(candidate: Node2D) -> bool:
+	# Autonomous search checks this before creating a conversation. Keep direct
+	# far-distance Talk requests free to use this state's existing approach phase.
+	if npc == null or not _is_valid_talk_partner(candidate):
+		return false
+	if maximum_talk_distance <= 0.0:
+		return true
+	return npc.global_position.distance_to(candidate.global_position) <= maximum_talk_distance
+
+
 func _get_after_talk_state() -> NpcState:
 	# A non-null result tells the state machine to close this overlay. It is not a
 	# request to exit, re-enter, or otherwise replace the primary state.

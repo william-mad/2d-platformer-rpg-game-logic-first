@@ -3,7 +3,7 @@
 [ext_resource type="Script" uid="uid://bid6v05xvf26i" path="res://scripts/instances/player_cooking_station.gd" id="1_station"]
 
 [sub_resource type="RectangleShape2D" id="StationShape"]
-size = Vector2(120, 100)
+size = Vector2(72, 100)
 
 [node name="PlayerCookingStation" type="Area2D" unique_id=1326992960]
 collision_layer = 0

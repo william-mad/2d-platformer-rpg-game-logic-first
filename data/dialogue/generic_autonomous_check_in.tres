@@ -1,0 +1,58 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_well"]
+script = ExtResource("3_choice")
+choice_id = &"doing_well"
+text = "I'm doing well."
+next_node_id = &"player_well"
+
+[sub_resource type="Resource" id="Choice_tired"]
+script = ExtResource("3_choice")
+choice_id = &"long_day"
+text = "It's been a long day."
+next_node_id = &"player_tired"
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"npc"
+speaker_text = "Hey. How have you been?"
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_well"), SubResource("Choice_tired")])
+
+[sub_resource type="Resource" id="Node_player_well"]
+script = ExtResource("2_node")
+node_id = &"player_well"
+speaker_id = &"player"
+speaker_text = "I've been doing well."
+next_node_id = &"npc_well"
+
+[sub_resource type="Resource" id="Node_npc_well"]
+script = ExtResource("2_node")
+node_id = &"npc_well"
+speaker_id = &"npc"
+speaker_text = "I'm glad to hear it."
+terminal = true
+
+[sub_resource type="Resource" id="Node_player_tired"]
+script = ExtResource("2_node")
+node_id = &"player_tired"
+speaker_id = &"player"
+speaker_text = "It's been a long day."
+next_node_id = &"npc_tired"
+
+[sub_resource type="Resource" id="Node_npc_tired"]
+script = ExtResource("2_node")
+node_id = &"npc_tired"
+speaker_id = &"npc"
+speaker_text = "I understand. I hope things settle down for you soon."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"generic_autonomous_check_in"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_player_well"), SubResource("Node_npc_well"), SubResource("Node_player_tired"), SubResource("Node_npc_tired")])

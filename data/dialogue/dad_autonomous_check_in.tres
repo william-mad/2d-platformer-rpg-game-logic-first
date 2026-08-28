@@ -1,0 +1,58 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_fine"]
+script = ExtResource("3_choice")
+choice_id = &"ask_about_hunt"
+text = "Ask what he's hunting."
+next_node_id = &"player_hunt"
+
+[sub_resource type="Resource" id="Choice_time"]
+script = ExtResource("3_choice")
+choice_id = &"tell_him_careful"
+text = "Tell him to be careful."
+next_node_id = &"player_careful"
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"npc"
+speaker_text = "I'm checking the trails outside town later. Something has been driving the smaller monsters closer to the road."
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_fine"), SubResource("Choice_time")])
+
+[sub_resource type="Resource" id="Node_player_fine"]
+script = ExtResource("2_node")
+node_id = &"player_hunt"
+speaker_id = &"player"
+speaker_text = "What are you hunting?"
+next_node_id = &"npc_hunt"
+
+[sub_resource type="Resource" id="Node_npc_fine"]
+script = ExtResource("2_node")
+node_id = &"npc_hunt"
+speaker_id = &"npc"
+speaker_text = "Not sure yet. I'll follow the tracks and keep my distance until I know what made them."
+terminal = true
+
+[sub_resource type="Resource" id="Node_player_time"]
+script = ExtResource("2_node")
+node_id = &"player_careful"
+speaker_id = &"player"
+speaker_text = "Be careful out there."
+next_node_id = &"npc_careful"
+
+[sub_resource type="Resource" id="Node_npc_time"]
+script = ExtResource("2_node")
+node_id = &"npc_careful"
+speaker_id = &"npc"
+speaker_text = "I will. A good hunter comes home; the reckless ones only leave stories."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"dad_autonomous_check_in"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_player_fine"), SubResource("Node_npc_fine"), SubResource("Node_player_time"), SubResource("Node_npc_time")])

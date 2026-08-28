@@ -7,6 +7,7 @@ const EVENT_TARGET_UNAVAILABLE: StringName = &"target_unavailable"
 const EVENT_MOVEMENT_FAILED: StringName = &"movement_failed"
 const EVENT_INTENTION_TARGET_LOST: StringName = &"intention_target_lost"
 const EVENT_HARMED_BY_ACTOR: StringName = &"harmed_by_actor"
+const EVENT_REPRIMAND: StringName = &"reprimand"
 
 const MERGE_INCREMENT: StringName = &"increment"
 
@@ -81,6 +82,16 @@ const POLICIES := {
 		"maximum_occurrences": 8,
 		"debug_feedback_text": "recently harmed",
 	},
+	EVENT_REPRIMAND: {
+		"default_duration_game_hours": 1.5,
+		"default_importance": 0.7,
+		"default_emotional_valence": -0.35,
+		"dedupe_window_game_hours": 0.25,
+		"maximum_lifetime_game_hours": 3.0,
+		"merge_mode": MERGE_INCREMENT,
+		"maximum_occurrences": 6,
+		"debug_feedback_text": "reprimanded",
+	},
 }
 
 
@@ -108,6 +119,8 @@ static func get_dedupe_key(event) -> String:
 			parts.append(String(event.logical_action))
 			parts.append(String(event.place_id))
 		EVENT_HARMED_BY_ACTOR:
+			parts.append(String(event.target_id))
+		EVENT_REPRIMAND:
 			parts.append(String(event.target_id))
 	return "|".join(parts)
 
@@ -142,6 +155,8 @@ static func format_debug_text(descriptor: Dictionary) -> String:
 			return "Lost track of %s" % _or_fallback(target, "target")
 		EVENT_HARMED_BY_ACTOR:
 			return "Recently harmed"
+		EVENT_REPRIMAND:
+			return "Reprimanded %s" % _or_fallback(subject, "someone")
 	return String(policy.get("debug_feedback_text", ""))
 
 

@@ -1,8 +1,8 @@
-[gd_resource type="Resource" script_class="DialogueDefinition" load_steps=12 format=3]
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3 uid="uid://bc4vm48o36kk0"]
 
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+[ext_resource type="Script" uid="uid://bsmeen4ahl14e" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" uid="uid://csithy7k1fddw" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" uid="uid://cytm50bmpbyao" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
 
 [sub_resource type="Resource" id="Choice_help"]
 script = ExtResource("3_choice")
@@ -19,56 +19,56 @@ next_node_id = &"player_done"
 [sub_resource type="Resource" id="Choice_hide"]
 script = ExtResource("3_choice")
 choice_id = &"strategic_retreat"
-text = "I was about to become very busy."
+text = "Can it wait until later?"
 next_node_id = &"player_hide"
 
 [sub_resource type="Resource" id="Node_entry"]
 script = ExtResource("2_node")
 node_id = &"chores"
 speaker_id = &"mom"
-speaker_text = "I have a list, and the list has started looking back at me."
+speaker_text = "I still have a few things to finish around the house. Have you done what you needed to do?"
 choices = Array[ExtResource("3_choice")]([SubResource("Choice_help"), SubResource("Choice_done"), SubResource("Choice_hide")])
 
 [sub_resource type="Resource" id="Node_player_help"]
 script = ExtResource("2_node")
 node_id = &"player_help"
 speaker_id = &"player"
-speaker_text = "Need a hand? We can make the list afraid of us instead."
+speaker_text = "Do you need a hand with anything?"
 next_node_id = &"mom_help"
 
 [sub_resource type="Resource" id="Node_mom_help"]
 script = ExtResource("2_node")
 node_id = &"mom_help"
 speaker_id = &"mom"
-speaker_text = "That's the spirit. I'll save you something satisfyingly dramatic."
+speaker_text = "Thank you. A little help would make the work go much faster."
 terminal = true
 
 [sub_resource type="Resource" id="Node_player_done"]
 script = ExtResource("2_node")
 node_id = &"player_done"
 speaker_id = &"player"
-speaker_text = "I already handled my share. You may inspect the evidence."
+speaker_text = "I already finished my part."
 next_node_id = &"mom_done"
 
 [sub_resource type="Resource" id="Node_mom_done"]
 script = ExtResource("2_node")
 node_id = &"mom_done"
 speaker_id = &"mom"
-speaker_text = "Proactive and confident. Should I be proud or suspicious?"
+speaker_text = "Good. Thank you for taking care of it without being asked."
 terminal = true
 
 [sub_resource type="Resource" id="Node_player_hide"]
 script = ExtResource("2_node")
 node_id = &"player_hide"
 speaker_id = &"player"
-speaker_text = "Fascinating. I suddenly remembered some urgent, distant business."
+speaker_text = "Can it wait until later?"
 next_node_id = &"mom_hide"
 
 [sub_resource type="Resource" id="Node_mom_hide"]
 script = ExtResource("2_node")
 node_id = &"mom_hide"
 speaker_id = &"mom"
-speaker_text = "Run if you like. The list knows where you sleep."
+speaker_text = "For a little while. Just don't leave everything until the end of the day."
 terminal = true
 
 [resource]

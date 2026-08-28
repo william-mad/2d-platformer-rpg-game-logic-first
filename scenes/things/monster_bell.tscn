@@ -1,0 +1,68 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/instances/monster_bell.gd" id="1_bell"]
+[ext_resource type="Script" path="res://player/scripts/damage_area.gd" id="2_damage_area"]
+[ext_resource type="Script" path="res://scripts/systems/npc_radius_event_emitter.gd" id="3_emitter"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_bell"]
+size = Vector2(64, 96)
+
+[node name="MonsterBell" type="Node2D" groups=["attack_target", "monster_bell"]]
+script = ExtResource("1_bell")
+
+[node name="Frame" type="Node2D" parent="."]
+
+[node name="LeftPost" type="Polygon2D" parent="Frame"]
+color = Color(0.27, 0.14, 0.07, 1)
+polygon = PackedVector2Array(-48, -112, -36, -112, -36, 0, -48, 0)
+
+[node name="RightPost" type="Polygon2D" parent="Frame"]
+color = Color(0.27, 0.14, 0.07, 1)
+polygon = PackedVector2Array(36, -112, 48, -112, 48, 0, 36, 0)
+
+[node name="Crossbar" type="Polygon2D" parent="Frame"]
+color = Color(0.38, 0.21, 0.09, 1)
+polygon = PackedVector2Array(-55, -119, 55, -119, 55, -105, -55, -105)
+
+[node name="Base" type="Polygon2D" parent="Frame"]
+color = Color(0.22, 0.12, 0.06, 1)
+polygon = PackedVector2Array(-62, -7, 62, -7, 70, 1, -70, 1)
+
+[node name="BellVisual" type="Node2D" parent="."]
+position = Vector2(0, -102)
+
+[node name="Hanger" type="Polygon2D" parent="BellVisual"]
+color = Color(0.36, 0.22, 0.08, 1)
+polygon = PackedVector2Array(-4, 0, 4, 0, 4, 25, -4, 25)
+
+[node name="Bell" type="Polygon2D" parent="BellVisual"]
+position = Vector2(0, 48)
+color = Color(0.88, 0.66, 0.12, 1)
+polygon = PackedVector2Array(-12, -28, 12, -28, 25, 4, 31, 19, -31, 19, -25, 4)
+
+[node name="BellHighlight" type="Polygon2D" parent="BellVisual"]
+position = Vector2(0, 48)
+color = Color(1, 0.86, 0.31, 1)
+polygon = PackedVector2Array(-9, -23, -3, -25, -12, 12, -20, 13)
+
+[node name="Clapper" type="Polygon2D" parent="BellVisual"]
+position = Vector2(0, 76)
+color = Color(0.3, 0.2, 0.08, 1)
+polygon = PackedVector2Array(-3, -12, 3, -12, 3, 2, 7, 7, -7, 7, -3, 2)
+
+[node name="Damage_Area" type="Area2D" parent="."]
+position = Vector2(0, -57)
+collision_layer = 128
+collision_mask = 0
+script = ExtResource("2_damage_area")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Damage_Area"]
+shape = SubResource("RectangleShape2D_bell")
+
+[node name="NpcRadiusEventEmitter" type="Node" parent="."]
+script = ExtResource("3_emitter")
+event_name = &"monster_bell_rung"
+radius = 1800.0
+state_request = &"ReactToEvent"
+request_priority = 94
+tags = Array[StringName]([&"sound", &"alarm", &"monster_bell"])

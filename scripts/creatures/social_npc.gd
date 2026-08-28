@@ -7,6 +7,9 @@ const PlayerRelationshipPresentation = preload(
 	"res://scripts/systems/npc_player_relationship_presentation.gd"
 )
 const DamageFlash := preload("res://scripts/visual/character_damage_flash.gd")
+const ReprimandCoordinator := preload(
+	"res://scripts/creatures/npc_reprimand_coordinator.gd"
+)
 
 const STORED_ONLY_STAT_KEYS := {
 	"curiosity": true,
@@ -193,6 +196,7 @@ var _active_autonomous_dialogue_session_id: StringName = &""
 var _active_autonomous_talk_session_id: String = ""
 var _active_autonomous_talk_ref: WeakRef
 var _active_autonomous_player_ref: WeakRef
+var _reprimand_coordinator: NpcReprimandCoordinator
 
 
 func _ready() -> void:
@@ -221,11 +225,14 @@ func _ready() -> void:
 	sight_area.body_entered.connect(_on_sight_area_body_entered)
 	sight_area.body_exited.connect(_on_sight_area_body_exited)
 	_setup_state_machine()
+	_setup_reprimands()
 	_setup_event_bus()
 	_setup_autonomous_dialogue()
 
 
 func _exit_tree() -> void:
+	if _reprimand_coordinator != null:
+		_reprimand_coordinator.shutdown()
 	_cancel_active_autonomous_dialogue("npc_exit")
 	_stop_damage_flash()
 	_unregister_location_tracking()
@@ -238,6 +245,11 @@ func on_npc_talk_started(
 	talk_state: NpcStateTalk,
 	_action_name: StringName
 ) -> void:
+	if (
+		_reprimand_coordinator != null
+		and _reprimand_coordinator.handle_talk_started(partner, talk_state)
+	):
+		return
 	if autonomous_dialogue_profile == null:
 		return
 	# Player-selected Talk content is presented by PlayerNpcTalkInteractor. This
@@ -309,6 +321,8 @@ func on_npc_talk_cancelled(
 	talk_state: NpcStateTalk,
 	reason: String
 ) -> void:
+	if _reprimand_coordinator != null:
+		_reprimand_coordinator.handle_talk_cancelled(talk_state, reason)
 	if _active_autonomous_dialogue_session_id == &"":
 		return
 	if _active_autonomous_talk_ref == null or _active_autonomous_talk_ref.get_ref() != talk_state:
@@ -429,6 +443,14 @@ func _move_and_slide_with_rope(
 
 func get_rope_attach_point() -> Node2D:
 	return rope_attach_point if rope_attach_point != null else self
+
+
+func get_rope_weight() -> float:
+	return rope_weight
+
+
+func is_rope_immovable() -> bool:
+	return false
 
 
 func get_rope_status() -> Dictionary:
@@ -654,6 +676,10 @@ func take_damage(
 		_state_machine_active()
 		and npc_state_machine.has_method("apply_explicit_directed_social_event")
 	):
+		var evaluate_damage_reactions := not (
+			_reprimand_coordinator != null
+			and _reprimand_coordinator.has_active_reprimand()
+		)
 		damage_social_result = npc_state_machine.call(
 			"apply_explicit_directed_social_event",
 			damage_stats,
@@ -661,7 +687,8 @@ func take_damage(
 			damage_actor,
 			false,
 			damage_relationship_reason,
-			damage_context
+			damage_context,
+			evaluate_damage_reactions
 		)
 	else:
 		apply_social_event(
@@ -696,9 +723,19 @@ func take_damage(
 		var relationship_snapshot = damage_social_result.get("relationship", {})
 		if not (relationship_snapshot is Dictionary):
 			relationship_snapshot = {}
+		var confrontation_handled := false
+		if damage_came_from_player and _reprimand_coordinator != null:
+			var confrontation_result := _reprimand_coordinator.consider_direct_damage(
+				damage_taken,
+				damage_actor,
+				get_hp(),
+				max_hp
+			)
+			confrontation_handled = bool(confrontation_result.get("handled", false))
 		var relationship_anger := float(relationship_snapshot.get("anger", 0.0))
 		if (
-			npc_state_machine != null
+			not confrontation_handled
+			and npc_state_machine != null
 			and get_hp() > 0.0
 			and relationship_anger_delta > 0.0
 			and relationship_anger >= npc_relationship_fight_anger_threshold
@@ -714,7 +751,8 @@ func take_damage(
 			)
 		var relationship_fear := float(relationship_snapshot.get("fear", 0.0))
 		if (
-			npc_state_machine != null
+			not confrontation_handled
+			and npc_state_machine != null
 			and get_hp() > 0.0
 			and relationship_fear_delta > 0.0
 			and relationship_fear >= npc_relationship_flee_fear_threshold
@@ -1286,6 +1324,10 @@ func has_met_npc(other: Node) -> bool:
 
 func get_hp() -> float:
 	return clampf(float(social_stats.get("hp", max_hp)), 0.0, max_hp)
+
+
+func get_max_hp() -> float:
+	return max_hp
 
 
 func get_knockout() -> float:
@@ -1881,26 +1923,227 @@ func _on_event_bus_event(event_name: StringName, payload: Dictionary) -> void:
 
 	if not _event_reaction_matches(reaction_rule, payload):
 		return
+	if event_name == &"monster_bell_rung":
+		_handle_monster_bell_event(reaction_rule, payload)
+		return
 
 	var actor := _get_event_actor(payload)
 	var stat_delta := _get_rule_dictionary(reaction_rule, "stat_delta")
+	var local_stat_delta := _get_rule_dictionary(reaction_rule, "local_stat_delta")
+	var directed_opinion_delta := _get_rule_dictionary(
+		reaction_rule, "directed_opinion_delta"
+	)
+	var state_name := _get_rule_state_name(reaction_rule)
 
 	# Event reactions are one-shot value changes, so they stay responsive without frame polling.
-	if not stat_delta.is_empty():
+	if not local_stat_delta.is_empty() or not directed_opinion_delta.is_empty():
+		_apply_explicit_event_deltas(
+			local_stat_delta,
+			directed_opinion_delta,
+			actor,
+			event_name,
+			state_name == &""
+		)
+	elif not stat_delta.is_empty():
 		apply_social_event(
 			stat_delta,
 			actor,
-			bool(reaction_rule.get("requires_actor_visibility", false))
+			bool(reaction_rule.get("requires_actor_visibility", false)),
+			"event_bus:%s" % String(event_name),
+			{"source": "event_bus", "event_name": String(event_name)}
 		)
 
-	var state_name := _get_rule_state_name(reaction_rule)
-	if state_name != &"" and npc_state_machine != null:
+	if (
+		state_name != &""
+		and npc_state_machine != null
+		and not _event_reaction_state_is_redundant_during_fight(state_name)
+	):
 		npc_state_machine.request_state(
 			state_name,
 			actor,
 			"event_bus:%s" % String(event_name),
 			int(reaction_rule.get("priority", 0))
 		)
+	if (
+		event_name == &"damage_dealt"
+		and _reprimand_coordinator != null
+	):
+		_reprimand_coordinator.consider_witnessed_damage(payload)
+
+
+func _handle_monster_bell_event(
+	reaction_rule: Dictionary,
+	payload: Dictionary
+) -> void:
+	var monster := _find_monster_for_bell(payload)
+	if monster != null:
+		if npc_state_machine != null:
+			npc_state_machine.request_monster_reaction(
+				monster,
+				"event_bus:monster_bell_rung",
+				int(reaction_rule.get("priority", 94))
+			)
+		return
+
+	# A false alarm first gets the ordinary brief sound reaction. The reprimand
+	# coordinator waits for ReactToEvent to finish before its existing Talk state
+	# approaches the responsible Player.
+	var reaction_target := _get_payload_node(payload, "source") as Node2D
+	if reaction_target == null:
+		reaction_target = _get_payload_node(payload, "target") as Node2D
+	var state_name := _get_rule_state_name(reaction_rule)
+	if (
+		state_name != &""
+		and npc_state_machine != null
+		and not _event_reaction_state_is_redundant_during_fight(state_name)
+	):
+		npc_state_machine.request_state(
+			state_name,
+			reaction_target,
+			"event_bus:monster_bell_false_alarm",
+			int(payload.get("false_alarm_reaction_priority", 45))
+		)
+
+	var actor := _get_payload_node(payload, "actor") as Node2D
+	if actor == null or not actor.is_in_group("player"):
+		return
+	var opinion_delta := _get_rule_dictionary(
+		reaction_rule, "false_alarm_directed_opinion_delta"
+	)
+	if opinion_delta.is_empty():
+		opinion_delta = _get_rule_dictionary(
+			payload, "false_alarm_directed_opinion_delta"
+		)
+	_apply_explicit_event_deltas(
+		{}, opinion_delta, actor, &"monster_bell_false_alarm", false
+	)
+	if _reprimand_coordinator != null:
+		_reprimand_coordinator.consider_false_monster_alarm(payload)
+
+
+func _event_reaction_state_is_redundant_during_fight(
+	state_name: StringName
+) -> bool:
+	# Fight already owns movement, facing, and interruption policy. Keep processing
+	# the event and its social consequences, but do not build a transient reaction
+	# intent which Fight cannot use and would ordinarily reject.
+	return (
+		state_name == &"ReactToEvent"
+		and npc_state_machine != null
+		and npc_state_machine.is_primary_state(&"Fight")
+	)
+
+
+func _find_monster_for_bell(payload: Dictionary) -> Node2D:
+	var event_actor := _get_payload_node(payload, "actor") as Node2D
+	if _is_live_monster_for_bell(event_actor):
+		return event_actor
+	if npc_state_machine == null or get_tree() == null:
+		return null
+
+	var event_position := global_position
+	var position_value = payload.get("position", null)
+	if position_value is Vector2:
+		event_position = position_value
+	var closest: Node2D
+	var closest_distance_squared := INF
+	var considered: Dictionary = {}
+	for group_name in npc_state_machine.monster_target_groups:
+		for candidate_value in get_tree().get_nodes_in_group(String(group_name)):
+			var candidate := candidate_value as Node2D
+			if candidate == null or considered.has(candidate.get_instance_id()):
+				continue
+			considered[candidate.get_instance_id()] = true
+			if not _is_live_monster_for_bell(candidate):
+				continue
+			var distance_squared := event_position.distance_squared_to(
+				candidate.global_position
+			)
+			if distance_squared < closest_distance_squared:
+				closest_distance_squared = distance_squared
+				closest = candidate
+	return closest
+
+
+func _is_live_monster_for_bell(candidate: Node2D) -> bool:
+	if (
+		candidate == null
+		or not is_instance_valid(candidate)
+		or candidate.is_queued_for_deletion()
+		or npc_state_machine == null
+		or not npc_state_machine.is_monster_target(candidate)
+	):
+		return false
+	var scene_root := get_tree().current_scene if get_tree() != null else null
+	if scene_root != null and candidate != scene_root and not scene_root.is_ancestor_of(candidate):
+		return false
+	if candidate.has_method("get_current_health"):
+		return float(candidate.call("get_current_health")) > 0.0
+	return true
+
+
+func _apply_explicit_event_deltas(
+	local_stat_delta: Dictionary,
+	directed_opinion_delta: Dictionary,
+	actor: Node2D,
+	event_name: StringName,
+	evaluate_reactions: bool
+) -> void:
+	var safe_directed_delta := (
+		directed_opinion_delta if actor != null else {}
+	)
+	var reason := "event_bus:%s" % String(event_name)
+	var context := {"source": "event_bus", "event_name": String(event_name)}
+	if (
+		_state_machine_active()
+		and npc_state_machine.has_method("apply_explicit_directed_social_event")
+	):
+		npc_state_machine.call(
+			"apply_explicit_directed_social_event",
+			local_stat_delta,
+			safe_directed_delta,
+			actor,
+			false,
+			reason,
+			context,
+			evaluate_reactions
+		)
+		return
+
+	if not local_stat_delta.is_empty():
+		apply_social_event(local_stat_delta, actor, false, reason, context)
+	if safe_directed_delta.is_empty():
+		return
+	var routed := SocialWriteRouter.route_explicit_directed_delta(
+		self,
+		actor,
+		{},
+		safe_directed_delta,
+		_get_relationship_system(),
+		reason,
+		context
+	)
+	if evaluate_reactions and bool(routed.get("directed_applied", false)):
+		var changes: Dictionary = routed.get("directed_changes", {})
+		_react_to_event(actor, float(changes.get("favor", 0.0)))
+
+
+func _setup_reprimands() -> void:
+	_reprimand_coordinator = ReprimandCoordinator.new()
+	_reprimand_coordinator.bind(self, npc_state_machine, player_talk_dialogue_profile)
+
+
+func _try_begin_pending_reprimand() -> void:
+	if _reprimand_coordinator != null:
+		_reprimand_coordinator.try_begin_pending_reprimand()
+
+
+func get_reprimand_context() -> Dictionary:
+	return (
+		_reprimand_coordinator.get_active_context()
+		if _reprimand_coordinator != null
+		else {}
+	)
 
 
 func _is_monster_damage_source(source: Node) -> bool:
@@ -1933,6 +2176,13 @@ func _get_payload_reaction_rule(payload: Dictionary) -> Dictionary:
 		"scope": payload.get("scope", "global"),
 		"radius": float(payload.get("radius", 0.0)),
 		"stat_delta": _get_rule_dictionary(payload, "stat_delta"),
+		"local_stat_delta": _get_rule_dictionary(payload, "local_stat_delta"),
+		"directed_opinion_delta": _get_rule_dictionary(
+			payload, "directed_opinion_delta"
+		),
+		"false_alarm_directed_opinion_delta": _get_rule_dictionary(
+			payload, "false_alarm_directed_opinion_delta"
+		),
 		"state_request": payload.get("state_request", &""),
 		"priority": int(payload.get("priority", 0)),
 		"required_tags": payload.get("required_tags", []),
@@ -1941,7 +2191,15 @@ func _get_payload_reaction_rule(payload: Dictionary) -> Dictionary:
 		"ignore_self_as_target": bool(payload.get("ignore_self_as_target", false)),
 	}
 
-	if _get_rule_dictionary(reaction_rule, "stat_delta").is_empty() and _get_rule_state_name(reaction_rule) == &"":
+	if (
+		_get_rule_dictionary(reaction_rule, "stat_delta").is_empty()
+		and _get_rule_dictionary(reaction_rule, "local_stat_delta").is_empty()
+		and _get_rule_dictionary(reaction_rule, "directed_opinion_delta").is_empty()
+		and _get_rule_dictionary(
+			reaction_rule, "false_alarm_directed_opinion_delta"
+		).is_empty()
+		and _get_rule_state_name(reaction_rule) == &""
+	):
 		return {}
 
 	return reaction_rule
@@ -2026,7 +2284,15 @@ func _can_see_event_node(event_node: Node2D) -> bool:
 
 
 func _is_inside_event_radius(reaction_rule: Dictionary, payload: Dictionary) -> bool:
-	var radius := float(reaction_rule.get("radius", payload.get("radius", 0.0)))
+	# The emitter owns how far this occurrence travels. A receiver-authored radius
+	# remains a compatibility cap, rather than replacing the emitted sound radius.
+	var radius := float(payload.get("radius", 0.0))
+	if reaction_rule.has("radius"):
+		var receiver_radius := float(reaction_rule.get("radius", 0.0))
+		if radius <= 0.0:
+			radius = receiver_radius
+		elif receiver_radius > 0.0:
+			radius = minf(radius, receiver_radius)
 	if radius <= 0.0:
 		return false
 

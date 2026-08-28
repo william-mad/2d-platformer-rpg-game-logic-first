@@ -1,40 +1,40 @@
-[gd_resource type="Resource" script_class="DialogueDefinition" load_steps=6 format=3]
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3 uid="uid://dgr8l2vnunlaj"]
 
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+[ext_resource type="Script" uid="uid://bsmeen4ahl14e" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" uid="uid://csithy7k1fddw" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" uid="uid://cytm50bmpbyao" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
 
 [sub_resource type="Resource" id="Choice_good"]
 script = ExtResource("3_choice")
 choice_id = &"good_to_hear"
-text = "Good to hear."
+text = "Say you're doing well."
 next_node_id = &"good"
 
 [sub_resource type="Resource" id="Choice_more"]
 script = ExtResource("3_choice")
 choice_id = &"tell_me_more"
-text = "Tell me more."
+text = "Say you've been busy."
 next_node_id = &"more"
 
 [sub_resource type="Resource" id="Node_entry"]
 script = ExtResource("2_node")
 node_id = &"entry"
 speaker_id = &"npc"
-speaker_text = "Nothing dramatic today. Honestly, a quiet minute with you is rather nice."
+speaker_text = "Things have been quiet today. How have you been?"
 choices = Array[ExtResource("3_choice")]([SubResource("Choice_good"), SubResource("Choice_more")])
 
 [sub_resource type="Resource" id="Node_good"]
 script = ExtResource("2_node")
 node_id = &"good"
 speaker_id = &"npc"
-speaker_text = "Don't sound so surprised. I can be pleasant when the mood takes me."
+speaker_text = "I'm glad to hear it. I hope the rest of your day goes well too."
 terminal = true
 
 [sub_resource type="Resource" id="Node_more"]
 script = ExtResource("2_node")
 node_id = &"more"
 speaker_id = &"npc"
-speaker_text = "Maybe later. For now, I'm enjoying not having a crisis to report."
+speaker_text = "I know the feeling. It's good to stop for a moment now and then."
 terminal = true
 
 [resource]

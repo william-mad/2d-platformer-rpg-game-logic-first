@@ -535,6 +535,14 @@ func _move_and_slide_with_rope(delta: float) -> void:
 	_update_run_animation_playback(delta)
 
 
+func get_rope_weight() -> float:
+	return rope_weight
+
+
+func is_rope_immovable() -> bool:
+	return false
+
+
 func initialize_states () -> void:
 	states = []
 	for c in $States.get_children():

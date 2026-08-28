@@ -21,9 +21,22 @@ class TestBody:
 	func get_rope_attach_point() -> Node2D:
 		return rope_attach_point
 
+	func get_rope_weight() -> float:
+		return rope_weight
+
+	func is_rope_immovable() -> bool:
+		return false
+
 
 class TestNpcWithoutWeight:
 	extends CharacterBody2D
+
+
+class LegacyPropertyBody:
+	extends CharacterBody2D
+
+	var rope_weight: float = 3.25
+	var rope_immovable: bool = true
 
 
 func _initialize() -> void:
@@ -52,6 +65,7 @@ func _initialize() -> void:
 	await _test_maximum_tension_snaps_cleanly_with_feedback()
 	_test_npc_rope_status_notifications()
 	_test_closest_target_uses_the_attachment_point()
+	_test_rope_body_capability_contract()
 	_test_npc_default_weight_and_scene_contract()
 
 	if _failures.is_empty():
@@ -1659,6 +1673,40 @@ func _test_closest_target_uses_the_attachment_point() -> void:
 	_clear_fixture()
 
 
+func _test_rope_body_capability_contract() -> void:
+	var player := Player.new()
+	player.rope_weight = 1.75
+	_expect(
+		player.has_method("get_rope_weight")
+		and player.has_method("is_rope_immovable"),
+		"the Player exposes the fast rope-body capability methods"
+	)
+	_expect_close(
+		Rope._get_rope_weight(player),
+		1.75,
+		0.001,
+		"the Player rope capability preserves its configured weight"
+	)
+	_expect(
+		not Rope._is_rope_immovable(player),
+		"the Player rope capability keeps the Player movable"
+	)
+	player.free()
+
+	var legacy_body := LegacyPropertyBody.new()
+	_expect_close(
+		Rope._get_rope_weight(legacy_body),
+		3.25,
+		0.001,
+		"legacy rope bodies can still expose weight as a property"
+	)
+	_expect(
+		Rope._is_rope_immovable(legacy_body),
+		"legacy rope bodies can still expose immovability as a property"
+	)
+	legacy_body.free()
+
+
 func _test_npc_default_weight_and_scene_contract() -> void:
 	var actor := _make_body(Vector2.ZERO, 1.0)
 	var npc := TestNpcWithoutWeight.new()
@@ -1722,6 +1770,21 @@ func _test_npc_default_weight_and_scene_contract() -> void:
 			2.0,
 			0.001,
 			"%s defaults to average NPC weight" % scene_path
+		)
+		_expect(
+			scene_root.has_method("get_rope_weight")
+			and scene_root.has_method("is_rope_immovable"),
+			"%s exposes the fast rope-body capability methods" % scene_path
+		)
+		_expect_close(
+			Rope._get_rope_weight(scene_root),
+			2.0,
+			0.001,
+			"%s reports its configured weight through the rope contract" % scene_path
+		)
+		_expect(
+			not Rope._is_rope_immovable(scene_root),
+			"%s remains movable through the rope contract" % scene_path
 		)
 		scene_root.free()
 

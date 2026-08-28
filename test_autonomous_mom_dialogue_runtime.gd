@@ -32,6 +32,7 @@ func _initialize() -> void:
 	_expect(profile != null and profile.get_validation_error().is_empty(), "Mom profile validates")
 	_expect(profile != null and profile.conversations.size() == 7, "Mom profile contains seven conversations")
 	_test_no_immediate_pool_repeat(profile)
+	_test_value_rule_preserves_autonomous_source(machine, talk_state, player, controller)
 
 	machine.values["talk_need"] = 80.0
 	machine.values["boredom"] = 55.0
@@ -124,6 +125,43 @@ func _initialize() -> void:
 	)
 
 	_finish()
+
+
+func _test_value_rule_preserves_autonomous_source(
+	machine: NpcStateMachine,
+	talk_state: NpcStateTalk,
+	player: Node2D,
+	controller: Node
+) -> void:
+	machine.value_reactions_enabled = true
+	machine.values["talk_need"] = 80.0
+	machine.values["hunger"] = 0.0
+	machine.values["tired"] = 0.0
+	machine.values["sleep_need"] = 0.0
+	machine.values["knockout"] = 0.0
+	_expect(
+		machine.evaluate_value_reactions(player, {}),
+		"the social-need value rule starts Talk with its seen Player target"
+	)
+	_expect(
+		machine.get_active_interaction_source() == &"social_ai",
+		"the social-need Talk keeps its explicit autonomous source"
+	)
+	_expect(
+		bool(controller.call("is_dialogue_active")),
+		"the preserved autonomous source opens Mom's dialogue"
+	)
+	if bool(controller.call("is_dialogue_active")):
+		var report: Dictionary = controller.call("dump_active_dialogue")
+		_expect(
+			StringName(report.get("session_mode", &"")) == &"autonomous_talk",
+			"the value-rule conversation uses autonomous-Talk presentation"
+		)
+		controller.call("cancel_dialogue", "value_rule_source_test_cleanup")
+	machine._physics_process(0.01)
+	_expect(machine.interaction_overlay == null, "value-rule Talk cleanup closes its overlay")
+	_expect(not talk_state.talk_completed_successfully, "test cleanup grants no Talk payout")
+	machine.value_reactions_enabled = false
 
 
 func _test_no_immediate_pool_repeat(profile: NpcAutonomousDialogueProfile) -> void:

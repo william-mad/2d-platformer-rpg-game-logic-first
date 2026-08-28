@@ -92,6 +92,49 @@ func observe_damage_dealt(
 	})
 
 
+func observe_reprimand(
+	offender: Node,
+	context: Dictionary,
+	semantic_outcome: StringName,
+	resolution: StringName,
+	action_session_id: String = ""
+) -> Dictionary:
+	if _memory == null or _machine == null:
+		return {"accepted": false, "reason": "observer_unbound"}
+	var remembering_npc := _machine.npc
+	if remembering_npc == null or not is_instance_valid(remembering_npc):
+		return {"accepted": false, "reason": "invalid_remembering_npc"}
+	if offender == null or not is_instance_valid(offender) or offender == remembering_npc:
+		return {"accepted": false, "reason": "invalid_reprimand_offender"}
+
+	var offender_id := PlayerInteractionMemoryPolicy.get_stable_actor_id(offender)
+	var remembering_id := PlayerInteractionMemoryPolicy.get_stable_actor_id(
+		remembering_npc
+	)
+	if offender_id == &"" or remembering_id == &"":
+		return {"accepted": false, "reason": "missing_stable_actor_identity"}
+	var source_event = context.get("source_event", {})
+	var event_snapshot: Dictionary = (
+		source_event.duplicate(true) if source_event is Dictionary else {}
+	)
+	return _memory.remember_event(MemoryPolicy.EVENT_REPRIMAND, {
+		"source": "reprimand_dialogue",
+		"reason_code": StringName(String(context.get("reason", &""))),
+		"subject_id": offender_id,
+		"target_id": remembering_id,
+		"logical_action": &"Reprimand",
+		"action_session_id": action_session_id,
+		"now_game_hours": _get_current_game_hours(),
+		"metadata": {
+			"semantic_outcome": String(semantic_outcome),
+			"resolution": String(resolution),
+			"severity": float(context.get("severity", 0.0)),
+			"offense_count": int(context.get("offense_count", 1)),
+			"source_event": event_snapshot,
+		},
+	})
+
+
 func observe_action_terminal(
 	session_descriptor: Dictionary,
 	intent_descriptor: Dictionary,

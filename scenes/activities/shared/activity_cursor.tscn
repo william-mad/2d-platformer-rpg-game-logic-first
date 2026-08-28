@@ -1,0 +1,25 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/activities/shared/activity_cursor.gd" id="1_cursor"]
+
+[node name="ActivityCursor" type="Node2D"]
+z_index = 20
+script = ExtResource("1_cursor")
+
+[node name="Glow" type="Polygon2D" parent="."]
+polygon = PackedVector2Array(18, 0, 12.73, 12.73, 0, 18, -12.73, 12.73, -18, 0, -12.73, -12.73, 0, -18, 12.73, -12.73)
+color = Color(0.78, 0.46, 1, 0.3)
+
+[node name="Core" type="Polygon2D" parent="."]
+polygon = PackedVector2Array(11, 0, 4, 4, 0, 11, -4, 4, -11, 0, -4, -4, 0, -11, 4, -4)
+color = Color(0.94, 0.82, 1, 1)
+
+[node name="Horizontal" type="Line2D" parent="."]
+points = PackedVector2Array(-15, 0, 15, 0)
+width = 2.0
+default_color = Color(1, 0.92, 1, 0.95)
+
+[node name="Vertical" type="Line2D" parent="."]
+points = PackedVector2Array(0, -15, 0, 15)
+width = 2.0
+default_color = Color(1, 0.92, 1, 0.95)

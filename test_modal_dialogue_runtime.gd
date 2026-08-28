@@ -76,6 +76,32 @@ func _initialize() -> void:
 
 	var dialogue_ui := controller.get_node("ModalDialogueUI") as ModalDialogueUI
 	_expect(dialogue_ui.visible and dialogue_ui.input_enabled, "dialogue UI is visible and accepts input")
+	_expect(
+		dialogue_ui.portrait_texture.texture == mom.player_talk_dialogue_profile.portrait,
+		"scripted Mom dialogue reuses her configured portrait"
+	)
+	var portrait_animation_report := (
+		dialogue_ui.portrait_presenter.get_portrait_animation_report()
+	)
+	_expect(
+		bool(portrait_animation_report.get("configured", false))
+		and bool(portrait_animation_report.get("talking", false)),
+		"scripted Mom dialogue starts the layered speaking animation"
+	)
+	var pending_choice := dialogue_ui.choice_container.get_child(0) as Button
+	_expect(
+		pending_choice != null
+		and not dialogue_ui.choice_container.visible
+		and pending_choice.disabled,
+		"answers stay hidden and disabled while Mom's line types"
+	)
+	dialogue_ui._process(10.0)
+	_expect(
+		dialogue_ui.choice_container.visible
+		and pending_choice != null
+		and not pending_choice.disabled,
+		"answers appear only after Mom's line finishes"
+	)
 	await process_frame
 	var focus_owner := root.gui_get_focus_owner()
 	_expect(focus_owner is Button, "first dialogue choice receives keyboard/gamepad focus")

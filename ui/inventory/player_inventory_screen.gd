@@ -1,6 +1,8 @@
 class_name PlayerInventoryScreen
 extends Control
 
+signal close_requested
+
 const SLOT_SCENE: PackedScene = preload("res://ui/inventory/inventory_item_slot.tscn")
 const LOOT_SCENE: PackedScene = preload("res://scenes/items/world_loot_container.tscn")
 
@@ -15,6 +17,7 @@ const LOOT_SCENE: PackedScene = preload("res://scenes/items/world_loot_container
 @onready var dump_quantity: SpinBox = %DumpQuantity
 @onready var dump_button: Button = %DumpButton
 @onready var feedback_label: Label = %FeedbackLabel
+@onready var close_button: Button = %CloseButton
 
 var _inventory: InventoryModel
 var _player_owner: Node2D
@@ -29,6 +32,7 @@ var _food_service := FoodConsumptionService.new()
 func _ready() -> void:
 	visible = false
 	dump_button.pressed.connect(_on_dump_pressed)
+	close_button.pressed.connect(func() -> void: close_requested.emit())
 	consume_button.pressed.connect(_on_consume_pressed)
 	equipment_button.pressed.connect(_on_equipment_pressed)
 	dump_quantity.value_changed.connect(func(_value: float) -> void: _refresh_dump_controls())
@@ -91,6 +95,58 @@ func is_open() -> bool:
 	return visible
 
 
+func _unhandled_input(event: InputEvent) -> void:
+	if not visible:
+		return
+	var key_event := event as InputEventKey
+	if key_event != null and key_event.echo:
+		return
+	var focused := get_viewport().gui_get_focus_owner()
+	if focused is InventoryItemSlot and focused in _slots:
+		if _move_slot_focus(focused, event):
+			get_viewport().set_input_as_handled()
+		return
+	if focused != _get_quantity_focus_control():
+		return
+	if event.is_action_pressed(&"ui_left"):
+		dump_quantity.value = maxf(dump_quantity.value - 1.0, dump_quantity.min_value)
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed(&"ui_right"):
+		dump_quantity.value = minf(dump_quantity.value + 1.0, dump_quantity.max_value)
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed(&"ui_up"):
+		_focus_detail_control_before_quantity()
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed(&"ui_down"):
+		_defer_focus(dump_button if not dump_button.disabled else close_button)
+		get_viewport().set_input_as_handled()
+
+
+func _move_slot_focus(slot: InventoryItemSlot, event: InputEvent) -> bool:
+	var index := _slots.find(slot)
+	if index < 0:
+		return false
+	var columns := items_grid.columns
+	var column := index % columns
+	if event.is_action_pressed(&"ui_left") and column > 0:
+		_defer_focus(_slots[index - 1])
+		return true
+	if event.is_action_pressed(&"ui_right"):
+		if index + 1 < _slots.size() and column < columns - 1:
+			_defer_focus(_slots[index + 1])
+		else:
+			var detail_controls := _get_detail_focus_controls()
+			_defer_focus(detail_controls[0] if not detail_controls.is_empty() else close_button)
+		return true
+	if event.is_action_pressed(&"ui_up"):
+		_defer_focus(_slots[index - columns] if index >= columns else close_button)
+		return true
+	if event.is_action_pressed(&"ui_down"):
+		_defer_focus(_slots[index + columns] if index + columns < _slots.size() else close_button)
+		return true
+	return false
+
+
 func _refresh_items() -> void:
 	_clear_slots()
 	_display_dirty = false
@@ -120,12 +176,14 @@ func _refresh_items() -> void:
 	if not _has_slot(_selected_item_id):
 		_selected_item_id = _slots[0].item_id if not _slots.is_empty() else &""
 	_refresh_details(_get_selected_slot())
+	_configure_focus_navigation()
 	_focus_selected_or_first()
 
 
 func _on_slot_inspected(slot: InventoryItemSlot) -> void:
 	_selected_item_id = slot.item_id
 	_refresh_details(slot)
+	_configure_focus_navigation()
 
 
 func _refresh_details(slot: InventoryItemSlot) -> void:
@@ -349,3 +407,64 @@ func _focus_current_slot() -> void:
 		slot = _slots[0]
 	if slot != null and is_instance_valid(slot) and slot.is_inside_tree():
 		slot.grab_focus()
+	elif close_button != null:
+		close_button.grab_focus()
+
+
+func _configure_focus_navigation() -> void:
+	var selected := _get_selected_slot()
+	var detail_controls := _get_detail_focus_controls()
+	var first_detail: Control = detail_controls[0] if not detail_controls.is_empty() else close_button
+	for index in _slots.size():
+		var slot := _slots[index]
+		var column := index % items_grid.columns
+		var next_index := index + 1
+		if next_index < _slots.size() and column < items_grid.columns - 1:
+			slot.focus_neighbor_right = slot.get_path_to(_slots[next_index])
+		else:
+			slot.focus_neighbor_right = slot.get_path_to(first_detail)
+		if index + items_grid.columns >= _slots.size():
+			slot.focus_neighbor_bottom = slot.get_path_to(close_button)
+	for index in detail_controls.size():
+		var control := detail_controls[index]
+		var previous: Control = selected if index == 0 and selected != null else (
+			detail_controls[index - 1] if index > 0 else close_button
+		)
+		var next: Control = close_button if index == detail_controls.size() - 1 else detail_controls[index + 1]
+		control.focus_neighbor_top = control.get_path_to(previous)
+		control.focus_neighbor_bottom = control.get_path_to(next)
+		if selected != null:
+			control.focus_neighbor_left = control.get_path_to(selected)
+	if not _slots.is_empty():
+		close_button.focus_neighbor_top = close_button.get_path_to(_slots[-1])
+		close_button.focus_neighbor_bottom = close_button.get_path_to(_slots[0])
+
+
+func _get_detail_focus_controls() -> Array[Control]:
+	var controls: Array[Control] = []
+	if consume_button.visible and not consume_button.disabled:
+		controls.append(consume_button)
+	if equipment_button.visible and not equipment_button.disabled:
+		controls.append(equipment_button)
+	controls.append(_get_quantity_focus_control())
+	if not dump_button.disabled:
+		controls.append(dump_button)
+	return controls
+
+
+func _focus_detail_control_before_quantity() -> void:
+	var controls := _get_detail_focus_controls()
+	var quantity_index := controls.find(_get_quantity_focus_control())
+	if quantity_index > 0:
+		_defer_focus(controls[quantity_index - 1])
+	else:
+		_defer_focus(_get_selected_slot() if _get_selected_slot() != null else close_button)
+
+
+func _defer_focus(control: Control) -> void:
+	if control != null:
+		control.grab_focus.call_deferred()
+
+
+func _get_quantity_focus_control() -> Control:
+	return dump_quantity.get_line_edit()

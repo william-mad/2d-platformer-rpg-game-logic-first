@@ -1,36 +1,38 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://b7rgnlf1raafv"]
 
-[ext_resource type="Script" path="res://scripts/instances/npc_work_spot.gd" id="1_work_spot"]
+[ext_resource type="Script" uid="uid://cuxupj55vjbvt" path="res://scripts/instances/npc_work_spot.gd" id="1_work_spot"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_work_spot"]
-size = Vector2(128, 88)
+size = Vector2(68, 44)
 
-[node name="NpcWorkSpot" type="Area2D"]
+[node name="NpcWorkSpot" type="Area2D" unique_id=152800065]
 collision_layer = 0
 collision_mask = 6
 monitorable = false
 script = ExtResource("1_work_spot")
 label_prefix = "Work Needed"
 
-[node name="ZoneVisual" type="Polygon2D" parent="."]
+[node name="ZoneVisual" type="Polygon2D" parent="." unique_id=2072820335]
 unique_name_in_owner = true
+position = Vector2(-1.9073486e-06, 0)
+scale = Vector2(0.53125, 0.5)
 color = Color(0.95, 0.12, 0.08, 0.54)
 polygon = PackedVector2Array(-64, -44, 64, -44, 64, 44, -64, 44)
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=746575402]
 shape = SubResource("RectangleShape2D_work_spot")
 debug_color = Color(0.18, 0.82, 0.28, 0.25)
 
-[node name="Label" type="Label" parent="."]
+[node name="Label" type="Label" parent="." unique_id=509249384]
 unique_name_in_owner = true
 offset_left = -74.0
 offset_top = -78.0
 offset_right = 74.0
 offset_bottom = -44.0
-text = "Work Needed"
-horizontal_alignment = 1
-vertical_alignment = 1
 theme_override_colors/font_color = Color(1, 1, 1, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
 theme_override_constants/shadow_offset_x = 1
 theme_override_constants/shadow_offset_y = 1
+text = "Work Needed"
+horizontal_alignment = 1
+vertical_alignment = 1

@@ -1,7 +1,7 @@
-[gd_resource type="Resource" script_class="NpcPlayerTalkDialogueProfile" load_steps=13 format=3]
+[gd_resource type="Resource" script_class="NpcPlayerTalkDialogueProfile" load_steps=20 format=3]
 
 [ext_resource type="Script" path="res://scripts/resources/dialogue/npc_player_talk_dialogue_profile.gd" id="1_profile"]
-[ext_resource type="Texture2D" path="res://images/dialog/mom/portrait_1_mom7.png" id="2_portrait"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/portrait_2_mom.png" id="2_portrait"]
 [ext_resource type="Resource" path="res://data/dialogue/mom_player_talk_casual_tea.tres" id="3_casual_a"]
 [ext_resource type="Resource" path="res://data/dialogue/mom_player_talk_casual_weather.tres" id="4_casual_b"]
 [ext_resource type="Resource" path="res://data/dialogue/mom_player_talk_compliment_sweet.tres" id="5_compliment_a"]
@@ -12,6 +12,13 @@
 [ext_resource type="Resource" path="res://data/dialogue/mom_player_talk_insult_attention.tres" id="10_insult_b"]
 [ext_resource type="Resource" path="res://data/dialogue/mom_player_talk_gossip_chore.tres" id="11_gossip_a"]
 [ext_resource type="Resource" path="res://data/dialogue/mom_player_talk_gossip_kindness.tres" id="12_gossip_b"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_reprimand_attacked_me_watch_it.tres" id="13_reprimand_hit_a"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_reprimand_attacked_me_slime.tres" id="14_reprimand_hit_b"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_reprimand_repeated_offense.tres" id="15_reprimand_repeat"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_reprimand_attacked_friend.tres" id="16_reprimand_friend"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_reprimand_false_monster_alarm_running.tres" id="17_false_alarm_a"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_reprimand_false_monster_alarm_empty.tres" id="18_false_alarm_b"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_dialogue_portrait_animation.tres" id="19_portrait_animation"]
 
 [resource]
 script = ExtResource("1_profile")
@@ -20,8 +27,15 @@ speaker_name = "Mom"
 player_speaker_id = &"player"
 player_speaker_name = "Player"
 portrait = ExtResource("2_portrait")
+portrait_animation = ExtResource("19_portrait_animation")
 casual_responses = Array[ExtResource("3_casual_a")]([ExtResource("3_casual_a"), ExtResource("4_casual_b")])
 compliment_responses = Array[ExtResource("5_compliment_a")]([ExtResource("5_compliment_a"), ExtResource("6_compliment_b")])
 flirt_responses = Array[ExtResource("7_flirt_a")]([ExtResource("7_flirt_a"), ExtResource("8_flirt_b")])
 insult_responses = Array[ExtResource("9_insult_a")]([ExtResource("9_insult_a"), ExtResource("10_insult_b")])
 gossip_responses = Array[ExtResource("11_gossip_a")]([ExtResource("11_gossip_a"), ExtResource("12_gossip_b")])
+reprimand_responses = {
+"attacked_friend": [ExtResource("16_reprimand_friend")],
+"attacked_me": [ExtResource("13_reprimand_hit_a"), ExtResource("14_reprimand_hit_b")],
+"false_monster_alarm": [ExtResource("17_false_alarm_a"), ExtResource("18_false_alarm_b")],
+"repeated_offense": [ExtResource("15_reprimand_repeat")]
+}

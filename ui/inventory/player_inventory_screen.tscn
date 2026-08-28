@@ -3,12 +3,12 @@
 [ext_resource type="Script" path="res://ui/inventory/player_inventory_screen.gd" id="1_screen"]
 
 [sub_resource type="StyleBoxFlat" id="Panel"]
-bg_color = Color(0.055, 0.065, 0.085, 0.98)
+bg_color = Color(0.917647, 0.85098, 0.678431, 0.99)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
-border_color = Color(0.42, 0.54, 0.68, 0.9)
+border_color = Color(0.501961, 0.4, 0.278431, 1)
 corner_radius_top_left = 8
 corner_radius_top_right = 8
 corner_radius_bottom_right = 8
@@ -34,7 +34,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-color = Color(0, 0, 0, 0.55)
+color = Color(0.14902, 0.192157, 0.180392, 0.62)
 
 [node name="Center" type="CenterContainer" parent="."]
 layout_mode = 1
@@ -45,34 +45,34 @@ grow_horizontal = 2
 grow_vertical = 2
 
 [node name="Panel" type="PanelContainer" parent="Center"]
-custom_minimum_size = Vector2(820, 520)
+custom_minimum_size = Vector2(730, 460)
 layout_mode = 2
 theme_override_styles/panel = SubResource("Panel")
 
 [node name="Margin" type="MarginContainer" parent="Center/Panel"]
 layout_mode = 2
-theme_override_constants/margin_left = 24
-theme_override_constants/margin_top = 20
-theme_override_constants/margin_right = 24
-theme_override_constants/margin_bottom = 18
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 12
 
 [node name="Root" type="VBoxContainer" parent="Center/Panel/Margin"]
 layout_mode = 2
-theme_override_constants/separation = 12
+theme_override_constants/separation = 8
 
 [node name="Header" type="Label" parent="Center/Panel/Margin/Root"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 26
+theme_type_variation = &"MenuTitle"
 text = "INVENTORY"
 horizontal_alignment = 1
 
 [node name="Content" type="HBoxContainer" parent="Center/Panel/Margin/Root"]
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_constants/separation = 20
+theme_override_constants/separation = 14
 
 [node name="Scroll" type="ScrollContainer" parent="Center/Panel/Margin/Root/Content"]
-custom_minimum_size = Vector2(500, 380)
+custom_minimum_size = Vector2(470, 330)
 layout_mode = 2
 size_flags_horizontal = 3
 
@@ -95,12 +95,12 @@ theme_override_constants/h_separation = 8
 theme_override_constants/v_separation = 8
 
 [node name="Details" type="VBoxContainer" parent="Center/Panel/Margin/Root/Content"]
-custom_minimum_size = Vector2(250, 0)
+custom_minimum_size = Vector2(205, 0)
 layout_mode = 2
 
 [node name="DetailsLabel" type="Label" parent="Center/Panel/Margin/Root/Content/Details"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(250, 210)
+custom_minimum_size = Vector2(205, 165)
 layout_mode = 2
 text = "Select an item to view details."
 autowrap_mode = 2
@@ -138,7 +138,8 @@ unique_name_in_owner = true
 layout_mode = 2
 autowrap_mode = 2
 
-[node name="CloseHint" type="Label" parent="Center/Panel/Margin/Root"]
+[node name="CloseButton" type="Button" parent="Center/Panel/Margin/Root"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
-text = "Arrow keys/controller: navigate • I: close"
-horizontal_alignment = 1
+text = "CLOSE  •  Z / I"

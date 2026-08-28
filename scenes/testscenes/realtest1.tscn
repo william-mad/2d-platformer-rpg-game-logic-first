@@ -11,12 +11,10 @@
 [ext_resource type="Script" uid="uid://dmk04b5rdyj3l" path="res://scripts/testscenes/realtest1_time_view.gd" id="14_time_view"]
 [ext_resource type="PackedScene" uid="uid://c3yowegig4fvu" path="res://scenes/creatures/mom_npc.tscn" id="15_mom_npc"]
 [ext_resource type="Script" uid="uid://ctcqm70yhr0sv" path="res://scripts/systems/npc_location_scene.gd" id="16_npc_location_scene"]
-[ext_resource type="PackedScene" path="res://scenes/creatures/npc/stateful_social_npc.tscn" id="18_talk_npc"]
+[ext_resource type="PackedScene" path="res://scenes/creatures/dad_npc.tscn" id="18_dad_npc"]
 [ext_resource type="PackedScene" path="res://scenes/ui/character_stats_overlay.tscn" id="19_stats_overlay"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_work_spot.tscn" id="20_work_spot"]
-[ext_resource type="Resource" path="res://data/npc_spots/mom_eat.tres" id="22_mom_eat_definition"]
 [ext_resource type="Resource" uid="uid://bltr1rkw27va" path="res://data/npc_spots/mom_work.tres" id="23_mom_work_definition"]
-[ext_resource type="Resource" path="res://data/npc_spots/mom_eat_prep.tres" id="24_mom_eat_prep_definition"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_recreation_spot.tscn" id="25_recreation_spot"]
 [ext_resource type="PackedScene" path="res://scenes/things/npc_bench_rest_spot.tscn" id="26_rest_spot"]
 [ext_resource type="Script" uid="uid://bamkt5f56h1bc" path="res://scripts/instances/player_spawn.gd" id="27_player_spawn"]
@@ -30,6 +28,10 @@
 [ext_resource type="Resource" path="res://data/npc_routes/edges/realtest1_to_realhometest.tres" id="34_yard_home_route"]
 [ext_resource type="PackedScene" path="res://scenes/art/realtest1_background.tscn" id="35_handmade_background"]
 [ext_resource type="PackedScene" path="res://scenes/art/realtest1_props.tscn" id="36_handmade_props"]
+[ext_resource type="PackedScene" path="res://scenes/things/monster_bell.tscn" id="37_monster_bell"]
+[ext_resource type="PackedScene" path="res://scenes/creatures/maid_npc.tscn" id="38_maid_npc"]
+[ext_resource type="PackedScene" path="res://scenes/creatures/bob_npc.tscn" id="39_bob_npc"]
+[ext_resource type="Resource" path="res://data/npc_routes/edges/realtest1_to_dad_workplace.tres" id="40_yard_dad_work_route"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_o4ojr"]
 texture = ExtResource("28_gmeiq")
@@ -192,7 +194,7 @@ position = Vector2(-320, 384)
 target_scene_path = "res://scenes/testscenes/realhometest.tscn"
 target_spawn_id = &"from_realtest1"
 route_edge = ExtResource("34_yard_home_route")
-owner_ids = Array[StringName]([&"mom", &"player"])
+owner_ids = Array[StringName]([&"mom", &"dad", &"maid", &"player"])
 
 [node name="PlayerSpawnFromHome" type="Marker2D" parent="." unique_id=1165842368]
 position = Vector2(-318, 375)
@@ -229,8 +231,44 @@ position = Vector2(-4352, 387)
 target_scene_path = "res://scenes/levels/level_1.tscn"
 target_spawn_id = &"travel_route_entry"
 
+[node name="DadWorkExit" parent="." instance=ExtResource("31_route_door")]
+visible = false
+position = Vector2(-4200, 387)
+target_scene_path = "res://scenes/simulated/dad_workplace.tscn"
+route_edge = ExtResource("40_yard_dad_work_route")
+owner_ids = Array[StringName]([&"dad"])
+
+[node name="DadWorkExitSign" type="Node2D" parent="."]
+position = Vector2(-4140, 366)
+
+[node name="Post" type="Polygon2D" parent="DadWorkExitSign"]
+position = Vector2(0, -44)
+color = Color(0.24, 0.13, 0.05, 1)
+polygon = PackedVector2Array(-4, 44, 4, 44, 4, -28, -4, -28)
+
+[node name="Board" type="Polygon2D" parent="DadWorkExitSign"]
+position = Vector2(0, -79)
+color = Color(0.52, 0.3, 0.1, 1)
+polygon = PackedVector2Array(-62, 20, 62, 20, 62, -20, -62, -20)
+
+[node name="Label" type="Label" parent="DadWorkExitSign"]
+offset_left = -58.0
+offset_top = -111.0
+offset_right = 58.0
+offset_bottom = -71.0
+theme_override_colors/font_color = Color(1, 0.91, 0.64, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+text = "← WORK"
+horizontal_alignment = 1
+vertical_alignment = 1
+
 [node name="PracticeDummy" parent="." unique_id=1318855900 instance=ExtResource("28_practice_dummy")]
 position = Vector2(-520, 384)
+
+[node name="MonsterBell" parent="." instance=ExtResource("37_monster_bell")]
+position = Vector2(-700, 384)
 
 [node name="SlimeHourlySpawner" type="Node2D" parent="." unique_id=1043976664]
 script = ExtResource("29_slime_hourly")
@@ -263,55 +301,20 @@ npc_preference_weights = {
 "mom": 1.0
 }
 
-[node name="MomMealCycleSpot" parent="." unique_id=2012645276 instance=ExtResource("20_work_spot")]
-position = Vector2(-1217, 341)
-player_work_interaction_id = &"meal_prep"
-eat_world_definition = ExtResource("22_mom_eat_definition")
-save_id = "realtest1_mom_meal_cycle"
-world_definition = ExtResource("24_mom_eat_prep_definition")
-restrict_to_target_npc = false
-
-[node name="MomWorkNeedSpot" parent="." unique_id=1167551469 instance=ExtResource("20_work_spot")]
+[node name="MomWorkNeedSpot" parent="." instance=ExtResource("20_work_spot")]
 position = Vector2(1443, 346)
-save_id = "realtest1_mom_work"
-spot_id = &"mom_work"
 world_definition = ExtResource("23_mom_work_definition")
 restrict_to_target_npc = false
-owner_npc_ids = Array[StringName]([&"mom"])
-require_target_need_threshold = false
-active_time_windows = Array[Dictionary]([{
-"end_hour": 10.0,
-"start_hour": 9.0
-}, {
-"end_hour": 18.0,
-"start_hour": 16.0
-}])
 
-[node name="TalkPartnerNpc" parent="." unique_id=1577191316 instance=ExtResource("18_talk_npc")]
-position = Vector2(1616, 389)
-patrol_range = 0.0
+[node name="DadNpc" parent="." instance=ExtResource("18_dad_npc")]
+position = Vector2(1460, 384)
+
+[node name="MaidNpc" parent="." instance=ExtResource("38_maid_npc")]
+position = Vector2(1780, 384)
 starts_moving_right = false
-social_stats = {
-"anger": 0.0,
-"boredom": 10.0,
-"curiosity": 10.0,
-"disabled": 0.0,
-"energy": 80.0,
-"favor": 55.0,
-"hp": 100.0,
-"hunger": 20.0,
-"lonely": 0.0,
-"love": 0.0,
-"sadness": 0.0,
-"sleep_need": 10.0,
-"suspicion": 0.0,
-"talk_need": 10.0,
-"trust": 55.0
-}
-display_name = "Talk NPC"
-npc_tags = Array[StringName]([&"test_talk"])
-location_id = &"talk_partner_npc"
-npc_scene_path = "res://scenes/creatures/npc/stateful_social_npc.tscn"
+
+[node name="BobNpc" parent="." instance=ExtResource("39_bob_npc")]
+position = Vector2(2100, 384)
 
 [node name="ground" type="TileMapLayer" parent="." unique_id=1304660112]
 tile_map_data = PackedByteArray("AAAsAAUAAAACAAAAAAAsAAQAAAACAAAAAAAsAAMAAAACAAAAAAAsAAIAAAACAAAAAAAsAAEAAAACAAAAAAAsAAAAAAACAAAAAAAsAP//AAACAAAAAAAsAP7/AAACAAAAAAAsAP3/AAACAAAAAAAsAPz/AAACAAAAAAAsAPv/AAACAAAAAAAsAPr/AAACAAAAAAAsAPn/AAACAAAAAAAsAPj/AAACAAAAAAAsAPf/AAACAAAAAAAsAPb/AAACAAAAAAAsAPX/AAACAAAAAAAsAPT/AAACAAAAAAAsAPP/AAACAAAAAAAsAPL/AAACAAAAAAAsAPH/AAACAAAAAAAsAPD/AAACAAAAAAAsAO//AAACAAAAAAAsAO7/AAACAAAAAAAsAO3/AAACAAAAAAAsAOz/AAACAAAAAAAsAOv/AAACAAAAAAAsAOr/AAACAAAAAAAsAOn/AAACAAAAAAAsAOj/AAACAAAAAAAsAOf/AAACAAAAAAAsAOb/AAACAAAAAAAsAOX/AAACAAAAAAAsAOT/AAACAAAAAAC7/9//AAACAAAAAAC8/9//AAACAAAAAAC9/9//AAACAAAAAAC+/9//AAACAAAAAAC//9//AAACAAAAAADA/9//AAACAAAAAADB/9//AAACAAAAAADC/9//AAACAAAAAADD/9//AAACAAAAAADE/9//AAACAAAAAADF/9//AAACAAAAAADG/9//AAACAAAAAADH/9//AAACAAAAAADI/9//AAACAAAAAADJ/9//AAACAAAAAADK/9//AAACAAAAAADL/9//AAACAAAAAADM/9//AAACAAAAAADN/9//AAACAAAAAADO/9//AAACAAAAAADP/9//AAACAAAAAADQ/9//AAACAAAAAADR/9//AAACAAAAAADS/9//AAACAAAAAADT/9//AAACAAAAAADU/9//AAACAAAAAADV/9//AAACAAAAAADW/9//AAACAAAAAADX/9//AAACAAAAAADY/9//AAACAAAAAADZ/9//AAACAAAAAADa/9//AAACAAAAAADb/9//AAACAAAAAADc/9//AAACAAAAAADd/9//AAACAAAAAADe/9//AAACAAAAAADf/9//AAACAAAAAADg/9//AAACAAAAAADh/9//AAACAAAAAADi/9//AAACAAAAAADj/9//AAACAAAAAADk/9//AAACAAAAAADl/9//AAACAAAAAADm/9//AAACAAAAAADn/9//AAACAAAAAADo/9//AAACAAAAAADp/9//AAACAAAAAADq/9//AAACAAAAAADr/9//AAACAAAAAADs/9//AAACAAAAAADt/9//AAACAAAAAADu/9//AAACAAAAAADv/9//AAACAAAAAADw/9//AAACAAAAAADx/9//AAACAAAAAADy/9//AAACAAAAAADz/9//AAACAAAAAAD0/9//AAACAAAAAAD1/9//AAACAAAAAAD2/9//AAACAAAAAAD3/9//AAACAAAAAAD4/9//AAACAAAAAAD5/9//AAACAAAAAAD6/9//AAACAAAAAAD7/9//AAACAAAAAAD8/9//AAACAAAAAAD9/9//AAACAAAAAAD+/9//AAACAAAAAAD//9//AAACAAAAAAAAAN//AAACAAAAAAABAN//AAACAAAAAAACAN//AAACAAAAAAADAN//AAACAAAAAAAEAN//AAACAAAAAAAFAN//AAACAAAAAAAGAN//AAACAAAAAAAHAN//AAACAAAAAAAIAN//AAACAAAAAAAJAN//AAACAAAAAAAKAN//AAACAAAAAAALAN//AAACAAAAAAAMAN//AAACAAAAAAANAN//AAACAAAAAAAOAN//AAACAAAAAAAPAN//AAACAAAAAAAQAN//AAACAAAAAAARAN//AAACAAAAAAASAN//AAACAAAAAAATAN//AAACAAAAAAAUAN//AAACAAAAAAAVAN//AAACAAAAAAAWAN//AAACAAAAAAAXAN//AAACAAAAAAAYAN//AAACAAAAAAAZAN//AAACAAAAAAAaAN//AAACAAAAAAAbAN//AAACAAAAAAAcAN//AAACAAAAAAAdAN//AAACAAAAAAAeAN//AAACAAAAAAAfAN//AAACAAAAAAAgAN//AAACAAAAAAAhAN//AAACAAAAAAAiAN//AAACAAAAAAAjAN//AAACAAAAAAAkAN//AAACAAAAAAAlAN//AAACAAAAAAAmAN//AAACAAAAAAAnAN//AAACAAAAAAAoAN//AAACAAAAAAApAN//AAACAAAAAAAqAN//AAACAAAAAAArAN//AAACAAAAAAAsAN//AAACAAAAAAAsAOD/AAACAAAAAAAsAOH/AAACAAAA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")

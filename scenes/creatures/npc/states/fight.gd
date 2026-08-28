@@ -423,21 +423,13 @@ func _get_effective_anger_for(candidate: Node2D) -> float:
 	if (
 		candidate == null
 		or not is_instance_valid(candidate)
-		or not (candidate.is_in_group("player") or candidate.is_in_group("npc"))
-		or npc == null
-		or not npc.has_method("get_relationship_anger_for")
 	):
 		return broad_anger
-	var directed_anger := float(
-		npc.call("get_relationship_anger_for", candidate, 0.0)
-	)
-	if candidate.is_in_group("npc"):
-		# Preserve the established NPC-to-NPC rule: those fights require anger
-		# directed at that NPC rather than a broad mood.
-		return directed_anger
-	# Player combat historically consumed broad anger. Player-directed anger now
-	# participates without removing that compatibility path.
-	return maxf(broad_anger, directed_anger)
+	if candidate.is_in_group("player") or candidate.is_in_group("npc"):
+		if npc != null and npc.has_method("get_relationship_anger_for"):
+			return float(npc.call("get_relationship_anger_for", candidate, 0.0))
+		return 0.0
+	return broad_anger
 
 
 func _get_finished_fight_state() -> NpcState:
@@ -482,7 +474,11 @@ func _get_npc_health_percent() -> float:
 	elif machine != null:
 		current_hp = machine.get_value(&"hp", 100.0)
 
-	var max_hp := _get_node_float_property(npc, &"max_hp", 100.0)
+	var max_hp := (
+		float(npc.call("get_max_hp"))
+		if npc != null and npc.has_method("get_max_hp")
+		else _get_node_float_property(npc, &"max_hp", 100.0)
+	)
 	if max_hp <= 0.0:
 		max_hp = 100.0
 

@@ -21,6 +21,35 @@ class StableNpcTarget:
 		pass
 
 
+class HealthContractNpc:
+	extends CharacterBody2D
+
+	var hp: float = 50.0
+	var authored_max_hp: float = 200.0
+	var maximum_health_queries: int = 0
+
+	func get_hp() -> float:
+		return hp
+
+	func get_max_hp() -> float:
+		maximum_health_queries += 1
+		return authored_max_hp
+
+
+class FightHealthLookupProbe:
+	extends NpcStateFight
+
+	var reflective_lookup_count: int = 0
+
+	func _get_node_float_property(
+		_node: Node,
+		_property_name: StringName,
+		fallback: float
+	) -> float:
+		reflective_lookup_count += 1
+		return fallback
+
+
 func test_player_directed_anger_starts_sustains_and_calms_fight() -> void:
 	var fixture := _create_combat_fixture("PlayerDirectedAngerProbe")
 	var npc := fixture.get("npc") as SocialNpc
@@ -67,7 +96,7 @@ func test_player_damage_crossing_directed_anger_threshold_sustains_fight() -> vo
 	)
 
 
-func test_npc_directed_and_legacy_broad_anger_keep_existing_fight_paths() -> void:
+func test_directed_anger_starts_fight_but_broad_mood_anger_does_not_target_player() -> void:
 	var npc_fixture := _create_combat_fixture("NpcDirectedAngerProbe")
 	var npc := npc_fixture.get("npc") as SocialNpc
 	var machine := npc_fixture.get("machine") as NpcStateMachine
@@ -91,17 +120,49 @@ func test_npc_directed_and_legacy_broad_anger_keep_existing_fight_paths() -> voi
 		"NPC-directed anger still sustains Fight"
 	)
 
-	var broad_fixture := _create_combat_fixture("BroadAngerCompatibilityProbe")
+	var broad_fixture := _create_combat_fixture("BroadAngerDirectionProbe")
+	var broad_npc := broad_fixture.get("npc") as SocialNpc
 	var broad_machine := broad_fixture.get("machine") as NpcStateMachine
 	var broad_target := broad_fixture.get("attacker") as CharacterBody2D
-	if broad_machine == null or broad_target == null:
+	if broad_npc == null or broad_machine == null or broad_target == null:
 		return
 	broad_machine.set_value(&"anger", 100.0, broad_target, false)
-	broad_machine.notify_target_seen(broad_target)
-	assert_true(broad_machine.is_primary_state(&"Fight"), "legacy broad anger still starts Fight")
+	assert_eq(
+		broad_npc.get_relationship_anger_for(broad_target, 0.0),
+		0.0,
+		"the Player has no directed anger before the sight check"
+	)
+	broad_machine.select_combat_target(broad_target)
 	assert_false(
+		broad_machine.evaluate_persistent_combat_reactions(),
+		"persistent broad mood anger does not acquire the selected Player as its subject"
+	)
+	broad_machine.notify_target_seen(broad_target)
+	assert_false(
+		broad_machine.is_primary_state(&"Fight"),
+		"broad mood anger does not become anger directed at the seen Player"
+	)
+	assert_true(
+		broad_machine.request_state(&"Fight", broad_target, "broad_anger_sustain_probe", 94),
+		"the fixture can enter Fight directly"
+	)
+	assert_true(
 		_state_tick_requests(broad_machine, &"Idle"),
-		"legacy broad anger still sustains Fight"
+		"broad mood anger does not sustain a person-directed Fight"
+	)
+
+	var fear_fixture := _create_combat_fixture("BroadAngerFearProbe")
+	var fear_npc := fear_fixture.get("npc") as SocialNpc
+	var fear_machine := fear_fixture.get("machine") as NpcStateMachine
+	var fear_target := fear_fixture.get("attacker") as CharacterBody2D
+	if fear_npc == null or fear_machine == null or fear_target == null:
+		return
+	fear_machine.set_value(&"anger", 100.0, fear_target, false)
+	fear_npc.change_relationship_fear_for(fear_target, 100.0, "broad_anger_fear_probe")
+	fear_machine.notify_target_seen(fear_target)
+	assert_true(
+		fear_machine.is_primary_state(&"Flee"),
+		"broad mood anger does not override directed fear of the Player"
 	)
 
 
@@ -147,7 +208,7 @@ func test_damage_does_not_resubmit_blocked_or_terminal_combat_states() -> void:
 	if npc == null or machine == null or attacker == null:
 		return
 
-	machine.set_value(&"anger", 100.0, attacker, false)
+	npc.change_relationship_anger_for(attacker, 70.0, "transition_probe_setup")
 	assert_true(
 		machine.request_state(&"Fight", attacker, "probe_start", 94),
 		"healthy angry NPC starts Fight"
@@ -202,9 +263,9 @@ func test_favor_loss_does_not_build_an_impossible_reaction_during_fight() -> voi
 	if npc == null or machine == null or attacker == null:
 		return
 
-	# Enter Fight directly without also satisfying the local anger rule. This isolates
+	# Enter Fight directly below the directed-anger start threshold. This isolates
 	# the favor-loss rule that requested ReactToEvent repeatedly in the runtime log.
-	machine.set_value(&"anger", 70.0, attacker, false)
+	npc.change_relationship_anger_for(attacker, 70.0, "favor_probe_setup")
 	assert_true(
 		machine.request_state(&"Fight", attacker, "favor_probe_start", 94),
 		"fixture enters Fight"
@@ -227,6 +288,100 @@ func test_favor_loss_does_not_build_an_impossible_reaction_during_fight() -> voi
 	)
 
 
+func test_event_reaction_state_is_suppressed_only_during_fight() -> void:
+	var idle_fixture := _create_combat_fixture("IdleEventReactionProbe")
+	var idle_npc := idle_fixture.get("npc") as SocialNpc
+	var idle_machine := idle_fixture.get("machine") as NpcStateMachine
+	var idle_actor := idle_fixture.get("attacker") as CharacterBody2D
+	if idle_npc == null or idle_machine == null or idle_actor == null:
+		return
+	idle_npc.event_bus_reactions = _event_reaction_rules()
+	idle_npc.call(
+		"_on_event_bus_event",
+		&"fight_efficiency_probe",
+		_event_payload(idle_npc, idle_actor)
+	)
+	assert_true(
+		idle_machine.is_primary_state(&"ReactToEvent"),
+		"the existing event reaction still starts normally outside Fight"
+	)
+
+	var fight_fixture := _create_combat_fixture("FightEventReactionProbe")
+	var fight_npc := fight_fixture.get("npc") as SocialNpc
+	var fight_machine := fight_fixture.get("machine") as NpcStateMachine
+	var fight_actor := fight_fixture.get("attacker") as CharacterBody2D
+	if fight_npc == null or fight_machine == null or fight_actor == null:
+		return
+	fight_npc.change_relationship_anger_for(fight_actor, 70.0, "event_probe_setup")
+	assert_true(
+		fight_machine.request_state(&"Fight", fight_actor, "event_probe_start", 94),
+		"fixture enters Fight"
+	)
+	fight_npc.event_bus_reactions = _event_reaction_rules()
+	var rejected_requests: Array[String] = []
+	fight_machine.state_request_failed.connect(
+		func(state_name: StringName, reason: String) -> void:
+			rejected_requests.append("%s:%s" % [String(state_name), reason])
+	)
+	var relationships := fight_npc.get_node_or_null("/root/Relationships")
+	assert_not_null(relationships, "relationship system is available")
+	if relationships == null:
+		return
+	var trust_before := float(relationships.call(
+		"get_opinion_metric", fight_npc, fight_actor, &"trust"
+	))
+	fight_npc.call(
+		"_on_event_bus_event",
+		&"fight_efficiency_probe",
+		_event_payload(fight_npc, fight_actor)
+	)
+	assert_true(
+		fight_machine.is_primary_state(&"Fight"),
+		"ReactToEvent presentation does not interrupt active Fight"
+	)
+	assert_true(
+		rejected_requests.is_empty(),
+		"Fight does not build or reject the redundant event reaction request"
+	)
+	assert_eq(
+		float(relationships.call(
+			"get_opinion_metric", fight_npc, fight_actor, &"trust"
+		)),
+		trust_before - 4.0,
+		"the event's directed social consequence still applies during Fight"
+	)
+	assert_eq(
+		fight_machine.get_value(&"anger"),
+		8.0,
+		"the event's local mood consequence still applies during Fight"
+	)
+
+
+func test_fight_health_uses_live_maximum_health_contract_without_reflection() -> void:
+	var npc := HealthContractNpc.new()
+	var fight := FightHealthLookupProbe.new()
+	npc.add_child(fight)
+	add_child_autofree(npc)
+	fight.npc = npc
+
+	assert_eq(
+		float(fight.call("_get_npc_health_percent")),
+		25.0,
+		"Fight calculates health from the direct maximum-health contract"
+	)
+	assert_eq(
+		fight.reflective_lookup_count,
+		0,
+		"the direct contract avoids scanning the NPC property list"
+	)
+	npc.authored_max_hp = 100.0
+	assert_eq(
+		float(fight.call("_get_npc_health_percent")),
+		50.0,
+		"runtime maximum-health changes remain visible without stale caching"
+	)
+
+
 func test_low_health_fight_does_not_reenter_every_physics_step() -> void:
 	var fixture := _create_combat_fixture("LowHealthFightProbe")
 	var npc := fixture.get("npc") as SocialNpc
@@ -235,7 +390,7 @@ func test_low_health_fight_does_not_reenter_every_physics_step() -> void:
 	if npc == null or machine == null or attacker == null:
 		return
 
-	machine.set_value(&"anger", 100.0, attacker, false)
+	npc.change_relationship_anger_for(attacker, 100.0, "low_health_probe_setup")
 	assert_true(
 		machine.request_state(&"Fight", attacker, "probe_start", 94),
 		"healthy angry NPC starts Fight"
@@ -333,3 +488,29 @@ func _state_tick_requests(machine: NpcStateMachine, state_name: StringName) -> b
 		return false
 	var requested := machine.current_state.physics_process(1.0 / 60.0)
 	return requested != null and StringName(requested.name) == state_name
+
+
+func _event_reaction_rules() -> Dictionary:
+	return {
+		"fight_efficiency_probe": {
+			"scope": "local",
+			"radius": 160.0,
+			"stat_delta": {"anger": 8.0, "trust": -4.0},
+			"state_request": "ReactToEvent",
+			"priority": 55,
+		}
+	}
+
+
+func _event_payload(npc: SocialNpc, actor: Node2D) -> Dictionary:
+	return {
+		"event_name": &"fight_efficiency_probe",
+		"npc_event": true,
+		"scope": &"local",
+		"position": npc.global_position,
+		"has_position": true,
+		"radius": 160.0,
+		"actor": actor,
+		"source": actor,
+		"tags": [],
+	}

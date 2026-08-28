@@ -46,6 +46,12 @@ static func supply_meal_cycle_recipe_batches(
 			InventoryResult.Code.INVALID_SAVE_DATA,
 			"Meal-cycle controller '%s' was not found." % String(controller_spot_id)
 		)
+	if controller.meal_cycle_infinite_ingredient_storage:
+		return InventoryResult.failed(
+			InventoryResult.Code.INVALID_SAVE_DATA,
+			"Meal-cycle controller '%s' draws ingredients from its configured storage."
+			% String(controller_spot_id)
+		)
 	var recipe := _get_valid_meal_cycle_recipe(runtime, controller)
 	if recipe == null:
 		return InventoryResult.failed(
@@ -110,6 +116,7 @@ static func _initialize_meal_cycle_runtime_states(runtime) -> void:
 			state.get("stage", MEAL_STAGE_PREP_WORK)
 		))
 		var food_spot_id := _get_meal_cycle_food_spot_id(controller)
+		var food_spot_ids := _get_meal_cycle_food_spot_ids(controller)
 		var existing_food_state = runtime.spot_runtime_states.get(String(food_spot_id), {})
 		var legacy_food_value := 0.0
 		var legacy_food_limit := 0.0
@@ -121,6 +128,7 @@ static func _initialize_meal_cycle_runtime_states(runtime) -> void:
 		state["meal_cycle_enabled"] = true
 		state["meal_cycle_id"] = String(controller.meal_cycle_id)
 		state["food_spot_id"] = String(food_spot_id)
+		state["food_spot_ids"] = _string_names_to_strings(food_spot_ids, [])
 		state["meal_schema_version"] = MEAL_SCHEMA_VERSION
 		state["minimum"] = lower
 		state["maximum"] = upper
@@ -154,9 +162,10 @@ static func _initialize_meal_cycle_runtime_states(runtime) -> void:
 			controller.meal_cycle_prep_owner_ids,
 			controller.get_owner_ids()
 		)
-		state["food_owner_ids"] = _string_names_to_strings(
-			controller.meal_cycle_food_owner_ids,
-			_get_meal_cycle_food_definition_owner_ids(runtime, controller)
+		state["food_owner_ids"] = _get_meal_cycle_food_owner_ids_for_meal(
+			runtime,
+			controller,
+			String(state["meal"])
 		)
 		state["cleanup_owner_ids"] = _string_names_to_strings(
 			controller.meal_cycle_cleanup_owner_ids,
@@ -164,6 +173,14 @@ static func _initialize_meal_cycle_runtime_states(runtime) -> void:
 		)
 		state["cleanup_work_multiplier"] = controller.get_meal_cycle_work_multiplier_for_stage(
 			MEAL_STAGE_CLEANUP_WORK
+		)
+		state["ingredient_storage_infinite"] = (
+			controller.meal_cycle_infinite_ingredient_storage
+		)
+		state["ingredient_storage_batches_per_prep"] = (
+			controller.meal_cycle_storage_batches_per_prep
+			if controller.meal_cycle_infinite_ingredient_storage
+			else 0
 		)
 
 		var owner_meal_data = state.get("owner_meal_data", {})
@@ -201,6 +218,7 @@ static func _initialize_meal_cycle_runtime_states(runtime) -> void:
 			batch_total = 0.0
 		state["meal_batch_remaining_points"] = batch_remaining
 		state["meal_batch_total_points"] = batch_total
+		_initialize_meal_cycle_cleanup_remaining(runtime, controller, state, previous_stage)
 
 		if configured_recipe != null and previous_stage == MEAL_STAGE_PREP_WORK:
 			var reservation_is_valid := _recipe_preparation_reservation_is_valid(
@@ -218,14 +236,18 @@ static func _initialize_meal_cycle_runtime_states(runtime) -> void:
 				state["work_call_active"] = false
 				state["waiting_for_ingredients"] = true
 				state.erase("pending_work_completion_total_hours")
-				_warn_meal_cycle_once(
-					runtime,
-					"legacy_prep_%s" % String(controller.spot_id),
-					(
-						"Meal cycle '%s' restored active preparation without a valid "
-						+ "ingredient reservation; it was reset to wait for ingredients."
-					) % String(controller.spot_id)
-				)
+				if controller.meal_cycle_infinite_ingredient_storage:
+					_restock_infinite_ingredient_storage(runtime, controller, state)
+					_attempt_activate_recipe_preparation(runtime, controller, state)
+				else:
+					_warn_meal_cycle_once(
+						runtime,
+						"legacy_prep_%s" % String(controller.spot_id),
+						(
+							"Meal cycle '%s' restored active preparation without a valid "
+							+ "ingredient reservation; it was reset to wait for ingredients."
+						) % String(controller.spot_id)
+					)
 		elif controller.meal_cycle_recipe == null:
 			state["waiting_for_ingredients"] = false
 			state["reserved_recipe_batches"] = 0
@@ -236,6 +258,7 @@ static func _initialize_meal_cycle_runtime_states(runtime) -> void:
 
 		runtime.spot_runtime_states[state_key] = state
 		_sync_meal_cycle_food_state(runtime, controller, state)
+		_sync_meal_cycle_cleanup_states(runtime, controller, state)
 
 
 static func _process_meal_cycle_schedule_until_snapshot(runtime, snapshot: Dictionary) -> void:
@@ -395,12 +418,18 @@ static func _start_meal_cycle_prep(
 	_release_recipe_preparation_reservation(runtime, controller, state)
 	state["stage"] = MEAL_STAGE_PREP_WORK
 	state["meal"] = meal
+	state["food_owner_ids"] = _get_meal_cycle_food_owner_ids_for_meal(
+		runtime,
+		controller,
+		meal
+	)
 	state["value"] = _get_meal_cycle_reset_work_value(controller)
 	state["meal_window_open"] = false
 	state["meal_called"] = false
 	state["food_available"] = false
 	state["meal_batch_total_points"] = 0.0
 	state["meal_batch_remaining_points"] = 0.0
+	state["cleanup_remaining_by_spot"] = {}
 	state["food_ready_total_hours"] = -1.0
 	state["stage_started_total_hours"] = event_total_hours
 	state["cleanup_work_multiplier"] = controller.get_meal_cycle_work_multiplier_for_stage(
@@ -413,6 +442,7 @@ static func _start_meal_cycle_prep(
 	else:
 		state["work_call_active"] = false
 		state["waiting_for_ingredients"] = true
+		_restock_infinite_ingredient_storage(runtime, controller, state)
 		_attempt_activate_recipe_preparation(runtime, controller, state)
 	_refresh_meal_call_state(runtime, controller, state)
 	_set_meal_cycle_controller_state(runtime, controller, state)
@@ -432,6 +462,11 @@ static func _call_meal_cycle_food(
 	state["last_food_call_total_hours"] = event_total_hours
 	state["last_food_call_meal"] = meal
 	state["meal_call_instance_id"] = "%s@%.6f" % [meal, event_total_hours]
+	state["food_owner_ids"] = _get_meal_cycle_food_owner_ids_for_meal(
+		runtime,
+		controller,
+		meal
+	)
 	if String(state.get("meal", "")) == meal:
 		state["meal_window_open"] = true
 	_refresh_meal_call_state(runtime, controller, state)
@@ -466,6 +501,7 @@ static func _start_meal_cycle_cleanup(
 	state["meal_batch_remaining_points"] = 0.0
 	state["food_ready_total_hours"] = -1.0
 	state["stage_started_total_hours"] = event_total_hours
+	_reset_meal_cycle_cleanup_remaining(runtime, controller, state)
 	state.erase("pending_work_completion_total_hours")
 	_refresh_meal_call_state(runtime, controller, state)
 	_set_meal_cycle_controller_state(runtime, controller, state)
@@ -510,6 +546,9 @@ static func _advance_meal_cycle_work_complete(runtime, controller_spot_id: Strin
 		return
 
 	if stage == MEAL_STAGE_CLEANUP_WORK:
+		if float(state.get("value", 0.0)) > float(state.get("done_threshold", 0.0)):
+			_set_meal_cycle_controller_state(runtime, controller, state)
+			return
 		state["stage"] = MEAL_STAGE_PREP_WORK
 		state["meal"] = ""
 		state["value"] = _get_meal_cycle_reset_work_value(controller)
@@ -519,6 +558,7 @@ static func _advance_meal_cycle_work_complete(runtime, controller_spot_id: Strin
 		state["food_available"] = false
 		state["meal_batch_total_points"] = 0.0
 		state["meal_batch_remaining_points"] = 0.0
+		state["cleanup_remaining_by_spot"] = {}
 		state["food_ready_total_hours"] = -1.0
 		state["stage_started_total_hours"] = completed_total_hours
 		_refresh_meal_call_state(runtime, controller, state)
@@ -534,19 +574,67 @@ static func _apply_meal_cycle_work_progress(
 	game_hours: float,
 	total_hours: float
 ) -> void:
-	var state := _get_meal_cycle_controller_state(runtime, definition.spot_id)
+	var controller_id := _get_meal_cycle_controller_id_for_definition(runtime, definition)
+	var controller := runtime.spot_definitions.get(controller_id, null) as NpcSpotDefinition
+	if controller == null:
+		return
+	var state := _get_meal_cycle_controller_state(runtime, controller_id)
 	if state.is_empty():
 		return
 
-	var previous_value := float(state.get("value", definition.spot_value_initial))
 	var stage := String(state.get("stage", MEAL_STAGE_PREP_WORK))
+	if stage == MEAL_STAGE_CLEANUP_WORK:
+		var cleanup_remaining := _get_cleanup_remaining_by_spot(runtime, controller, state)
+		var spot_key := String(definition.spot_id)
+		if not cleanup_remaining.has(spot_key):
+			return
+		var previous_local_value := float(cleanup_remaining.get(spot_key, 0.0))
+		if previous_local_value <= MEAL_CYCLE_EPSILON:
+			return
+		var requested_cleanup_delta := (
+			definition.spot_value_delta_per_game_hour
+			* game_hours
+			* controller.get_meal_cycle_work_multiplier_for_stage(stage)
+		)
+		if requested_cleanup_delta >= 0.0:
+			return
+		var aggregate_before := _sum_cleanup_remaining(cleanup_remaining)
+		var actual_cleanup_delta := maxf(
+			requested_cleanup_delta,
+			-previous_local_value
+		)
+		if (
+			total_hours >= 0.0
+			and aggregate_before + actual_cleanup_delta <= MEAL_CYCLE_EPSILON
+		):
+			var cleanup_fraction := clampf(
+				previous_local_value / maxf(absf(requested_cleanup_delta), 0.001),
+				0.0,
+				1.0
+			)
+			state["pending_work_completion_total_hours"] = maxf(
+				total_hours - game_hours + game_hours * cleanup_fraction,
+				0.0
+			)
+			runtime.spot_runtime_states[String(controller_id)] = state
+		_set_meal_cycle_cleanup_spot_value(
+			runtime,
+			definition.spot_id,
+			previous_local_value + requested_cleanup_delta
+		)
+		return
+
+	if stage != MEAL_STAGE_PREP_WORK or definition.spot_id != controller_id:
+		return
+
+	var previous_value := float(state.get("value", controller.spot_value_initial))
 	if (
 		stage == MEAL_STAGE_PREP_WORK
-		and definition.meal_cycle_recipe != null
-		and not _active_recipe_preparation_is_valid(runtime, definition, state)
+		and controller.meal_cycle_recipe != null
+		and not _active_recipe_preparation_is_valid(runtime, controller, state)
 	):
-		_set_recipe_preparation_waiting(runtime, definition, state)
-		_set_meal_cycle_controller_state(runtime, definition, state)
+		_set_recipe_preparation_waiting(runtime, controller, state)
+		_set_meal_cycle_controller_state(runtime, controller, state)
 		return
 	var requested_delta := (
 		definition.spot_value_delta_per_game_hour
@@ -571,7 +659,7 @@ static func _apply_meal_cycle_work_progress(
 		)
 		runtime.spot_runtime_states[String(definition.spot_id)] = state
 
-	runtime.apply_spot_value_delta(definition.spot_id, requested_delta)
+	runtime.apply_spot_value_delta(controller_id, requested_delta)
 
 
 static func _set_meal_cycle_controller_state(
@@ -581,7 +669,16 @@ static func _set_meal_cycle_controller_state(
 ) -> void:
 	runtime.spot_runtime_states[String(controller.spot_id)] = state
 	_sync_meal_cycle_food_state(runtime, controller, state)
-	runtime._notify_live_spot_value(controller.spot_id, float(state.get("value", controller.spot_value_initial)))
+	_sync_meal_cycle_cleanup_states(runtime, controller, state)
+	var controller_live_value := float(state.get("value", controller.spot_value_initial))
+	if String(state.get("stage", "")) == MEAL_STAGE_CLEANUP_WORK:
+		var cleanup_remaining = state.get("cleanup_remaining_by_spot", {})
+		if cleanup_remaining is Dictionary:
+			controller_live_value = float(cleanup_remaining.get(
+				String(controller.spot_id),
+				controller_live_value
+			))
+	runtime._notify_live_spot_value(controller.spot_id, controller_live_value)
 	_notify_meal_cycle_state(runtime, controller.spot_id)
 
 
@@ -613,15 +710,15 @@ static func _sync_meal_cycle_food_state(
 	controller: NpcSpotDefinition,
 	controller_state: Dictionary
 ) -> void:
-	var food_spot_id := _get_meal_cycle_food_spot_id(controller)
-	if food_spot_id == &"":
+	var food_spot_ids := _get_meal_cycle_food_spot_ids(controller)
+	if food_spot_ids.is_empty():
 		return
 
+	var food_spot_id := food_spot_ids[0]
 	var food_definition := runtime.spot_definitions.get(food_spot_id, null) as NpcSpotDefinition
-	var food_key := String(food_spot_id)
-	var food_state = runtime.spot_runtime_states.get(food_key, {})
-	if not (food_state is Dictionary):
-		food_state = {}
+	var canonical_food_state = runtime.spot_runtime_states.get(String(food_spot_id), {})
+	if not (canonical_food_state is Dictionary):
+		canonical_food_state = {}
 
 	var lower := 0.0
 	var upper := 1.0
@@ -651,11 +748,11 @@ static func _sync_meal_cycle_food_state(
 			dynamic_upper
 		)
 	else:
-		var previous_stage_started_total_hours := float(food_state.get(
+		var previous_stage_started_total_hours := float(canonical_food_state.get(
 			"meal_cycle_stage_started_total_hours",
 			-1.0
 		))
-		var previous_active := bool(food_state.get("meal_cycle_food_active", false))
+		var previous_active := bool(canonical_food_state.get("meal_cycle_food_active", false))
 		var should_reset_food := (
 			food_is_available
 			and (
@@ -670,31 +767,55 @@ static func _sync_meal_cycle_food_state(
 			if should_reset_food:
 				next_value = upper
 			else:
-				next_value = clampf(float(food_state.get("value", upper)), lower, upper)
+				next_value = clampf(float(canonical_food_state.get("value", upper)), lower, upper)
 	if food_is_available:
 		food_is_available = next_value > done_threshold
 	if not food_is_available:
 		next_value = lower
 
-	food_state["kind"] = "food_available"
-	food_state["meal_cycle_controller_id"] = String(controller.spot_id)
-	food_state["meal_cycle_id"] = String(controller.meal_cycle_id)
-	food_state["minimum"] = lower
-	food_state["maximum"] = dynamic_upper
-	food_state["done_threshold"] = done_threshold
-	food_state["daily_growth"] = 0.0
-	food_state["value"] = next_value
-	food_state["meal_cycle_food_active"] = food_is_available
-	food_state["meal_cycle_stage_started_total_hours"] = stage_started_total_hours
 	controller_state["food_available"] = food_is_available
 	controller_state["food_value"] = next_value
 	controller_state["food_limit"] = dynamic_upper
+	controller_state["food_spot_id"] = String(food_spot_id)
+	controller_state["food_spot_ids"] = _string_names_to_strings(food_spot_ids, [])
 	if controller.meal_cycle_recipe != null:
 		controller_state["meal_batch_remaining_points"] = next_value
 	_refresh_meal_call_state(runtime, controller, controller_state)
 	runtime.spot_runtime_states[String(controller.spot_id)] = controller_state
-	runtime.spot_runtime_states[food_key] = food_state
-	runtime._notify_live_spot_value(food_spot_id, float(food_state["value"]))
+
+	for configured_food_spot_id in food_spot_ids:
+		var configured_definition := runtime.spot_definitions.get(
+			configured_food_spot_id,
+			null
+		) as NpcSpotDefinition
+		if configured_definition == null:
+			continue
+		var configured_lower := minf(
+			configured_definition.spot_value_minimum,
+			configured_definition.spot_value_maximum
+		)
+		var configured_done_threshold := configured_definition.spot_value_done_threshold
+		var food_key := String(configured_food_spot_id)
+		var food_state = runtime.spot_runtime_states.get(food_key, {})
+		if not (food_state is Dictionary):
+			food_state = {}
+		food_state["kind"] = "food_available"
+		food_state["meal_cycle_controller_id"] = String(controller.spot_id)
+		food_state["meal_cycle_id"] = String(controller.meal_cycle_id)
+		food_state["minimum"] = configured_lower
+		food_state["maximum"] = dynamic_upper
+		food_state["done_threshold"] = configured_done_threshold
+		food_state["daily_growth"] = 0.0
+		food_state["value"] = clampf(next_value, configured_lower, dynamic_upper)
+		food_state["meal_cycle_food_active"] = (
+			food_is_available and next_value > configured_done_threshold
+		)
+		food_state["meal_cycle_stage_started_total_hours"] = stage_started_total_hours
+		runtime.spot_runtime_states[food_key] = food_state
+		runtime._notify_live_spot_value(
+			configured_food_spot_id,
+			float(food_state["value"])
+		)
 
 
 static func _deplete_meal_cycle_food(runtime, food_spot_id: StringName) -> void:
@@ -721,6 +842,7 @@ static func _deplete_meal_cycle_food(runtime, food_spot_id: StringName) -> void:
 	state["meal_batch_remaining_points"] = 0.0
 	state["food_ready_total_hours"] = -1.0
 	state["stage_started_total_hours"] = runtime._get_current_total_hours()
+	_reset_meal_cycle_cleanup_remaining(runtime, controller, state)
 	state["cleanup_work_multiplier"] = controller.get_meal_cycle_work_multiplier_for_stage(
 		MEAL_STAGE_CLEANUP_WORK
 	)
@@ -757,6 +879,187 @@ static func _apply_meal_cycle_food_value_changed(
 	_set_meal_cycle_controller_state(runtime, controller, state)
 
 
+static func _set_meal_cycle_cleanup_spot_value(
+	runtime,
+	cleanup_spot_id: StringName,
+	requested_value: float
+) -> void:
+	var controller_id := _get_meal_cycle_controller_id_for_spot(runtime, cleanup_spot_id)
+	var controller := runtime.spot_definitions.get(controller_id, null) as NpcSpotDefinition
+	if controller == null:
+		return
+	var state := _get_meal_cycle_controller_state(runtime, controller_id)
+	if state.is_empty() or String(state.get("stage", "")) != MEAL_STAGE_CLEANUP_WORK:
+		return
+
+	var cleanup_remaining := _get_cleanup_remaining_by_spot(runtime, controller, state)
+	var cleanup_capacities := _get_meal_cycle_cleanup_capacities(runtime, controller)
+	var spot_key := String(cleanup_spot_id)
+	if not cleanup_remaining.has(spot_key) or not cleanup_capacities.has(spot_key):
+		return
+	cleanup_remaining[spot_key] = clampf(
+		requested_value,
+		0.0,
+		float(cleanup_capacities[spot_key])
+	)
+	state["cleanup_remaining_by_spot"] = cleanup_remaining
+	state["value"] = _sum_cleanup_remaining(cleanup_remaining)
+	runtime.spot_runtime_states[String(controller_id)] = state
+	if float(state["value"]) <= float(state.get("done_threshold", 0.0)):
+		_advance_meal_cycle_work_complete(runtime, controller_id)
+		return
+	_set_meal_cycle_controller_state(runtime, controller, state)
+
+
+static func _initialize_meal_cycle_cleanup_remaining(
+	runtime,
+	controller: NpcSpotDefinition,
+	state: Dictionary,
+	stage: String
+) -> void:
+	if stage != MEAL_STAGE_CLEANUP_WORK:
+		state["cleanup_remaining_by_spot"] = {}
+		return
+
+	var capacities := _get_meal_cycle_cleanup_capacities(runtime, controller)
+	var stored_remaining = state.get("cleanup_remaining_by_spot", {})
+	var stored_is_complete := stored_remaining is Dictionary
+	if stored_is_complete:
+		for spot_key in capacities.keys():
+			if not stored_remaining.has(spot_key):
+				stored_is_complete = false
+				break
+
+	var normalized: Dictionary = {}
+	if stored_is_complete:
+		for spot_key in capacities.keys():
+			normalized[spot_key] = clampf(
+				float(stored_remaining.get(spot_key, 0.0)),
+				0.0,
+				float(capacities[spot_key])
+			)
+	else:
+		var legacy_total := clampf(
+			float(state.get("value", _get_meal_cycle_reset_work_value(controller))),
+			0.0,
+			_sum_cleanup_remaining(capacities)
+		)
+		var capacity_total := _sum_cleanup_remaining(capacities)
+		for spot_key in capacities.keys():
+			normalized[spot_key] = (
+				legacy_total * float(capacities[spot_key]) / capacity_total
+				if capacity_total > MEAL_CYCLE_EPSILON
+				else 0.0
+			)
+
+	state["cleanup_remaining_by_spot"] = normalized
+	state["value"] = _sum_cleanup_remaining(normalized)
+
+
+static func _reset_meal_cycle_cleanup_remaining(
+	runtime,
+	controller: NpcSpotDefinition,
+	state: Dictionary
+) -> void:
+	var capacities := _get_meal_cycle_cleanup_capacities(runtime, controller)
+	state["cleanup_remaining_by_spot"] = capacities.duplicate(true)
+	state["value"] = _sum_cleanup_remaining(capacities)
+
+
+static func _get_cleanup_remaining_by_spot(
+	runtime,
+	controller: NpcSpotDefinition,
+	state: Dictionary
+) -> Dictionary:
+	var remaining = state.get("cleanup_remaining_by_spot", {})
+	if remaining is Dictionary and not remaining.is_empty():
+		return remaining.duplicate(true)
+	_initialize_meal_cycle_cleanup_remaining(
+		runtime,
+		controller,
+		state,
+		MEAL_STAGE_CLEANUP_WORK
+	)
+	return state.get("cleanup_remaining_by_spot", {}).duplicate(true)
+
+
+static func _get_meal_cycle_cleanup_capacities(
+	runtime,
+	controller: NpcSpotDefinition
+) -> Dictionary:
+	var cleanup_spot_ids := _get_meal_cycle_cleanup_spot_ids(controller)
+	var capacities: Dictionary = {}
+	var unconfigured_ids: Array[StringName] = []
+	var configured_total := 0.0
+	for cleanup_spot_id in cleanup_spot_ids:
+		var definition := runtime.spot_definitions.get(
+			cleanup_spot_id,
+			null
+		) as NpcSpotDefinition
+		if definition == null:
+			continue
+		var configured_share := maxf(definition.meal_cycle_cleanup_share, 0.0)
+		if configured_share > MEAL_CYCLE_EPSILON:
+			capacities[String(cleanup_spot_id)] = configured_share
+			configured_total += configured_share
+		else:
+			unconfigured_ids.append(cleanup_spot_id)
+
+	var reset_total := _get_meal_cycle_reset_work_value(controller)
+	if capacities.is_empty() and unconfigured_ids.is_empty():
+		capacities[String(controller.spot_id)] = reset_total
+		return capacities
+	if not unconfigured_ids.is_empty():
+		var unconfigured_share := maxf(reset_total - configured_total, 0.0) / float(
+			unconfigured_ids.size()
+		)
+		for cleanup_spot_id in unconfigured_ids:
+			capacities[String(cleanup_spot_id)] = unconfigured_share
+	return capacities
+
+
+static func _sum_cleanup_remaining(values: Dictionary) -> float:
+	var total := 0.0
+	for value in values.values():
+		total += maxf(float(value), 0.0)
+	return total
+
+
+static func _sync_meal_cycle_cleanup_states(
+	runtime,
+	controller: NpcSpotDefinition,
+	controller_state: Dictionary
+) -> void:
+	var capacities := _get_meal_cycle_cleanup_capacities(runtime, controller)
+	var remaining: Dictionary = {}
+	if String(controller_state.get("stage", "")) == MEAL_STAGE_CLEANUP_WORK:
+		remaining = _get_cleanup_remaining_by_spot(runtime, controller, controller_state)
+	controller_state["cleanup_spot_ids"] = _string_names_to_strings(
+		_get_meal_cycle_cleanup_spot_ids(controller),
+		[]
+	)
+	controller_state["cleanup_remaining_by_spot"] = remaining
+	runtime.spot_runtime_states[String(controller.spot_id)] = controller_state
+
+	for spot_key in capacities.keys():
+		var cleanup_spot_id := StringName(String(spot_key))
+		if cleanup_spot_id == controller.spot_id:
+			continue
+		var cleanup_state = runtime.spot_runtime_states.get(spot_key, {})
+		if not (cleanup_state is Dictionary):
+			cleanup_state = {}
+		cleanup_state["kind"] = "meal_cleanup_contribution"
+		cleanup_state["meal_cycle_controller_id"] = String(controller.spot_id)
+		cleanup_state["meal_cycle_id"] = String(controller.meal_cycle_id)
+		cleanup_state["minimum"] = 0.0
+		cleanup_state["maximum"] = float(capacities[spot_key])
+		cleanup_state["done_threshold"] = 0.0
+		cleanup_state["daily_growth"] = 0.0
+		cleanup_state["value"] = float(remaining.get(spot_key, 0.0))
+		runtime.spot_runtime_states[spot_key] = cleanup_state
+		runtime._notify_live_spot_value(cleanup_spot_id, float(cleanup_state["value"]))
+
+
 static func _notify_meal_cycle_state(runtime, controller_spot_id: StringName) -> void:
 	if controller_spot_id == &"":
 		return
@@ -772,14 +1075,28 @@ static func _notify_meal_cycle_state(runtime, controller_spot_id: StringName) ->
 		_notify_live_spot_meal_cycle_state(controller_spot, controller_spot_id, state)
 		notified_spots.append(controller_spot)
 
-	var food_spot_id := StringName(String(state.get("food_spot_id", "")))
-	var food_spot := runtime.live_spots.get(food_spot_id, null) as Node
-	if (
-		food_spot != null
-		and is_instance_valid(food_spot)
-		and not notified_spots.has(food_spot)
-	):
-		_notify_live_spot_meal_cycle_state(food_spot, controller_spot_id, state)
+	var linked_spot_ids: Array[StringName] = []
+	for raw_spot_id in state.get("food_spot_ids", []):
+		var linked_id := StringName(String(raw_spot_id))
+		if linked_id != &"" and not linked_spot_ids.has(linked_id):
+			linked_spot_ids.append(linked_id)
+	for raw_spot_id in state.get("cleanup_spot_ids", []):
+		var linked_id := StringName(String(raw_spot_id))
+		if linked_id != &"" and not linked_spot_ids.has(linked_id):
+			linked_spot_ids.append(linked_id)
+	var legacy_food_spot_id := StringName(String(state.get("food_spot_id", "")))
+	if legacy_food_spot_id != &"" and not linked_spot_ids.has(legacy_food_spot_id):
+		linked_spot_ids.append(legacy_food_spot_id)
+
+	for linked_spot_id in linked_spot_ids:
+		var linked_spot := runtime.live_spots.get(linked_spot_id, null) as Node
+		if (
+			linked_spot != null
+			and is_instance_valid(linked_spot)
+			and not notified_spots.has(linked_spot)
+		):
+			_notify_live_spot_meal_cycle_state(linked_spot, controller_spot_id, state)
+			notified_spots.append(linked_spot)
 
 
 static func _notify_live_spot_meal_cycle_state(
@@ -807,7 +1124,8 @@ static func _meal_cycle_definition_can_start(
 
 	if _definition_is_meal_cycle_food(definition):
 		return (
-			_meal_cycle_owner_allows(state, MEAL_OWNER_FOOD, npc_id)
+			definition.allows_npc_id(npc_id)
+			and _meal_cycle_owner_allows(state, MEAL_OWNER_FOOD, npc_id)
 			and not _meal_cycle_owner_has_had_current_meal(state, npc_id)
 		)
 
@@ -836,11 +1154,18 @@ static func _meal_cycle_definition_is_available(runtime, definition: NpcSpotDefi
 			and food_value > definition.spot_value_done_threshold
 		)
 
+	var stage := String(state.get("stage", ""))
+	if stage == MEAL_STAGE_CLEANUP_WORK:
+		var cleanup_remaining = state.get("cleanup_remaining_by_spot", {})
+		return (
+			cleanup_remaining is Dictionary
+			and float(cleanup_remaining.get(String(definition.spot_id), 0.0))
+				> definition.spot_value_done_threshold
+			and bool(state.get("work_call_active", false))
+		)
 	if not _definition_is_meal_cycle_controller(definition):
 		return false
-
-	var stage := String(state.get("stage", ""))
-	if stage != MEAL_STAGE_PREP_WORK and stage != MEAL_STAGE_CLEANUP_WORK:
+	if stage != MEAL_STAGE_PREP_WORK:
 		return false
 	if not bool(state.get("work_call_active", false)):
 		return false
@@ -1081,6 +1406,38 @@ static func _load_meal_ingredient_inventory(
 	)
 	inventory.apply_save_data(InventoryModel.get_empty_save_data())
 	return inventory
+
+
+static func _restock_infinite_ingredient_storage(
+	runtime,
+	controller: NpcSpotDefinition,
+	state: Dictionary
+) -> bool:
+	if controller == null or not controller.meal_cycle_infinite_ingredient_storage:
+		return false
+	var recipe := _get_valid_meal_cycle_recipe(runtime, controller)
+	if recipe == null:
+		return false
+	var batch_count := controller.meal_cycle_storage_batches_per_prep
+	var requested_inputs := _get_recipe_inputs_for_batches(recipe, batch_count)
+	if requested_inputs.is_empty():
+		return false
+
+	var inventory := InventoryModel.new()
+	for raw_item_id: Variant in requested_inputs:
+		var item_id := StringName(String(raw_item_id))
+		var add_result := inventory.add(item_id, int(requested_inputs[raw_item_id]))
+		if not add_result.success:
+			_warn_meal_cycle_once(
+				runtime,
+				"storage_restock_%s" % String(controller.spot_id),
+				"Meal cycle '%s' could not restock its configured ingredient storage: %s"
+				% [String(controller.spot_id), add_result.message]
+			)
+			return false
+
+	state["ingredient_inventory"] = inventory.get_save_data()
+	return true
 
 
 static func _make_meal_ingredient_reservation_id(controller_spot_id: StringName) -> StringName:
@@ -1349,6 +1706,7 @@ static func _definition_is_meal_cycle_managed(definition: NpcSpotDefinition) -> 
 	return (
 		_definition_is_meal_cycle_controller(definition)
 		or _definition_is_meal_cycle_food(definition)
+		or _definition_is_meal_cycle_cleanup(definition)
 	)
 
 
@@ -1365,6 +1723,14 @@ static func _definition_is_meal_cycle_food(definition: NpcSpotDefinition) -> boo
 		definition != null
 		and definition.meal_cycle_id != &""
 		and String(definition.meal_cycle_stage) == MEAL_STAGE_FOOD
+	)
+
+
+static func _definition_is_meal_cycle_cleanup(definition: NpcSpotDefinition) -> bool:
+	return (
+		definition != null
+		and definition.meal_cycle_id != &""
+		and String(definition.meal_cycle_stage) == MEAL_STAGE_CLEANUP_WORK
 	)
 
 
@@ -1389,13 +1755,18 @@ static func _get_meal_cycle_controller_id_for_definition(
 		return &""
 	if _definition_is_meal_cycle_controller(definition):
 		return definition.spot_id
-	if not _definition_is_meal_cycle_food(definition):
+	if definition.meal_cycle_controller_spot_id != &"":
+		return definition.meal_cycle_controller_spot_id
+	if not _definition_is_meal_cycle_food(definition) and not _definition_is_meal_cycle_cleanup(definition):
 		return &""
 
 	for controller in _get_meal_cycle_controller_definitions(runtime):
 		if (
 			controller.meal_cycle_id == definition.meal_cycle_id
-			and _get_meal_cycle_food_spot_id(controller) == definition.spot_id
+			and (
+				_get_meal_cycle_food_spot_ids(controller).has(definition.spot_id)
+				or _get_meal_cycle_cleanup_spot_ids(controller).has(definition.spot_id)
+			)
 		):
 			return controller.spot_id
 
@@ -1421,17 +1792,76 @@ static func _get_meal_cycle_food_spot_id(controller: NpcSpotDefinition) -> Strin
 	return &""
 
 
+static func _get_meal_cycle_food_spot_ids(
+	controller: NpcSpotDefinition
+) -> Array[StringName]:
+	var spot_ids: Array[StringName] = []
+	if controller == null:
+		return spot_ids
+	if controller.meal_cycle_food_spot_id != &"":
+		spot_ids.append(controller.meal_cycle_food_spot_id)
+	for configured_id in controller.meal_cycle_food_spot_ids:
+		if configured_id != &"" and not spot_ids.has(configured_id):
+			spot_ids.append(configured_id)
+	if spot_ids.is_empty() and controller.next_spot_id_when_done != &"":
+		spot_ids.append(controller.next_spot_id_when_done)
+	return spot_ids
+
+
+static func _get_meal_cycle_cleanup_spot_ids(
+	controller: NpcSpotDefinition
+) -> Array[StringName]:
+	var spot_ids: Array[StringName] = []
+	if controller == null:
+		return spot_ids
+	for configured_id in controller.meal_cycle_cleanup_spot_ids:
+		if configured_id != &"" and not spot_ids.has(configured_id):
+			spot_ids.append(configured_id)
+	if spot_ids.is_empty():
+		spot_ids.append(controller.spot_id)
+	elif not spot_ids.has(controller.spot_id):
+		spot_ids.push_front(controller.spot_id)
+	return spot_ids
+
+
 static func _get_meal_cycle_food_definition_owner_ids(
 	runtime,
 	controller: NpcSpotDefinition
 ) -> Array[StringName]:
-	var food_definition := runtime.spot_definitions.get(
-		_get_meal_cycle_food_spot_id(controller),
-		null
-	) as NpcSpotDefinition
-	if food_definition != null:
-		return food_definition.get_owner_ids()
+	var owner_ids: Array[StringName] = []
+	for food_spot_id in _get_meal_cycle_food_spot_ids(controller):
+		var food_definition := runtime.spot_definitions.get(
+			food_spot_id,
+			null
+		) as NpcSpotDefinition
+		if food_definition == null:
+			continue
+		for owner_id in food_definition.get_owner_ids():
+			if not owner_ids.has(owner_id):
+				owner_ids.append(owner_id)
+	if not owner_ids.is_empty():
+		return owner_ids
 	return controller.get_owner_ids()
+
+
+static func _get_meal_cycle_food_owner_ids_for_meal(
+	runtime,
+	controller: NpcSpotDefinition,
+	meal: String
+) -> Array[String]:
+	var fallback_values: Array = controller.meal_cycle_food_owner_ids
+	if fallback_values.is_empty():
+		fallback_values = _get_meal_cycle_food_definition_owner_ids(runtime, controller)
+	for schedule_value in controller.meal_cycle_schedule:
+		if not (schedule_value is Dictionary):
+			continue
+		var schedule: Dictionary = schedule_value
+		if String(schedule.get("meal", "")) != meal:
+			continue
+		var configured_values = schedule.get("food_owner_ids", [])
+		if configured_values is Array and not configured_values.is_empty():
+			return _string_names_to_strings(configured_values, fallback_values)
+	return _string_names_to_strings(fallback_values, [])
 
 
 static func _get_meal_cycle_reset_work_value(controller: NpcSpotDefinition) -> float:

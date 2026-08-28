@@ -173,7 +173,10 @@ func begin_dialogue(player: Node, npc: Node, definition: Resource) -> Dictionary
 		return _reject_started_session("scripted_talk_animation_rejected")
 
 	current_node = current_definition.get_node(current_definition.entry_node_id)
-	_ui.configure_portrait_presentation(&"", {})
+	_ui.configure_portrait_presentation(
+		current_definition.dialogue_id,
+		_get_npc_portrait_presentation(current_npc)
+	)
 	dialogue_session_started.emit(current_session_id, current_definition.dialogue_id)
 	if not _display_current_node():
 		return _reject_started_session("entry_node_display_rejected")
@@ -905,6 +908,21 @@ func _get_npc_machine(npc) -> Node:
 	if npc is NpcStateMachine:
 		return npc
 	return npc.get_node_or_null("NpcStateMachine")
+
+
+func _get_npc_portrait_presentation(npc: Node) -> Dictionary:
+	if npc == null or not is_instance_valid(npc):
+		return {}
+	for property_name in [
+		&"player_talk_dialogue_profile",
+		&"autonomous_dialogue_profile",
+	]:
+		if not NpcIdentity.has_property(npc, property_name):
+			continue
+		var profile = npc.get(property_name)
+		if profile != null and profile.has_method("get_portrait_presentation"):
+			return profile.call("get_portrait_presentation") as Dictionary
+	return {}
 
 
 func _get_primary_state_name(machine: Node) -> StringName:

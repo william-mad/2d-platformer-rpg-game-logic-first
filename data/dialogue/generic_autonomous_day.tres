@@ -1,0 +1,78 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_good"]
+script = ExtResource("3_choice")
+choice_id = &"day_good"
+text = "Pretty well."
+next_node_id = &"player_good"
+
+[sub_resource type="Resource" id="Choice_busy"]
+script = ExtResource("3_choice")
+choice_id = &"day_busy"
+text = "Busy."
+next_node_id = &"player_busy"
+
+[sub_resource type="Resource" id="Choice_bad"]
+script = ExtResource("3_choice")
+choice_id = &"day_bad"
+text = "It could be better."
+next_node_id = &"player_bad"
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"npc"
+speaker_text = "How is your day going?"
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_good"), SubResource("Choice_busy"), SubResource("Choice_bad")])
+
+[sub_resource type="Resource" id="Node_player_good"]
+script = ExtResource("2_node")
+node_id = &"player_good"
+speaker_id = &"player"
+speaker_text = "Pretty well."
+next_node_id = &"npc_good"
+
+[sub_resource type="Resource" id="Node_npc_good"]
+script = ExtResource("2_node")
+node_id = &"npc_good"
+speaker_id = &"npc"
+speaker_text = "Good. I hope it stays that way."
+terminal = true
+
+[sub_resource type="Resource" id="Node_player_busy"]
+script = ExtResource("2_node")
+node_id = &"player_busy"
+speaker_id = &"player"
+speaker_text = "Busy. There has been a lot to do."
+next_node_id = &"npc_busy"
+
+[sub_resource type="Resource" id="Node_npc_busy"]
+script = ExtResource("2_node")
+node_id = &"npc_busy"
+speaker_id = &"npc"
+speaker_text = "I know how that feels. Remember to take a break when you can."
+terminal = true
+
+[sub_resource type="Resource" id="Node_player_bad"]
+script = ExtResource("2_node")
+node_id = &"player_bad"
+speaker_id = &"player"
+speaker_text = "It could be better."
+next_node_id = &"npc_bad"
+
+[sub_resource type="Resource" id="Node_npc_bad"]
+script = ExtResource("2_node")
+node_id = &"npc_bad"
+speaker_id = &"npc"
+speaker_text = "I'm sorry to hear that. Maybe tomorrow will be easier."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"generic_autonomous_day"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_player_good"), SubResource("Node_npc_good"), SubResource("Node_player_busy"), SubResource("Node_npc_busy"), SubResource("Node_player_bad"), SubResource("Node_npc_bad")])

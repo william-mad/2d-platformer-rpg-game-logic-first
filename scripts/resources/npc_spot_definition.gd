@@ -43,13 +43,19 @@ const ScheduleWindowPolicy = preload(
 @export_group("Meal Cycle")
 @export var meal_cycle_id: StringName = &""
 @export var meal_cycle_stage: StringName = &""
+@export var meal_cycle_controller_spot_id: StringName = &""
 @export var meal_cycle_food_spot_id: StringName = &""
+@export var meal_cycle_food_spot_ids: Array[StringName] = []
+@export var meal_cycle_cleanup_spot_ids: Array[StringName] = []
+@export_range(0.0, 1000.0, 0.1) var meal_cycle_cleanup_share: float = 0.0
 @export var meal_cycle_schedule: Array[Dictionary] = []
 @export var meal_cycle_recipe: ProcessingRecipeDefinition
 @export var meal_cycle_prep_owner_ids: Array[StringName] = []
 @export var meal_cycle_food_owner_ids: Array[StringName] = []
 @export var meal_cycle_cleanup_owner_ids: Array[StringName] = []
 @export_range(0.0, 20.0, 0.01) var meal_cycle_cleanup_work_multiplier: float = 1.0
+@export var meal_cycle_infinite_ingredient_storage: bool = false
+@export_range(1, 64, 1) var meal_cycle_storage_batches_per_prep: int = 1
 
 @export_group("Sleep Skip Wake")
 @export var wake_at_home_position: bool = true
@@ -191,6 +197,11 @@ func get_validation_errors() -> Array[String]:
 				errors.append(
 					"meal_cycle_recipe must produce at least one edible output with positive hunger value"
 				)
+	if meal_cycle_infinite_ingredient_storage:
+		if meal_cycle_recipe == null:
+			errors.append("infinite meal ingredient storage requires meal_cycle_recipe")
+		if meal_cycle_storage_batches_per_prep < 1 or meal_cycle_storage_batches_per_prep > 64:
+			errors.append("meal_cycle_storage_batches_per_prep must be between 1 and 64")
 	return errors
 
 

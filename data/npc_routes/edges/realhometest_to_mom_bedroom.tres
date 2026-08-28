@@ -9,4 +9,4 @@ edge_id = &"household.realhometest_to_mom_bedroom"
 source_scene_path = "res://scenes/testscenes/realhometest.tscn"
 target_scene_path = "res://scenes/testscenes/mom_bedroom.tscn"
 target_arrival_position = Vector2(-320, 420)
-allowed_npc_ids = Array[StringName]([&"mom"])
+allowed_npc_ids = Array[StringName]([&"mom", &"dad"])

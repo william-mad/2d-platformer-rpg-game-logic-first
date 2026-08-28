@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="NpcSceneRouteEdge" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/npc_scene_route_edge.gd" id="1_edge"]
+
+[resource]
+resource_name = "Realtest1 to Dad Workplace"
+script = ExtResource("1_edge")
+edge_id = &"household.realtest1_to_dad_workplace"
+source_scene_path = "res://scenes/testscenes/realtest1.tscn"
+target_scene_path = "res://scenes/simulated/dad_workplace.tscn"
+target_arrival_position = Vector2(0, 0)
+allowed_npc_ids = Array[StringName]([&"dad"])

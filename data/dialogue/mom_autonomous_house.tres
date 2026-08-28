@@ -1,8 +1,8 @@
-[gd_resource type="Resource" script_class="DialogueDefinition" load_steps=9 format=3]
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3 uid="uid://dv6dj8xwgf4k5"]
 
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
-[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+[ext_resource type="Script" uid="uid://bsmeen4ahl14e" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" uid="uid://csithy7k1fddw" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" uid="uid://cytm50bmpbyao" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
 
 [sub_resource type="Resource" id="Choice_cozy"]
 script = ExtResource("3_choice")
@@ -13,42 +13,42 @@ next_node_id = &"player_cozy"
 [sub_resource type="Resource" id="Choice_creaky"]
 script = ExtResource("3_choice")
 choice_id = &"house_is_creaky"
-text = "It has a lot of opinions."
+text = "It feels a little old."
 next_node_id = &"player_creaky"
 
 [sub_resource type="Resource" id="Node_entry"]
 script = ExtResource("2_node")
 node_id = &"house_comment"
 speaker_id = &"mom"
-speaker_text = "This house sounds different every day. Cozy, or plotting against us?"
+speaker_text = "The house feels peaceful today. Do you like it here?"
 choices = Array[ExtResource("3_choice")]([SubResource("Choice_cozy"), SubResource("Choice_creaky")])
 
 [sub_resource type="Resource" id="Node_player_cozy"]
 script = ExtResource("2_node")
 node_id = &"player_cozy"
 speaker_id = &"player"
-speaker_text = "Cozy. The creaks make it feel lived in."
+speaker_text = "Yes. It feels cozy."
 next_node_id = &"mom_cozy"
 
 [sub_resource type="Resource" id="Node_mom_cozy"]
 script = ExtResource("2_node")
 node_id = &"mom_cozy"
 speaker_id = &"mom"
-speaker_text = "Good answer. The house may let you keep your room."
+speaker_text = "I'm glad. A home should feel comfortable, even when it isn't perfect."
 terminal = true
 
 [sub_resource type="Resource" id="Node_player_creaky"]
 script = ExtResource("2_node")
 node_id = &"player_creaky"
 speaker_id = &"player"
-speaker_text = "Plotting. That floorboard definitely knows something."
+speaker_text = "It feels a little old in places."
 next_node_id = &"mom_creaky"
 
 [sub_resource type="Resource" id="Node_mom_creaky"]
 script = ExtResource("2_node")
 node_id = &"mom_creaky"
 speaker_id = &"mom"
-speaker_text = "I knew it. We'll interrogate it after tea."
+speaker_text = "It is. There are a few things I would like to fix when we have the time."
 terminal = true
 
 [resource]

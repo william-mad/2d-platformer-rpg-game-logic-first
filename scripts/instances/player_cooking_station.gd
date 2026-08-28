@@ -108,13 +108,14 @@ func _build_panel() -> void:
 	add_child(_panel_layer)
 	var dim := ColorRect.new()
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	dim.color = Color(0, 0, 0, 0.55)
+	dim.color = Color(0.14902, 0.192157, 0.180392, 0.62)
 	_panel_layer.add_child(dim)
 	var center := CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_panel_layer.add_child(center)
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(520, 390)
+	panel.theme_type_variation = &"MenuShell"
 	center.add_child(panel)
 	var margin := MarginContainer.new()
 	for side: String in ["left", "top", "right", "bottom"]:
@@ -126,7 +127,7 @@ func _build_panel() -> void:
 	var title := Label.new()
 	title.text = recipe.display_name
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 26)
+	title.theme_type_variation = &"MenuTitle"
 	root.add_child(title)
 	root.add_child(_make_recipe_flow())
 	_maximum_label = Label.new()

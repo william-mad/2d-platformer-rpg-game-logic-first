@@ -83,7 +83,7 @@ func _initialize() -> void:
 	locations.npc_records[MOM_ID] = blocked_work_record
 	simulator.call("simulate_now")
 	var blocked_work: Dictionary = locations.call("get_record_snapshot", MOM_ID)
-	_print_record("terminal_action_recovered_main_route", blocked_work)
+	_print_record("terminal_action_recovered_main_work", blocked_work)
 	if String((blocked_work.get("activity", {}) as Dictionary).get("spot_id", "")) != "mom_work":
 		push_error("DIAG terminal action still blocks work")
 		quit(1)

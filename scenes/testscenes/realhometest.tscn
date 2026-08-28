@@ -22,17 +22,25 @@
 [ext_resource type="Script" uid="uid://dv7yuq7ydxoyl" path="res://scripts/activities/interactive_activity_launch_options.gd" id="20_activity_launch_options"]
 [ext_resource type="Script" uid="uid://dd4s28glmoxa6" path="res://scripts/instances/intro_bed_arrival.gd" id="21_intro_bed_arrival"]
 [ext_resource type="AudioStream" uid="uid://brj46n6bnd7sh" path="res://sounds/birds.mp3" id="22_intro_birds"]
-[ext_resource type="Resource" path="res://data/dialogue/intro_memory_home_epilogue.tres" id="23_intro_memory_epilogue"]
-[ext_resource type="Script" path="res://scripts/instances/intro_memory_portrait_presenter.gd" id="24_memory_portrait_presenter"]
-[ext_resource type="Texture2D" path="res://images/dialog/mom/portrait_1_mom7.png" id="25_memory_portrait"]
+[ext_resource type="Resource" uid="uid://bjlepgbvcnoco" path="res://data/dialogue/intro_memory_home_epilogue.tres" id="23_intro_memory_epilogue"]
+[ext_resource type="Script" uid="uid://wborgguuldxd" path="res://scripts/instances/intro_memory_portrait_presenter.gd" id="24_memory_portrait_presenter"]
+[ext_resource type="Texture2D" uid="uid://cc5ghxbp2jvmh" path="res://images/dialog/mom/portrait_1_mom7.png" id="25_memory_portrait"]
 [ext_resource type="Script" uid="uid://dninfdqdtix1o" path="res://scripts/testscenes/realhome_bathroom_privacy.gd" id="26_bathroom_privacy"]
 [ext_resource type="Script" uid="uid://ciarx48ccamy3" path="res://scripts/instances/locked_door_feedback.gd" id="27_locked_door_feedback"]
 [ext_resource type="Texture2D" uid="uid://bpcmqrwbvg0pe" path="res://images/backgrounds/realhome_second_floor_light_clipped.png" id="27_second_floor_light_clipped"]
 [ext_resource type="Script" uid="uid://nfev6rpnfbtu" path="res://scripts/instances/fake_scene_door.gd" id="28_fake_scene_door"]
-[ext_resource type="Resource" path="res://data/dialogue/locked_side_room.tres" id="29_locked_side_room_dialogue"]
-
-[sub_resource type="RectangleShape2D" id="RectangleShape2D_fake_scene_door"]
-size = Vector2(64, 116)
+[ext_resource type="Resource" uid="uid://npdv6i0swln8" path="res://data/dialogue/locked_side_room.tres" id="29_locked_side_room_dialogue"]
+[ext_resource type="Resource" uid="uid://dqgdx1ybue1dw" path="res://data/interactive_activities/rune_weaving.tres" id="30_rune_weaving"]
+[ext_resource type="Resource" path="res://data/npc_routes/edges/realhometest_to_maid_room.tres" id="31_home_maid_room_route"]
+[ext_resource type="PackedScene" uid="uid://b7rgnlf1raafv" path="res://scenes/things/npc_work_spot.tscn" id="32_mom_meal_spot"]
+[ext_resource type="Resource" path="res://data/npc_spots/mom_eat.tres" id="33_mom_eat_definition"]
+[ext_resource type="Resource" path="res://data/npc_spots/mom_eat_prep.tres" id="34_mom_eat_prep_definition"]
+[ext_resource type="PackedScene" path="res://scenes/things/meal_ingredient_storage.tscn" id="35_meal_storage"]
+[ext_resource type="PackedScene" path="res://scenes/things/npc_meal_phase_spot.tscn" id="36_meal_phase_spot"]
+[ext_resource type="Resource" path="res://data/npc_spots/dad_meal_eat.tres" id="37_dad_meal_eat"]
+[ext_resource type="Resource" path="res://data/npc_spots/maid_meal_eat.tres" id="38_maid_meal_eat"]
+[ext_resource type="Resource" path="res://data/npc_spots/player_meal_eat.tres" id="39_player_meal_eat"]
+[ext_resource type="Resource" path="res://data/npc_spots/mom_meal_table_cleanup.tres" id="40_table_cleanup"]
 
 [sub_resource type="Animation" id="Animation_bathroom_visible"]
 resource_name = "bathroom"
@@ -824,6 +832,9 @@ size = Vector2(47, 8)
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_first_floor_ceiling_right"]
 size = Vector2(1338, 7.75)
 
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_fake_scene_door"]
+size = Vector2(64, 116)
+
 [sub_resource type="CircleShape2D" id="CircleShape2D_room_visibility_probe"]
 radius = 0.25
 
@@ -1056,7 +1067,7 @@ position = Vector2(715, 368)
 door_id = &"hall_bathroom"
 allowed_npc_ids = Array[StringName]([&"mom"])
 
-[node name="LockedSideRoomDoor" type="Area2D" parent="."]
+[node name="LockedSideRoomDoor" type="Area2D" parent="." unique_id=1270580010]
 position = Vector2(528, 368)
 collision_layer = 0
 collision_mask = 2
@@ -1064,15 +1075,21 @@ monitorable = false
 script = ExtResource("28_fake_scene_door")
 dialogue_definition = ExtResource("29_locked_side_room_dialogue")
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="LockedSideRoomDoor"]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="LockedSideRoomDoor" unique_id=578231465]
 position = Vector2(0, -58)
 shape = SubResource("RectangleShape2D_fake_scene_door")
 
-[node name="BathroomPrivacy" type="Node" parent="."]
+[node name="MaidRoomNpcDoor" parent="LockedSideRoomDoor" unique_id=1817098729 instance=ExtResource("3_door")]
+visible = false
+target_scene_path = "res://scenes/simulated/maid_room.tscn"
+route_edge = ExtResource("31_home_maid_room_route")
+owner_ids = Array[StringName]([&"maid"])
+
+[node name="BathroomPrivacy" type="Node" parent="." unique_id=1558709163]
 script = ExtResource("26_bathroom_privacy")
 bathroom_door_path = NodePath("../HallBathroomInteriorDoor")
 
-[node name="BathroomLockedDoorFeedback" type="Node" parent="."]
+[node name="BathroomLockedDoorFeedback" type="Node" parent="." unique_id=37628941]
 script = ExtResource("27_locked_door_feedback")
 door_path = NodePath("../HallBathroomInteriorDoor")
 interaction_area_path = NodePath("../HallBathroomInteriorDoor/RequestArea")
@@ -1080,7 +1097,7 @@ interaction_area_path = NodePath("../HallBathroomInteriorDoor/RequestArea")
 [node name="BedroomClassroomInteriorDoor" parent="." unique_id=1911439747 instance=ExtResource("16_interior_door")]
 position = Vector2(-582, 368)
 door_id = &"bedroom_classroom"
-allowed_npc_ids = Array[StringName]([&"mom"])
+allowed_npc_ids = Array[StringName]([&"mom", &"dad"])
 
 [node name="NpcLocationScene" type="Node" parent="." unique_id=738533555]
 script = ExtResource("2_location_scene")
@@ -1118,16 +1135,16 @@ position = Vector2(-20, 394)
 target_scene_path = "res://scenes/testscenes/realtest1.tscn"
 target_spawn_id = &"from_realhometest"
 route_edge = ExtResource("17_home_yard_route")
-owner_ids = Array[StringName]([&"mom", &"player"])
+owner_ids = Array[StringName]([&"mom", &"dad", &"maid", &"player"])
 
 [node name="MomBedroomDoor" parent="." unique_id=1876449603 instance=ExtResource("3_door")]
 position = Vector2(-271, 367)
 target_scene_path = "res://scenes/testscenes/mom_bedroom.tscn"
 target_spawn_id = &"from_realhometest"
 route_edge = ExtResource("18_home_bedroom_route")
-owner_ids = Array[StringName]([&"mom"])
+owner_ids = Array[StringName]([&"mom", &"dad"])
 
-[node name="MomBedroomLockedDoorFeedback" type="Node" parent="."]
+[node name="MomBedroomLockedDoorFeedback" type="Node" parent="." unique_id=1733559331]
 script = ExtResource("27_locked_door_feedback")
 door_path = NodePath("../MomBedroomDoor")
 interaction_area_path = NodePath("../MomBedroomDoor")
@@ -1168,14 +1185,51 @@ npc_preference_weights = {
 }
 
 [node name="KitchenStove" parent="." unique_id=766221443 instance=ExtResource("14_cooking_station")]
-position = Vector2(394, 363)
+position = Vector2(414, 363)
+
+[node name="MealIngredientStorage" parent="." unique_id=996543539 instance=ExtResource("35_meal_storage")]
+position = Vector2(264, 371)
+storage_id = &"mom_meal_storage"
+controller_definition = ExtResource("34_mom_eat_prep_definition")
+
+[node name="MomMealCycleSpot" parent="." unique_id=1251251329 instance=ExtResource("32_mom_meal_spot")]
+position = Vector2(327, 347)
+player_work_interaction_id = &"meal_prep"
+world_definition = ExtResource("34_mom_eat_prep_definition")
+restrict_to_target_npc = false
+
+[node name="MomMealSeat" parent="." unique_id=849035836 instance=ExtResource("36_meal_phase_spot")]
+position = Vector2(60, 347)
+world_definition = ExtResource("33_mom_eat_definition")
+restrict_to_target_npc = false
+
+[node name="DadMealSeat" parent="." unique_id=2142335196 instance=ExtResource("36_meal_phase_spot")]
+position = Vector2(95, 347)
+world_definition = ExtResource("37_dad_meal_eat")
+restrict_to_target_npc = false
+
+[node name="MaidMealSeat" parent="." unique_id=1439300982 instance=ExtResource("36_meal_phase_spot")]
+position = Vector2(130, 347)
+world_definition = ExtResource("38_maid_meal_eat")
+restrict_to_target_npc = false
+
+[node name="PlayerMealSeat" parent="." unique_id=1225739978 instance=ExtResource("36_meal_phase_spot")]
+position = Vector2(165, 347)
+world_definition = ExtResource("39_player_meal_eat")
+restrict_to_target_npc = false
+
+[node name="MealTableCleanupSpot" parent="." unique_id=1393707526 instance=ExtResource("36_meal_phase_spot")]
+position = Vector2(105, 347)
+player_work_interaction_id = &"meal_cleanup"
+world_definition = ExtResource("40_table_cleanup")
+restrict_to_target_npc = false
 
 [node name="MomMagicLessonSpot" type="Node2D" parent="." unique_id=668963211]
 visible = false
 position = Vector2(-301, 368)
 script = ExtResource("12_magic_lesson")
 world_definition = ExtResource("13_mom_magic_lesson")
-interactive_activity_definitions = Array[ExtResource("17_0rflt")]([ExtResource("19_mana_balance")])
+interactive_activity_definitions = Array[ExtResource("17_0rflt")]([ExtResource("19_mana_balance"), ExtResource("30_rune_weaving")])
 interactive_activity_launch_options = SubResource("ActivityLaunchOptions_magic_training")
 
 [node name="MomLessonPosition" type="Marker2D" parent="MomMagicLessonSpot" unique_id=1540572963]
@@ -1185,6 +1239,7 @@ position = Vector2(-96, 0)
 position = Vector2(96, 0)
 
 [node name="CharacterStatsOverlay" parent="." unique_id=1403932194 instance=ExtResource("5_stats_overlay")]
+visible = true
 
 [node name="IntroBedArrival" type="CanvasLayer" parent="." unique_id=503228460]
 layer = 110
@@ -1206,11 +1261,12 @@ unique_name_in_owner = true
 stream = ExtResource("22_intro_birds")
 volume_db = -7.0
 
-[node name="MemoryDialogueBackdropLayer" type="CanvasLayer" parent="."]
+[node name="MemoryDialogueBackdropLayer" type="CanvasLayer" parent="." unique_id=341550133]
 layer = 70
 
-[node name="MemoryDialogueBackdropMute" type="ColorRect" parent="MemoryDialogueBackdropLayer"]
+[node name="MemoryDialogueBackdropMute" type="ColorRect" parent="MemoryDialogueBackdropLayer" unique_id=882945497]
 unique_name_in_owner = true
+visible = false
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -1219,10 +1275,10 @@ grow_vertical = 2
 mouse_filter = 2
 color = Color(0.035, 0.045, 0.06, 0.22)
 
-[node name="MemoryPortraitLayer" type="CanvasLayer" parent="."]
+[node name="MemoryPortraitLayer" type="CanvasLayer" parent="." unique_id=2057558093]
 layer = 80
 
-[node name="MemoryPortraitPresentation" type="Control" parent="MemoryPortraitLayer"]
+[node name="MemoryPortraitPresentation" type="Control" parent="MemoryPortraitLayer" unique_id=527323634]
 unique_name_in_owner = true
 layout_mode = 3
 anchors_preset = 15
@@ -1234,7 +1290,7 @@ mouse_filter = 2
 script = ExtResource("24_memory_portrait_presenter")
 dialogue_id = &"intro_memory_home_epilogue"
 
-[node name="MemoryDialoguePortraitSlot" type="Control" parent="MemoryPortraitLayer/MemoryPortraitPresentation"]
+[node name="MemoryDialoguePortraitSlot" type="Control" parent="MemoryPortraitLayer/MemoryPortraitPresentation" unique_id=334286803]
 layout_mode = 1
 anchors_preset = 3
 anchor_left = 1.0
@@ -1247,7 +1303,7 @@ grow_horizontal = 0
 grow_vertical = 0
 mouse_filter = 2
 
-[node name="MemoryDialoguePortrait" type="TextureRect" parent="MemoryPortraitLayer/MemoryPortraitPresentation/MemoryDialoguePortraitSlot"]
+[node name="MemoryDialoguePortrait" type="TextureRect" parent="MemoryPortraitLayer/MemoryPortraitPresentation/MemoryDialoguePortraitSlot" unique_id=1659125585]
 unique_name_in_owner = true
 layout_mode = 1
 anchors_preset = 15

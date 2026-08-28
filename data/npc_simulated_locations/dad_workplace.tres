@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="NpcSimulatedLocationDefinition" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/npc_simulated_location_definition.gd" id="1_definition"]
+
+[resource]
+resource_name = "Dad Workplace Simulated Location"
+script = ExtResource("1_definition")
+location_id = &"dad_workplace"
+scene_path = "res://scenes/simulated/dad_workplace.tscn"
+spot_ids = Array[StringName]([&"dad_workplace_work"])
+npc_ids = Array[StringName]([&"dad"])
+expected_origin_scene_paths = Array[String](["res://scenes/testscenes/realtest1.tscn"])

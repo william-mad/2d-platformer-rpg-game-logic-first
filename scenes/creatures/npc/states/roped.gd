@@ -32,16 +32,20 @@ const HARD_OVERRIDE_MINIMUM_PRIORITIES := {
 
 @export_group("Struggle")
 @export var struggle_enabled: bool = true
-@export_range(0.0, 3.0, 0.05) var struggle_speed_multiplier: float = 1.0
+## Position holding is deliberately slower than ordinary walking: the NPC braces
+## against displacement without turning the rope into another locomotion state.
+@export_range(0.0, 3.0, 0.05) var struggle_speed_multiplier: float = 0.35
 @export_range(0.0, 3.0, 0.05) var dragged_speed_multiplier: float = 1.0
 @export_range(0.0, 3000.0, 10.0, "suffix:px/s²") var struggle_acceleration := 800.0
-## Prevents rapid direction/facing flips while crossing an endpoint's X position.
-@export_range(0.0, 64.0, 0.5, "suffix:px") var direction_switch_deadzone := 6.0
+## Converts displacement from the held point into a corrective velocity.
+@export_range(0.0, 10.0, 0.1, "suffix:1/s") var hold_position_response := 2.0
+## Small displacement is accepted so the NPC does not jitter around the held point.
+@export_range(0.0, 64.0, 0.5, "suffix:px") var hold_position_deadzone := 6.0
 ## A short grounded reaction window before voluntary struggle begins.
 @export_range(0.0, 3.0, 0.05, "suffix:s") var reaction_delay_seconds := 0.35
 @export var reaction_animation_name: StringName = &"idle"
-## Dragged/load-bearing is the default hard-struggle condition.
-@export var dragged_animation_name: StringName = &"run"
+## Walk is a restrained in-place stand-in until a dedicated bracing pose exists.
+@export var dragged_animation_name: StringName = &"walk"
 ## Idle is a safe stand-in; Mom's airborne controller supplies jump/fall poses.
 @export var airborne_dangle_animation_name: StringName = &"idle"
 
@@ -71,7 +75,8 @@ var _reaction_delay_remaining: float = 0.0
 var _request_queued: bool = false
 var _idle_request_queued: bool = false
 var _initialized: bool = false
-var _last_struggle_direction: float = 0.0
+var _hold_position_x: float = 0.0
+var _hold_position_initialized: bool = false
 ## Voluntary movement intent must stay separate from the velocity Rope solved last
 ## frame. Feeding the solved velocity back as intent makes repeated pulls erase
 ## the endpoint's weight.
@@ -117,7 +122,8 @@ func enter() -> void:
 	# replay attachment or first-drag opinions.
 	begin_enter_without_animation()
 	_sync_initial_rope_status()
-	_initialize_struggle_direction()
+	if not dragged and is_grounded_for_rope_behavior():
+		_capture_hold_position()
 	_initialize_struggle_intent()
 	_seed_motion_sample_if_needed()
 	_current_roped_phase = -1
@@ -138,6 +144,8 @@ func physics_process(delta: float) -> NpcState:
 		return get_state(&"Idle")
 
 	_sample_pre_state_air_motion(delta)
+	if not dragged and is_grounded_for_rope_behavior():
+		_capture_hold_position()
 	var phase := get_roped_phase()
 	_update_roped_phase(phase)
 	_refresh_struggle_animation()
@@ -211,6 +219,10 @@ func get_roped_phase() -> int:
 	if not is_grounded_for_rope_behavior():
 		return RopedPhase.DANGLING
 	if _reaction_delay_remaining > 0.0:
+		return RopedPhase.REACTION
+	# Attachment alone is passive. The rope's load-bearing signal already has
+	# enter/exit hysteresis, so it is the stable and inexpensive struggle gate.
+	if not dragged:
 		return RopedPhase.REACTION
 	if is_struggling_hard():
 		return RopedPhase.HARD_STRUGGLE
@@ -295,7 +307,7 @@ func should_down_after_hard_air_drag(
 
 
 func get_struggle_direction() -> float:
-	return _resolve_struggle_direction_from_ropes()
+	return signf(_get_hold_target_velocity_x())
 
 
 func _physics_process(delta: float) -> void:
@@ -350,8 +362,7 @@ func _begin_rope_session(initially_dragged: bool = false) -> void:
 	set_physics_process(true)
 	_session_serial += 1
 	_reaction_delay_remaining = get_reaction_delay_seconds()
-	_last_struggle_direction = 0.0
-	_initialize_struggle_direction()
+	_capture_hold_position()
 	_struggle_intent_initialized = false
 	_initialize_struggle_intent()
 	_current_roped_phase = -1
@@ -373,7 +384,8 @@ func _end_rope_session() -> void:
 	dragged = false
 	set_physics_process(false)
 	_reaction_delay_remaining = 0.0
-	_last_struggle_direction = 0.0
+	_hold_position_x = 0.0
+	_hold_position_initialized = false
 	_struggle_intent_velocity_x = 0.0
 	_struggle_intent_initialized = false
 	_current_roped_phase = -1
@@ -392,6 +404,8 @@ func _set_dragged(is_being_dragged: bool) -> void:
 		return
 	dragged = is_being_dragged
 	_reset_continued_drag_timer()
+	if not dragged:
+		_capture_hold_position()
 	if machine != null and machine.is_primary_state(&"Roped"):
 		_update_roped_phase()
 		_refresh_struggle_animation()
@@ -608,18 +622,12 @@ func _apply_struggle_movement(delta: float) -> void:
 
 	_initialize_struggle_intent()
 	var acceleration_step := maxf(struggle_acceleration, 0.0) * delta
-	var direction := get_struggle_direction() if struggle_enabled else 0.0
-	if is_zero_approx(direction):
-		_struggle_intent_velocity_x = move_toward(
-			_struggle_intent_velocity_x,
-			0.0,
-			acceleration_step
-		)
-		npc.velocity.x = _struggle_intent_velocity_x
-		return
-
-	face_x_direction(direction)
-	var target_velocity := direction * maxf(get_struggle_speed(), 0.0)
+	var target_velocity := (
+		_get_hold_target_velocity_x() if struggle_enabled else 0.0
+	)
+	var direction := signf(target_velocity)
+	if not is_zero_approx(direction):
+		face_x_direction(direction)
 	_struggle_intent_velocity_x = move_toward(
 		_struggle_intent_velocity_x,
 		target_velocity,
@@ -633,125 +641,27 @@ func _initialize_struggle_intent() -> void:
 		return
 	_struggle_intent_initialized = true
 	_struggle_intent_velocity_x = 0.0
-	if npc == null:
-		return
 
-	# Preserve pre-attachment locomotion only within the NPC's own voluntary
-	# speed range. A rope yank may be much faster and must never become intent.
-	var voluntary_speed_limit := maxf(get_struggle_speed(), 0.0)
-	_struggle_intent_velocity_x = clampf(
-		npc.velocity.x,
-		-voluntary_speed_limit,
-		voluntary_speed_limit
+
+func _get_hold_target_velocity_x() -> float:
+	if npc == null or not _hold_position_initialized:
+		return 0.0
+	var position_error := _hold_position_x - npc.global_position.x
+	if absf(position_error) <= maxf(hold_position_deadzone, 0.0):
+		return 0.0
+	var speed_limit := maxf(get_struggle_speed(), 0.0)
+	return clampf(
+		position_error * maxf(hold_position_response, 0.0),
+		-speed_limit,
+		speed_limit
 	)
 
 
-func _resolve_struggle_direction_from_ropes() -> float:
-	var ropes := _get_attached_ropes()
-	if ropes.is_empty():
-		return 0.0
-
-	var candidates: Array[Dictionary] = []
-	var has_load_bearing_rope := false
-	for rope in ropes:
-		var endpoint_offset = _get_rope_horizontal_offset(rope)
-		if endpoint_offset == null:
-			continue
-		var load_bearing := rope.is_load_bearing()
-		has_load_bearing_rope = has_load_bearing_rope or load_bearing
-		candidates.append({
-			"offset": float(endpoint_offset),
-			"load_bearing": load_bearing,
-			"tension": maxf(rope.get_current_tension(), 0.0),
-		})
-
-	if candidates.is_empty():
-		return 0.0
-
-	var direction_score := 0.0
-	for candidate in candidates:
-		if has_load_bearing_rope and not bool(candidate["load_bearing"]):
-			continue
-		var offset := float(candidate["offset"])
-		if absf(offset) <= maxf(direction_switch_deadzone, 0.0):
-			continue
-		var weight := (
-			maxf(float(candidate["tension"]), 0.05)
-			if bool(candidate["load_bearing"])
-			else 1.0
-		)
-		direction_score += signf(offset) * weight
-
-	if not is_zero_approx(direction_score):
-		_last_struggle_direction = signf(direction_score)
-	_initialize_struggle_direction()
-	return _last_struggle_direction
-
-
-func _get_rope_horizontal_offset(rope: Rope):
-	if (
-		rope == null
-		or not is_instance_valid(rope)
-		or not rope.active
-		or not rope.is_attached_to(npc)
-	):
-		return null
-
-	var own_visual: Node2D
-	var own_body: Node2D
-	var other_visual: Node2D
-	var other_body: Node2D
-	if rope.start_body == npc:
-		own_visual = rope.start_visual_point
-		own_body = rope.start_body
-		other_visual = rope.end_visual_point
-		other_body = rope.end_body
-	elif rope.end_body == npc:
-		own_visual = rope.end_visual_point
-		own_body = rope.end_body
-		other_visual = rope.start_visual_point
-		other_body = rope.start_body
-	else:
-		return null
-
-	var own_position = _get_endpoint_position(own_visual, own_body)
-	var other_position = _get_endpoint_position(other_visual, other_body)
-	if own_position == null or other_position == null:
-		return null
-	return (own_position as Vector2).x - (other_position as Vector2).x
-
-
-func _get_endpoint_position(visual: Node2D, body: Node2D):
-	if _node_is_usable(visual):
-		return visual.global_position
-	if _node_is_usable(body):
-		return body.global_position
-	return null
-
-
-func _get_attached_ropes() -> Array[Rope]:
-	var ropes: Array[Rope] = []
-	if npc == null or not npc.has_method(&"get_attached_ropes"):
-		return ropes
-	var attached_rope_values = npc.call(&"get_attached_ropes")
-	if not (attached_rope_values is Array):
-		return ropes
-	for rope_value in attached_rope_values:
-		var rope := rope_value as Rope
-		if rope != null and is_instance_valid(rope):
-			ropes.append(rope)
-	return ropes
-
-
-func _initialize_struggle_direction() -> void:
-	if not is_zero_approx(_last_struggle_direction):
+func _capture_hold_position() -> void:
+	if npc == null:
 		return
-	var facing_direction := 1.0
-	if npc != null:
-		var direction_value = npc.get(&"direction")
-		if direction_value is int or direction_value is float:
-			facing_direction = signf(float(direction_value))
-	_last_struggle_direction = facing_direction if not is_zero_approx(facing_direction) else 1.0
+	_hold_position_x = npc.global_position.x
+	_hold_position_initialized = true
 
 
 func _refresh_struggle_animation(force: bool = false) -> void:
@@ -774,14 +684,6 @@ func _refresh_struggle_animation(force: bool = false) -> void:
 		var fallback_animation := get_roped_phase_animation_fallback(phase)
 		if fallback_animation != &"" and fallback_animation != requested_animation:
 			machine.play_fixed_animation(fallback_animation)
-
-
-func _node_is_usable(node: Node) -> bool:
-	return (
-		node != null
-		and is_instance_valid(node)
-		and not node.is_queued_for_deletion()
-	)
 
 
 func _try_send_initial_opinions() -> void:

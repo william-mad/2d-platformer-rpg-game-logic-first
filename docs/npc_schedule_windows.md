@@ -44,6 +44,25 @@ control, and emergency ownership remain protected.
 Meal-cycle-managed definitions keep their dedicated meal timing and deliberately
 bypass this policy. The first authored opt-in is the two `mom_work` windows; Mom's
 meals, lesson, shower, and sleep retain their prior configuration.
+The canonical `mom_work` definition remains in the yard. Meal preparation stays at
+the `realhometest` kitchen counter, left of the stove. Its nearby barrel represents
+the meal cycle's persistent ingredient inventory. The authored storage restocks
+four recipe batches at each prep event, producing 120 meal points without
+transferring food through a character inventory.
+
+Eating uses four capacity-one positions across the table: one each for Mom, Dad,
+the Maid, and the Player. These are presentation/target views of the same prepared
+food pool, so food consumed at any seat is immediately reflected at every seat.
+Mom, the Maid, and the Player are called for every meal; Dad is called for breakfast
+and dinner but not lunch while he is working.
+
+Cleanup remains one meal-cycle stage, but its 100 work points are split into two
+independent 50-point contributions: the original counter and the table. The Player
+or Maid can complete them in either order; the cycle resets only after both reach
+zero. The controller remains the only schedule and persistence authority. Existing
+single-food-spot fields remain compatibility fallbacks, and older cleanup rows that
+lack the split dictionary distribute their saved aggregate total across both halves.
+No meal save-version bump is required.
 
 ## Completion policy and bounded overtime
 

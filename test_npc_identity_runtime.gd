@@ -374,28 +374,95 @@ func test_rejected_registration_does_not_commit_alias_adoption() -> void:
 
 func test_main_authored_social_npcs_have_persistence_safe_ids() -> void:
 	var mom_scene := load("res://scenes/creatures/mom_npc.tscn") as PackedScene
+	var bob_scene := load("res://scenes/creatures/bob_npc.tscn") as PackedScene
+	var dad_scene := load("res://scenes/creatures/dad_npc.tscn") as PackedScene
+	var maid_scene := load("res://scenes/creatures/maid_npc.tscn") as PackedScene
 	var main_scene := load("res://scenes/testscenes/realtest1.tscn") as PackedScene
 	assert_not_null(mom_scene, "Mom scene loads")
+	assert_not_null(bob_scene, "Bob scene loads")
+	assert_not_null(dad_scene, "Dad scene loads")
+	assert_not_null(maid_scene, "Maid scene loads")
 	assert_not_null(main_scene, "main social scene loads")
-	if mom_scene == null or main_scene == null:
+	if (
+		mom_scene == null
+		or bob_scene == null
+		or dad_scene == null
+		or maid_scene == null
+		or main_scene == null
+	):
 		return
 	var mom := mom_scene.instantiate()
+	var bob := bob_scene.instantiate()
+	var dad := dad_scene.instantiate()
+	var maid := maid_scene.instantiate()
 	var main := main_scene.instantiate()
-	var talk_partner := main.get_node_or_null("TalkPartnerNpc")
+	var main_bob := main.get_node_or_null("BobNpc")
+	var main_dad := main.get_node_or_null("DadNpc")
+	var main_maid := main.get_node_or_null("MaidNpc")
 	assert_eq(
 		Identity.get_stable_actor_id(mom),
 		"mom",
 		"Mom has an authored persistence identity"
 	)
-	assert_not_null(talk_partner, "main-scene talk partner exists")
-	if talk_partner != null:
-		assert_eq(
-			Identity.get_stable_actor_id(talk_partner),
-			"talk_partner_npc",
-			"the authored talk partner has a persistence identity"
-		)
+	assert_eq(
+		Identity.get_stable_actor_id(bob),
+		"bob",
+		"Bob has an authored persistence identity"
+	)
+	assert_eq(
+		Identity.get_stable_actor_id(dad),
+		"dad",
+		"Dad has an authored persistence identity"
+	)
+	assert_eq(
+		Identity.get_stable_actor_id(maid),
+		"maid",
+		"Maid has an authored persistence identity"
+	)
+	assert_not_null(main_bob, "main-scene Bob exists")
+	assert_not_null(main_dad, "main-scene Dad exists")
+	assert_not_null(main_maid, "main-scene Maid exists")
+	_assert_placeholder_npc_body(bob, 25.0, 100.0, "Bob")
+	_assert_placeholder_npc_body(dad, 16.0, 124.0, "Dad")
+	_assert_placeholder_npc_body(maid, 15.0, 112.0, "Maid")
 	mom.free()
+	bob.free()
+	dad.free()
+	maid.free()
 	main.free()
+
+
+func _assert_placeholder_npc_body(
+	npc: Node,
+	expected_radius: float,
+	expected_height: float,
+	npc_name: String
+) -> void:
+	var collision := npc.get_node_or_null("CollisionShape2D") as CollisionShape2D
+	assert_not_null(collision, "%s has a body collision" % npc_name)
+	if collision == null:
+		return
+	var capsule := collision.shape as CapsuleShape2D
+	assert_not_null(capsule, "%s uses Mom's capsule-style hitbox" % npc_name)
+	if capsule == null:
+		return
+	assert_eq(
+		capsule.radius,
+		expected_radius,
+		"%s hitbox radius is authored" % npc_name
+	)
+	assert_eq(
+		capsule.height,
+		expected_height,
+		"%s hitbox height is authored" % npc_name
+	)
+	var body_visual := npc.get_node_or_null("BodyVisual") as Polygon2D
+	assert_not_null(body_visual, "%s has a temporary body visual" % npc_name)
+	if body_visual != null:
+		assert_true(
+			body_visual.polygon.size() > 4,
+			"%s placeholder silhouette is not the old square" % npc_name
+		)
 
 
 func test_offscreen_decay_falls_back_when_canonical_record_key_is_unstable() -> void:

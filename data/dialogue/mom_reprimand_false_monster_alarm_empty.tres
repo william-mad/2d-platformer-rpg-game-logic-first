@@ -1,0 +1,73 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3 uid="uid://cei0jl4y25k7p"]
+
+[ext_resource type="Script" uid="uid://bsmeen4ahl14e" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" uid="uid://csithy7k1fddw" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" uid="uid://cytm50bmpbyao" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Node_warning"]
+script = ExtResource("2_node")
+node_id = &"warning"
+speaker_id = &"mom"
+speaker_text = "I heard the monster bell, but I don't see any monsters."
+next_node_id = &"question"
+
+[sub_resource type="Resource" id="Choice_apologize"]
+script = ExtResource("3_choice")
+choice_id = &"empty_alarm_apologize"
+text = "There wasn't one. Sorry."
+next_node_id = &"mom_apology"
+consequences = {
+"reprimand_outcome": &"apologize"
+}
+
+[sub_resource type="Resource" id="Choice_excuse"]
+script = ExtResource("3_choice")
+choice_id = &"empty_alarm_excuse"
+text = "Maybe it ran away."
+next_node_id = &"mom_excuse"
+consequences = {
+"reprimand_outcome": &"excuse"
+}
+
+[sub_resource type="Resource" id="Choice_justify"]
+script = ExtResource("3_choice")
+choice_id = &"empty_alarm_safe"
+text = "Better safe than sorry."
+next_node_id = &"mom_justify"
+consequences = {
+"reprimand_outcome": &"justify"
+}
+
+[sub_resource type="Resource" id="Node_question"]
+script = ExtResource("2_node")
+node_id = &"question"
+speaker_id = &"mom"
+speaker_text = "What happened?"
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_apologize"), SubResource("Choice_excuse"), SubResource("Choice_justify")])
+
+[sub_resource type="Resource" id="Node_apology"]
+script = ExtResource("2_node")
+node_id = &"mom_apology"
+speaker_id = &"mom"
+speaker_text = "Thank you for telling me. Only use the bell when there is a real danger."
+terminal = true
+
+[sub_resource type="Resource" id="Node_excuse"]
+script = ExtResource("2_node")
+node_id = &"mom_excuse"
+speaker_id = &"mom"
+speaker_text = "Maybe. Take a moment to check before you ring it again."
+terminal = true
+
+[sub_resource type="Resource" id="Node_justify"]
+script = ExtResource("2_node")
+node_id = &"mom_justify"
+speaker_id = &"mom"
+speaker_text = "Being safe also means checking first. That bell brings everyone running."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"mom_reprimand_false_monster_alarm_empty"
+entry_node_id = &"warning"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_warning"), SubResource("Node_question"), SubResource("Node_apology"), SubResource("Node_excuse"), SubResource("Node_justify")])

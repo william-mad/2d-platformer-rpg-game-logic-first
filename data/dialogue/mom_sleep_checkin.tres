@@ -20,6 +20,7 @@ terminal = true
 [sub_resource type="Resource" id="DialogueNode_morning"]
 script = ExtResource("2_node")
 node_id = &"morning_checkin"
+speaker_id = &"mom"
 speaker_text = "Morning, sweetheart. Did you get enough rest?"
 choices = Array[ExtResource("3_choice")]([SubResource("DialogueChoice_ready"), SubResource("DialogueChoice_tired")])
 
