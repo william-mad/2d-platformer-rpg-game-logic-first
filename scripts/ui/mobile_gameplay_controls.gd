@@ -130,12 +130,13 @@ func _configure_mobile_window_scaling() -> void:
 	if not OS.has_feature("mobile"):
 		return
 	var window := get_tree().root
-	# Keep the pixel-art game rendered through a fixed virtual viewport, but let
-	# wide/tall phones expose extra world instead of pillarboxing it. Fractional
-	# scaling fills the available mobile game surface without changing aspect.
+	# Match the project's pixel-art settings on mobile: expose extra world on
+	# wider phones, but only scale the fixed virtual viewport by whole integers.
+	# Together with the project's nearest texture filter this avoids fractional
+	# pixel stretching/blur across gameplay and UI art.
 	window.content_scale_mode = Window.CONTENT_SCALE_MODE_VIEWPORT
 	window.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
-	window.content_scale_stretch = Window.CONTENT_SCALE_STRETCH_FRACTIONAL
+	window.content_scale_stretch = Window.CONTENT_SCALE_STRETCH_INTEGER
 
 
 func _refresh_visibility() -> void:
