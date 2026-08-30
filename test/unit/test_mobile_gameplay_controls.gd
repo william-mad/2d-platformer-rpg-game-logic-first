@@ -20,9 +20,10 @@ func after_each() -> void:
 
 func test_force_enabled_exposes_controls_for_headless_verification() -> void:
 	assert_true(controls.visible, "forced mobile controls should be visible in headless tests")
-	assert_eq(controls.get_action_button_center(&"attack"), Vector2(692.0, 426.0))
-	assert_eq(controls.get_action_button_center(&"attach_rope"), Vector2(614.0, 426.0))
-	assert_eq(controls.get_action_button_center(&"charm"), Vector2(654.0, 351.0))
+	assert_eq(controls.get_action_button_center(&"attack"), Vector2(72.0, 420.0))
+	assert_eq(controls.get_action_button_center(&"attach_rope"), Vector2(170.0, 420.0))
+	assert_eq(controls.get_action_button_center(&"charm"), Vector2(121.0, 322.0))
+	assert_eq(controls.get_joystick_center(), Vector2(642.0, 384.0))
 
 
 func test_player_hud_contains_mobile_control_overlay() -> void:
@@ -34,6 +35,14 @@ func test_player_hud_contains_mobile_control_overlay() -> void:
 		hud.get_node_or_null("MobileGameplayControls"),
 		"player HUD should include the mobile controls overlay"
 	)
+
+
+func test_unowned_touch_is_left_for_other_mobile_ui() -> void:
+	assert_false(
+		bool(controls.call("_begin_touch", 99, Vector2(377.0, 150.0))),
+		"touches away from gameplay controls must remain available to dialogue and menus"
+	)
+	assert_false(bool(controls.call("_end_touch", 99)))
 
 
 func test_z_button_presses_and_releases_attack() -> void:
