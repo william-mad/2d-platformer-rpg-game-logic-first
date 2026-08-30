@@ -5,10 +5,6 @@ signal choice_requested(session_id: StringName, choice_id: StringName)
 signal advance_requested(session_id: StringName)
 signal cancel_requested(session_id: StringName)
 
-const MOBILE_CHOICE_MIN_HEIGHT := 68.0
-const MOBILE_CHOICE_FONT_SIZE := 18
-const MOBILE_CHOICE_SEPARATION := 10
-
 @export_range(1.0, 120.0, 1.0, "suffix: chars/s") var characters_per_second: float = 36.0
 @export_range(1.0, 10.0, 0.25, "suffix:x") var held_advance_speed_multiplier: float = 4.0
 @export var advance_action: StringName = &"attack"
@@ -31,16 +27,8 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	set_process_input(true)
 	set_process_unhandled_input(true)
-	if OS.has_feature("mobile"):
-		# Make the interaction menu genuinely thumb-friendly: nearly full width,
-		# substantially taller, with large separated choice targets.
-		panel.offset_left = 16.0
-		panel.offset_right = -16.0
-		panel.offset_top = -360.0
-		panel.offset_bottom = -12.0
-		choice_container.add_theme_constant_override(
-			"separation", MOBILE_CHOICE_SEPARATION
-		)
+	# Keep the dialogue presentation at the scene's original desktop-sized
+	# layout on mobile. Touch support must not resize the dialogue box.
 	hide_and_clear()
 
 
@@ -97,9 +85,6 @@ func display_node(
 		button.focus_mode = Control.FOCUS_ALL
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.disabled = true
-		if OS.has_feature("mobile"):
-			button.custom_minimum_size.y = MOBILE_CHOICE_MIN_HEIGHT
-			button.add_theme_font_size_override("font_size", MOBILE_CHOICE_FONT_SIZE)
 		button.pressed.connect(
 			_on_choice_button_pressed.bind(session_id, choice.choice_id)
 		)
