@@ -5,6 +5,8 @@ signal choice_requested(session_id: StringName, choice_id: StringName)
 signal advance_requested(session_id: StringName)
 signal cancel_requested(session_id: StringName)
 
+const MOBILE_CHOICE_MIN_HEIGHT := 42.0
+
 @export_range(1.0, 120.0, 1.0, "suffix: chars/s") var characters_per_second: float = 36.0
 @export_range(1.0, 10.0, 0.25, "suffix:x") var held_advance_speed_multiplier: float = 4.0
 @export var advance_action: StringName = &"attack"
@@ -24,6 +26,13 @@ var _portrait_revealed_session_id: StringName = &""
 
 
 func _ready() -> void:
+	if OS.has_feature("mobile"):
+		# Give dialogue and social choices a comfortable finger target and use more
+		# of a phone's width instead of the desktop-sized inset panel.
+		panel.offset_left = 28.0
+		panel.offset_right = -28.0
+		panel.offset_top = -250.0
+		panel.offset_bottom = -20.0
 	hide_and_clear()
 
 
@@ -79,8 +88,15 @@ func display_node(
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.focus_mode = Control.FOCUS_ALL
 		button.disabled = true
+		if OS.has_feature("mobile"):
+			button.custom_minimum_size.y = MOBILE_CHOICE_MIN_HEIGHT
 		button.pressed.connect(
 			_on_choice_button_pressed.bind(session_id, choice.choice_id)
+		)
+		# Explicit touch handling makes choices work even when Android isn't
+		# emulating a mouse click for touchscreen input.
+		button.gui_input.connect(
+			_on_choice_button_gui_input.bind(session_id, choice.choice_id)
 		)
 		choice_container.add_child(button)
 
@@ -210,6 +226,17 @@ func _unhandled_input(event: InputEvent) -> void:
 	disable_input()
 	get_viewport().set_input_as_handled()
 	cancel_requested.emit(session_id)
+
+
+func _on_choice_button_gui_input(
+	event: InputEvent,
+	session_id: StringName,
+	choice_id: StringName
+) -> void:
+	var touch := event as InputEventScreenTouch
+	if touch == null or not touch.pressed:
+		return
+	_on_choice_button_pressed(session_id, choice_id)
 
 
 func _on_choice_button_pressed(session_id: StringName, choice_id: StringName) -> void:
