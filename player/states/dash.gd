@@ -9,9 +9,11 @@ const ProgressionIds := preload("res://scripts/progression/progression_ids.gd")
 @export var dash_ease_power: float = 1.85
 @export var air_vertical_velocity_multiplier: float = 0.22
 @export var dash_gravity_multiplier: float = 0.0
+@export_group("Mobile Dash")
+@export_range(1.0, 2.0, 0.05) var mobile_dash_speed_multiplier: float = 1.15
+@export_range(1.0, 2.0, 0.05) var mobile_dash_duration_multiplier: float = 1.2
 
 @export_group("Input")
-@export var double_tap_window: float = 0.25
 @export var cooldown_time: float = 0.28
 @export_range(0.0, 0.5, 0.01, "suffix:s") var roll_input_grace_time: float = 0.14
 
@@ -28,9 +30,8 @@ const ProgressionIds := preload("res://scripts/progression/progression_ids.gd")
 
 var dash_timer: float = 0.0
 var dash_elapsed: float = 0.0
+var active_dash_duration: float = 0.0
 var dash_direction: float = 1.0
-var last_tap_direction: float = 0.0
-var last_tap_time_msec: int = -100000
 var cooldown_end_msec: int = 0
 var previous_gravity_multiplier: float = 1.0
 var afterimage_timer: float = 0.0
@@ -46,7 +47,8 @@ func init() -> void:
 
 func enter() -> void:
 	run.enable_running()
-	dash_timer = dash_duration
+	active_dash_duration = get_effective_dash_duration()
+	dash_timer = active_dash_duration
 	dash_elapsed = 0.0
 	afterimage_timer = 0.0
 	roll_grace_timer = roll_input_grace_time
@@ -138,51 +140,49 @@ func physics_process(_delta: float) -> PlayerState:
 
 
 func get_dash_state_from_input(_event: InputEvent) -> PlayerState:
-	var tap_direction := get_tap_direction(_event)
-
-	if tap_direction == 0.0:
+	if _event is InputEventKey and (_event as InputEventKey).echo:
+		return null
+	if not _event.is_action_pressed("dash"):
 		return null
 
 	var now := Time.get_ticks_msec()
-
 	if now < cooldown_end_msec:
 		return null
-
-	var is_double_tap := tap_direction == last_tap_direction and now - last_tap_time_msec <= int(double_tap_window * 1000.0)
-	last_tap_direction = tap_direction
-	last_tap_time_msec = now
-
-	if not is_double_tap:
+	if not player.is_player_ability_unlocked(ProgressionIds.ABILITY_DASH):
 		return null
 
-	dash_direction = tap_direction
+	dash_direction = _resolve_dash_direction()
 	player.apply_facing_left(dash_direction < 0.0)
-	last_tap_time_msec = -100000
 	run.enable_running()
-	if not player.is_player_ability_unlocked(ProgressionIds.ABILITY_DASH):
-		return run if player.is_on_floor() else null
 	return self
 
 
-func get_tap_direction(_event: InputEvent) -> float:
-	if _event is InputEventKey and _event.echo:
-		return 0.0
-
-	if _event.is_action_pressed("left"):
+func _resolve_dash_direction() -> float:
+	if player.direction.x < 0.0 or Input.is_action_pressed("left"):
 		return -1.0
-
-	if _event.is_action_pressed("right"):
+	if player.direction.x > 0.0 or Input.is_action_pressed("right"):
 		return 1.0
+	return -1.0 if player.sprite_2d.flip_h else 1.0
 
-	return 0.0
+
+func get_effective_dash_speed() -> float:
+	if player.uses_mobile_run_profile():
+		return dash_speed * maxf(mobile_dash_speed_multiplier, 1.0)
+	return dash_speed
+
+
+func get_effective_dash_duration() -> float:
+	if player.uses_mobile_run_profile():
+		return dash_duration * maxf(mobile_dash_duration_multiplier, 1.0)
+	return dash_duration
 
 
 func get_current_dash_speed() -> float:
-	var duration := maxf(dash_duration, 0.001)
+	var duration := maxf(active_dash_duration, 0.001)
 	var progress := clampf(dash_elapsed / duration, 0.0, 1.0)
 	var eased_progress := pow(progress, maxf(dash_ease_power, 0.01))
 	var exit_speed := player.get_run_speed() * maxf(dash_exit_speed_multiplier, 0.0)
-	return lerpf(dash_speed, exit_speed, eased_progress)
+	return lerpf(get_effective_dash_speed(), exit_speed, eased_progress)
 
 
 func update_dash_visuals(delta: float) -> void:

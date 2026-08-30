@@ -21,8 +21,8 @@ func enter() -> void:
 	player.animation_player.play("jump")
 	player.animation_player.pause()
 	if player.previous_state == ledge_grab:
-		active_jump_velocity = ledge_jump_velocity
-		player.velocity.y = -ledge_jump_velocity
+		active_jump_velocity = ledge_jump_velocity * player.get_jump_velocity_multiplier()
+		player.velocity.y = -active_jump_velocity
 	else:
 		player.velocity.y = -active_jump_velocity
 	pass
@@ -98,7 +98,9 @@ func is_using_running_profile() -> bool:
 
 
 func _capture_jump_profile() -> void:
-	if player.previous_state == fall:
+	if player.uses_mobile_run_profile():
+		using_running_profile = true
+	elif player.previous_state == fall:
 		using_running_profile = fall.is_using_running_profile()
 	elif player.previous_state == run:
 		using_running_profile = true
@@ -119,4 +121,7 @@ func _get_speed_scaled_jump_velocity() -> float:
 	var speed_ratio := clampf(air_movement_speed / maximum_speed, 0.0, 1.0)
 	# Ballistic jump height is proportional to vertical velocity squared.
 	var proportional_velocity := maximum_jump_velocity * sqrt(speed_ratio)
-	return clampf(proportional_velocity, minimum_jump_velocity, maximum_jump_velocity)
+	return (
+		clampf(proportional_velocity, minimum_jump_velocity, maximum_jump_velocity)
+		* player.get_jump_velocity_multiplier()
+	)

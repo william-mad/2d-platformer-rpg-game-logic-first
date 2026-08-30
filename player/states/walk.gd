@@ -33,6 +33,8 @@ func handle_input(event: InputEvent) -> PlayerState:
 func process(_delta: float) -> PlayerState:
 	if is_zero_approx(player.direction.x):
 		return idle
+	if player.uses_mobile_run_profile():
+		return run
 	return next_state
 
 

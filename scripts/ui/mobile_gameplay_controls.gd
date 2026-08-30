@@ -15,12 +15,12 @@ const MOBILE_INTERACTION_FEEDBACK_FONT_SIZE := 14
 const MOBILE_MENU_EDGE_MARGIN := 12.0
 const ACTION_LABELS := {
 	&"attack": "Z",
-	&"attach_rope": "X",
+	&"dash": "X",
 	&"charm": "C",
 }
 const ACTION_CAPTIONS := {
 	&"attack": "ATTACK",
-	&"attach_rope": "ROPE",
+	&"dash": "DASH",
 	&"charm": "ACT",
 }
 
@@ -32,6 +32,7 @@ var _joystick_vector := Vector2.ZERO
 var _touch_actions: Dictionary = {}
 var _action_touch_counts: Dictionary = {}
 var _interaction_interactor_ref: WeakRef
+var _intro_movement_only: bool = false
 
 
 func _ready() -> void:
@@ -47,7 +48,9 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
-	if not visible or not (force_enabled or OS.has_feature("mobile")):
+	if not is_visible_in_tree() or not (force_enabled or OS.has_feature("mobile")):
+		return
+	if _intro_movement_only:
 		return
 	_refresh_interaction_menu_mobile_ui()
 
@@ -57,7 +60,7 @@ func _exit_tree() -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if not visible:
+	if not is_visible_in_tree():
 		return
 	if get_tree().paused:
 		_release_all_actions()
@@ -67,11 +70,19 @@ func _input(event: InputEvent) -> void:
 	if touch != null:
 		# NPC interaction menus remain in viewport/canvas coordinates and get first
 		# chance at the touch before gameplay controls.
-		if touch.pressed and _handle_interaction_menu_touch(touch.position):
+		if (
+			touch.pressed
+			and not _intro_movement_only
+			and _handle_interaction_menu_touch(touch.position)
+		):
 			get_viewport().set_input_as_handled()
 			return
 
-		if touch.pressed and _is_menu_touch(touch.position):
+		if (
+			touch.pressed
+			and not _intro_movement_only
+			and _is_menu_touch(touch.position)
+		):
 			_request_pause_menu()
 			get_viewport().set_input_as_handled()
 			return
@@ -99,6 +110,18 @@ func refresh_for_platform() -> void:
 	queue_redraw()
 
 
+func set_intro_movement_only(enabled: bool) -> void:
+	if _intro_movement_only == enabled:
+		return
+	_release_all_actions()
+	_intro_movement_only = enabled
+	queue_redraw()
+
+
+func is_intro_movement_only() -> bool:
+	return _intro_movement_only
+
+
 func _on_surface_changed() -> void:
 	queue_redraw()
 	if visible:
@@ -124,7 +147,7 @@ func get_action_button_center(action: StringName) -> Vector2:
 	match action:
 		&"attack":
 			return Vector2(56.0 * ui_scale, size.y - 66.0 * ui_scale)
-		&"attach_rope":
+		&"dash":
 			return Vector2(142.0 * ui_scale, size.y - 66.0 * ui_scale)
 		&"charm":
 			return Vector2(99.0 * ui_scale, size.y - 152.0 * ui_scale)
@@ -162,6 +185,8 @@ func _refresh_visibility() -> void:
 
 
 func _is_menu_touch(position: Vector2) -> bool:
+	if _intro_movement_only:
+		return false
 	var ui_scale := _get_control_scale()
 	var touch_size := MENU_TOUCH_SIZE * ui_scale
 	var center := get_menu_button_center()
@@ -338,6 +363,8 @@ func _begin_touch(touch_id: int, position: Vector2) -> bool:
 		_touch_actions[touch_id] = []
 		_update_joystick(position)
 		return true
+	if _intro_movement_only:
+		return false
 
 	var button_radius := BUTTON_RADIUS * ui_scale
 	for action in ACTION_LABELS:
@@ -371,11 +398,12 @@ func _update_joystick(position: Vector2) -> void:
 		next_actions.append(&"left")
 	elif _joystick_vector.x >= JOYSTICK_DEADZONE:
 		next_actions.append(&"right")
-	if _joystick_vector.y <= -JOYSTICK_DEADZONE:
-		next_actions.append(&"up")
-		next_actions.append(&"jump")
-	elif _joystick_vector.y >= JOYSTICK_DEADZONE:
-		next_actions.append(&"crouch")
+	if not _intro_movement_only:
+		if _joystick_vector.y <= -JOYSTICK_DEADZONE:
+			next_actions.append(&"up")
+			next_actions.append(&"jump")
+		elif _joystick_vector.y >= JOYSTICK_DEADZONE:
+			next_actions.append(&"crouch")
 
 	var previous_actions: Array = _touch_actions.get(_joystick_touch_id, [])
 	for action in previous_actions:
@@ -429,7 +457,7 @@ func _release_all_actions() -> void:
 
 
 func _on_visibility_changed() -> void:
-	if not visible:
+	if not is_visible_in_tree():
 		_release_all_actions()
 
 
@@ -444,8 +472,11 @@ func _draw() -> void:
 	var active_color := Color(0.38, 0.78, 1.0, 0.98)
 	var joystick_center := get_joystick_center()
 	var joystick_radius := JOYSTICK_RADIUS * ui_scale
+	if _intro_movement_only:
+		_draw_direction_markers(joystick_center, label_color, ui_scale, true)
+		return
 	draw_arc(joystick_center, joystick_radius, 0.0, TAU, 64, guide_color, maxf(2.0, 2.0 * ui_scale), true)
-	_draw_direction_markers(joystick_center, label_color, ui_scale)
+	_draw_direction_markers(joystick_center, label_color, ui_scale, false)
 
 	var thumb_center := joystick_center + _joystick_vector * (joystick_radius * 0.52)
 	draw_arc(
@@ -503,20 +534,26 @@ func _draw() -> void:
 	)
 
 
-func _draw_direction_markers(center: Vector2, color: Color, ui_scale: float) -> void:
+func _draw_direction_markers(
+	center: Vector2,
+	color: Color,
+	ui_scale: float,
+	horizontal_only: bool = false
+) -> void:
 	var distance := 56.0 * ui_scale
 	var half_width := 8.0 * ui_scale
 	var depth := 10.0 * ui_scale
-	draw_colored_polygon(PackedVector2Array([
-		center + Vector2(0.0, -distance - depth),
-		center + Vector2(-half_width, -distance + depth),
-		center + Vector2(half_width, -distance + depth),
-	]), color)
-	draw_colored_polygon(PackedVector2Array([
-		center + Vector2(0.0, distance + depth),
-		center + Vector2(-half_width, distance - depth),
-		center + Vector2(half_width, distance - depth),
-	]), color)
+	if not horizontal_only:
+		draw_colored_polygon(PackedVector2Array([
+			center + Vector2(0.0, -distance - depth),
+			center + Vector2(-half_width, -distance + depth),
+			center + Vector2(half_width, -distance + depth),
+		]), color)
+		draw_colored_polygon(PackedVector2Array([
+			center + Vector2(0.0, distance + depth),
+			center + Vector2(-half_width, distance - depth),
+			center + Vector2(half_width, distance - depth),
+		]), color)
 	draw_colored_polygon(PackedVector2Array([
 		center + Vector2(-distance - depth, 0.0),
 		center + Vector2(-distance + depth, -half_width),

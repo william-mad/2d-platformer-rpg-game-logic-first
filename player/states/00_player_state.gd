@@ -84,11 +84,15 @@ func get_ground_movement_state() -> PlayerState:
 func get_ground_movement_state_for_profile(use_running_profile: bool) -> PlayerState:
 	if is_zero_approx(player.direction.x):
 		return idle
-	return run if use_running_profile else walk
+	return run if _resolve_running_profile(use_running_profile) else walk
 
 
 func get_profile_movement_speed(use_running_profile: bool) -> float:
-	return player.get_run_speed() if use_running_profile else walk.walk_speed
+	return player.get_run_speed() if _resolve_running_profile(use_running_profile) else walk.walk_speed
+
+
+func _resolve_running_profile(requested_running_profile: bool) -> bool:
+	return player.uses_mobile_run_profile() or requested_running_profile
 
 
 func get_attack_release_state() -> PlayerState:

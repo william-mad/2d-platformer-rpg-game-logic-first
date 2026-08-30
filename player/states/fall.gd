@@ -115,6 +115,11 @@ func is_using_running_profile() -> bool:
 
 
 func _capture_air_profile() -> void:
+	if player.uses_mobile_run_profile():
+		using_running_profile = true
+		air_movement_speed = get_profile_movement_speed(true)
+		return
+
 	if player.previous_state == jump:
 		using_running_profile = jump.is_using_running_profile()
 		air_movement_speed = jump.get_air_movement_speed()

@@ -21,7 +21,7 @@ func after_each() -> void:
 func test_force_enabled_exposes_controls_for_headless_verification() -> void:
 	assert_true(controls.visible, "forced mobile controls should be visible in headless tests")
 	assert_eq(controls.get_action_button_center(&"attack"), Vector2(56.0, 430.0))
-	assert_eq(controls.get_action_button_center(&"attach_rope"), Vector2(142.0, 430.0))
+	assert_eq(controls.get_action_button_center(&"dash"), Vector2(142.0, 430.0))
 	assert_eq(controls.get_action_button_center(&"charm"), Vector2(99.0, 344.0))
 	assert_eq(controls.get_joystick_center(), Vector2(658.0, 392.0))
 	assert_eq(controls.get_menu_button_center(), Vector2(377.0, 34.0))
@@ -65,12 +65,13 @@ func test_z_button_presses_and_releases_attack() -> void:
 
 
 func test_x_and_c_buttons_support_simultaneous_touches() -> void:
-	controls.call("_input", _touch(2, controls.get_action_button_center(&"attach_rope"), true))
+	controls.call("_input", _touch(2, controls.get_action_button_center(&"dash"), true))
 	controls.call("_input", _touch(3, controls.get_action_button_center(&"charm"), true))
-	assert_true(Input.is_action_pressed(&"attach_rope"), "X touch should press rope")
+	assert_true(Input.is_action_pressed(&"dash"), "X touch should press dash")
+	assert_false(Input.is_action_pressed(&"attach_rope"), "mobile X should not press rope")
 	assert_true(Input.is_action_pressed(&"charm"), "C touch should press interaction")
-	controls.call("_input", _touch(2, controls.get_action_button_center(&"attach_rope"), false))
-	assert_false(Input.is_action_pressed(&"attach_rope"), "X releases independently")
+	controls.call("_input", _touch(2, controls.get_action_button_center(&"dash"), false))
+	assert_false(Input.is_action_pressed(&"dash"), "X releases independently")
 	assert_true(Input.is_action_pressed(&"charm"), "C remains held by its own finger")
 	controls.call("_input", _touch(3, controls.get_action_button_center(&"charm"), false))
 
@@ -94,6 +95,31 @@ func test_joystick_up_provides_platformer_jump_and_up_actions() -> void:
 	controls.call("_input", _touch(5, center + Vector2(0.0, -60.0), false))
 	assert_false(Input.is_action_pressed(&"up"), "lifting joystick touch should release up")
 	assert_false(Input.is_action_pressed(&"jump"), "lifting joystick touch should release jump")
+
+
+func test_intro_mode_exposes_horizontal_arrows_without_buttons_or_vertical_actions() -> void:
+	controls.set_intro_movement_only(true)
+	assert_true(controls.is_intro_movement_only(), "intro movement mode should be active")
+	assert_false(
+		bool(controls.call("_is_menu_touch", controls.get_menu_button_center())),
+		"intro movement mode should remove the menu touch target"
+	)
+	assert_false(
+		bool(controls.call(
+			"_begin_touch",
+			6,
+			controls.get_action_button_center(&"dash")
+		)),
+		"intro movement mode should not expose action buttons"
+	)
+
+	var center := controls.get_joystick_center()
+	controls.call("_input", _touch(7, center + Vector2(0.0, -60.0), true))
+	assert_false(Input.is_action_pressed(&"up"), "intro arrows should not press up")
+	assert_false(Input.is_action_pressed(&"jump"), "intro arrows should not jump")
+	controls.call("_input", _drag(7, center + Vector2(60.0, 0.0)))
+	assert_true(Input.is_action_pressed(&"right"), "intro arrows should still move horizontally")
+	controls.call("_input", _touch(7, center + Vector2(60.0, 0.0), false))
 
 
 func _touch(index: int, position: Vector2, pressed: bool) -> InputEventScreenTouch:

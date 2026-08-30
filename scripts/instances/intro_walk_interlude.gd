@@ -131,6 +131,12 @@ var _memory_tween: Tween
 var _final_image_tween: Tween
 var _birds_tween: Tween
 var _exit_tween: Tween
+var _player_hud: CanvasLayer
+var _player_hud_content: Control
+var _mobile_controls: MobileGameplayControls
+var _previous_player_hud_visible: bool = false
+var _previous_player_hud_content_visible: bool = false
+var _hud_visibility_captured: bool = false
 
 
 func _ready() -> void:
@@ -191,10 +197,12 @@ func _exit_tree() -> void:
 	]:
 		if tween != null and tween.is_valid():
 			tween.kill()
+	_restore_player_and_hud_profile()
 	_release_interlude_lock()
 
 
 func _configure_player_for_interlude() -> void:
+	player.set_intro_walk_movement_profile(true)
 	player.set_process_unhandled_input(false)
 	player.player_needs_enabled = false
 	camera.position_smoothing_enabled = false
@@ -216,10 +224,53 @@ func _configure_player_for_interlude() -> void:
 			sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 			_player_visuals.append(sprite)
 			_player_visual_base_positions.append(sprite.position)
-	var player_hud := get_node_or_null("/root/PlayerHud")
-	if player_hud != null:
-		player_hud.visible = false
+	_configure_hud_for_walkable_intro()
 	_snap_player_visuals_to_pixels()
+
+
+func _configure_hud_for_walkable_intro() -> void:
+	_player_hud = get_node_or_null("/root/PlayerHud") as CanvasLayer
+	if _player_hud == null:
+		return
+	_player_hud_content = _player_hud.get_node_or_null("Control") as Control
+	_mobile_controls = (
+		_player_hud.get_node_or_null("MobileGameplayControls")
+		as MobileGameplayControls
+	)
+	_previous_player_hud_visible = _player_hud.visible
+	_previous_player_hud_content_visible = (
+		_player_hud_content.visible if _player_hud_content != null else false
+	)
+	_hud_visibility_captured = true
+
+	if not player.is_mobile_gameplay() or _mobile_controls == null:
+		_player_hud.visible = false
+		return
+
+	if _player_hud_content != null:
+		_player_hud_content.visible = false
+	_mobile_controls.set_intro_movement_only(true)
+	_player_hud.visible = true
+
+
+func _hide_intro_mobile_controls() -> void:
+	if _mobile_controls != null and is_instance_valid(_mobile_controls):
+		_mobile_controls.set_intro_movement_only(false)
+	if _player_hud != null and is_instance_valid(_player_hud):
+		_player_hud.visible = false
+
+
+func _restore_player_and_hud_profile() -> void:
+	if player != null and is_instance_valid(player):
+		player.set_intro_walk_movement_profile(false)
+	if not _hud_visibility_captured:
+		return
+	if _mobile_controls != null and is_instance_valid(_mobile_controls):
+		_mobile_controls.set_intro_movement_only(false)
+	if _player_hud_content != null and is_instance_valid(_player_hud_content):
+		_player_hud_content.visible = _previous_player_hud_content_visible
+	if _player_hud != null and is_instance_valid(_player_hud):
+		_player_hud.visible = _previous_player_hud_visible
 
 
 func _snap_player_visuals_to_pixels() -> void:
@@ -274,6 +325,7 @@ func _on_exit_trigger_body_entered(body: Node2D) -> void:
 
 func _begin_scripted_approach() -> void:
 	current_phase = Phase.SCRIPTED_APPROACH
+	_hide_intro_mobile_controls()
 	exit_trigger.set_deferred("monitoring", false)
 	player.set_process(false)
 	player.set_physics_process(false)

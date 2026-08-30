@@ -12,6 +12,7 @@ const CLAIM_SUPPRESSED_ACTIONS: Array[StringName] = [
 	&"jump",
 	&"crouch",
 	&"charm",
+	&"dash",
 	&"attach_rope",
 	&"attach_rope_npc",
 ]
@@ -48,6 +49,11 @@ const CLAIM_SUPPRESSED_ACTIONS: Array[StringName] = [
 @export_range(1, 999, 1) var run_speed_max_level: int = 10
 @export var knockback_force: Vector2 = Vector2(220, -160)
 @export var knockback_time: float = 0.15
+@export_group("Mobile Movement")
+## Lets desktop builds preview the mobile movement profile.
+@export var force_mobile_gameplay: bool = false
+@export_range(1.0, 1.25, 0.01) var mobile_run_speed_multiplier: float = 1.08
+@export_range(1.0, 1.25, 0.01) var mobile_jump_velocity_multiplier: float = 1.06
 @export_group("Run Animation Playback")
 @export_range(0.01, 4.0, 0.01) var run_animation_start_speed_scale: float = 0.65
 @export_range(0.01, 4.0, 0.01) var run_animation_min_speed_scale: float = 0.55
@@ -136,6 +142,7 @@ var _gameplay_input_resume_frame: int = 0
 var _claim_suppressed_actions: Dictionary = {}
 var _damage_flash := DamageFlash.new()
 var player_hud
+var _intro_walk_movement_profile: bool = false
 
 func _ready() -> void:
 	add_to_group(&"saveable")
@@ -146,6 +153,12 @@ func _ready() -> void:
 		animation_player.animation_started.connect(animation_callback)
 	_sync_player_animation_visual(animation_player.current_animation)
 	rope.configure(self, rope_origin, rope_detector)
+	if is_mobile_gameplay():
+		# Rope remains available to desktop builds, but is removed from the mobile
+		# gameplay profile together with its detector work.
+		rope.detach()
+		rope_detector.monitoring = false
+		rope_detector.monitorable = false
 	if player_hud != null:
 		player_hud.visible = true
 	hp = max_hp
@@ -326,12 +339,38 @@ func get_run_speed() -> float:
 	var maximum_speed := maxf(move_speed, 0.0)
 	var starting_speed := clampf(level_one_run_speed, 0.0, maximum_speed)
 	var maximum_speed_level := maxi(run_speed_max_level, 1)
+	var progression_speed: float
 	if maximum_speed_level == 1:
-		return maximum_speed
+		progression_speed = maximum_speed
+	else:
+		var speed_level := clampi(get_player_level(), 1, maximum_speed_level)
+		var level_progress := float(speed_level - 1) / float(maximum_speed_level - 1)
+		progression_speed = lerpf(starting_speed, maximum_speed, level_progress)
+	if uses_mobile_run_profile():
+		return progression_speed * maxf(mobile_run_speed_multiplier, 1.0)
+	return progression_speed
 
-	var speed_level := clampi(get_player_level(), 1, maximum_speed_level)
-	var level_progress := float(speed_level - 1) / float(maximum_speed_level - 1)
-	return lerpf(starting_speed, maximum_speed, level_progress)
+
+func is_mobile_gameplay() -> bool:
+	return force_mobile_gameplay or OS.has_feature("mobile")
+
+
+func uses_mobile_run_profile() -> bool:
+	return is_mobile_gameplay() and not _intro_walk_movement_profile
+
+
+func set_intro_walk_movement_profile(enabled: bool) -> void:
+	_intro_walk_movement_profile = enabled
+	if enabled and not states.is_empty():
+		var run_state := get_node_or_null("States/Run") as PlayerStateRun
+		if run_state != null:
+			run_state.clear_running()
+
+
+func get_jump_velocity_multiplier() -> float:
+	if uses_mobile_run_profile():
+		return maxf(mobile_jump_velocity_multiplier, 1.0)
+	return 1.0
 
 
 func get_level_damage_multiplier() -> float:
@@ -674,6 +713,8 @@ func can_be_targeted_by_monster() -> bool:
 
 
 func _handle_rope_input(event: InputEvent) -> bool:
+	if is_mobile_gameplay():
+		return false
 	var end_id: StringName = &""
 	if (
 		event.is_action_pressed("attach_rope")
@@ -727,14 +768,15 @@ func _handle_rope_input(event: InputEvent) -> bool:
 
 func _consume_rope_pay_out_input(event: InputEvent) -> bool:
 	return (
-		rope != null
+		not is_mobile_gameplay()
+		and rope != null
 		and rope.can_pay_out()
 		and event.is_action_pressed("crouch")
 	)
 
 
 func is_rope_pay_out_control_active() -> bool:
-	return rope != null and rope.can_pay_out()
+	return not is_mobile_gameplay() and rope != null and rope.can_pay_out()
 
 
 func _get_rope_facing_direction() -> float:
