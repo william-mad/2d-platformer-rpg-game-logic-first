@@ -5,6 +5,11 @@ signal choice_requested(session_id: StringName, choice_id: StringName)
 signal advance_requested(session_id: StringName)
 signal cancel_requested(session_id: StringName)
 
+const MOBILE_PORTRAIT_EDGE_MARGIN := 12.0
+const MOBILE_PORTRAIT_WIDTH_RATIO := 0.34
+const MOBILE_PORTRAIT_MIN_WIDTH := 280.0
+const MOBILE_PORTRAIT_MAX_WIDTH := 460.0
+
 @export_range(1.0, 120.0, 1.0, "suffix: chars/s") var characters_per_second: float = 36.0
 @export_range(1.0, 10.0, 0.25, "suffix:x") var held_advance_speed_multiplier: float = 4.0
 @export var advance_action: StringName = &"attack"
@@ -14,7 +19,10 @@ signal cancel_requested(session_id: StringName)
 @onready var dialogue_label: Label = %DialogueText
 @onready var choice_container: VBoxContainer = %Choices
 @onready var portrait_presenter: IntroMemoryPortraitPresenter = %AutonomousPortraitPresentation
+@onready var portrait_slot: Control = $AutonomousPortraitPresentation/PortraitSlot
 @onready var portrait_texture: TextureRect = %MemoryDialoguePortrait
+@onready var portrait_blink_overlay: TextureRect = %DialoguePortraitBlinkOverlay
+@onready var portrait_talk_overlay: TextureRect = %DialoguePortraitTalkOverlay
 
 var active_session_id: StringName = &""
 var input_enabled: bool = false
@@ -150,6 +158,77 @@ func configure_portrait_presentation(
 		presentation.get("portrait_animation", null) as DialoguePortraitAnimationProfile
 	)
 	portrait_texture.texture = texture
+	_configure_mobile_portrait_layout(texture)
+
+
+func _configure_mobile_portrait_layout(texture: Texture2D) -> void:
+	if not OS.has_feature("mobile") or portrait_slot == null or texture == null:
+		return
+	var viewport_size := get_viewport().get_visible_rect().size
+	var texture_size := texture.get_size()
+	if (
+		viewport_size.x <= 0.0
+		or viewport_size.y <= 0.0
+		or texture_size.x <= 0
+		or texture_size.y <= 0
+	):
+		return
+
+	# Portraits should remain large enough to read on a wide phone. First try to
+	# fit the complete image. Very tall art is kept at a useful width and clipped
+	# only at the bottom, keeping the face/upper body visible instead of shrinking
+	# the whole portrait into a tiny PC-sized strip.
+	var available_width := maxf(
+		viewport_size.x - MOBILE_PORTRAIT_EDGE_MARGIN * 2.0,
+		1.0
+	)
+	var available_height := maxf(
+		viewport_size.y - MOBILE_PORTRAIT_EDGE_MARGIN * 2.0,
+		1.0
+	)
+	var desired_width := minf(
+		clampf(
+			viewport_size.x * MOBILE_PORTRAIT_WIDTH_RATIO,
+			MOBILE_PORTRAIT_MIN_WIDTH,
+			MOBILE_PORTRAIT_MAX_WIDTH
+		),
+		available_width
+	)
+	var texture_aspect := float(texture_size.x) / float(texture_size.y)
+	var full_image_fit_width := available_height * texture_aspect
+	var minimum_useful_width := minf(MOBILE_PORTRAIT_MIN_WIDTH, desired_width)
+	var target_width := desired_width
+	if full_image_fit_width >= minimum_useful_width:
+		target_width = minf(desired_width, full_image_fit_width)
+	var target_height := target_width / texture_aspect
+
+	portrait_slot.anchor_left = 1.0
+	portrait_slot.anchor_top = 0.0
+	portrait_slot.anchor_right = 1.0
+	portrait_slot.anchor_bottom = 0.0
+	portrait_slot.offset_left = -target_width - MOBILE_PORTRAIT_EDGE_MARGIN
+	portrait_slot.offset_top = MOBILE_PORTRAIT_EDGE_MARGIN
+	portrait_slot.offset_right = -MOBILE_PORTRAIT_EDGE_MARGIN
+	portrait_slot.offset_bottom = MOBILE_PORTRAIT_EDGE_MARGIN + available_height
+	portrait_slot.clip_contents = true
+
+	# Size the animated portrait itself to the source aspect ratio. The blink and
+	# talk layers are children of this node, so the complete presentation moves,
+	# clips and scales together with the existing entry/speaker tweens.
+	portrait_texture.anchor_left = 0.0
+	portrait_texture.anchor_top = 0.0
+	portrait_texture.anchor_right = 0.0
+	portrait_texture.anchor_bottom = 0.0
+	portrait_texture.offset_left = 0.0
+	portrait_texture.offset_top = 0.0
+	portrait_texture.offset_right = target_width
+	portrait_texture.offset_bottom = target_height
+	portrait_texture.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	portrait_texture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
+	for overlay in [portrait_blink_overlay, portrait_talk_overlay]:
+		if overlay != null:
+			overlay.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			overlay.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
 
 
 func reveal_portrait_presentation(session_id: StringName) -> bool:
