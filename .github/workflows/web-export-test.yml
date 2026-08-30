@@ -1,3 +1,4 @@
+# Test-only workflow: exports the current Godot project to a downloadable Web artifact.
 name: Web export test
 
 on:
