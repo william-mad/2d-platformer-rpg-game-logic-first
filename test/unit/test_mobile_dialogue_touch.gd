@@ -93,6 +93,32 @@ func test_touch_outside_visible_choices_does_not_pick_first_option() -> void:
 	assert_eq(advance_count, 0, "choice nodes require touching an actual option")
 
 
+func test_relationship_cue_survives_dialogue_close_without_consuming_touch() -> void:
+	var cue := ui.relationship_change_cue
+	var cue_group := cue.get_node("CueGroup") as Control
+	var heart_icon := cue.get_node("CueGroup/HeartIcon") as TextureRect
+	assert_eq(cue.mouse_filter, Control.MOUSE_FILTER_IGNORE)
+	assert_eq(cue_group.mouse_filter, Control.MOUSE_FILTER_IGNORE)
+	assert_eq(heart_icon.mouse_filter, Control.MOUSE_FILTER_IGNORE)
+
+	cue.call("show_love_change", 1.0)
+	assert_true(bool(cue.call("is_showing")))
+	assert_true(
+		ui.get_viewport().get_visible_rect().intersects(heart_icon.get_global_rect()),
+		"the heart cue should remain inside the mobile game viewport"
+	)
+
+	ui.hide_and_clear()
+	assert_true(ui.visible, "the CanvasLayer should remain visible while the heart fades")
+	assert_false(ui.panel.visible, "closing dialogue should still hide the dialogue panel")
+	ui.call("_input", _touch(heart_icon.get_global_rect().get_center()))
+	assert_eq(advance_count, 0, "a fading heart must not advance a closed dialogue")
+	assert_eq(choice_count, 0, "a fading heart must not select a closed dialogue choice")
+
+	cue.call("_finish_cue")
+	assert_false(ui.visible, "the idle CanvasLayer should hide after the heart finishes")
+
+
 func _plain_node(text: String) -> DialogueNode:
 	var node := DialogueNode.new()
 	node.speaker_text = text

@@ -20,6 +20,8 @@ const SocialStateSchema = preload(
 const FeedbackCatalog = preload(
 	"res://scripts/systems/npc_behavior/feedback/npc_feedback_catalog.gd"
 )
+const FLIRT_LOVE_GAIN_LIMIT: float = 60.0
+const CHOICE_OPINION_DELTA_KEY := &"player_talk_opinion_delta"
 
 @export_group("Interaction")
 @export var interaction_action: StringName = &"charm"
@@ -68,12 +70,13 @@ const FeedbackCatalog = preload(
 	},
 	{
 		"favor": 2.0,
-		"love": 3.0
+		"love": 1.0
 	},
 	{
 		"favor": -6.0,
 		"trust": -5.0,
-		"anger": 12.0
+		"anger": 12.0,
+		"love": -1.0
 	},
 	{
 		"trust": 1.0
@@ -135,9 +138,12 @@ func _ready() -> void:
 	_player_talk_rng.randomize()
 	var dialogue_controller := get_node_or_null("/root/DialogueController")
 	if dialogue_controller != null:
-		var callback := Callable(self, "_on_player_talk_dialogue_finished")
-		if not dialogue_controller.dialogue_session_finished.is_connected(callback):
-			dialogue_controller.dialogue_session_finished.connect(callback)
+		var finished_callback := Callable(self, "_on_player_talk_dialogue_finished")
+		if not dialogue_controller.dialogue_session_finished.is_connected(finished_callback):
+			dialogue_controller.dialogue_session_finished.connect(finished_callback)
+		var choice_callback := Callable(self, "_on_player_talk_choice_committed")
+		if not dialogue_controller.dialogue_choice_committed.is_connected(choice_callback):
+			dialogue_controller.dialogue_choice_committed.connect(choice_callback)
 
 
 func _exit_tree() -> void:
@@ -634,6 +640,7 @@ func _begin_player_talk_response(
 		"talk_session_id": "",
 		"target_ref": weakref(target_npc),
 		"dialogue_session_id": &"",
+		"choice_opinion_metrics": {},
 	}
 	if not talk_state.talk_started.is_connected(_on_player_talk_started):
 		talk_state.talk_started.connect(_on_player_talk_started)
@@ -723,6 +730,69 @@ func _on_player_talk_started(_talker: Node2D, partner: Node2D) -> void:
 		)
 
 
+func _on_player_talk_choice_committed(
+	session_id: StringName,
+	dialogue_id: StringName,
+	choice_id: StringName,
+	choice_data: DialogueChoice
+) -> void:
+	if (
+		_active_player_talk.is_empty()
+		or choice_data == null
+		or session_id != StringName(_active_player_talk.get("dialogue_session_id", &""))
+		or not choice_data.consequences.has(CHOICE_OPINION_DELTA_KEY)
+	):
+		return
+	var raw_delta = choice_data.consequences.get(CHOICE_OPINION_DELTA_KEY, {})
+	if not (raw_delta is Dictionary):
+		return
+	var opinion_delta: Dictionary = {}
+	var resolved_metrics: Dictionary = _active_player_talk.get(
+		"choice_opinion_metrics", {}
+	).duplicate(true)
+	for metric_value in raw_delta.keys():
+		var metric := StringName(String(metric_value))
+		if not SocialStateSchema.is_directed_opinion_metric(metric):
+			continue
+		var amount := float(raw_delta[metric_value])
+		if not is_finite(amount):
+			continue
+		resolved_metrics[String(metric)] = true
+		if not is_zero_approx(amount):
+			opinion_delta[String(metric)] = amount
+	_active_player_talk["choice_opinion_metrics"] = resolved_metrics
+	if opinion_delta.is_empty():
+		return
+
+	var target_npc := _get_active_player_talk_target()
+	if target_npc == null:
+		return
+	if StringName(_active_player_talk.get("interaction_id", &"")) == &"talk_flirt":
+		opinion_delta = _limit_flirt_love_gain(
+			target_npc,
+			opinion_delta,
+			&"talk_flirt"
+		)
+	if opinion_delta.is_empty():
+		return
+	var receiver := _get_event_receiver(target_npc)
+	if receiver == null:
+		return
+	receiver.call(
+		"apply_social_event",
+		opinion_delta,
+		player,
+		false,
+		"player_talk_dialogue_choice",
+		{
+			"source": "player_talk_dialogue_choice",
+			"dialogue_id": String(dialogue_id),
+			"choice_id": String(choice_id),
+			"interaction_id": String(_active_player_talk.get("interaction_id", &"talk")),
+		}
+	)
+
+
 func _on_player_talk_dialogue_finished(result: Dictionary) -> void:
 	if _active_player_talk.is_empty():
 		return
@@ -735,6 +805,12 @@ func _on_player_talk_dialogue_finished(result: Dictionary) -> void:
 	var talk_session_id := String(_active_player_talk.get("talk_session_id", ""))
 	var interaction_id := StringName(_active_player_talk.get("interaction_id", &"talk"))
 	var effect_delta: Dictionary = _active_player_talk.get("effect_delta", {}).duplicate(true)
+	var choice_opinion_metrics: Dictionary = _active_player_talk.get(
+		"choice_opinion_metrics", {}
+	).duplicate(true)
+	for metric_value in choice_opinion_metrics.keys():
+		effect_delta.erase(String(metric_value))
+		effect_delta.erase(StringName(String(metric_value)))
 	var effect_set_values: Dictionary = _active_player_talk.get(
 		"effect_set_values", {}
 	).duplicate(true)
@@ -979,11 +1055,27 @@ func _apply_interaction_effects(
 	effect_interaction_id: StringName
 ) -> void:
 	_mark_player_npc_met(target_npc, effect_interaction_id)
+	effect_delta = _limit_flirt_love_gain(
+		target_npc,
+		effect_delta,
+		effect_interaction_id
+	)
 	var receiver := _get_event_receiver(target_npc)
 	var machine := _get_machine(target_npc)
+	var relationship_context := {
+		"source": "player_talk_dialogue",
+		"interaction_id": String(effect_interaction_id),
+	}
 
 	if receiver != null and not effect_delta.is_empty():
-		receiver.call("apply_social_event", effect_delta, player, false)
+		receiver.call(
+			"apply_social_event",
+			effect_delta,
+			player,
+			false,
+			"player_talk_dialogue",
+			relationship_context
+		)
 	elif machine != null and not effect_delta.is_empty():
 		machine.apply_value_delta(effect_delta, player)
 
@@ -1030,6 +1122,40 @@ func _apply_interaction_effects(
 			effect_delta,
 			effect_set_values
 		)
+
+
+func _limit_flirt_love_gain(
+	target_npc: Node2D,
+	effect_delta: Dictionary,
+	effect_interaction_id: StringName
+) -> Dictionary:
+	var limited_delta := effect_delta.duplicate(true)
+	if effect_interaction_id != &"talk_flirt" or not limited_delta.has("love"):
+		return limited_delta
+	var relationships := _get_relationship_system()
+	if relationships == null or not relationships.has_method("get_opinion_metric"):
+		return limited_delta
+	var requested_love_delta := float(limited_delta["love"])
+	if requested_love_delta <= 0.0:
+		return limited_delta
+	var current_love := float(relationships.call(
+		"get_opinion_metric",
+		target_npc,
+		player,
+		&"love",
+		0.0
+	))
+	var remaining_gain := FLIRT_LOVE_GAIN_LIMIT - current_love
+	if remaining_gain <= 0.0:
+		limited_delta.erase("love")
+		return limited_delta
+	limited_delta["love"] = minf(
+		requested_love_delta,
+		remaining_gain
+	)
+	if is_zero_approx(float(limited_delta["love"])):
+		limited_delta.erase("love")
+	return limited_delta
 
 
 func _request_social_interaction_acceptance(
