@@ -6,9 +6,9 @@ signal advance_requested(session_id: StringName)
 signal cancel_requested(session_id: StringName)
 
 const MOBILE_PORTRAIT_EDGE_MARGIN := 12.0
-const MOBILE_PORTRAIT_WIDTH_RATIO := 0.34
-const MOBILE_PORTRAIT_MIN_WIDTH := 280.0
-const MOBILE_PORTRAIT_MAX_WIDTH := 460.0
+const MOBILE_PORTRAIT_WIDTH_RATIO := 0.68
+const MOBILE_PORTRAIT_MIN_WIDTH := 560.0
+const MOBILE_PORTRAIT_MAX_WIDTH := 920.0
 
 @export_range(1.0, 120.0, 1.0, "suffix: chars/s") var characters_per_second: float = 36.0
 @export_range(1.0, 10.0, 0.25, "suffix:x") var held_advance_speed_multiplier: float = 4.0
@@ -35,8 +35,10 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	set_process_input(true)
 	set_process_unhandled_input(true)
-	# Keep the dialogue presentation at the scene's original desktop-sized
-	# layout on mobile. Touch support must not resize the dialogue box.
+	if not get_viewport().size_changed.is_connected(_on_viewport_size_changed):
+		get_viewport().size_changed.connect(_on_viewport_size_changed)
+	# Dialogue text/choices keep their authored layout. Only the portrait gets a
+	# separate phone-aware presentation size.
 	hide_and_clear()
 
 
@@ -96,8 +98,6 @@ func display_node(
 		button.pressed.connect(
 			_on_choice_button_pressed.bind(session_id, choice.choice_id)
 		)
-		# Keep normal GUI handling as a fallback for mouse-emulated touch and
-		# desktop clicks. Raw touchscreen input is handled earlier in _input().
 		button.gui_input.connect(
 			_on_choice_button_gui_input.bind(session_id, choice.choice_id)
 		)
@@ -161,60 +161,75 @@ func configure_portrait_presentation(
 	_configure_mobile_portrait_layout(texture)
 
 
+func _on_viewport_size_changed() -> void:
+	if portrait_texture != null and portrait_texture.texture != null:
+		_configure_mobile_portrait_layout(portrait_texture.texture)
+
+
+func _get_phone_canvas_rect() -> Rect2:
+	var fallback := get_viewport().get_visible_rect()
+	var window_size := Vector2(DisplayServer.window_get_size())
+	if window_size.x <= 0.0 or window_size.y <= 0.0:
+		return fallback
+	var inverse := get_viewport().get_screen_transform().affine_inverse()
+	var point_a := inverse * Vector2.ZERO
+	var point_b := inverse * window_size
+	return Rect2(
+		Vector2(minf(point_a.x, point_b.x), minf(point_a.y, point_b.y)),
+		Vector2(absf(point_b.x - point_a.x), absf(point_b.y - point_a.y))
+	)
+
+
 func _configure_mobile_portrait_layout(texture: Texture2D) -> void:
 	if not OS.has_feature("mobile") or portrait_slot == null or texture == null:
 		return
-	var viewport_size := get_viewport().get_visible_rect().size
+	var screen_rect := _get_phone_canvas_rect()
 	var texture_size := texture.get_size()
 	if (
-		viewport_size.x <= 0.0
-		or viewport_size.y <= 0.0
+		screen_rect.size.x <= 0.0
+		or screen_rect.size.y <= 0.0
 		or texture_size.x <= 0
 		or texture_size.y <= 0
 	):
 		return
 
-	# Portraits should remain large enough to read on a wide phone. First try to
-	# fit the complete image. Very tall art is kept at a useful width and clipped
-	# only at the bottom, keeping the face/upper body visible instead of shrinking
-	# the whole portrait into a tiny PC-sized strip.
+	# Dialogue portraits are intentionally large on phones. Do not shrink a tall
+	# portrait just to expose its feet: keep the requested size, pin the artwork
+	# to the top-right of the actual phone surface, and clip only the bottom when
+	# necessary. This keeps faces/upper bodies readable while preserving aspect.
 	var available_width := maxf(
-		viewport_size.x - MOBILE_PORTRAIT_EDGE_MARGIN * 2.0,
+		screen_rect.size.x - MOBILE_PORTRAIT_EDGE_MARGIN * 2.0,
 		1.0
 	)
 	var available_height := maxf(
-		viewport_size.y - MOBILE_PORTRAIT_EDGE_MARGIN * 2.0,
+		screen_rect.size.y - MOBILE_PORTRAIT_EDGE_MARGIN * 2.0,
 		1.0
 	)
-	var desired_width := minf(
+	var target_width := minf(
 		clampf(
-			viewport_size.x * MOBILE_PORTRAIT_WIDTH_RATIO,
+			screen_rect.size.x * MOBILE_PORTRAIT_WIDTH_RATIO,
 			MOBILE_PORTRAIT_MIN_WIDTH,
 			MOBILE_PORTRAIT_MAX_WIDTH
 		),
 		available_width
 	)
 	var texture_aspect := float(texture_size.x) / float(texture_size.y)
-	var full_image_fit_width := available_height * texture_aspect
-	var minimum_useful_width := minf(MOBILE_PORTRAIT_MIN_WIDTH, desired_width)
-	var target_width := desired_width
-	if full_image_fit_width >= minimum_useful_width:
-		target_width = minf(desired_width, full_image_fit_width)
 	var target_height := target_width / texture_aspect
+	var screen_right := screen_rect.position.x + screen_rect.size.x
+	var screen_bottom := screen_rect.position.y + screen_rect.size.y
 
-	portrait_slot.anchor_left = 1.0
+	portrait_slot.anchor_left = 0.0
 	portrait_slot.anchor_top = 0.0
-	portrait_slot.anchor_right = 1.0
+	portrait_slot.anchor_right = 0.0
 	portrait_slot.anchor_bottom = 0.0
-	portrait_slot.offset_left = -target_width - MOBILE_PORTRAIT_EDGE_MARGIN
-	portrait_slot.offset_top = MOBILE_PORTRAIT_EDGE_MARGIN
-	portrait_slot.offset_right = -MOBILE_PORTRAIT_EDGE_MARGIN
-	portrait_slot.offset_bottom = MOBILE_PORTRAIT_EDGE_MARGIN + available_height
+	portrait_slot.offset_left = screen_right - MOBILE_PORTRAIT_EDGE_MARGIN - target_width
+	portrait_slot.offset_top = screen_rect.position.y + MOBILE_PORTRAIT_EDGE_MARGIN
+	portrait_slot.offset_right = screen_right - MOBILE_PORTRAIT_EDGE_MARGIN
+	portrait_slot.offset_bottom = screen_bottom - MOBILE_PORTRAIT_EDGE_MARGIN
 	portrait_slot.clip_contents = true
 
-	# Size the animated portrait itself to the source aspect ratio. The blink and
-	# talk layers are children of this node, so the complete presentation moves,
-	# clips and scales together with the existing entry/speaker tweens.
+	# Blink/talk overlays are children of the portrait, so they retain the exact
+	# same scale, crop and presenter motion as the base image.
 	portrait_texture.anchor_left = 0.0
 	portrait_texture.anchor_top = 0.0
 	portrait_texture.anchor_right = 0.0
@@ -269,10 +284,6 @@ func _input(event: InputEvent) -> void:
 	if touch == null or not touch.pressed:
 		return
 
-	# Dialogue owns every touchscreen press before the gameplay overlay can see
-	# it. During ordinary dialogue, tapping anywhere behaves like the Z/advance
-	# action. Once choices are visible, taps must land on a specific choice so an
-	# accidental tap never commits the focused/first response.
 	get_viewport().set_input_as_handled()
 	if not _is_text_fully_revealed():
 		_finish_text_reveal()
@@ -293,8 +304,6 @@ func _input(event: InputEvent) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not input_enabled or active_session_id == &"":
 		return
-	# Escape belongs to PauseSystem in this project. A separate ui_cancel binding may
-	# still cancel dialogue without competing with the pause action.
 	if event.is_action_pressed(&"pause"):
 		return
 	var key_event := event as InputEventKey
