@@ -5,6 +5,12 @@ const JOYSTICK_RADIUS := 76.0
 const JOYSTICK_DEADZONE := 0.28
 const BUTTON_RADIUS := 42.0
 const MENU_TOUCH_SIZE := Vector2(104.0, 48.0)
+const MOBILE_INTERACTION_MENU_POSITION := Vector2(18.0, 100.0)
+const MOBILE_INTERACTION_MENU_MIN_SIZE := Vector2(380.0, 310.0)
+const MOBILE_INTERACTION_OPTION_HEIGHT := 48.0
+const MOBILE_INTERACTION_TITLE_FONT_SIZE := 20
+const MOBILE_INTERACTION_OPTION_FONT_SIZE := 18
+const MOBILE_INTERACTION_FEEDBACK_FONT_SIZE := 14
 const ACTION_LABELS := {
 	&"attack": "Z",
 	&"attach_rope": "X",
@@ -23,6 +29,7 @@ var _joystick_touch_id := -1
 var _joystick_vector := Vector2.ZERO
 var _touch_actions: Dictionary = {}
 var _action_touch_counts: Dictionary = {}
+var _interaction_interactor_ref: WeakRef
 
 
 func _ready() -> void:
@@ -33,6 +40,12 @@ func _ready() -> void:
 	resized.connect(queue_redraw)
 	_configure_mobile_window_scaling()
 	_refresh_visibility()
+
+
+func _process(_delta: float) -> void:
+	if not visible or not (force_enabled or OS.has_feature("mobile")):
+		return
+	_refresh_interaction_menu_mobile_ui()
 
 
 func _exit_tree() -> void:
@@ -48,6 +61,12 @@ func _input(event: InputEvent) -> void:
 
 	var touch := event as InputEventScreenTouch
 	if touch != null:
+		# The NPC interaction menu is made of Labels rather than Buttons. Give the
+		# visible rows real mobile hit targets before checking gameplay controls.
+		if touch.pressed and _handle_interaction_menu_touch(touch.position):
+			get_viewport().set_input_as_handled()
+			return
+
 		# MENU is an invisible touch target with a text-only affordance. Route it
 		# through the project's PauseSystem so mobile uses exactly the same pause
 		# state and menu as the keyboard Escape action.
@@ -136,6 +155,132 @@ func _request_pause_menu() -> void:
 	var pause_system := get_node_or_null("/root/PauseSystem")
 	if pause_system != null and pause_system.has_method("open_pause_menu"):
 		pause_system.call("open_pause_menu")
+
+
+func _get_npc_talk_interactor() -> PlayerNpcTalkInteractor:
+	if _interaction_interactor_ref != null:
+		var cached := _interaction_interactor_ref.get_ref() as PlayerNpcTalkInteractor
+		if cached != null and is_instance_valid(cached) and cached.is_inside_tree():
+			return cached
+
+	var player := get_tree().get_first_node_in_group("player")
+	if player == null:
+		_interaction_interactor_ref = null
+		return null
+	var found := _find_npc_talk_interactor(player)
+	_interaction_interactor_ref = weakref(found) if found != null else null
+	return found
+
+
+func _find_npc_talk_interactor(node: Node) -> PlayerNpcTalkInteractor:
+	if node is PlayerNpcTalkInteractor:
+		return node as PlayerNpcTalkInteractor
+	for child in node.get_children():
+		var found := _find_npc_talk_interactor(child)
+		if found != null:
+			return found
+	return null
+
+
+func _refresh_interaction_menu_mobile_ui() -> void:
+	var interactor := _get_npc_talk_interactor()
+	if interactor == null:
+		return
+
+	# These values are also used if the menu has not been lazily created yet.
+	interactor.menu_position = MOBILE_INTERACTION_MENU_POSITION
+	interactor.menu_minimum_size = MOBILE_INTERACTION_MENU_MIN_SIZE
+
+	var panel := interactor.menu_panel
+	if panel == null or not is_instance_valid(panel):
+		return
+	panel.position = MOBILE_INTERACTION_MENU_POSITION
+	panel.custom_minimum_size = MOBILE_INTERACTION_MENU_MIN_SIZE
+
+	var margin := panel.get_child(0) as MarginContainer if panel.get_child_count() > 0 else null
+	if margin != null:
+		margin.add_theme_constant_override("margin_left", 16)
+		margin.add_theme_constant_override("margin_top", 12)
+		margin.add_theme_constant_override("margin_right", 16)
+		margin.add_theme_constant_override("margin_bottom", 12)
+		var stack := margin.get_child(0) as VBoxContainer if margin.get_child_count() > 0 else null
+		if stack != null:
+			stack.add_theme_constant_override("separation", 6)
+
+	if interactor.menu_title_label != null:
+		interactor.menu_title_label.add_theme_font_size_override(
+			"font_size", MOBILE_INTERACTION_TITLE_FONT_SIZE
+		)
+		interactor.menu_title_label.custom_minimum_size.y = 28.0
+		interactor.menu_title_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+
+	for option_label in interactor.menu_option_labels:
+		if option_label == null:
+			continue
+		option_label.custom_minimum_size.y = MOBILE_INTERACTION_OPTION_HEIGHT
+		option_label.add_theme_font_size_override(
+			"font_size", MOBILE_INTERACTION_OPTION_FONT_SIZE
+		)
+		option_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+
+	if interactor.menu_feedback_label != null:
+		interactor.menu_feedback_label.add_theme_font_size_override(
+			"font_size", MOBILE_INTERACTION_FEEDBACK_FONT_SIZE
+		)
+
+
+func _handle_interaction_menu_touch(position: Vector2) -> bool:
+	var interactor := _get_npc_talk_interactor()
+	if interactor == null or interactor.active_menu == &"":
+		return false
+	_refresh_interaction_menu_mobile_ui()
+
+	var panel := interactor.menu_panel
+	if panel == null or not is_instance_valid(panel) or not panel.visible:
+		return false
+	var panel_rect := panel.get_global_rect()
+	if not panel_rect.has_point(position):
+		return false
+
+	var option_count := mini(
+		interactor.current_menu_option_count,
+		interactor.menu_option_labels.size()
+	)
+	for index in range(option_count):
+		var option_label := interactor.menu_option_labels[index]
+		if option_label == null or not option_label.visible:
+			continue
+		var label_rect := option_label.get_global_rect()
+		# Treat the entire panel width at that row as the target, not just the text
+		# glyphs. This gives each option a proper thumb-sized touchscreen row.
+		var touch_rect := Rect2(
+			Vector2(panel_rect.position.x, label_rect.position.y - 3.0),
+			Vector2(panel_rect.size.x, label_rect.size.y + 6.0)
+		)
+		if touch_rect.has_point(position):
+			_select_interaction_menu_option(interactor, index)
+			return true
+
+	# A tap on panel chrome/title is still consumed so it cannot trigger an
+	# attack/rope/joystick control underneath the open interaction menu.
+	return true
+
+
+func _select_interaction_menu_option(
+	interactor: PlayerNpcTalkInteractor,
+	selected_index: int
+) -> void:
+	if selected_index < 0 or selected_index >= interactor.current_menu_option_count:
+		return
+	match interactor.active_menu:
+		&"interaction":
+			interactor.call("_handle_interaction_option", selected_index)
+		&"talk":
+			interactor.call("_handle_talk_option", selected_index)
+		&"gossip":
+			interactor.call("_handle_gossip_option", selected_index)
+		&"npc_prompt":
+			interactor.call("_handle_npc_prompt_option", selected_index)
 
 
 func _begin_touch(touch_id: int, position: Vector2) -> bool:
