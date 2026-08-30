@@ -5,7 +5,9 @@ signal choice_requested(session_id: StringName, choice_id: StringName)
 signal advance_requested(session_id: StringName)
 signal cancel_requested(session_id: StringName)
 
-const MOBILE_CHOICE_MIN_HEIGHT := 42.0
+const MOBILE_CHOICE_MIN_HEIGHT := 68.0
+const MOBILE_CHOICE_FONT_SIZE := 18
+const MOBILE_CHOICE_SEPARATION := 10
 
 @export_range(1.0, 120.0, 1.0, "suffix: chars/s") var characters_per_second: float = 36.0
 @export_range(1.0, 10.0, 0.25, "suffix:x") var held_advance_speed_multiplier: float = 4.0
@@ -26,13 +28,19 @@ var _portrait_revealed_session_id: StringName = &""
 
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	set_process_input(true)
+	set_process_unhandled_input(true)
 	if OS.has_feature("mobile"):
-		# Give dialogue and social choices a comfortable finger target and use more
-		# of a phone's width instead of the desktop-sized inset panel.
-		panel.offset_left = 28.0
-		panel.offset_right = -28.0
-		panel.offset_top = -250.0
-		panel.offset_bottom = -20.0
+		# Make the interaction menu genuinely thumb-friendly: nearly full width,
+		# substantially taller, with large separated choice targets.
+		panel.offset_left = 16.0
+		panel.offset_right = -16.0
+		panel.offset_top = -360.0
+		panel.offset_bottom = -12.0
+		choice_container.add_theme_constant_override(
+			"separation", MOBILE_CHOICE_SEPARATION
+		)
 	hide_and_clear()
 
 
@@ -87,14 +95,16 @@ func display_node(
 		button.text = choice.text
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.focus_mode = Control.FOCUS_ALL
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.disabled = true
 		if OS.has_feature("mobile"):
 			button.custom_minimum_size.y = MOBILE_CHOICE_MIN_HEIGHT
+			button.add_theme_font_size_override("font_size", MOBILE_CHOICE_FONT_SIZE)
 		button.pressed.connect(
 			_on_choice_button_pressed.bind(session_id, choice.choice_id)
 		)
-		# Explicit touch handling makes choices work even when Android isn't
-		# emulating a mouse click for touchscreen input.
+		# Keep normal GUI handling as a fallback for mouse-emulated touch and
+		# desktop clicks. Raw touchscreen input is handled earlier in _input().
 		button.gui_input.connect(
 			_on_choice_button_gui_input.bind(session_id, choice.choice_id)
 		)
@@ -188,6 +198,34 @@ func hide_and_clear() -> void:
 	_clear_choices()
 
 
+func _input(event: InputEvent) -> void:
+	if not input_enabled or active_session_id == &"" or not visible:
+		return
+	var touch := event as InputEventScreenTouch
+	if touch == null or not touch.pressed:
+		return
+
+	# Dialogue owns every touchscreen press before the gameplay overlay can see
+	# it. During ordinary dialogue, tapping anywhere behaves like the Z/advance
+	# action. Once choices are visible, taps must land on a specific choice so an
+	# accidental tap never commits the focused/first response.
+	get_viewport().set_input_as_handled()
+	if not _is_text_fully_revealed():
+		_finish_text_reveal()
+		return
+
+	var touched_choice := _get_choice_button_at_position(touch.position)
+	if touched_choice != null:
+		_on_choice_button_pressed(
+			active_session_id,
+			StringName(touched_choice.get_meta(&"choice_id", &""))
+		)
+		return
+	if _has_visible_choices():
+		return
+	_emit_advance_requested()
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if not input_enabled or active_session_id == &"":
 		return
@@ -200,25 +238,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event.is_action_pressed(advance_action):
 		get_viewport().set_input_as_handled()
-		if not _is_text_fully_revealed():
-			return
-		var session_id := active_session_id
-		var focused_button := get_viewport().gui_get_focus_owner() as Button
-		if focused_button != null and focused_button.get_parent() == choice_container:
-			_on_choice_button_pressed(
-				session_id,
-				StringName(focused_button.get_meta(&"choice_id", &""))
-			)
-			return
-		var first_button := _get_first_choice_button()
-		if first_button != null:
-			_on_choice_button_pressed(
-				session_id,
-				StringName(first_button.get_meta(&"choice_id", &""))
-			)
-			return
-		disable_input()
-		advance_requested.emit(session_id)
+		_handle_advance_press(true)
 		return
 	if not event.is_action_pressed(&"ui_cancel"):
 		return
@@ -226,6 +246,48 @@ func _unhandled_input(event: InputEvent) -> void:
 	disable_input()
 	get_viewport().set_input_as_handled()
 	cancel_requested.emit(session_id)
+
+
+func _handle_advance_press(allow_choice_fallback: bool) -> void:
+	if not _is_text_fully_revealed():
+		_finish_text_reveal()
+		return
+
+	var session_id := active_session_id
+	if _has_visible_choices():
+		var focused_button := get_viewport().gui_get_focus_owner() as Button
+		if focused_button != null and focused_button.get_parent() == choice_container:
+			_on_choice_button_pressed(
+				session_id,
+				StringName(focused_button.get_meta(&"choice_id", &""))
+			)
+			return
+		if allow_choice_fallback:
+			var first_button := _get_first_choice_button()
+			if first_button != null:
+				_on_choice_button_pressed(
+					session_id,
+					StringName(first_button.get_meta(&"choice_id", &""))
+				)
+		return
+
+	_emit_advance_requested()
+
+
+func _finish_text_reveal() -> void:
+	if dialogue_label == null:
+		return
+	_revealed_characters = float(_text_character_count)
+	dialogue_label.visible_characters = _text_character_count
+	_reveal_choices_if_text_finished()
+
+
+func _emit_advance_requested() -> void:
+	var session_id := active_session_id
+	if session_id == &"":
+		return
+	disable_input()
+	advance_requested.emit(session_id)
 
 
 func _on_choice_button_gui_input(
@@ -279,6 +341,25 @@ func _get_first_choice_button() -> Button:
 	for child in choice_container.get_children():
 		var button := child as Button
 		if button != null:
+			return button
+	return null
+
+
+func _has_visible_choices() -> bool:
+	return choice_container != null and choice_container.visible and _get_first_choice_button() != null
+
+
+func _get_choice_button_at_position(position: Vector2) -> Button:
+	if choice_container == null or not choice_container.visible:
+		return null
+	for child in choice_container.get_children():
+		var button := child as Button
+		if (
+			button != null
+			and button.visible
+			and not button.disabled
+			and button.get_global_rect().has_point(position)
+		):
 			return button
 	return null
 
