@@ -1,0 +1,71 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/npc_love_bar.gd" id="1_love_bar"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_love_empty"]
+bg_color = Color(0.788235, 0.745098, 0.607843, 0.92)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.501961, 0.4, 0.278431, 0.9)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_love_fill_background"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_love_fill"]
+bg_color = Color(0.721569, 0.368627, 0.45098, 1)
+corner_radius_top_left = 1
+corner_radius_top_right = 1
+corner_radius_bottom_right = 1
+corner_radius_bottom_left = 1
+
+[node name="NpcLoveBar" type="Control"]
+custom_minimum_size = Vector2(72, 16)
+offset_left = -36.0
+offset_top = -118.0
+offset_right = 36.0
+offset_bottom = -102.0
+mouse_filter = 2
+z_index = 121
+script = ExtResource("1_love_bar")
+
+[node name="HeartIconSlot" type="TextureRect" parent="."]
+unique_name_in_owner = true
+layout_mode = 0
+offset_right = 16.0
+offset_bottom = 16.0
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="LoveMeterFrame" type="Panel" parent="."]
+unique_name_in_owner = true
+layout_mode = 0
+offset_left = 18.0
+offset_top = 5.0
+offset_right = 72.0
+offset_bottom = 11.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_love_empty")
+
+[node name="LoveMeter" type="ProgressBar" parent="LoveMeterFrame"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 1.0
+offset_top = 1.0
+offset_right = -1.0
+offset_bottom = -1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+value = 0.0
+show_percentage = false
+theme_override_styles/background = SubResource("StyleBoxEmpty_love_fill_background")
+theme_override_styles/fill = SubResource("StyleBoxFlat_love_fill")

@@ -2,17 +2,89 @@
 
 [ext_resource type="Script" uid="uid://bsmeen4ahl14e" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
 [ext_resource type="Script" uid="uid://csithy7k1fddw" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
-[ext_resource type="Script" uid="uid://cytm50bmpbyao" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="2_yrg3x"]
+[ext_resource type="Script" uid="uid://cytm50bmpbyao" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_admire"]
+script = ExtResource("3_choice")
+choice_id = &"admire_her"
+text = "Tell her she makes chores look good."
+next_node_id = &"admire"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 1.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_stop"]
+script = ExtResource("3_choice")
+choice_id = &"make_her_stop"
+text = "Say you only wanted her to stop working."
+next_node_id = &"stop"
+consequences = {
+"player_talk_opinion_delta": {
+"love": -1.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_help"]
+script = ExtResource("3_choice")
+choice_id = &"offer_help"
+text = "Offer to help instead."
+next_node_id = &"help"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 0.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_finish_chores"]
+script = ExtResource("3_choice")
+choice_id = &"finish_her_chores"
+text = "Promise to finish her chores if she takes a break with you."
+next_node_id = &"finish_chores"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 2.0
+}
+}
 
 [sub_resource type="Resource" id="Node_entry"]
 script = ExtResource("2_node")
 node_id = &"entry"
 speaker_id = &"mom"
 speaker_text = "If you're trying to distract me, you're doing a pretty good job. Come a little closer and try again."
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_admire"), SubResource("Choice_stop"), SubResource("Choice_help"), SubResource("Choice_finish_chores")])
+
+[sub_resource type="Resource" id="Node_admire"]
+script = ExtResource("2_node")
+node_id = &"admire"
+speaker_id = &"mom"
+speaker_text = "Careful. Keep talking like that and I may find extra chores for you to admire."
+terminal = true
+
+[sub_resource type="Resource" id="Node_stop"]
+script = ExtResource("2_node")
+node_id = &"stop"
+speaker_id = &"mom"
+speaker_text = "Then you chose a poor way to ask. Let me finish."
+terminal = true
+
+[sub_resource type="Resource" id="Node_help"]
+script = ExtResource("2_node")
+node_id = &"help"
+speaker_id = &"mom"
+speaker_text = "That would impress me more than another line. Start with the counter."
+terminal = true
+
+[sub_resource type="Resource" id="Node_finish_chores"]
+script = ExtResource("2_node")
+node_id = &"finish_chores"
+speaker_id = &"mom"
+speaker_text = "Now that's an offer worth considering. Finish the counter, and I'll hold you to the rest."
 terminal = true
 
 [resource]
 script = ExtResource("1_definition")
 dialogue_id = &"mom_player_talk_flirt_chores"
 entry_node_id = &"entry"
-nodes = Array[ExtResource("2_node")]([SubResource("Node_entry")])
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_admire"), SubResource("Node_stop"), SubResource("Node_help"), SubResource("Node_finish_chores")])

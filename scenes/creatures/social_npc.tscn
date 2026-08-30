@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://scripts/creatures/social_npc.gd" id="1_social_npc"]
 [ext_resource type="Script" path="res://player/scripts/damage_area.gd" id="2_damage_area"]
@@ -7,6 +7,7 @@
 [ext_resource type="Script" path="res://scripts/creatures/npc_inventory_drop_component.gd" id="5_inventory_drop"]
 [ext_resource type="Script" path="res://scripts/economy/inventory_pickup_receiver.gd" id="6_pickup_receiver"]
 [ext_resource type="Script" path="res://scripts/economy/merchant_component.gd" id="7_trade"]
+[ext_resource type="PackedScene" path="res://scenes/creatures/npc/npc_love_bar.tscn" id="8_love_bar"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_body"]
 size = Vector2(48, 64)
@@ -100,3 +101,5 @@ offset_bottom = -95.0
 value = 100.0
 show_percentage = false
 script = ExtResource("3_hp_bar")
+
+[node name="NpcLoveBar" parent="." instance=ExtResource("8_love_bar")]

@@ -23,6 +23,7 @@ const MOBILE_PORTRAIT_MAX_WIDTH := 920.0
 @onready var portrait_texture: TextureRect = %MemoryDialoguePortrait
 @onready var portrait_blink_overlay: TextureRect = %DialoguePortraitBlinkOverlay
 @onready var portrait_talk_overlay: TextureRect = %DialoguePortraitTalkOverlay
+@onready var relationship_change_cue: Control = %RelationshipChangeCue
 
 var active_session_id: StringName = &""
 var input_enabled: bool = false
@@ -256,7 +257,10 @@ func reveal_portrait_presentation(session_id: StringName) -> bool:
 func hide_and_clear() -> void:
 	disable_input()
 	active_session_id = &""
-	visible = false
+	visible = (
+		relationship_change_cue != null
+		and bool(relationship_change_cue.call("is_showing"))
+	)
 	if panel != null:
 		panel.visible = false
 	if speaker_label != null:
