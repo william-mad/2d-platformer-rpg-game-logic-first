@@ -6,11 +6,12 @@ signal advance_requested(session_id: StringName)
 signal cancel_requested(session_id: StringName)
 
 const MOBILE_PORTRAIT_EDGE_MARGIN := 12.0
-const MOBILE_PORTRAIT_WIDTH_TO_SCREEN_HEIGHT := 0.94
+const MOBILE_PORTRAIT_WIDTH_TO_SCREEN_HEIGHT := 1.08
 const MOBILE_PORTRAIT_MIN_WIDTH := 360.0
-const MOBILE_PORTRAIT_MAX_WIDTH := 520.0
+const MOBILE_PORTRAIT_MAX_WIDTH := 600.0
 const MOBILE_PORTRAIT_FACE_CENTER_X_RATIO := 0.68
 const MOBILE_PORTRAIT_FACE_TOP_RATIO := 0.09
+const MOBILE_PORTRAIT_BASELINE_RATIO := 0.62
 const MOBILE_PORTRAIT_CHEST_CUTOFF_RATIO := 0.34
 
 @export_range(1.0, 120.0, 1.0, "suffix: chars/s") var characters_per_second: float = 36.0
@@ -42,8 +43,6 @@ func _ready() -> void:
 	set_process_unhandled_input(true)
 	if not get_viewport().size_changed.is_connected(_on_viewport_size_changed):
 		get_viewport().size_changed.connect(_on_viewport_size_changed)
-	if panel != null and not panel.resized.is_connected(_on_dialogue_panel_resized):
-		panel.resized.connect(_on_dialogue_panel_resized)
 	# Dialogue text/choices keep their authored layout. Only the portrait gets a
 	# separate phone-aware presentation size.
 	hide_and_clear()
@@ -173,10 +172,6 @@ func _on_viewport_size_changed() -> void:
 	_queue_mobile_portrait_layout_refresh()
 
 
-func _on_dialogue_panel_resized() -> void:
-	_queue_mobile_portrait_layout_refresh()
-
-
 func _queue_mobile_portrait_layout_refresh() -> void:
 	if _portrait_layout_refresh_queued:
 		return
@@ -211,8 +206,7 @@ func _configure_mobile_portrait_layout(texture: Texture2D) -> void:
 	):
 		return
 
-	var panel_top := panel.get_global_rect().position.y if panel != null else screen_rect.end.y
-	var layout := calculate_mobile_portrait_layout(texture_size, screen_rect, panel_top)
+	var layout := calculate_mobile_portrait_layout(texture_size, screen_rect)
 	if layout.is_empty():
 		return
 	var slot_rect: Rect2 = layout["slot_rect"]
@@ -228,9 +222,9 @@ func _configure_mobile_portrait_layout(texture: Texture2D) -> void:
 	portrait_slot.offset_bottom = slot_rect.end.y
 	portrait_slot.clip_contents = true
 
-	# The image is deliberately allowed to begin above the game surface. The slot
-	# clips the hair at the screen edge and the body at the live dialogue-panel
-	# edge, keeping the complete face and most of the chest above every panel size.
+	# The image is deliberately allowed to begin above the game surface. Its fixed
+	# lower framing stays unchanged when choices make the dialogue panel taller;
+	# the panel simply draws over the lower torso while the hair clips at screen top.
 	# Blink/talk overlays remain children of this rect and therefore keep the same
 	# framing, scale, clipping and presenter motion as the base portrait.
 	var current_motion_x := portrait_texture.position.x
@@ -252,8 +246,7 @@ func _configure_mobile_portrait_layout(texture: Texture2D) -> void:
 
 static func calculate_mobile_portrait_layout(
 	texture_size: Vector2,
-	screen_rect: Rect2,
-	dialogue_panel_top: float
+	screen_rect: Rect2
 ) -> Dictionary:
 	if (
 		texture_size.x <= 0.0
@@ -265,8 +258,10 @@ static func calculate_mobile_portrait_layout(
 
 	var screen_top := screen_rect.position.y
 	var screen_right := screen_rect.end.x
-	var clip_bottom := clampf(dialogue_panel_top, screen_top + 1.0, screen_rect.end.y)
-	var portrait_space_height := maxf(clip_bottom - screen_top, 1.0)
+	var portrait_baseline := maxf(
+		screen_rect.size.y * MOBILE_PORTRAIT_BASELINE_RATIO,
+		1.0
+	)
 	var texture_aspect := texture_size.x / texture_size.y
 	var available_width := maxf(
 		screen_rect.size.x - MOBILE_PORTRAIT_EDGE_MARGIN * 2.0,
@@ -277,17 +272,8 @@ static func calculate_mobile_portrait_layout(
 		MOBILE_PORTRAIT_MIN_WIDTH,
 		MOBILE_PORTRAIT_MAX_WIDTH
 	)
-	# Keep the authored face-top point on screen even when a choice list makes the
-	# panel grow upward. This changes scale only when the remaining space demands it.
-	var visible_source_ratio := maxf(
-		MOBILE_PORTRAIT_CHEST_CUTOFF_RATIO - MOBILE_PORTRAIT_FACE_TOP_RATIO,
-		0.01
-	)
-	var face_fit_width := (
-		portrait_space_height * texture_aspect / visible_source_ratio
-	)
 	var target_width := maxf(
-		minf(desired_width, minf(available_width, face_fit_width)),
+		minf(desired_width, available_width),
 		1.0
 	)
 	var target_height := target_width / texture_aspect
@@ -301,14 +287,14 @@ static func calculate_mobile_portrait_layout(
 		screen_right - target_width
 	)
 	var portrait_top := (
-		portrait_space_height
+		portrait_baseline
 		- target_height * MOBILE_PORTRAIT_CHEST_CUTOFF_RATIO
 	)
 
 	return {
 		"slot_rect": Rect2(
 			Vector2(slot_left, screen_top),
-			Vector2(target_width, portrait_space_height)
+			Vector2(target_width, portrait_baseline)
 		),
 		"portrait_rect": Rect2(
 			Vector2(0.0, portrait_top),
@@ -523,7 +509,6 @@ func _reveal_choices_if_text_finished() -> void:
 		if first_button == null:
 			first_button = button
 	choice_container.visible = first_button != null
-	_queue_mobile_portrait_layout_refresh()
 	if first_button != null and input_enabled:
 		call_deferred(
 			"_focus_first_choice", active_session_id, weakref(first_button)
