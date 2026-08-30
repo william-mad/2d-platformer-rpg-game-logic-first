@@ -1,9 +1,10 @@
 class_name MobileGameplayControls
 extends Control
 
-const JOYSTICK_RADIUS := 86.0
+const JOYSTICK_RADIUS := 76.0
 const JOYSTICK_DEADZONE := 0.28
-const BUTTON_RADIUS := 44.0
+const BUTTON_RADIUS := 42.0
+const MENU_TOUCH_SIZE := Vector2(104.0, 48.0)
 const ACTION_LABELS := {
 	&"attack": "Z",
 	&"attach_rope": "X",
@@ -47,6 +48,14 @@ func _input(event: InputEvent) -> void:
 
 	var touch := event as InputEventScreenTouch
 	if touch != null:
+		# MENU is an invisible touch target with a text-only affordance. Route it
+		# through the project's PauseSystem so mobile uses exactly the same pause
+		# state and menu as the keyboard Escape action.
+		if touch.pressed and _is_menu_touch(touch.position):
+			_request_pause_menu()
+			get_viewport().set_input_as_handled()
+			return
+
 		var consumed := false
 		if touch.pressed:
 			consumed = _begin_touch(touch.index, touch.position)
@@ -71,22 +80,27 @@ func refresh_for_platform() -> void:
 
 
 func get_joystick_center() -> Vector2:
-	# Direction control belongs under the right thumb on mobile.
-	return Vector2(size.x - 112.0, size.y - 112.0)
+	# Keep the movement control tight to the right edge while leaving enough
+	# clearance for a full thumb-sized drag radius.
+	return Vector2(size.x - 96.0, size.y - 104.0)
 
 
 func get_action_button_center(action: StringName) -> Vector2:
-	# Action cluster belongs under the left thumb. Keep the triangle familiar:
-	# Z and X low, C above between them.
+	# Compact left-thumb triangle: Z/X sit low, C sits above between them. The
+	# hit areas stay generous even though the rendered controls are text-only.
 	match action:
 		&"attack":
-			return Vector2(72.0, size.y - 76.0)
+			return Vector2(56.0, size.y - 66.0)
 		&"attach_rope":
-			return Vector2(170.0, size.y - 76.0)
+			return Vector2(142.0, size.y - 66.0)
 		&"charm":
-			return Vector2(121.0, size.y - 174.0)
+			return Vector2(99.0, size.y - 152.0)
 		_:
 			return Vector2.ZERO
+
+
+func get_menu_button_center() -> Vector2:
+	return Vector2(size.x * 0.5, 34.0)
 
 
 func get_joystick_vector() -> Vector2:
@@ -112,18 +126,30 @@ func _refresh_visibility() -> void:
 	queue_redraw()
 
 
+func _is_menu_touch(position: Vector2) -> bool:
+	var center := get_menu_button_center()
+	return Rect2(center - MENU_TOUCH_SIZE * 0.5, MENU_TOUCH_SIZE).has_point(position)
+
+
+func _request_pause_menu() -> void:
+	_release_all_actions()
+	var pause_system := get_node_or_null("/root/PauseSystem")
+	if pause_system != null and pause_system.has_method("open_pause_menu"):
+		pause_system.call("open_pause_menu")
+
+
 func _begin_touch(touch_id: int, position: Vector2) -> bool:
 	if _touch_actions.has(touch_id):
 		return true
 
-	if position.distance_to(get_joystick_center()) <= JOYSTICK_RADIUS * 1.25:
+	if position.distance_to(get_joystick_center()) <= JOYSTICK_RADIUS * 1.15:
 		_joystick_touch_id = touch_id
 		_touch_actions[touch_id] = []
 		_update_joystick(position)
 		return true
 
 	for action in ACTION_LABELS:
-		if position.distance_to(get_action_button_center(action)) <= BUTTON_RADIUS * 1.25:
+		if position.distance_to(get_action_button_center(action)) <= BUTTON_RADIUS * 1.2:
 			_touch_actions[touch_id] = [action]
 			_press_action(action)
 			queue_redraw()
@@ -221,37 +247,74 @@ func _draw() -> void:
 	if not visible:
 		return
 
-	var base_color := Color(0.035, 0.055, 0.09, 0.58)
-	var edge_color := Color(0.82, 0.9, 1.0, 0.72)
-	var active_color := Color(0.2, 0.7, 1.0, 0.78)
+	# The control node itself remains completely transparent. Only lightweight
+	# labels, arrows and outlines are rendered, so gameplay stays visible beneath
+	# one full-height touch layer instead of opaque side panels.
+	var guide_color := Color(0.82, 0.9, 1.0, 0.34)
+	var label_color := Color(0.94, 0.97, 1.0, 0.86)
+	var caption_color := Color(0.86, 0.91, 0.98, 0.68)
+	var active_color := Color(0.38, 0.78, 1.0, 0.98)
 	var joystick_center := get_joystick_center()
-	draw_circle(joystick_center, JOYSTICK_RADIUS, base_color)
-	draw_arc(joystick_center, JOYSTICK_RADIUS, 0.0, TAU, 64, edge_color, 3.0, true)
-	draw_circle(
-		joystick_center + _joystick_vector * (JOYSTICK_RADIUS * 0.55),
-		34.0,
-		active_color if _joystick_touch_id >= 0 else Color(0.72, 0.8, 0.9, 0.6)
+	draw_arc(joystick_center, JOYSTICK_RADIUS, 0.0, TAU, 64, guide_color, 2.0, true)
+	_draw_direction_markers(joystick_center, label_color)
+
+	var thumb_center := joystick_center + _joystick_vector * (JOYSTICK_RADIUS * 0.52)
+	draw_arc(
+		thumb_center,
+		22.0,
+		0.0,
+		TAU,
+		32,
+		active_color if _joystick_touch_id >= 0 else guide_color,
+		2.0,
+		true
 	)
-	_draw_direction_markers(joystick_center, edge_color)
 
 	var font := ThemeDB.fallback_font
 	for action in ACTION_LABELS:
 		var center := get_action_button_center(action)
 		var is_active := int(_action_touch_counts.get(action, 0)) > 0
-		draw_circle(center, BUTTON_RADIUS, active_color if is_active else base_color)
-		draw_arc(center, BUTTON_RADIUS, 0.0, TAU, 40, edge_color, 3.0, true)
 		var label: String = ACTION_LABELS[action]
-		var label_size := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 30)
-		draw_string(font, center - label_size * 0.5 + Vector2(0.0, -2.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color.WHITE)
+		var label_size := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 32)
+		draw_string(
+			font,
+			center - label_size * 0.5 + Vector2(0.0, -2.0),
+			label,
+			HORIZONTAL_ALIGNMENT_LEFT,
+			-1,
+			32,
+			active_color if is_active else label_color
+		)
 		var caption: String = ACTION_CAPTIONS[action]
 		var caption_size := font.get_string_size(caption, HORIZONTAL_ALIGNMENT_LEFT, -1, 10)
-		draw_string(font, center + Vector2(-caption_size.x * 0.5, 27.0), caption, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.88, 0.93, 1.0, 0.9))
+		draw_string(
+			font,
+			center + Vector2(-caption_size.x * 0.5, 24.0),
+			caption,
+			HORIZONTAL_ALIGNMENT_LEFT,
+			-1,
+			10,
+			caption_color
+		)
+
+	var menu_center := get_menu_button_center()
+	var menu_label := "MENU"
+	var menu_size := font.get_string_size(menu_label, HORIZONTAL_ALIGNMENT_LEFT, -1, 15)
+	draw_string(
+		font,
+		menu_center - menu_size * 0.5 + Vector2(0.0, 5.0),
+		menu_label,
+		HORIZONTAL_ALIGNMENT_LEFT,
+		-1,
+		15,
+		label_color
+	)
 
 
 func _draw_direction_markers(center: Vector2, color: Color) -> void:
-	var distance := 62.0
-	var half_width := 9.0
-	var depth := 11.0
+	var distance := 56.0
+	var half_width := 8.0
+	var depth := 10.0
 	draw_colored_polygon(PackedVector2Array([
 		center + Vector2(0.0, -distance - depth),
 		center + Vector2(-half_width, -distance + depth),
