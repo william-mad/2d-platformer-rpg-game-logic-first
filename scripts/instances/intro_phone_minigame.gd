@@ -14,6 +14,7 @@ signal answered
 @export_range(20.0, 300.0, 5.0, "suffix:px/s") var hand_speed: float = 105.0
 @export_range(0.1, 1.0, 0.05) var held_hand_speed_multiplier: float = 0.45
 @export_range(4.0, 64.0, 1.0, "suffix:px") var grab_radius: float = 28.0
+@export_range(24.0, 96.0, 1.0, "suffix:px") var touch_grab_radius: float = 44.0
 @export_range(24.0, 160.0, 1.0, "suffix:px") var slider_travel_pixels: float = 80.0
 @export_range(0.5, 1.0, 0.01) var slider_success_threshold: float = 0.85
 @export_range(0.05, 1.0, 0.01, "suffix:s") var snap_back_duration: float = 0.18
@@ -56,13 +57,18 @@ var _snap_back_tween: Tween
 var _blur_tween: Tween
 var _hand_reveal_tween: Tween
 var _random := RandomNumberGenerator.new()
+var _direct_touch_enabled: bool = false
+var _touch_drag_id: int = -1
+var _touch_grab_offset_x: float = 0.0
 
 
 func _ready() -> void:
 	_handle_start_position = answer_handle.position
+	_direct_touch_enabled = OS.has_feature("mobile")
 	phone_flash_timer.timeout.connect(_on_phone_flash_timer_timeout)
 	blur_cycle_timer.timeout.connect(_on_blur_cycle_timer_timeout)
 	hand_reveal_timer.timeout.connect(_reveal_hand)
+	set_process_input(true)
 	set_process(false)
 	_reset_visual_state()
 
@@ -70,6 +76,7 @@ func _ready() -> void:
 func activate() -> void:
 	_completed = false
 	_grabbed = false
+	_touch_drag_id = -1
 	_active = true
 	_hand_input_enabled = false
 	_shake_time = 0.0
@@ -83,16 +90,22 @@ func activate() -> void:
 	phone_flash_timer.start()
 	_schedule_next_blur()
 	set_process(true)
-	if hand_reveal_delay > 0.0:
-		hand_reveal_timer.start(hand_reveal_delay)
+	if _direct_touch_enabled:
+		# On a phone, the player's real finger is the hand. Do not draw or wait for
+		# the artificial cursor; the green answer handle can be grabbed directly.
+		hand_reveal_timer.stop()
 	else:
-		_reveal_hand()
+		if hand_reveal_delay > 0.0:
+			hand_reveal_timer.start(hand_reveal_delay)
+		else:
+			_reveal_hand()
 
 
 func deactivate() -> void:
 	_active = false
 	_hand_input_enabled = false
 	_grabbed = false
+	_touch_drag_id = -1
 	set_process(false)
 	phone_flash_timer.stop()
 	blur_cycle_timer.stop()
@@ -101,6 +114,31 @@ func deactivate() -> void:
 	_kill_blur_tween()
 	_kill_hand_reveal_tween()
 	_set_blur_strength(0.0)
+
+
+func _input(event: InputEvent) -> void:
+	if not _direct_touch_enabled or not _active or _completed:
+		return
+
+	var touch := event as InputEventScreenTouch
+	if touch != null:
+		if touch.pressed:
+			if _touch_drag_id < 0:
+				var local_position := _viewport_to_phone_panel(touch.position)
+				if _touch_overlaps_handle(local_position):
+					_begin_touch_drag(touch.index, local_position)
+					get_viewport().set_input_as_handled()
+		else:
+			if touch.index == _touch_drag_id:
+				_touch_drag_id = -1
+				_release_handle()
+				get_viewport().set_input_as_handled()
+		return
+
+	var drag := event as InputEventScreenDrag
+	if drag != null and drag.index == _touch_drag_id:
+		_update_touch_drag(_viewport_to_phone_panel(drag.position))
+		get_viewport().set_input_as_handled()
 
 
 func _process(delta: float) -> void:
@@ -154,6 +192,36 @@ func is_handle_grabbed() -> bool:
 	return _grabbed
 
 
+func _begin_touch_drag(touch_id: int, local_position: Vector2) -> void:
+	_kill_snap_back_tween()
+	_touch_drag_id = touch_id
+	_grabbed = true
+	_touch_grab_offset_x = _handle_base_x - local_position.x
+	_shake_time = 0.0
+
+
+func _update_touch_drag(local_position: Vector2) -> void:
+	_handle_base_x = clampf(
+		local_position.x + _touch_grab_offset_x,
+		_handle_start_position.x,
+		_get_handle_end_x()
+	)
+	_shake_time += get_process_delta_time()
+	_apply_handle_visual(true)
+	if get_slider_progress() >= slider_success_threshold:
+		_complete_answer()
+
+
+func _touch_overlaps_handle(local_position: Vector2) -> bool:
+	return local_position.distance_to(
+		Vector2(_handle_base_x, _handle_start_position.y)
+	) <= touch_grab_radius
+
+
+func _viewport_to_phone_panel(viewport_position: Vector2) -> Vector2:
+	return phone_panel.get_global_transform_with_canvas().affine_inverse() * viewport_position
+
+
 func _begin_grab() -> void:
 	_kill_snap_back_tween()
 	_grabbed = true
@@ -182,6 +250,7 @@ func _complete_answer() -> void:
 	_active = false
 	_hand_input_enabled = false
 	_grabbed = false
+	_touch_drag_id = -1
 	_handle_base_x = _get_handle_end_x()
 	_apply_handle_visual(false)
 	hand_sprite.modulate.a = 0.55
@@ -235,6 +304,7 @@ func _reset_visual_state() -> void:
 	hand_sprite.position = _hand_position.round()
 	hand_sprite.modulate.a = 0.0
 	hand_sprite.visible = false
+	_touch_drag_id = -1
 	_handle_base_x = _handle_start_position.x
 	_apply_handle_visual(false)
 	_show_flash_frame_a(true)
@@ -242,7 +312,7 @@ func _reset_visual_state() -> void:
 
 
 func _reveal_hand() -> void:
-	if not _active or _completed:
+	if not _active or _completed or _direct_touch_enabled:
 		return
 	hand_sprite.visible = true
 	hand_sprite.modulate.a = 0.0
@@ -263,7 +333,7 @@ func _reveal_hand() -> void:
 
 
 func _enable_hand_input() -> void:
-	if _active and not _completed:
+	if _active and not _completed and not _direct_touch_enabled:
 		_hand_input_enabled = true
 
 
