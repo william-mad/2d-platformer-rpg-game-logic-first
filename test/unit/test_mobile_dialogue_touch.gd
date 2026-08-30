@@ -119,6 +119,75 @@ func test_relationship_cue_survives_dialogue_close_without_consuming_touch() -> 
 	assert_false(ui.visible, "the idle CanvasLayer should hide after the heart finishes")
 
 
+func test_mobile_portrait_frames_face_and_chest_above_choice_panel() -> void:
+	var screen_rect := Rect2(Vector2.ZERO, Vector2(1188.0, 496.0))
+	var panel_top := 234.0
+	var layout := ModalDialogueUI.calculate_mobile_portrait_layout(
+		Vector2(248.0, 496.0),
+		screen_rect,
+		panel_top
+	)
+	var slot_rect: Rect2 = layout["slot_rect"]
+	var portrait_rect: Rect2 = layout["portrait_rect"]
+	var face_top := (
+		portrait_rect.position.y
+		+ portrait_rect.size.y * ModalDialogueUI.MOBILE_PORTRAIT_FACE_TOP_RATIO
+	)
+	var chest_cutoff := (
+		portrait_rect.position.y
+		+ portrait_rect.size.y * ModalDialogueUI.MOBILE_PORTRAIT_CHEST_CUTOFF_RATIO
+	)
+
+	assert_true(is_equal_approx(slot_rect.position.y, 0.0), "portrait clip starts at game top")
+	assert_true(is_equal_approx(slot_rect.end.y, panel_top), "portrait stops above choice panel")
+	assert_true(face_top >= -0.01, "the complete face should remain inside the game surface")
+	assert_true(
+		is_equal_approx(chest_cutoff, slot_rect.size.y),
+		"the authored upper-chest cutoff should meet the panel edge"
+	)
+	assert_true(
+		portrait_rect.position.y < 0.0,
+		"only the upper hair should be allowed to extend beyond the game surface"
+	)
+	assert_true(
+		is_equal_approx(slot_rect.get_center().x, screen_rect.size.x * 0.68),
+		"portrait face remains in its established right-side position"
+	)
+
+
+func test_plain_dialogue_uses_same_scale_with_more_upper_space() -> void:
+	var screen_rect := Rect2(Vector2.ZERO, Vector2(1188.0, 496.0))
+	var choice_layout := ModalDialogueUI.calculate_mobile_portrait_layout(
+		Vector2(248.0, 496.0), screen_rect, 234.0
+	)
+	var plain_layout := ModalDialogueUI.calculate_mobile_portrait_layout(
+		Vector2(248.0, 496.0), screen_rect, 306.0
+	)
+	var choice_portrait: Rect2 = choice_layout["portrait_rect"]
+	var plain_portrait: Rect2 = plain_layout["portrait_rect"]
+	var plain_slot: Rect2 = plain_layout["slot_rect"]
+
+	assert_true(
+		is_equal_approx(choice_portrait.size.x, plain_portrait.size.x),
+		"portrait should not jump in scale when choices appear"
+	)
+	assert_true(is_equal_approx(plain_slot.end.y, 306.0), "plain portrait stops above panel")
+	assert_true(
+		plain_portrait.position.y > choice_portrait.position.y,
+		"plain dialogue uses its extra space instead of hiding the chest behind the panel"
+	)
+	assert_same(
+		ui.portrait_blink_overlay.get_parent(),
+		ui.portrait_texture,
+		"blink animation must inherit the reframed portrait transform"
+	)
+	assert_same(
+		ui.portrait_talk_overlay.get_parent(),
+		ui.portrait_texture,
+		"talk animation must inherit the reframed portrait transform"
+	)
+
+
 func _plain_node(text: String) -> DialogueNode:
 	var node := DialogueNode.new()
 	node.speaker_text = text
