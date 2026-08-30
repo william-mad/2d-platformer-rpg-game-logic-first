@@ -15,6 +15,7 @@ signal cancel_requested(session_id: StringName)
 @onready var choice_container: VBoxContainer = %Choices
 @onready var portrait_presenter: IntroMemoryPortraitPresenter = %AutonomousPortraitPresentation
 @onready var portrait_texture: TextureRect = %MemoryDialoguePortrait
+@onready var relationship_change_cue: Control = %RelationshipChangeCue
 
 var active_session_id: StringName = &""
 var input_enabled: bool = false
@@ -157,7 +158,10 @@ func reveal_portrait_presentation(session_id: StringName) -> bool:
 func hide_and_clear() -> void:
 	disable_input()
 	active_session_id = &""
-	visible = false
+	visible = (
+		relationship_change_cue != null
+		and bool(relationship_change_cue.call("is_showing"))
+	)
 	if panel != null:
 		panel.visible = false
 	if speaker_label != null:

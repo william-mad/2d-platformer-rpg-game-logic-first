@@ -4,41 +4,87 @@
 [ext_resource type="Script" uid="uid://csithy7k1fddw" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
 [ext_resource type="Script" uid="uid://cytm50bmpbyao" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
 
-[sub_resource type="Resource" id="Choice_worked"]
+[sub_resource type="Resource" id="Choice_sincere"]
 script = ExtResource("3_choice")
-choice_id = &"it_worked"
-text = "Point out that it worked."
-next_node_id = &"worked"
+choice_id = &"mean_every_word"
+text = "Tell her you meant every word."
+next_node_id = &"sincere"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 1.0
+}
+}
 
-[sub_resource type="Resource" id="Choice_better"]
+[sub_resource type="Resource" id="Choice_practicing"]
 script = ExtResource("3_choice")
-choice_id = &"can_do_better"
-text = "Promise you can do better."
-next_node_id = &"better"
+choice_id = &"only_practicing"
+text = "Laugh and say you were only practicing."
+next_node_id = &"practicing"
+consequences = {
+"player_talk_opinion_delta": {
+"love": -1.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_subject"]
+script = ExtResource("3_choice")
+choice_id = &"change_subject"
+text = "Change the subject before it gets serious."
+next_node_id = &"subject"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 0.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_double_down"]
+script = ExtResource("3_choice")
+choice_id = &"double_down"
+text = "Take her hand and double down."
+next_node_id = &"double_down"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 2.0
+}
+}
 
 [sub_resource type="Resource" id="Node_entry"]
 script = ExtResource("2_node")
 node_id = &"entry"
 speaker_id = &"mom"
 speaker_text = "You really know how to make me feel noticed. I like that."
-choices = Array[ExtResource("3_choice")]([SubResource("Choice_worked"), SubResource("Choice_better")])
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_sincere"), SubResource("Choice_practicing"), SubResource("Choice_subject"), SubResource("Choice_double_down")])
 
-[sub_resource type="Resource" id="Node_worked"]
+[sub_resource type="Resource" id="Node_sincere"]
 script = ExtResource("2_node")
-node_id = &"worked"
+node_id = &"sincere"
 speaker_id = &"mom"
-speaker_text = "It worked. Come here and enjoy your victory for a moment."
+speaker_text = "Then don't look away now. I like hearing you say it—and I like that you mean it."
 terminal = true
 
-[sub_resource type="Resource" id="Node_better"]
+[sub_resource type="Resource" id="Node_practicing"]
 script = ExtResource("2_node")
-node_id = &"better"
+node_id = &"practicing"
 speaker_id = &"mom"
-speaker_text = "Then come find me when you're ready. I'll be listening."
+speaker_text = "Oh. Practicing. Next time, find someone else to rehearse on."
+terminal = true
+
+[sub_resource type="Resource" id="Node_subject"]
+script = ExtResource("2_node")
+node_id = &"subject"
+speaker_id = &"mom"
+speaker_text = "Mm-hm. Saved by the change of subject—for now."
+terminal = true
+
+[sub_resource type="Resource" id="Node_double_down"]
+script = ExtResource("2_node")
+node_id = &"double_down"
+speaker_id = &"mom"
+speaker_text = "There you are. That confidence suits you—just don't make me regret encouraging it."
 terminal = true
 
 [resource]
 script = ExtResource("1_definition")
 dialogue_id = &"mom_player_talk_flirt_line"
 entry_node_id = &"entry"
-nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_worked"), SubResource("Node_better")])
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_sincere"), SubResource("Node_practicing"), SubResource("Node_subject"), SubResource("Node_double_down")])

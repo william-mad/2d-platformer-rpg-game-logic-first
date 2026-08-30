@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/modal_dialogue_ui.gd" id="1_ui"]
 [ext_resource type="Script" path="res://scripts/instances/intro_memory_portrait_presenter.gd" id="2_portrait_presenter"]
+[ext_resource type="PackedScene" path="res://scenes/ui/dialogue_relationship_change_cue.tscn" id="3_relationship_cue"]
 
 [node name="ModalDialogueUI" type="CanvasLayer"]
 layer = 90
@@ -117,3 +118,6 @@ autowrap_mode = 2
 [node name="Choices" type="VBoxContainer" parent="Panel/Margin/Content"]
 unique_name_in_owner = true
 theme_override_constants/separation = 4
+
+[node name="RelationshipChangeCue" parent="." instance=ExtResource("3_relationship_cue")]
+unique_name_in_owner = true

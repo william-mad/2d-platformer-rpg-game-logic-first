@@ -9,19 +9,51 @@ script = ExtResource("3_choice")
 choice_id = &"meant_it"
 text = "Tell her you meant it."
 next_node_id = &"meant"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 1.0
+}
+}
 
 [sub_resource type="Resource" id="Choice_tease"]
 script = ExtResource("3_choice")
-choice_id = &"tease_gently"
-text = "Tease her gently."
+choice_id = &"only_teasing"
+text = "Say you were only teasing."
 next_node_id = &"tease"
+consequences = {
+"player_talk_opinion_delta": {
+"love": -1.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_apologize"]
+script = ExtResource("3_choice")
+choice_id = &"apologize_surprise"
+text = "Apologize for surprising her."
+next_node_id = &"apologize"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 0.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_again"]
+script = ExtResource("3_choice")
+choice_id = &"say_it_again"
+text = "Ask if she would like to hear it again."
+next_node_id = &"again"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 2.0
+}
+}
 
 [sub_resource type="Resource" id="Node_entry"]
 script = ExtResource("2_node")
 node_id = &"entry"
 speaker_id = &"npc"
 speaker_text = "Y-you shouldn't say something like that so suddenly... I didn't say I disliked it."
-choices = Array[ExtResource("3_choice")]([SubResource("Choice_mean"), SubResource("Choice_tease")])
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_mean"), SubResource("Choice_tease"), SubResource("Choice_apologize"), SubResource("Choice_again")])
 
 [sub_resource type="Resource" id="Node_meant"]
 script = ExtResource("2_node")
@@ -34,11 +66,25 @@ terminal = true
 script = ExtResource("2_node")
 node_id = &"tease"
 speaker_id = &"npc"
-speaker_text = "Please don't tease me when my face is already this warm."
+speaker_text = "Oh. I see. Please don't make a joke of me like that."
+terminal = true
+
+[sub_resource type="Resource" id="Node_apologize"]
+script = ExtResource("2_node")
+node_id = &"apologize"
+speaker_id = &"npc"
+speaker_text = "It's all right. Just... give me a little warning next time."
+terminal = true
+
+[sub_resource type="Resource" id="Node_again"]
+script = ExtResource("2_node")
+node_id = &"again"
+speaker_id = &"npc"
+speaker_text = "Again? ...All right. But only if you say it just as sincerely."
 terminal = true
 
 [resource]
 script = ExtResource("1_definition")
 dialogue_id = &"maid_player_talk_flirt"
 entry_node_id = &"entry"
-nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_meant"), SubResource("Node_tease")])
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_meant"), SubResource("Node_tease"), SubResource("Node_apologize"), SubResource("Node_again")])

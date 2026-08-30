@@ -31,6 +31,7 @@ func _initialize() -> void:
 	_expect(profile != null, "Mom has a player-facing Talk dialogue profile")
 	_expect(profile != null and profile.get_validation_error().is_empty(), "player Talk profile validates")
 	_test_profile_content(profile)
+	_test_flirt_choice_content(profile, "Mom")
 	_test_other_npc_dialogue_profiles()
 
 	var interactor := player.get_node("NpcTalkInteractor") as PlayerNpcTalkInteractor
@@ -116,6 +117,16 @@ func _initialize() -> void:
 		).size() == memories_before + 1,
 		"successful player dialogue records normal conversation memory"
 	)
+	_test_flirt_choice_effects(
+		interactor,
+		controller,
+		dialogue_ui,
+		mom,
+		player,
+		machine,
+		talk_state,
+		relationships
+	)
 
 	# Cancellation must not grant category effects or normal Talk rewards.
 	_clear_interaction_cooldowns(interactor, machine)
@@ -197,6 +208,123 @@ func _test_profile_content(profile: NpcPlayerTalkDialogueProfile) -> void:
 				_expect(node.speaker_id == &"mom", "%s remains a one-sided Mom response" % String(category))
 
 
+func _test_flirt_choice_content(
+	profile: NpcPlayerTalkDialogueProfile,
+	label: String
+) -> void:
+	if profile == null:
+		return
+	var expected_love_deltas := [1.0, -1.0, 0.0, 2.0]
+	for definition in profile.flirt_responses:
+		var entry := definition.get_node(definition.entry_node_id)
+		_expect(entry != null, "%s Flirt has an entry node" % label)
+		if entry == null:
+			continue
+		_expect(entry.choices.size() == 4, "%s Flirt offers four contextual choices" % label)
+		for index in mini(entry.choices.size(), expected_love_deltas.size()):
+			var choice := entry.choices[index]
+			var opinion_delta = choice.consequences.get(
+				&"player_talk_opinion_delta", {}
+			)
+			_expect(opinion_delta is Dictionary, "%s Flirt choice %d has an opinion consequence" % [label, index])
+			if opinion_delta is Dictionary:
+				_expect_close(
+					float(opinion_delta.get("love", 999.0)),
+					expected_love_deltas[index],
+					"%s Flirt choice %d has its authored love result" % [label, index]
+				)
+			var follow_up := definition.get_node(choice.next_node_id)
+			_expect(
+				follow_up != null
+				and follow_up.terminal
+				and not follow_up.speaker_text.strip_edges().is_empty(),
+				"%s Flirt choice %d leads to a visible follow-up line" % [label, index]
+			)
+
+
+func _test_flirt_choice_effects(
+	interactor: PlayerNpcTalkInteractor,
+	controller: Node,
+	dialogue_ui: ModalDialogueUI,
+	mom: SocialNpc,
+	player: CharacterBody2D,
+	machine: NpcStateMachine,
+	talk_state: NpcStateTalk,
+	relationships: Node
+) -> void:
+	relationships.call(
+		"set_opinion_metric", mom, player, &"love", 57.0, "flirt_choice_test_setup"
+	)
+	var expected_after_choice := [58.0, 57.0, 57.0, 59.0]
+	var expected_cue_text := ["+1", "-1", "", "+2"]
+	for choice_index in 4:
+		_clear_interaction_cooldowns(interactor, machine)
+		machine.short_term_memory.clear_all(&"player_talk_flirt_choice_test")
+		var cue := dialogue_ui.relationship_change_cue
+		if bool(cue.call("is_showing")):
+			cue.call("_finish_cue")
+		_open_talk_category_menu(interactor)
+		interactor.call("_handle_talk_option", 2)
+		_expect(bool(controller.call("is_dialogue_active")), "Flirt choice case %d opens dialogue" % choice_index)
+		var entry := controller.get("current_node") as DialogueNode
+		_expect(entry != null and entry.choices.size() == 4, "Flirt choice case %d exposes all outcomes" % choice_index)
+		if entry == null or entry.choices.size() <= choice_index:
+			continue
+		var love_before := float(relationships.call(
+			"get_opinion_metric", mom, player, &"love", 0.0
+		))
+		controller.call("choose", entry.choices[choice_index].choice_id)
+		_expect_close(
+			float(relationships.call("get_opinion_metric", mom, player, &"love", 0.0)),
+			expected_after_choice[choice_index],
+			"Flirt choice %d applies love immediately" % choice_index
+		)
+		var follow_up := controller.get("current_node") as DialogueNode
+		_expect(
+			bool(controller.call("is_dialogue_active"))
+			and follow_up != null
+			and follow_up.terminal
+			and dialogue_ui.panel.visible,
+			"Flirt choice %d keeps its follow-up line visible" % choice_index
+		)
+		if expected_cue_text[choice_index].is_empty():
+			_expect(not bool(cue.call("is_showing")), "neutral Flirt choice shows no false heart")
+			_expect_close(
+				float(relationships.call("get_opinion_metric", mom, player, &"love", 0.0)),
+				love_before,
+				"neutral Flirt choice leaves love unchanged"
+			)
+		else:
+			var delta_label := cue.get_node("CueGroup/DeltaLabel") as Label
+			var heart_icon := cue.get_node("CueGroup/HeartIcon") as TextureRect
+			var heart_echo_2 := cue.get_node("CueGroup/HeartEcho2") as TextureRect
+			_expect(bool(cue.call("is_showing")), "Flirt choice %d shows the heart immediately" % choice_index)
+			_expect(delta_label.text == expected_cue_text[choice_index], "Flirt choice %d shows its actual delta" % choice_index)
+			_expect(
+				heart_echo_2.visible == (choice_index == 3),
+				"Flirt +2 uses a second softer heart only for its larger change"
+			)
+			if choice_index == 3:
+				_expect(
+					heart_echo_2.modulate.a < heart_icon.modulate.a,
+					"Flirt +2 secondary heart starts at lower alpha"
+				)
+			_expect(
+				dialogue_ui.get_viewport().get_visible_rect().intersects(
+					heart_icon.get_global_rect()
+				),
+				"Flirt choice %d heart is inside the visible viewport" % choice_index
+			)
+		_complete_current_dialogue(controller)
+		_expect_close(
+			float(relationships.call("get_opinion_metric", mom, player, &"love", 0.0)),
+			expected_after_choice[choice_index],
+			"Flirt choice %d is not paid again at dialogue completion" % choice_index
+		)
+		machine._physics_process(0.01)
+		_expect(machine.interaction_overlay == null, "Flirt choice %d closes normal Talk" % choice_index)
+
+
 func _test_other_npc_dialogue_profiles() -> void:
 	var npc_cases: Array[Dictionary] = [
 		{
@@ -248,6 +376,8 @@ func _test_other_npc_dialogue_profiles() -> void:
 					has_shared_response = has_shared_response or dialogue_id.begins_with("generic_")
 			_expect(has_authored_response, "%s has character-authored player responses" % String(npc_case["name"]))
 			_expect(has_shared_response, "%s reuses neutral player responses" % String(npc_case["name"]))
+			if String(npc_case["name"]) == "Maid":
+				_test_flirt_choice_content(player_profile, "Maid")
 
 		var autonomous_profile := npc.autonomous_dialogue_profile as NpcAutonomousDialogueProfile
 		_expect(autonomous_profile != null, "%s has an autonomous dialogue profile" % String(npc_case["name"]))
