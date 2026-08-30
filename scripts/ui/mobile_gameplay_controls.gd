@@ -65,34 +65,31 @@ func _input(event: InputEvent) -> void:
 
 	var touch := event as InputEventScreenTouch
 	if touch != null:
-		# Interaction menus use normal canvas coordinates and remain fully inside
-		# the phone surface. Keep that hit test in the original event space.
+		# NPC interaction menus remain in viewport/canvas coordinates and get first
+		# chance at the touch before gameplay controls.
 		if touch.pressed and _handle_interaction_menu_touch(touch.position):
 			get_viewport().set_input_as_handled()
 			return
 
-		# Gameplay controls are drawn in this Control's local coordinates. Convert
-		# the stretched-window input before comparing it with phone-anchored shapes.
-		var local_touch := make_input_local(touch) as InputEventScreenTouch
-		var local_position := local_touch.position if local_touch != null else touch.position
-		if touch.pressed and _is_menu_touch(local_position):
+		if touch.pressed and _is_menu_touch(touch.position):
 			_request_pause_menu()
 			get_viewport().set_input_as_handled()
 			return
 
 		var consumed := false
 		if touch.pressed:
-			consumed = _begin_touch(touch.index, local_position)
+			consumed = _begin_touch(touch.index, touch.position)
 		else:
 			consumed = _end_touch(touch.index)
+		# Leave unowned touches available to dialogue, inventory, intro minigames,
+		# pause UI and other touchscreen interfaces.
 		if consumed:
 			get_viewport().set_input_as_handled()
 		return
 
 	var drag := event as InputEventScreenDrag
 	if drag != null and drag.index == _joystick_touch_id:
-		var local_drag := make_input_local(drag) as InputEventScreenDrag
-		_update_joystick(local_drag.position if local_drag != null else drag.position)
+		_update_joystick(drag.position)
 		get_viewport().set_input_as_handled()
 
 
@@ -108,72 +105,36 @@ func _on_surface_changed() -> void:
 		_refresh_interaction_menu_mobile_ui()
 
 
-func _rect_from_points(point_a: Vector2, point_b: Vector2) -> Rect2:
-	return Rect2(
-		Vector2(minf(point_a.x, point_b.x), minf(point_a.y, point_b.y)),
-		Vector2(absf(point_b.x - point_a.x), absf(point_b.y - point_a.y))
-	)
-
-
-func _get_phone_local_rect() -> Rect2:
-	var window_size := Vector2(DisplayServer.window_get_size())
-	if window_size.x <= 0.0 or window_size.y <= 0.0:
-		return Rect2(Vector2.ZERO, size)
-	var local_to_screen := (
-		get_viewport().get_screen_transform() * get_global_transform_with_canvas()
-	)
-	var inverse := local_to_screen.affine_inverse()
-	return _rect_from_points(inverse * Vector2.ZERO, inverse * window_size)
-
-
-func _get_phone_canvas_rect() -> Rect2:
-	var fallback := get_viewport().get_visible_rect()
-	var window_size := Vector2(DisplayServer.window_get_size())
-	if window_size.x <= 0.0 or window_size.y <= 0.0:
-		return fallback
-	var inverse := get_viewport().get_screen_transform().affine_inverse()
-	return _rect_from_points(inverse * Vector2.ZERO, inverse * window_size)
-
-
 func _get_control_scale() -> float:
-	var screen_rect := _get_phone_local_rect()
-	if screen_rect.size.y <= 0.0:
+	if size.y <= 0.0:
 		return 1.0
-	return clampf(screen_rect.size.y / REFERENCE_PHONE_SURFACE.y, 0.8, 1.35)
+	return clampf(size.y / REFERENCE_PHONE_SURFACE.y, 0.82, 1.35)
 
 
 func get_joystick_center() -> Vector2:
-	var screen_rect := _get_phone_local_rect()
 	var ui_scale := _get_control_scale()
 	return Vector2(
-		screen_rect.position.x + screen_rect.size.x - 96.0 * ui_scale,
-		screen_rect.position.y + screen_rect.size.y - 104.0 * ui_scale
+		size.x - 96.0 * ui_scale,
+		size.y - 104.0 * ui_scale
 	)
 
 
 func get_action_button_center(action: StringName) -> Vector2:
-	var screen_rect := _get_phone_local_rect()
 	var ui_scale := _get_control_scale()
-	var left := screen_rect.position.x
-	var bottom := screen_rect.position.y + screen_rect.size.y
 	match action:
 		&"attack":
-			return Vector2(left + 56.0 * ui_scale, bottom - 66.0 * ui_scale)
+			return Vector2(56.0 * ui_scale, size.y - 66.0 * ui_scale)
 		&"attach_rope":
-			return Vector2(left + 142.0 * ui_scale, bottom - 66.0 * ui_scale)
+			return Vector2(142.0 * ui_scale, size.y - 66.0 * ui_scale)
 		&"charm":
-			return Vector2(left + 99.0 * ui_scale, bottom - 152.0 * ui_scale)
+			return Vector2(99.0 * ui_scale, size.y - 152.0 * ui_scale)
 		_:
 			return Vector2.ZERO
 
 
 func get_menu_button_center() -> Vector2:
-	var screen_rect := _get_phone_local_rect()
 	var ui_scale := _get_control_scale()
-	return Vector2(
-		screen_rect.position.x + screen_rect.size.x * 0.5,
-		screen_rect.position.y + 34.0 * ui_scale
-	)
+	return Vector2(size.x * 0.5, 34.0 * ui_scale)
 
 
 func get_joystick_vector() -> Vector2:
@@ -184,12 +145,13 @@ func _configure_mobile_window_scaling() -> void:
 	if not OS.has_feature("mobile"):
 		return
 	var window := get_tree().root
-	# The game world keeps whole-integer scaling and nearest filtering. Controls
-	# compensate for the resulting window transform separately, so their anchors
-	# follow the actual phone surface instead of the virtual game rectangle.
+	# EXPAND makes the virtual canvas adopt the phone's aspect ratio instead of
+	# letterboxing the 754x496 PC viewport. FRACTIONAL fills the available phone
+	# surface, while nearest-neighbour texture filtering preserves hard pixel-art
+	# edges and the aspect ratio remains unchanged.
 	window.content_scale_mode = Window.CONTENT_SCALE_MODE_VIEWPORT
 	window.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
-	window.content_scale_stretch = Window.CONTENT_SCALE_STRETCH_INTEGER
+	window.content_scale_stretch = Window.CONTENT_SCALE_STRETCH_FRACTIONAL
 
 
 func _refresh_visibility() -> void:
@@ -243,7 +205,10 @@ func _refresh_interaction_menu_mobile_ui() -> void:
 	if interactor == null:
 		return
 
-	var screen_rect := _get_phone_canvas_rect()
+	# Unlike portraits, menus must remain completely visible. Fit the interaction
+	# menu inside the expanded mobile viewport and only shrink it when absolutely
+	# necessary for a smaller screen.
+	var screen_rect := get_viewport().get_visible_rect()
 	if screen_rect.size.x <= 0.0 or screen_rect.size.y <= 0.0:
 		return
 	var available_size := Vector2(
@@ -259,14 +224,17 @@ func _refresh_interaction_menu_mobile_ui() -> void:
 	)
 	var target_size := MOBILE_INTERACTION_MENU_MIN_SIZE * fit_scale
 	var minimum_position := screen_rect.position + Vector2.ONE * MOBILE_MENU_EDGE_MARGIN
-	var maximum_position := screen_rect.position + screen_rect.size - Vector2.ONE * MOBILE_MENU_EDGE_MARGIN - target_size
+	var maximum_position := (
+		screen_rect.position + screen_rect.size
+		- Vector2.ONE * MOBILE_MENU_EDGE_MARGIN
+		- target_size
+	)
 	var preferred_position := screen_rect.position + MOBILE_INTERACTION_MENU_POSITION * fit_scale
 	var target_position := Vector2(
 		clampf(preferred_position.x, minimum_position.x, maximum_position.x),
 		clampf(preferred_position.y, minimum_position.y, maximum_position.y)
 	)
 
-	# These values also cover menus that have not been lazily created yet.
 	interactor.menu_position = target_position
 	interactor.menu_minimum_size = target_size
 
@@ -299,7 +267,7 @@ func _refresh_interaction_menu_mobile_ui() -> void:
 			continue
 		option_label.custom_minimum_size.y = maxf(34.0, MOBILE_INTERACTION_OPTION_HEIGHT * fit_scale)
 		option_label.add_theme_font_size_override(
-			"font_size", maxi(13, roundi(MOBILE_INTERACTION_OPTION_FONT_SIZE * fit_scale))
+			"font_size", maxi(14, roundi(MOBILE_INTERACTION_OPTION_FONT_SIZE * fit_scale))
 		)
 		option_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
@@ -470,22 +438,13 @@ func _draw() -> void:
 		return
 
 	var ui_scale := _get_control_scale()
-	var joystick_radius := JOYSTICK_RADIUS * ui_scale
 	var guide_color := Color(0.82, 0.9, 1.0, 0.34)
 	var label_color := Color(0.94, 0.97, 1.0, 0.86)
 	var caption_color := Color(0.86, 0.91, 0.98, 0.68)
 	var active_color := Color(0.38, 0.78, 1.0, 0.98)
 	var joystick_center := get_joystick_center()
-	draw_arc(
-		joystick_center,
-		joystick_radius,
-		0.0,
-		TAU,
-		64,
-		guide_color,
-		maxf(1.0, 2.0 * ui_scale),
-		true
-	)
+	var joystick_radius := JOYSTICK_RADIUS * ui_scale
+	draw_arc(joystick_center, joystick_radius, 0.0, TAU, 64, guide_color, maxf(2.0, 2.0 * ui_scale), true)
 	_draw_direction_markers(joystick_center, label_color, ui_scale)
 
 	var thumb_center := joystick_center + _joystick_vector * (joystick_radius * 0.52)
@@ -496,20 +455,18 @@ func _draw() -> void:
 		TAU,
 		32,
 		active_color if _joystick_touch_id >= 0 else guide_color,
-		maxf(1.0, 2.0 * ui_scale),
+		maxf(2.0, 2.0 * ui_scale),
 		true
 	)
 
 	var font := ThemeDB.fallback_font
-	var action_font_size := maxi(24, roundi(32.0 * ui_scale))
+	var action_font_size := maxi(26, roundi(32.0 * ui_scale))
 	var caption_font_size := maxi(9, roundi(10.0 * ui_scale))
 	for action in ACTION_LABELS:
 		var center := get_action_button_center(action)
 		var is_active := int(_action_touch_counts.get(action, 0)) > 0
 		var label: String = ACTION_LABELS[action]
-		var label_size := font.get_string_size(
-			label, HORIZONTAL_ALIGNMENT_LEFT, -1, action_font_size
-		)
+		var label_size := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, action_font_size)
 		draw_string(
 			font,
 			center - label_size * 0.5 + Vector2(0.0, -2.0 * ui_scale),
@@ -520,9 +477,7 @@ func _draw() -> void:
 			active_color if is_active else label_color
 		)
 		var caption: String = ACTION_CAPTIONS[action]
-		var caption_size := font.get_string_size(
-			caption, HORIZONTAL_ALIGNMENT_LEFT, -1, caption_font_size
-		)
+		var caption_size := font.get_string_size(caption, HORIZONTAL_ALIGNMENT_LEFT, -1, caption_font_size)
 		draw_string(
 			font,
 			center + Vector2(-caption_size.x * 0.5, 24.0 * ui_scale),
@@ -535,10 +490,8 @@ func _draw() -> void:
 
 	var menu_center := get_menu_button_center()
 	var menu_label := "MENU"
-	var menu_font_size := maxi(12, roundi(15.0 * ui_scale))
-	var menu_size := font.get_string_size(
-		menu_label, HORIZONTAL_ALIGNMENT_LEFT, -1, menu_font_size
-	)
+	var menu_font_size := maxi(13, roundi(15.0 * ui_scale))
+	var menu_size := font.get_string_size(menu_label, HORIZONTAL_ALIGNMENT_LEFT, -1, menu_font_size)
 	draw_string(
 		font,
 		menu_center - menu_size * 0.5 + Vector2(0.0, 5.0 * ui_scale),
