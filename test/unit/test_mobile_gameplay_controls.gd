@@ -20,10 +20,11 @@ func after_each() -> void:
 
 func test_force_enabled_exposes_controls_for_headless_verification() -> void:
 	assert_true(controls.visible, "forced mobile controls should be visible in headless tests")
-	assert_eq(controls.get_action_button_center(&"attack"), Vector2(72.0, 420.0))
-	assert_eq(controls.get_action_button_center(&"attach_rope"), Vector2(170.0, 420.0))
-	assert_eq(controls.get_action_button_center(&"charm"), Vector2(121.0, 322.0))
-	assert_eq(controls.get_joystick_center(), Vector2(642.0, 384.0))
+	assert_eq(controls.get_action_button_center(&"attack"), Vector2(56.0, 430.0))
+	assert_eq(controls.get_action_button_center(&"attach_rope"), Vector2(142.0, 430.0))
+	assert_eq(controls.get_action_button_center(&"charm"), Vector2(99.0, 344.0))
+	assert_eq(controls.get_joystick_center(), Vector2(658.0, 392.0))
+	assert_eq(controls.get_menu_button_center(), Vector2(377.0, 34.0))
 
 
 func test_player_hud_contains_mobile_control_overlay() -> void:
@@ -34,6 +35,17 @@ func test_player_hud_contains_mobile_control_overlay() -> void:
 	assert_not_null(
 		hud.get_node_or_null("MobileGameplayControls"),
 		"player HUD should include the mobile controls overlay"
+	)
+
+
+func test_menu_touch_target_is_centered_without_adding_a_panel() -> void:
+	assert_true(
+		bool(controls.call("_is_menu_touch", controls.get_menu_button_center())),
+		"MENU label center should be a valid touch target"
+	)
+	assert_false(
+		bool(controls.call("_is_menu_touch", Vector2(377.0, 150.0))),
+		"MENU touch target should stay compact near the top edge"
 	)
 
 
