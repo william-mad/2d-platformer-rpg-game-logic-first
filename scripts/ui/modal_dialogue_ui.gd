@@ -167,17 +167,11 @@ func _on_viewport_size_changed() -> void:
 
 
 func _get_phone_canvas_rect() -> Rect2:
-	var fallback := get_viewport().get_visible_rect()
-	var window_size := Vector2(DisplayServer.window_get_size())
-	if window_size.x <= 0.0 or window_size.y <= 0.0:
-		return fallback
-	var inverse := get_viewport().get_screen_transform().affine_inverse()
-	var point_a := inverse * Vector2.ZERO
-	var point_b := inverse * window_size
-	return Rect2(
-		Vector2(minf(point_a.x, point_b.x), minf(point_a.y, point_b.y)),
-		Vector2(absf(point_b.x - point_a.x), absf(point_b.y - point_a.y))
-	)
+	# The expanded game viewport is the phone/game surface. Using the Android
+	# process window here also includes the Godot editor chrome when running the
+	# project inside the mobile editor, which pushed portraits and controls beyond
+	# the embedded game view.
+	return get_viewport().get_visible_rect()
 
 
 func _configure_mobile_portrait_layout(texture: Texture2D) -> void:
@@ -195,7 +189,7 @@ func _configure_mobile_portrait_layout(texture: Texture2D) -> void:
 
 	# Dialogue portraits are intentionally large on phones. Do not shrink a tall
 	# portrait just to expose its feet: keep the requested size, pin the artwork
-	# to the top-right of the actual phone surface, and clip only the bottom when
+	# to the top-right of the game surface, and clip only the bottom when
 	# necessary. This keeps faces/upper bodies readable while preserving aspect.
 	var available_width := maxf(
 		screen_rect.size.x - MOBILE_PORTRAIT_EDGE_MARGIN * 2.0,
