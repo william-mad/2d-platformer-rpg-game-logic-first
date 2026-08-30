@@ -12,7 +12,7 @@ config_version=5
 
 config/name="2d platformer rpg game logic first"
 run/main_scene="res://scenes/levels/title_screen.tscn"
-config/features=PackedStringArray("4.6", "GL Compatibility")
+config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"
 
 [autoload]
@@ -47,7 +47,8 @@ window/size/viewport_height=496
 window/size/mode=4
 window/size/resizable=false
 window/stretch/mode="viewport"
-window/stretch/scale_mode="integer"
+window/stretch/aspect="expand"
+window/stretch/scale_mode="fractional"
 
 [global_group]
 

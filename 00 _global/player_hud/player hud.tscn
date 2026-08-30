@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3 uid="uid://dicudb0t1rd0j"]
+[gd_scene load_steps=8 format=3 uid="uid://dicudb0t1rd0j"]
 
 [ext_resource type="Script" uid="uid://ct62uktvpeu7x" path="res://00 _global/player_hud/player_hud.gd" id="2_hud"]
 [ext_resource type="PackedScene" path="res://ui/inventory/player_inventory_screen.tscn" id="3_inventory_screen"]
@@ -6,6 +6,7 @@
 [ext_resource type="Texture2D" uid="uid://dtgi1dycloyf6" path="res://images/system/ui/ui_1.png" id="5_hud_frame"]
 [ext_resource type="Texture2D" uid="uid://cuaaol6ty0kx6" path="res://images/system/ui/hunger_sleep.png" id="6_need_icons"]
 [ext_resource type="Texture2D" uid="uid://ddyyinsnro3jf" path="res://images/system/ui/ko.png" id="7_ko_icon"]
+[ext_resource type="Script" path="res://scripts/ui/mobile_gameplay_controls.gd" id="8_mobile_controls"]
 
 [sub_resource type="Gradient" id="Gradient_3vx8i"]
 offsets = PackedFloat32Array(0.2470238, 0.98511904)
@@ -57,6 +58,17 @@ script = ExtResource("2_hud")
 [node name="PlayerInventoryScreen" parent="." instance=ExtResource("3_inventory_screen")]
 
 [node name="TradeScreen" parent="." instance=ExtResource("4_trade_screen")]
+
+[node name="MobileGameplayControls" type="Control" parent="."]
+process_mode = 3
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("8_mobile_controls")
 
 [node name="Control" type="Control" parent="." unique_id=1427456495]
 process_mode = 3
