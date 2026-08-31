@@ -121,3 +121,28 @@ func test_live_minigame_applies_transform_to_non_container_content_root() -> voi
 		),
 		"live phone content should apply its responsive scale without distortion"
 	)
+
+
+func test_connected_phone_background_keeps_caller_picture_and_hides_answer_slider() -> void:
+	var intro := INTRO_SCENE.instantiate()
+	var controller := intro.get_node("IntroSequenceController")
+	intro.remove_child(controller)
+	controller.free()
+	add_child_autofree(intro)
+	var host := intro.get_node("PhoneInteractionLayer/PhoneMinigameHost") as IntroPhoneMinigame
+	host.show_dialogue_background()
+	var panel := host.get_node(
+		"PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"
+	) as Control
+	var caller_picture := panel.get_node("PhoneBackgroundFrameA") as TextureRect
+	var caller_status := panel.get_node("CallerStatusLabel") as Label
+	var slider_instruction := panel.get_node("SliderInstructionLabel") as Label
+	var slider_pill := panel.get_node("SliderPill") as Panel
+	var answer_handle := panel.get_node("AnswerHandle") as Sprite2D
+
+	assert_true(host.visible, "answered phone should remain as the dialogue background")
+	assert_true(caller_picture.visible, "caller's picture should remain visible during dialogue")
+	assert_eq(caller_status.text, "CALL CONNECTED", "phone background should show active-call status")
+	assert_false(slider_instruction.visible, "answer prompt should disappear after connecting")
+	assert_false(slider_pill.visible, "answer slider should disappear after connecting")
+	assert_false(answer_handle.visible, "answer handle should disappear after connecting")

@@ -194,6 +194,7 @@ texture = SubResource("AtlasTexture_caller_name")
 expand_mode = 1
 
 [node name="CallerStatusLabel" type="Label" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"]
+unique_name_in_owner = true
 layout_mode = 0
 offset_top = 460.0
 offset_right = 248.0
@@ -206,6 +207,7 @@ horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="SliderInstructionLabel" type="Label" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"]
+unique_name_in_owner = true
 layout_mode = 0
 offset_top = 515.0
 offset_right = 248.0
@@ -218,6 +220,7 @@ horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="SliderPill" type="Panel" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"]
+unique_name_in_owner = true
 layout_mode = 0
 offset_left = 55.0
 offset_top = 548.0

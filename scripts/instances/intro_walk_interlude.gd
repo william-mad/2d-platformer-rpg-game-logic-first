@@ -501,34 +501,14 @@ func _get_memory_image_index_for_beat(beat_number: int) -> int:
 	return result
 
 
-static func calculate_goddess_cover_vertical_offset(
-	viewport_size: Vector2,
-	texture_size: Vector2,
-	top_margin_pixels: float = 12.0
-) -> float:
-	if (
-		viewport_size.x <= 0.0
-		or viewport_size.y <= 0.0
-		or texture_size.x <= 0.0
-		or texture_size.y <= 0.0
-	):
-		return 0.0
-	var cover_scale := maxf(
-		viewport_size.x / texture_size.x,
-		viewport_size.y / texture_size.y
-	)
-	var centered_image_top := (viewport_size.y - texture_size.y * cover_scale) * 0.5
-	return maxf(0.0, top_margin_pixels - centered_image_top)
-
-
 func _apply_memory_image_framing(image_rect: TextureRect, image_index: int) -> void:
-	var vertical_offset := 0.0
-	if image_index >= 0 and image_index < MEMORY_IMAGES.size() - 1:
-		vertical_offset = calculate_goddess_cover_vertical_offset(
-			get_viewport_rect().size,
-			MEMORY_IMAGES[image_index].get_size(),
-			goddess_top_margin_pixels
-		)
+	var showing_goddess := image_index >= 0 and image_index < MEMORY_IMAGES.size() - 1
+	var vertical_offset := goddess_top_margin_pixels if showing_goddess else 0.0
+	image_rect.stretch_mode = (
+		TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		if showing_goddess
+		else TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	)
 	image_rect.offset_top = vertical_offset
 	image_rect.offset_bottom = vertical_offset
 

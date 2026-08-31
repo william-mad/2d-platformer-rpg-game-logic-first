@@ -54,25 +54,30 @@ func test_goddess_frames_have_a_white_blue_backdrop_and_slow_final_dissolve() ->
 	intro.free()
 
 
-func test_goddess_cover_framing_moves_wide_screen_art_down_to_reveal_its_top() -> void:
-	var offset := IntroWalkInterlude.calculate_goddess_cover_vertical_offset(
-		Vector2(1188.0, 496.0),
-		Vector2(754.0, 496.0),
-		12.0
+func test_goddess_art_fits_without_clipping_while_final_memory_keeps_cover_mode() -> void:
+	var intro := INTRO_WALK_SCENE.instantiate() as IntroWalkInterlude
+	var memory_image := intro.get_node("IllustrationLayer/MemoryImage") as TextureRect
+
+	intro.call("_apply_memory_image_framing", memory_image, 0)
+	assert_eq(
+		memory_image.stretch_mode,
+		TextureRect.STRETCH_KEEP_ASPECT_CENTERED,
+		"goddess art should fit inside the full screen instead of exposing a cropped rectangle"
+	)
+	assert_true(
+		is_equal_approx(memory_image.offset_top, 12.0)
+		and is_equal_approx(memory_image.offset_bottom, 12.0),
+		"goddess art should be lowered slightly without cutting off its head"
 	)
 
-	assert_true(
-		is_equal_approx(offset, 154.74802),
-		"wide mobile framing should lower goddess art enough to expose its top edge"
+	intro.call("_apply_memory_image_framing", memory_image, 3)
+	assert_eq(
+		memory_image.stretch_mode,
+		TextureRect.STRETCH_KEEP_ASPECT_COVERED,
+		"illustration 3 (8) should retain its full-screen cover presentation"
 	)
 	assert_true(
-		is_equal_approx(
-			IntroWalkInterlude.calculate_goddess_cover_vertical_offset(
-				Vector2(754.0, 496.0),
-				Vector2(754.0, 496.0),
-				12.0
-			),
-			12.0
-		),
-		"native-aspect framing should keep only the requested top margin"
+		is_zero_approx(memory_image.offset_top) and is_zero_approx(memory_image.offset_bottom),
+		"illustration 3 (8) should retain its original position"
 	)
+	intro.free()

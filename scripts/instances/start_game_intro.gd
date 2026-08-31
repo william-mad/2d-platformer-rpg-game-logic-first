@@ -249,11 +249,19 @@ func _answer_phone() -> void:
 func _enter_dialogue_phase() -> void:
 	if current_phase != Phase.ANSWER_TRANSITION:
 		return
-	phone_minigame_host.visible = false
-	phone_minigame_host.modulate.a = 1.0
+	phone_minigame_host.call("show_dialogue_background")
+	phone_minigame_host.visible = true
+	phone_minigame_host.modulate.a = 0.0
 	_set_phase(Phase.DIALOGUE)
 	_backdrop_tween = create_tween()
+	_backdrop_tween.set_parallel(true)
 	_backdrop_tween.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	_backdrop_tween.tween_property(
+		phone_minigame_host,
+		"modulate:a",
+		1.0,
+		dialogue_backdrop_mute_seconds
+	)
 	_backdrop_tween.tween_property(
 		dialogue_backdrop_mute,
 		"modulate:a",

@@ -41,6 +41,9 @@ const PHONE_LEFT_ROTATION_RADIANS := -PI * 0.5
 @onready var phone_background_frame_b: TextureRect = %PhoneBackgroundFrameB
 @onready var slider_track_frame_a: TextureRect = %SliderTrackFrameA
 @onready var slider_track_frame_b: TextureRect = %SliderTrackFrameB
+@onready var caller_status_label: Label = %CallerStatusLabel
+@onready var slider_instruction_label: Label = %SliderInstructionLabel
+@onready var slider_pill: Panel = %SliderPill
 @onready var answer_handle: Sprite2D = %AnswerHandle
 @onready var hand_sprite: Sprite2D = %HandSprite
 @onready var blur_overlay: ColorRect = %PhoneBlurOverlay
@@ -83,6 +86,8 @@ func _ready() -> void:
 
 func activate() -> void:
 	_apply_phone_panel_layout()
+	caller_status_label.text = "INCOMING CALL"
+	_set_call_controls_visible(true)
 	_completed = false
 	_grabbed = false
 	_touch_drag_id = -1
@@ -110,6 +115,18 @@ func activate() -> void:
 			_reveal_hand()
 
 
+func show_dialogue_background() -> void:
+	deactivate()
+	_apply_phone_panel_layout()
+	visible = true
+	_completed = true
+	caller_status_label.text = "CALL CONNECTED"
+	_show_flash_frame_a(true)
+	_set_call_controls_visible(false)
+	phone_background_frame_a.visible = true
+	phone_background_frame_b.visible = false
+
+
 func deactivate() -> void:
 	_active = false
 	_hand_input_enabled = false
@@ -123,6 +140,16 @@ func deactivate() -> void:
 	_kill_blur_tween()
 	_kill_hand_reveal_tween()
 	_set_blur_strength(0.0)
+
+
+func _set_call_controls_visible(controls_visible: bool) -> void:
+	slider_instruction_label.visible = controls_visible
+	slider_pill.visible = controls_visible
+	answer_handle.visible = controls_visible
+	if not controls_visible:
+		slider_track_frame_a.visible = false
+		slider_track_frame_b.visible = false
+		hand_sprite.visible = false
 
 
 func _input(event: InputEvent) -> void:
