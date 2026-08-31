@@ -1,4 +1,4 @@
-[gd_scene load_steps=33 format=3 uid="uid://b6uelg5wsy8in"]
+[gd_scene load_steps=31 format=3 uid="uid://b6uelg5wsy8in"]
 
 [ext_resource type="Script" path="res://scripts/instances/start_game_intro.gd" id="1_intro"]
 [ext_resource type="Texture2D" path="res://images/backgrounds/intro/fullscreen_illustration_intro1.png" id="2_intro_frame_1"]
@@ -9,7 +9,7 @@
 [ext_resource type="Texture2D" uid="uid://csftbdufw5ge3" path="res://images/square_imgs/story_ilustrations_1phone 1.png" id="3_phone_ready"]
 [ext_resource type="Texture2D" uid="uid://xpexoiq73rdp" path="res://images/square_imgs/story_ilustrations_1phone 2.png" id="4_phone_answered"]
 [ext_resource type="Texture2D" uid="uid://cot6120boq7d7" path="res://images/square_imgs/story_ilustrations1.png" id="5_phone_background_a"]
-[ext_resource type="Texture2D" uid="uid://coclj5s6eb6eo" path="res://images/square_imgs/story_ilustrations2.png" id="6_phone_background_b"]
+[ext_resource type="Texture2D" uid="uid://b63j5ukvu0no" path="res://images/square_imgs/story_caller_mom_clean.png" id="6_phone_caller_clean"]
 [ext_resource type="Texture2D" uid="uid://5s4md7lwc25q" path="res://images/dialog/real_mom/portrait_1_mom_Real1.png" id="7_dialogue_slide_1"]
 [ext_resource type="Texture2D" uid="uid://dtuyl2r7aek4v" path="res://images/dialog/real_mom/portrait_1_mom_Real2.png" id="8_dialogue_slide_2"]
 [ext_resource type="Texture2D" uid="uid://dxigctkhv2aq4" path="res://images/dialog/real_mom/portrait_1_mom_Real3.png" id="9_dialogue_slide_3"]
@@ -36,16 +36,6 @@ filter_clip = true
 [sub_resource type="AtlasTexture" id="AtlasTexture_track_b"]
 atlas = ExtResource("4_phone_answered")
 region = Rect2(91, 181, 39, 31)
-filter_clip = true
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_caller_a"]
-atlas = ExtResource("5_phone_background_a")
-region = Rect2(0, 0, 248, 180)
-filter_clip = true
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_caller_b"]
-atlas = ExtResource("6_phone_background_b")
-region = Rect2(0, 0, 248, 180)
 filter_clip = true
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_caller_name"]
@@ -168,53 +158,58 @@ mouse_filter = 2
 
 [node name="PhoneBackgroundFrameA" type="TextureRect" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"]
 unique_name_in_owner = true
+texture_filter = 1
 layout_mode = 0
-offset_left = -20.0
-offset_top = 20.0
-offset_right = 268.0
-offset_bottom = 229.0
+offset_left = -23.0
+offset_top = -4.0
+offset_right = 271.0
+offset_bottom = 416.0
 mouse_filter = 2
-texture = SubResource("AtlasTexture_caller_a")
+texture = ExtResource("6_phone_caller_clean")
 expand_mode = 1
+stretch_mode = 5
 
 [node name="PhoneBackgroundFrameB" type="TextureRect" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"]
 unique_name_in_owner = true
 visible = false
+self_modulate = Color(0.91, 0.95, 1, 1)
+texture_filter = 1
 layout_mode = 0
-offset_left = -20.0
-offset_top = 20.0
-offset_right = 268.0
-offset_bottom = 229.0
+offset_left = -23.0
+offset_top = -4.0
+offset_right = 271.0
+offset_bottom = 416.0
 mouse_filter = 2
-texture = SubResource("AtlasTexture_caller_b")
+texture = ExtResource("6_phone_caller_clean")
 expand_mode = 1
+stretch_mode = 5
 
 [node name="CallerNameArt" type="TextureRect" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"]
 layout_mode = 0
-offset_top = 245.0
+offset_top = 423.0
 offset_right = 248.0
-offset_bottom = 275.0
+offset_bottom = 453.0
 mouse_filter = 2
 texture = SubResource("AtlasTexture_caller_name")
 expand_mode = 1
 
 [node name="CallerStatusLabel" type="Label" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"]
 layout_mode = 0
-offset_top = 305.0
+offset_top = 460.0
 offset_right = 248.0
-offset_bottom = 333.0
+offset_bottom = 484.0
 mouse_filter = 2
 theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 14
+theme_override_font_sizes/font_size = 12
 text = "INCOMING CALL"
 horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="SliderInstructionLabel" type="Label" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"]
 layout_mode = 0
-offset_top = 405.0
+offset_top = 515.0
 offset_right = 248.0
-offset_bottom = 431.0
+offset_bottom = 539.0
 mouse_filter = 2
 theme_override_colors/font_color = Color(0.58, 0.6, 0.64, 1)
 theme_override_font_sizes/font_size = 12
@@ -225,9 +220,9 @@ vertical_alignment = 1
 [node name="SliderPill" type="Panel" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"]
 layout_mode = 0
 offset_left = 55.0
-offset_top = 448.0
+offset_top = 548.0
 offset_right = 183.0
-offset_bottom = 480.0
+offset_bottom = 580.0
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBox_slider_pill")
 
@@ -235,9 +230,9 @@ theme_override_styles/panel = SubResource("StyleBox_slider_pill")
 unique_name_in_owner = true
 layout_mode = 0
 offset_left = 91.0
-offset_top = 448.0
+offset_top = 548.0
 offset_right = 130.0
-offset_bottom = 479.0
+offset_bottom = 579.0
 mouse_filter = 2
 texture = SubResource("AtlasTexture_track_a")
 expand_mode = 1
@@ -247,9 +242,9 @@ unique_name_in_owner = true
 visible = false
 layout_mode = 0
 offset_left = 91.0
-offset_top = 448.0
+offset_top = 548.0
 offset_right = 130.0
-offset_bottom = 479.0
+offset_bottom = 579.0
 mouse_filter = 2
 texture = SubResource("AtlasTexture_track_b")
 expand_mode = 1
@@ -257,14 +252,14 @@ expand_mode = 1
 [node name="AnswerHandle" type="Sprite2D" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"]
 unique_name_in_owner = true
 z_index = 5
-position = Vector2(79, 464)
+position = Vector2(79, 564)
 texture = SubResource("AtlasTexture_answer_handle")
 
 [node name="HandSprite" type="Sprite2D" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"]
 unique_name_in_owner = true
 z_index = 110
 texture_filter = 1
-position = Vector2(120, 380)
+position = Vector2(120, 490)
 texture = ExtResource("15_hand")
 offset = Vector2(13, 51)
 

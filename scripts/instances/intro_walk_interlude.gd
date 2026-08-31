@@ -15,13 +15,10 @@ const MEMORY_IMAGES: Array[Texture2D] = [
 	preload("res://images/backgrounds/intro/fullscreen ilustration 3 (1).png"),
 	preload("res://images/backgrounds/intro/fullscreen ilustration 3 (2).png"),
 	preload("res://images/backgrounds/intro/fullscreen ilustration 3 (3).png"),
-	preload("res://images/backgrounds/intro/fullscreen ilustration 3 (4).png"),
-	preload("res://images/backgrounds/intro/fullscreen ilustration 3 (5).png"),
-	preload("res://images/backgrounds/intro/fullscreen ilustration 3 (6).png"),
-	preload("res://images/backgrounds/intro/fullscreen ilustration 3 (7).png"),
 	preload("res://images/backgrounds/intro/fullscreen ilustration 3 (8).png"),
 ]
-const MEMORY_IMAGE_FIRST_BEATS: Array[int] = [1, 5, 9, 13, 17, 21, 25, 28]
+const MEMORY_IMAGE_FIRST_BEATS: Array[int] = [1, 10, 19, 28]
+const BIRDS_FADE_IN_IMAGE_INDEX := 2
 
 enum Phase {
 	WALKING,
@@ -66,7 +63,7 @@ enum Phase {
 @export_range(0.1, 3.0, 0.05, "suffix:s") var memory_image_fade_seconds: float = 0.8
 @export_range(1.0, 16.0, 0.5, "suffix:s") var birds_fade_in_seconds: float = 8.0
 @export_category("Final Memory Framing")
-@export_range(0.5, 8.0, 0.1, "suffix:s") var final_image_appearance_fade_seconds: float = 2.4
+@export_range(0.5, 12.0, 0.1, "suffix:s") var final_image_appearance_fade_seconds: float = 8.0
 @export_range(1.0, 3.0, 0.05) var final_image_zoom_amount: float = 1.85
 @export_range(0.5, 8.0, 0.1, "suffix:s") var final_image_zoom_in_seconds: float = 2.0
 @export_range(0.5, 1.0, 0.01) var final_image_bottom_focus_y: float = 0.88
@@ -104,6 +101,7 @@ enum Phase {
 @onready var left_headlight: Sprite2D = %LeftHeadlight
 @onready var right_headlight: Sprite2D = %RightHeadlight
 @onready var impact_illustration: TextureRect = %ImpactIllustration
+@onready var goddess_backdrop: TextureRect = %GoddessBackdrop
 @onready var memory_image: TextureRect = %MemoryImage
 @onready var memory_image_incoming: TextureRect = %MemoryImageIncoming
 @onready var fade_overlay: ColorRect = %InterludeFadeOverlay
@@ -149,6 +147,7 @@ func _ready() -> void:
 	fade_overlay.modulate.a = 0.0
 	headlight_stage.visible = false
 	impact_illustration.visible = false
+	goddess_backdrop.visible = false
 	memory_image.visible = false
 	memory_image_incoming.visible = false
 	memory_image.material = null
@@ -427,10 +426,16 @@ func _start_montage() -> void:
 		return
 	current_phase = Phase.MONTAGE
 	_set_memory_image_immediate(0)
+	goddess_backdrop.visible = true
+	goddess_backdrop.modulate.a = 0.0
 	memory_image.visible = true
 	memory_image.modulate.a = 0.0
 	_memory_tween = create_tween()
+	_memory_tween.set_parallel(true)
 	_memory_tween.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	_memory_tween.tween_property(
+		goddess_backdrop, "modulate:a", 1.0, memory_image_fade_seconds
+	)
 	_memory_tween.tween_property(
 		memory_image, "modulate:a", 1.0, memory_image_fade_seconds
 	)
@@ -482,7 +487,7 @@ func _on_dialogue_node_started(
 			_set_montage_dialogue_input_enabled(session_id, false)
 			_set_montage_dialogue_visible(session_id, false)
 		_crossfade_memory_image(image_index)
-	if image_index >= MEMORY_IMAGES.size() - 3:
+	if image_index >= BIRDS_FADE_IN_IMAGE_INDEX:
 		_start_birds_fade_in()
 
 
@@ -545,6 +550,7 @@ func _finish_memory_image_crossfade(image_index: int) -> void:
 	memory_image_incoming.visible = false
 	_current_memory_image_index = image_index
 	if image_index == MEMORY_IMAGES.size() - 1:
+		goddess_backdrop.visible = false
 		_start_final_image_bottom_up_view()
 
 

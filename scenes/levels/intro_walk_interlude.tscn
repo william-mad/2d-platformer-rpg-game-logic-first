@@ -1,4 +1,4 @@
-[gd_scene load_steps=17 format=3]
+[gd_scene load_steps=19 format=3]
 
 [ext_resource type="Script" path="res://scripts/instances/intro_walk_interlude.gd" id="1_controller"]
 [ext_resource type="PackedScene" uid="uid://by1aphre1t601" path="res://player/player.tscn" id="2_player"]
@@ -32,6 +32,18 @@ height = 128
 fill = 1
 fill_from = Vector2(0.5, 0.5)
 fill_to = Vector2(1, 0.5)
+
+[sub_resource type="Gradient" id="GoddessBackdropGradient"]
+offsets = PackedFloat32Array(0, 0.34, 0.72, 1)
+colors = PackedColorArray(0.985, 0.995, 1, 1, 0.84, 0.94, 1, 1, 0.39, 0.66, 0.9, 1, 0.11, 0.25, 0.47, 1)
+
+[sub_resource type="GradientTexture2D" id="GoddessBackdropTexture"]
+gradient = SubResource("GoddessBackdropGradient")
+width = 754
+height = 496
+fill = 1
+fill_from = Vector2(0.5, 0.46)
+fill_to = Vector2(0.98, 0.46)
 
 [node name="IntroWalkInterlude" type="Node2D"]
 script = ExtResource("1_controller")
@@ -188,6 +200,19 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 texture = ExtResource("7_impact")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="GoddessBackdrop" type="TextureRect" parent="IllustrationLayer"]
+unique_name_in_owner = true
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = SubResource("GoddessBackdropTexture")
 expand_mode = 1
 stretch_mode = 6
 

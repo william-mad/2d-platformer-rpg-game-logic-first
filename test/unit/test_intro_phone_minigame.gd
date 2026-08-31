@@ -67,6 +67,14 @@ func test_phone_scene_uses_dark_backdrop_and_keeps_effect_layers() -> void:
 	)
 	assert_eq(panel.size, Vector2(248.0, 600.0), "phone layout should use a tall call-screen canvas")
 	assert_same(background_frame.get_parent(), panel, "caller picture rotates with phone panel")
+	assert_true(
+		background_frame.size.y >= 420.0,
+		"caller portrait should dominate the phone screen instead of using the old square crop"
+	)
+	assert_true(
+		background_frame.texture.resource_path.ends_with("story_caller_mom_clean.png"),
+		"phone should use the clean full-bust caller portrait without embedded controls"
+	)
 	assert_not_null(caller_name.texture, "caller name should remain visible below the portrait")
 	assert_true(
 		slider_pill.position.y > background_frame.get_rect().end.y,
