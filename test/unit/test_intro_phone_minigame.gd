@@ -34,11 +34,12 @@ func test_phone_panel_rotates_left_and_fills_most_of_landscape_screen() -> void:
 	)
 
 
-func test_phone_scene_uses_light_grey_backdrop_and_keeps_effect_layers() -> void:
+func test_phone_scene_uses_dark_backdrop_and_keeps_effect_layers() -> void:
 	var intro := INTRO_SCENE.instantiate()
 	var host := intro.get_node("PhoneInteractionLayer/PhoneMinigameHost")
 	var backdrop := host.get_node("PhoneInteractionBackdrop") as ColorRect
-	var panel := host.get_node("PhonePanelCenter/PhoneInteractionPanel") as Control
+	var panel_frame := host.get_node("PhonePanelCenter/PhoneInteractionPanel") as Control
+	var panel := panel_frame.get_node("PhoneTransformRoot") as Control
 	var background_frame := panel.get_node("PhoneBackgroundFrameA") as TextureRect
 	var background_flash_frame := panel.get_node("PhoneBackgroundFrameB") as TextureRect
 	var slider_frame := panel.get_node("SliderTrackFrameA") as TextureRect
@@ -48,7 +49,15 @@ func test_phone_scene_uses_light_grey_backdrop_and_keeps_effect_layers() -> void
 	var ringing := intro.get_node("Audio/PhoneRinging") as AudioStreamPlayer
 
 	assert_not_null(backdrop, "phone interaction needs a dedicated backdrop")
-	assert_eq(backdrop.color, Color(0.82, 0.82, 0.82, 1.0), "backdrop should be light grey")
+	assert_eq(backdrop.color, Color(0.14, 0.15, 0.17, 1.0), "backdrop should be dark charcoal")
+	assert_false(
+		panel.get_parent() is Container,
+		"rotated content must not be a direct Container child that resets its transform"
+	)
+	assert_true(
+		is_equal_approx(panel.rotation, -PI * 0.5) and panel.scale.x > 1.5,
+		"scene fallback should already be visibly rotated and enlarged"
+	)
 	assert_same(background_frame.get_parent(), panel, "caller picture rotates with phone panel")
 	assert_not_null(background_flash_frame.texture, "ringing picture flash frame should remain configured")
 	assert_same(slider_frame.get_parent(), panel, "flashing slider rotates with phone panel")
@@ -57,3 +66,31 @@ func test_phone_scene_uses_light_grey_backdrop_and_keeps_effect_layers() -> void
 	assert_not_null(blur_overlay.material, "existing ringing blur effect should remain configured")
 	assert_not_null(ringing.stream, "existing ringing audio should remain configured")
 	intro.free()
+
+
+func test_live_minigame_applies_transform_to_non_container_content_root() -> void:
+	var intro := INTRO_SCENE.instantiate()
+	var sequence_controller := intro.get_node("IntroSequenceController")
+	intro.remove_child(sequence_controller)
+	sequence_controller.free()
+	add_child_autofree(intro)
+	var host := intro.get_node(
+		"PhoneInteractionLayer/PhoneMinigameHost"
+	) as IntroPhoneMinigame
+	host.call("_apply_phone_panel_layout")
+	var transform_root := host.get_node(
+		"PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"
+	) as Control
+
+	assert_same(host.phone_panel, transform_root, "runtime should transform the inner content root")
+	assert_true(
+		is_equal_approx(transform_root.rotation, -PI * 0.5),
+		"live phone content should remain turned left"
+	)
+	assert_true(
+		transform_root.scale.x > 1.5 and is_equal_approx(
+			transform_root.scale.x,
+			transform_root.scale.y
+		),
+		"live phone content should be visibly enlarged without distortion"
+	)

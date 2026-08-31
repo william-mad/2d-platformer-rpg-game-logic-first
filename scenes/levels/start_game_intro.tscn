@@ -111,7 +111,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-color = Color(0.82, 0.82, 0.82, 1)
+color = Color(0.14, 0.15, 0.17, 1)
 
 [node name="PhonePanelCenter" type="CenterContainer" parent="PhoneInteractionLayer/PhoneMinigameHost"]
 layout_mode = 1
@@ -128,7 +128,17 @@ custom_minimum_size = Vector2(248, 248)
 layout_mode = 2
 mouse_filter = 2
 
-[node name="PhoneBackgroundFrameA" type="TextureRect" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel"]
+[node name="PhoneTransformRoot" type="Control" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel"]
+unique_name_in_owner = true
+layout_mode = 0
+offset_right = 248.0
+offset_bottom = 248.0
+pivot_offset = Vector2(124, 124)
+rotation = -1.5708
+scale = Vector2(1.88, 1.88)
+mouse_filter = 2
+
+[node name="PhoneBackgroundFrameA" type="TextureRect" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"]
 unique_name_in_owner = true
 layout_mode = 1
 anchors_preset = 15
@@ -140,7 +150,7 @@ mouse_filter = 2
 texture = ExtResource("5_phone_background_a")
 expand_mode = 1
 
-[node name="PhoneBackgroundFrameB" type="TextureRect" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel"]
+[node name="PhoneBackgroundFrameB" type="TextureRect" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 1
@@ -153,7 +163,7 @@ mouse_filter = 2
 texture = ExtResource("6_phone_background_b")
 expand_mode = 1
 
-[node name="SliderTrackFrameA" type="TextureRect" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel"]
+[node name="SliderTrackFrameA" type="TextureRect" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"]
 unique_name_in_owner = true
 layout_mode = 0
 offset_left = 91.0
@@ -164,7 +174,7 @@ mouse_filter = 2
 texture = SubResource("AtlasTexture_track_a")
 expand_mode = 1
 
-[node name="SliderTrackFrameB" type="TextureRect" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel"]
+[node name="SliderTrackFrameB" type="TextureRect" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 0
@@ -176,13 +186,13 @@ mouse_filter = 2
 texture = SubResource("AtlasTexture_track_b")
 expand_mode = 1
 
-[node name="AnswerHandle" type="Sprite2D" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel"]
+[node name="AnswerHandle" type="Sprite2D" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"]
 unique_name_in_owner = true
 z_index = 5
 position = Vector2(79, 196)
 texture = SubResource("AtlasTexture_answer_handle")
 
-[node name="HandSprite" type="Sprite2D" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel"]
+[node name="HandSprite" type="Sprite2D" parent="PhoneInteractionLayer/PhoneMinigameHost/PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"]
 unique_name_in_owner = true
 z_index = 110
 texture_filter = 1

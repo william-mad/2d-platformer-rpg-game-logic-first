@@ -36,7 +36,7 @@ const PHONE_LEFT_ROTATION_RADIANS := -PI * 0.5
 @export_range(0.5, 8.0, 0.1, "suffix:s") var blur_interval_min: float = 2.5
 @export_range(0.5, 8.0, 0.1, "suffix:s") var blur_interval_max: float = 4.0
 
-@onready var phone_panel: Control = %PhoneInteractionPanel
+@onready var phone_panel: Control = %PhoneTransformRoot
 @onready var phone_background_frame_a: TextureRect = %PhoneBackgroundFrameA
 @onready var phone_background_frame_b: TextureRect = %PhoneBackgroundFrameB
 @onready var slider_track_frame_a: TextureRect = %SliderTrackFrameA
