@@ -62,9 +62,10 @@ enum Phase {
 @export_range(0.1, 60.0, 0.1, "suffix:s") var hum_loop_end_seconds: float = 18.0
 @export_range(0.1, 3.0, 0.05, "suffix:s") var memory_image_fade_seconds: float = 0.8
 @export_range(1.0, 16.0, 0.5, "suffix:s") var birds_fade_in_seconds: float = 8.0
+@export_range(0.0, 48.0, 1.0, "suffix:px") var goddess_top_margin_pixels: float = 12.0
 @export_category("Final Memory Framing")
 @export_range(0.5, 12.0, 0.1, "suffix:s") var final_image_appearance_fade_seconds: float = 8.0
-@export_range(1.0, 3.0, 0.05) var final_image_zoom_amount: float = 1.85
+@export_range(1.0, 3.0, 0.05) var final_image_zoom_amount: float = 1.55
 @export_range(0.5, 8.0, 0.1, "suffix:s") var final_image_zoom_in_seconds: float = 2.0
 @export_range(0.5, 1.0, 0.01) var final_image_bottom_focus_y: float = 0.88
 @export_range(0.0, 0.5, 0.01) var final_image_eye_focus_y: float = 0.14
@@ -500,9 +501,42 @@ func _get_memory_image_index_for_beat(beat_number: int) -> int:
 	return result
 
 
+static func calculate_goddess_cover_vertical_offset(
+	viewport_size: Vector2,
+	texture_size: Vector2,
+	top_margin_pixels: float = 12.0
+) -> float:
+	if (
+		viewport_size.x <= 0.0
+		or viewport_size.y <= 0.0
+		or texture_size.x <= 0.0
+		or texture_size.y <= 0.0
+	):
+		return 0.0
+	var cover_scale := maxf(
+		viewport_size.x / texture_size.x,
+		viewport_size.y / texture_size.y
+	)
+	var centered_image_top := (viewport_size.y - texture_size.y * cover_scale) * 0.5
+	return maxf(0.0, top_margin_pixels - centered_image_top)
+
+
+func _apply_memory_image_framing(image_rect: TextureRect, image_index: int) -> void:
+	var vertical_offset := 0.0
+	if image_index >= 0 and image_index < MEMORY_IMAGES.size() - 1:
+		vertical_offset = calculate_goddess_cover_vertical_offset(
+			get_viewport_rect().size,
+			MEMORY_IMAGES[image_index].get_size(),
+			goddess_top_margin_pixels
+		)
+	image_rect.offset_top = vertical_offset
+	image_rect.offset_bottom = vertical_offset
+
+
 func _set_memory_image_immediate(image_index: int) -> void:
 	_current_memory_image_index = clampi(image_index, 0, MEMORY_IMAGES.size() - 1)
 	memory_image.texture = MEMORY_IMAGES[_current_memory_image_index]
+	_apply_memory_image_framing(memory_image, _current_memory_image_index)
 	_reset_final_image_view()
 
 
@@ -517,6 +551,7 @@ func _crossfade_memory_image(image_index: int) -> void:
 	if entering_final_image:
 		_final_image_view_complete = false
 	memory_image_incoming.texture = MEMORY_IMAGES[next_index]
+	_apply_memory_image_framing(memory_image_incoming, next_index)
 	memory_image_incoming.modulate.a = 0.0
 	memory_image_incoming.visible = true
 	_memory_tween = create_tween()
@@ -546,6 +581,7 @@ func _crossfade_memory_image(image_index: int) -> void:
 
 func _finish_memory_image_crossfade(image_index: int) -> void:
 	memory_image.texture = MEMORY_IMAGES[image_index]
+	_apply_memory_image_framing(memory_image, image_index)
 	memory_image.modulate.a = 1.0
 	memory_image_incoming.visible = false
 	_current_memory_image_index = image_index

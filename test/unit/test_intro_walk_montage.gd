@@ -42,4 +42,37 @@ func test_goddess_frames_have_a_white_blue_backdrop_and_slow_final_dissolve() ->
 		intro.final_image_appearance_fade_seconds >= 8.0,
 		"illustration 3 (8) should dissolve into view very slowly"
 	)
+	assert_true(
+		is_equal_approx(intro.final_image_zoom_amount, 1.55),
+		"illustration 3 (8) should use the reduced zoom without changing its focus path"
+	)
+	assert_true(
+		is_equal_approx(intro.final_image_bottom_focus_y, 0.88)
+		and is_equal_approx(intro.final_image_eye_focus_y, 0.14),
+		"the final illustration position and pan targets should remain unchanged"
+	)
 	intro.free()
+
+
+func test_goddess_cover_framing_moves_wide_screen_art_down_to_reveal_its_top() -> void:
+	var offset := IntroWalkInterlude.calculate_goddess_cover_vertical_offset(
+		Vector2(1188.0, 496.0),
+		Vector2(754.0, 496.0),
+		12.0
+	)
+
+	assert_true(
+		is_equal_approx(offset, 154.74802),
+		"wide mobile framing should lower goddess art enough to expose its top edge"
+	)
+	assert_true(
+		is_equal_approx(
+			IntroWalkInterlude.calculate_goddess_cover_vertical_offset(
+				Vector2(754.0, 496.0),
+				Vector2(754.0, 496.0),
+				12.0
+			),
+			12.0
+		),
+		"native-aspect framing should keep only the requested top margin"
+	)
