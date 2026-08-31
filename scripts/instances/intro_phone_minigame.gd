@@ -21,7 +21,7 @@ const PHONE_LEFT_ROTATION_RADIANS := -PI * 0.5
 @export_range(0.5, 1.0, 0.01) var slider_success_threshold: float = 0.85
 @export_range(0.05, 1.0, 0.01, "suffix:s") var snap_back_duration: float = 0.18
 @export_range(0.0, 8.0, 0.25, "suffix:px") var held_shake_amplitude: float = 2.25
-@export var hand_start_position: Vector2 = Vector2(150.0, 105.0)
+@export var hand_start_position: Vector2 = Vector2(120.0, 380.0)
 @export_range(0.0, 2.0, 0.05, "suffix:s") var hand_reveal_delay: float = 0.85
 @export_range(0.0, 1.0, 0.05, "suffix:s") var hand_reveal_fade_duration: float = 0.3
 

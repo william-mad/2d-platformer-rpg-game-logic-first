@@ -5,13 +5,14 @@ const INTRO_SCENE := preload("res://scenes/levels/start_game_intro.tscn")
 
 func test_phone_panel_rotates_left_and_fills_most_of_landscape_screen() -> void:
 	var viewport_size := Vector2(1188.0, 496.0)
+	var panel_size := Vector2(248.0, 600.0)
 	var layout := IntroPhoneMinigame.calculate_phone_panel_layout(
-		Vector2(248.0, 248.0),
+		panel_size,
 		viewport_size,
 		0.94
 	)
 	var panel_scale: Vector2 = layout["scale"]
-	var displayed_size := Vector2(248.0, 248.0) * panel_scale
+	var displayed_size := Vector2(panel_size.y, panel_size.x) * panel_scale
 	var screen_slider_travel := Vector2(80.0, 0.0).rotated(
 		float(layout["rotation"])
 	) * panel_scale
@@ -21,8 +22,12 @@ func test_phone_panel_rotates_left_and_fills_most_of_landscape_screen() -> void:
 		"phone picture and slider should turn ninety degrees left"
 	)
 	assert_true(
-		is_equal_approx(displayed_size.y, viewport_size.y * 0.94),
-		"phone presentation should occupy nearly all available screen height"
+		is_equal_approx(displayed_size.x, viewport_size.x * 0.94),
+		"phone layout should occupy nearly all available screen width"
+	)
+	assert_true(
+		displayed_size.y > viewport_size.y * 0.9,
+		"phone layout should also occupy nearly all available screen height"
 	)
 	assert_true(
 		is_equal_approx(panel_scale.x, panel_scale.y),
@@ -44,6 +49,8 @@ func test_phone_scene_uses_dark_backdrop_and_keeps_effect_layers() -> void:
 	var background_flash_frame := panel.get_node("PhoneBackgroundFrameB") as TextureRect
 	var slider_frame := panel.get_node("SliderTrackFrameA") as TextureRect
 	var slider_flash_frame := panel.get_node("SliderTrackFrameB") as TextureRect
+	var caller_name := panel.get_node("CallerNameArt") as TextureRect
+	var slider_pill := panel.get_node("SliderPill") as Panel
 	var answer_handle := panel.get_node("AnswerHandle") as Sprite2D
 	var blur_overlay := host.get_node("PhoneBlurOverlay") as ColorRect
 	var ringing := intro.get_node("Audio/PhoneRinging") as AudioStreamPlayer
@@ -58,7 +65,13 @@ func test_phone_scene_uses_dark_backdrop_and_keeps_effect_layers() -> void:
 		is_equal_approx(panel.rotation, -PI * 0.5) and panel.scale.x > 1.5,
 		"scene fallback should already be visibly rotated and enlarged"
 	)
+	assert_eq(panel.size, Vector2(248.0, 600.0), "phone layout should use a tall call-screen canvas")
 	assert_same(background_frame.get_parent(), panel, "caller picture rotates with phone panel")
+	assert_not_null(caller_name.texture, "caller name should remain visible below the portrait")
+	assert_true(
+		slider_pill.position.y > background_frame.get_rect().end.y,
+		"answer slider should sit below the caller portrait instead of covering it"
+	)
 	assert_not_null(background_flash_frame.texture, "ringing picture flash frame should remain configured")
 	assert_same(slider_frame.get_parent(), panel, "flashing slider rotates with phone panel")
 	assert_not_null(slider_flash_frame.texture, "ringing slider flash frame should remain configured")
@@ -81,6 +94,12 @@ func test_live_minigame_applies_transform_to_non_container_content_root() -> voi
 	var transform_root := host.get_node(
 		"PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"
 	) as Control
+	var expected_layout := IntroPhoneMinigame.calculate_phone_panel_layout(
+		transform_root.size,
+		host.get_viewport().get_visible_rect().size,
+		host.phone_screen_fill_ratio
+	)
+	var expected_scale: Vector2 = expected_layout["scale"]
 
 	assert_same(host.phone_panel, transform_root, "runtime should transform the inner content root")
 	assert_true(
@@ -88,9 +107,9 @@ func test_live_minigame_applies_transform_to_non_container_content_root() -> voi
 		"live phone content should remain turned left"
 	)
 	assert_true(
-		transform_root.scale.x > 1.5 and is_equal_approx(
+		is_equal_approx(transform_root.scale.x, expected_scale.x) and is_equal_approx(
 			transform_root.scale.x,
 			transform_root.scale.y
 		),
-		"live phone content should be visibly enlarged without distortion"
+		"live phone content should apply its responsive scale without distortion"
 	)
