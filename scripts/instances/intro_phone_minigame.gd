@@ -3,6 +3,8 @@ extends Control
 
 signal answered
 
+const PHONE_LEFT_ROTATION_RADIANS := -PI * 0.5
+
 @export_category("Input")
 @export var left_action: StringName = &"left"
 @export var right_action: StringName = &"right"
@@ -22,6 +24,9 @@ signal answered
 @export var hand_start_position: Vector2 = Vector2(150.0, 105.0)
 @export_range(0.0, 2.0, 0.05, "suffix:s") var hand_reveal_delay: float = 0.85
 @export_range(0.0, 1.0, 0.05, "suffix:s") var hand_reveal_fade_duration: float = 0.3
+
+@export_category("Phone Presentation")
+@export_range(0.5, 1.0, 0.01) var phone_screen_fill_ratio: float = 0.94
 
 @export_category("Blur")
 @export_range(0.5, 4.0, 0.1) var blur_strength: float = 2.6
@@ -65,15 +70,19 @@ var _touch_grab_offset_x: float = 0.0
 func _ready() -> void:
 	_handle_start_position = answer_handle.position
 	_direct_touch_enabled = OS.has_feature("mobile")
+	if not get_viewport().size_changed.is_connected(_on_viewport_size_changed):
+		get_viewport().size_changed.connect(_on_viewport_size_changed)
 	phone_flash_timer.timeout.connect(_on_phone_flash_timer_timeout)
 	blur_cycle_timer.timeout.connect(_on_blur_cycle_timer_timeout)
 	hand_reveal_timer.timeout.connect(_reveal_hand)
 	set_process_input(true)
 	set_process(false)
 	_reset_visual_state()
+	call_deferred("_apply_phone_panel_layout")
 
 
 func activate() -> void:
+	_apply_phone_panel_layout()
 	_completed = false
 	_grabbed = false
 	_touch_drag_id = -1
@@ -190,6 +199,53 @@ func get_slider_progress() -> float:
 
 func is_handle_grabbed() -> bool:
 	return _grabbed
+
+
+static func calculate_phone_panel_layout(
+	panel_size: Vector2,
+	viewport_size: Vector2,
+	fill_ratio: float = 0.94
+) -> Dictionary:
+	if (
+		panel_size.x <= 0.0
+		or panel_size.y <= 0.0
+		or viewport_size.x <= 0.0
+		or viewport_size.y <= 0.0
+	):
+		return {}
+
+	# After a quarter turn, the local width occupies screen height and the local
+	# height occupies screen width. Use one scale so the pixel art is never warped.
+	var safe_fill_ratio := clampf(fill_ratio, 0.5, 1.0)
+	var rotated_size := Vector2(panel_size.y, panel_size.x)
+	var uniform_scale := minf(
+		viewport_size.x * safe_fill_ratio / rotated_size.x,
+		viewport_size.y * safe_fill_ratio / rotated_size.y
+	)
+	return {
+		"pivot_offset": panel_size * 0.5,
+		"rotation": PHONE_LEFT_ROTATION_RADIANS,
+		"scale": Vector2.ONE * uniform_scale,
+	}
+
+
+func _on_viewport_size_changed() -> void:
+	call_deferred("_apply_phone_panel_layout")
+
+
+func _apply_phone_panel_layout() -> void:
+	if phone_panel == null or not is_instance_valid(phone_panel):
+		return
+	var layout := calculate_phone_panel_layout(
+		phone_panel.size,
+		get_viewport().get_visible_rect().size,
+		phone_screen_fill_ratio
+	)
+	if layout.is_empty():
+		return
+	phone_panel.pivot_offset = layout["pivot_offset"]
+	phone_panel.rotation = float(layout["rotation"])
+	phone_panel.scale = layout["scale"]
 
 
 func _begin_touch_drag(touch_id: int, local_position: Vector2) -> void:
