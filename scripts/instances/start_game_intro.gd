@@ -196,6 +196,7 @@ func _on_establishing_timer_timeout() -> void:
 	if current_phase != Phase.WAIT_FOR_PHONE:
 		return
 	phone_ringing.play()
+	_enable_phone_interaction()
 
 
 func _on_city_ambience_finished() -> void:
@@ -210,6 +211,8 @@ func _set_opening_blur_strength(value: float) -> void:
 
 
 func _on_phone_ringing_finished() -> void:
+	# The incoming-call screen starts with the first ring. Audio completion is
+	# only responsible for repeating the ring, never for unlocking the scene.
 	if current_phase == Phase.WAIT_FOR_PHONE:
 		_enable_phone_interaction()
 	if current_phase == Phase.WAIT_FOR_PHONE or current_phase == Phase.PHONE_INTERACTION:

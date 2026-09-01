@@ -151,3 +151,27 @@ func test_connected_call_uses_compact_indicator_without_perpendicular_portrait()
 		0,
 		"the rejected separate caller portrait should not be instantiated"
 	)
+
+
+func test_incoming_call_starts_with_first_ring_without_waiting_for_audio_to_finish() -> void:
+	var intro := INTRO_SCENE.instantiate()
+	var controller := intro.get_node("IntroSequenceController") as IntroSequenceController
+	controller.next_scene_path = ""
+	controller.visual_start_delay_seconds = 2.0
+	controller.ambience_fade_in_seconds = 16.0
+	add_child_autofree(intro)
+	var host := intro.get_node(
+		"PhoneInteractionLayer/PhoneMinigameHost"
+	) as IntroPhoneMinigame
+	var ringing := intro.get_node("Audio/PhoneRinging") as AudioStreamPlayer
+
+	controller.current_phase = IntroSequenceController.Phase.WAIT_FOR_PHONE
+	controller.call("_on_establishing_timer_timeout")
+
+	assert_eq(
+		controller.get_phase_name(),
+		&"PHONE_INTERACTION",
+		"the call must unlock on the first ring instead of an audio-finished callback"
+	)
+	assert_true(host.visible, "the incoming-call screen should appear with the first ring")
+	assert_true(ringing.playing, "the phone should keep ringing behind the answer screen")
