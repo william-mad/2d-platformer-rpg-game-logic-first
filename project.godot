@@ -13,7 +13,7 @@ config_version=5
 config/name="2d platformer rpg game logic first"
 run/main_scene="res://scenes/levels/title_screen.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
-config/icon="res://assets/ui/app_icon_heart_generated.png"
+config/icon="res://icon.svg"
 
 [autoload]
 

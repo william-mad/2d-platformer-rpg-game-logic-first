@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="432" height="432" viewBox="0 0 108 108" shape-rendering="crispEdges">
-  <g transform="rotate(180 54 54)" fill="#000">
-    <path d="M20 38L25 28L34 21L46 21L54 29L62 21L74 21L83 28L88 38L88 50L83 61L74 70L65 79L54 89L43 79L34 70L25 61L20 50Z"/>
-    <path d="M54 42L65 53L54 64L43 53Z" fill="#fff"/>
-  </g>
-  <path d="M36 82H44V89H42V92H38V89H36Z" fill="#000"/>
-  <path d="M64 82H72V89H70V92H66V89H64Z" fill="#000"/>
-</svg>
