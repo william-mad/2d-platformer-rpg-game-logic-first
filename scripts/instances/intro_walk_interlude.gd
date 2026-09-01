@@ -76,7 +76,10 @@ enum Phase {
 
 @export_category("Montage Dialogue")
 @export var montage_dialogue_definition: DialogueDefinition
-@export var montage_speaker_names: Dictionary = {&"memory": "..."}
+@export var montage_speaker_names: Dictionary = {
+	&"memory": "...",
+	&"player": "Player",
+}
 
 @export_category("Exit")
 @export_range(0.1, 4.0, 0.05, "suffix:s") var exit_fade_seconds: float = 2.0

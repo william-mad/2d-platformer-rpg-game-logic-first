@@ -123,7 +123,7 @@ func test_live_minigame_applies_transform_to_non_container_content_root() -> voi
 	)
 
 
-func test_connected_phone_background_keeps_caller_picture_and_hides_answer_slider() -> void:
+func test_connected_call_uses_compact_indicator_without_perpendicular_portrait() -> void:
 	var intro := INTRO_SCENE.instantiate()
 	var controller := intro.get_node("IntroSequenceController")
 	intro.remove_child(controller)
@@ -131,18 +131,23 @@ func test_connected_phone_background_keeps_caller_picture_and_hides_answer_slide
 	add_child_autofree(intro)
 	var host := intro.get_node("PhoneInteractionLayer/PhoneMinigameHost") as IntroPhoneMinigame
 	host.show_dialogue_background()
-	var panel := host.get_node(
-		"PhonePanelCenter/PhoneInteractionPanel/PhoneTransformRoot"
+	var panel_center := host.get_node("PhonePanelCenter") as Control
+	var indicator := intro.get_node(
+		"DialoguePortraitLayer/ConnectedCallIndicator"
+	) as PanelContainer
+	var indicator_label := indicator.get_node("Margin/Content/ConnectedCallLabel") as Label
+	var phone_icon := indicator.get_node("Margin/Content/PhoneIcon") as TextureRect
+	var portrait_placeholder := intro.get_node(
+		"DialoguePortraitLayer/PortraitPresentation"
 	) as Control
-	var caller_picture := panel.get_node("PhoneBackgroundFrameA") as TextureRect
-	var caller_status := panel.get_node("CallerStatusLabel") as Label
-	var slider_instruction := panel.get_node("SliderInstructionLabel") as Label
-	var slider_pill := panel.get_node("SliderPill") as Panel
-	var answer_handle := panel.get_node("AnswerHandle") as Sprite2D
 
 	assert_true(host.visible, "answered phone should remain as the dialogue background")
-	assert_true(caller_picture.visible, "caller's picture should remain visible during dialogue")
-	assert_eq(caller_status.text, "CALL CONNECTED", "phone background should show active-call status")
-	assert_false(slider_instruction.visible, "answer prompt should disappear after connecting")
-	assert_false(slider_pill.visible, "answer slider should disappear after connecting")
-	assert_false(answer_handle.visible, "answer handle should disappear after connecting")
+	assert_false(panel_center.visible, "the perpendicular phone portrait should leave after answering")
+	assert_true(indicator.visible, "dialogue should retain a compact connected-call cue")
+	assert_eq(indicator_label.text, "MOM  ·  CALL CONNECTED")
+	assert_not_null(phone_icon.texture, "connected-call cue should retain a phone element")
+	assert_eq(
+		portrait_placeholder.get_child_count(),
+		0,
+		"the rejected separate caller portrait should not be instantiated"
+	)

@@ -8,37 +8,65 @@
 script = ExtResource("2_node")
 node_id = &"home_memory_01"
 speaker_id = &"mom"
-speaker_text = "[Mom's first post-arrival dialogue beat placeholder.]"
+speaker_text = "Morning, sweetheart. Wake up."
 next_node_id = &"home_memory_02"
 
 [sub_resource type="Resource" id="Node_home_memory_02"]
 script = ExtResource("2_node")
 node_id = &"home_memory_02"
 speaker_id = &"mom"
-speaker_text = "[Mom's second post-arrival dialogue beat placeholder.]"
+speaker_text = "Breakfast is ready. Everyone is waiting for you."
+next_node_id = &"home_memory_03"
+
+[sub_resource type="Resource" id="Node_home_memory_03"]
+script = ExtResource("2_node")
+node_id = &"home_memory_03"
+speaker_id = &"player"
+speaker_text = "Who... are you?"
+next_node_id = &"home_memory_04"
+
+[sub_resource type="Resource" id="Node_home_memory_04"]
+script = ExtResource("2_node")
+node_id = &"home_memory_04"
+speaker_id = &"mom"
+speaker_text = "Still half asleep? I'm your mother."
 next_node_id = &"home_memory_choice"
 
 [sub_resource type="Resource" id="Choice_memory_reach_out"]
 script = ExtResource("3_choice")
 choice_id = &"memory_reach_out"
-text = "[Reach out.]"
-terminal = true
+text = "Mom...?"
+next_node_id = &"home_memory_reach"
 
 [sub_resource type="Resource" id="Choice_memory_stay_silent"]
 script = ExtResource("3_choice")
 choice_id = &"memory_stay_silent"
-text = "[Stay silent.]"
-terminal = true
+text = "Stay silent."
+next_node_id = &"home_memory_silent"
 
 [sub_resource type="Resource" id="Node_home_memory_choice"]
 script = ExtResource("2_node")
 node_id = &"home_memory_choice"
 speaker_id = &"player"
-speaker_text = "[Post-arrival choice placeholder.]"
+speaker_text = "She wasn't the woman from the phone."
 choices = Array[ExtResource("3_choice")]([SubResource("Choice_memory_reach_out"), SubResource("Choice_memory_stay_silent")])
+
+[sub_resource type="Resource" id="Node_home_memory_reach"]
+script = ExtResource("2_node")
+node_id = &"home_memory_reach"
+speaker_id = &"mom"
+speaker_text = "Yes. I'm right here. Come downstairs when you're ready."
+terminal = true
+
+[sub_resource type="Resource" id="Node_home_memory_silent"]
+script = ExtResource("2_node")
+node_id = &"home_memory_silent"
+speaker_id = &"mom"
+speaker_text = "It's all right. Take your time. Come downstairs when you're ready."
+terminal = true
 
 [resource]
 script = ExtResource("1_definition")
 dialogue_id = &"intro_memory_home_epilogue"
 entry_node_id = &"home_memory_01"
-nodes = Array[ExtResource("2_node")]([SubResource("Node_home_memory_01"), SubResource("Node_home_memory_02"), SubResource("Node_home_memory_choice")])
+nodes = Array[ExtResource("2_node")]([SubResource("Node_home_memory_01"), SubResource("Node_home_memory_02"), SubResource("Node_home_memory_03"), SubResource("Node_home_memory_04"), SubResource("Node_home_memory_choice"), SubResource("Node_home_memory_reach"), SubResource("Node_home_memory_silent")])

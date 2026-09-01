@@ -1,6 +1,39 @@
 extends "res://test/native_scene_tree_test.gd"
 
 const INTRO_WALK_SCENE := preload("res://scenes/levels/intro_walk_interlude.tscn")
+const PHONE_DIALOGUE := preload("res://data/dialogue/intro_phone_call.tres")
+const MONTAGE_DIALOGUE := preload("res://data/dialogue/intro_memory_montage.tres")
+const HOME_EPILOGUE := preload("res://data/dialogue/intro_memory_home_epilogue.tres")
+
+
+func test_intro_dialogue_is_complete_and_connects_the_call_to_the_new_morning() -> void:
+	for definition in [PHONE_DIALOGUE, MONTAGE_DIALOGUE, HOME_EPILOGUE]:
+		assert_eq(
+			definition.get_validation_error(),
+			"",
+			"every authored intro dialogue route should be complete"
+		)
+		for dialogue_node in definition.nodes:
+			assert_false(
+				dialogue_node.speaker_text.to_lower().contains("placeholder"),
+				"the playable intro should contain no placeholder dialogue"
+			)
+
+	assert_eq(
+		PHONE_DIALOGUE.get_node(&"call_goodbye_go").speaker_text,
+		"All right. Be careful on the way. I love you.",
+		"the real-world call should end explicitly before the street sequence"
+	)
+	assert_eq(
+		MONTAGE_DIALOGUE.get_node(&"memory_27").speaker_text,
+		"Someone is waiting to wake you.",
+		"the goddess should lead directly into the alternative-world wake-up"
+	)
+	assert_eq(
+		HOME_EPILOGUE.get_node(&"home_memory_03").speaker_text,
+		"Who... are you?",
+		"the alternative Mom should preserve the first-contact mystery beat"
+	)
 
 
 func test_montage_keeps_only_the_three_goddess_frames_and_final_memory() -> void:

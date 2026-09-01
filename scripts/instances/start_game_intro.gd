@@ -36,7 +36,7 @@ const INTRO_LOCK_REASON := &"phone_call_intro"
 @export_range(0.05, 1.0, 0.05, "suffix:s") var dialogue_backdrop_mute_seconds: float = 0.3
 @export var dialogue_definition: DialogueDefinition
 @export var dialogue_speaker_names: Dictionary = {
-	&"caller": "Caller",
+	&"caller": "Mom",
 	&"player": "Player",
 }
 

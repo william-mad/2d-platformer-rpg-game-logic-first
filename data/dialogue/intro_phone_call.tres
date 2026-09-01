@@ -7,148 +7,169 @@
 [sub_resource type="Resource" id="Choice_first_question"]
 script = ExtResource("3_choice")
 choice_id = &"ask_what_happened"
-text = "Ask what happened."
-next_node_id = &"followup_01"
+text = "Did something happen?"
+next_node_id = &"followup_question"
 
 [sub_resource type="Resource" id="Choice_first_listen"]
 script = ExtResource("3_choice")
 choice_id = &"say_im_listening"
-text = "Say that you're listening."
-next_node_id = &"followup_01"
+text = "I'm listening."
+next_node_id = &"followup_listen"
 
 [sub_resource type="Resource" id="Choice_second_go"]
 script = ExtResource("3_choice")
 choice_id = &"promise_to_go"
-text = "Promise to go."
-terminal = true
+text = "I'm on my way."
+next_node_id = &"call_goodbye_go"
 
 [sub_resource type="Resource" id="Choice_second_wait"]
 script = ExtResource("3_choice")
 choice_id = &"need_more_time"
-text = "Say that you need more time."
-terminal = true
+text = "Give me ten minutes."
+next_node_id = &"call_goodbye_wait"
 
 [sub_resource type="Resource" id="Node_intro_01"]
 script = ExtResource("2_node")
 node_id = &"intro_01"
 speaker_id = &"caller"
-speaker_text = "[Caller opening line placeholder.]"
+speaker_text = "Hello? There you are. Did I wake you?"
 next_node_id = &"intro_02"
 
 [sub_resource type="Resource" id="Node_intro_02"]
 script = ExtResource("2_node")
 node_id = &"intro_02"
 speaker_id = &"caller"
-speaker_text = "[Caller establishes why they called.]"
+speaker_text = "You were supposed to be here twenty minutes ago."
 next_node_id = &"intro_03"
 
 [sub_resource type="Resource" id="Node_intro_03"]
 script = ExtResource("2_node")
 node_id = &"intro_03"
 speaker_id = &"player"
-speaker_text = "[Player acknowledges the caller.]"
+speaker_text = "Mom...? I fell asleep at my desk."
 next_node_id = &"intro_04"
 
 [sub_resource type="Resource" id="Node_intro_04"]
 script = ExtResource("2_node")
 node_id = &"intro_04"
 speaker_id = &"caller"
-speaker_text = "[Caller continues with important context.]"
+speaker_text = "I guessed. You sounded exhausted last night."
 next_node_id = &"intro_05"
 
 [sub_resource type="Resource" id="Node_intro_05"]
 script = ExtResource("2_node")
 node_id = &"intro_05"
 speaker_id = &"player"
-speaker_text = "[Player asks for clarification.]"
+speaker_text = "Is everything all right?"
 next_node_id = &"intro_06"
 
 [sub_resource type="Resource" id="Node_intro_06"]
 script = ExtResource("2_node")
 node_id = &"intro_06"
 speaker_id = &"caller"
-speaker_text = "[Caller answers the question.]"
+speaker_text = "We're fine. I was worried when you didn't answer."
 next_node_id = &"intro_07"
 
 [sub_resource type="Resource" id="Node_intro_07"]
 script = ExtResource("2_node")
 node_id = &"intro_07"
 speaker_id = &"caller"
-speaker_text = "[Caller adds a second detail.]"
+speaker_text = "Your father has already reheated breakfast twice."
 next_node_id = &"intro_08"
 
 [sub_resource type="Resource" id="Node_intro_08"]
 script = ExtResource("2_node")
 node_id = &"intro_08"
 speaker_id = &"player"
-speaker_text = "[Player reacts to the news.]"
+speaker_text = "I forgot."
 next_node_id = &"intro_09"
 
 [sub_resource type="Resource" id="Node_intro_09"]
 script = ExtResource("2_node")
 node_id = &"intro_09"
 speaker_id = &"caller"
-speaker_text = "[Caller explains what is at stake.]"
+speaker_text = "You promised you'd come home this morning."
 next_node_id = &"intro_10"
 
 [sub_resource type="Resource" id="Node_intro_10"]
 script = ExtResource("2_node")
 node_id = &"intro_10"
 speaker_id = &"caller"
-speaker_text = "[Caller asks for the player's response.]"
+speaker_text = "Are you awake enough to hear me?"
 next_node_id = &"choice_one"
 
 [sub_resource type="Resource" id="Node_choice_one"]
 script = ExtResource("2_node")
 node_id = &"choice_one"
 speaker_id = &"player"
-speaker_text = "[Choose the player's first response.]"
+speaker_text = "I rubbed my eyes and sat up."
 choices = Array[ExtResource("3_choice")]([SubResource("Choice_first_question"), SubResource("Choice_first_listen")])
 
-[sub_resource type="Resource" id="Node_followup_01"]
+[sub_resource type="Resource" id="Node_followup_question"]
 script = ExtResource("2_node")
-node_id = &"followup_01"
+node_id = &"followup_question"
 speaker_id = &"caller"
-speaker_text = "[Caller responds to the first choice.]"
+speaker_text = "Nothing happened. I just want to see you."
+next_node_id = &"followup_02"
+
+[sub_resource type="Resource" id="Node_followup_listen"]
+script = ExtResource("2_node")
+node_id = &"followup_listen"
+speaker_id = &"caller"
+speaker_text = "Good. Then listen: I want to see you."
 next_node_id = &"followup_02"
 
 [sub_resource type="Resource" id="Node_followup_02"]
 script = ExtResource("2_node")
 node_id = &"followup_02"
 speaker_id = &"player"
-speaker_text = "[Player follows up.]"
+speaker_text = "I know. I've been busy."
 next_node_id = &"followup_03"
 
 [sub_resource type="Resource" id="Node_followup_03"]
 script = ExtResource("2_node")
 node_id = &"followup_03"
 speaker_id = &"caller"
-speaker_text = "[Caller provides the next instruction.]"
+speaker_text = "I know, sweetheart. But don't disappear on us."
 next_node_id = &"followup_04"
 
 [sub_resource type="Resource" id="Node_followup_04"]
 script = ExtResource("2_node")
 node_id = &"followup_04"
 speaker_id = &"caller"
-speaker_text = "[Caller confirms the destination.]"
+speaker_text = "Come straight home. Take the usual route."
 next_node_id = &"followup_05"
 
 [sub_resource type="Resource" id="Node_followup_05"]
 script = ExtResource("2_node")
 node_id = &"followup_05"
 speaker_id = &"caller"
-speaker_text = "[Caller asks for a final commitment.]"
+speaker_text = "Will I see you soon?"
 next_node_id = &"choice_two"
 
 [sub_resource type="Resource" id="Node_choice_two"]
 script = ExtResource("2_node")
 node_id = &"choice_two"
 speaker_id = &"player"
-speaker_text = "[Choose the player's final response.]"
+speaker_text = "I'll..."
 choices = Array[ExtResource("3_choice")]([SubResource("Choice_second_go"), SubResource("Choice_second_wait")])
+
+[sub_resource type="Resource" id="Node_call_goodbye_go"]
+script = ExtResource("2_node")
+node_id = &"call_goodbye_go"
+speaker_id = &"caller"
+speaker_text = "All right. Be careful on the way. I love you."
+terminal = true
+
+[sub_resource type="Resource" id="Node_call_goodbye_wait"]
+script = ExtResource("2_node")
+node_id = &"call_goodbye_wait"
+speaker_id = &"caller"
+speaker_text = "Ten minutes. Then go. Be careful, sweetheart. I love you."
+terminal = true
 
 [resource]
 script = ExtResource("1_definition")
 dialogue_id = &"intro_phone_call"
 entry_node_id = &"intro_01"
-nodes = Array[ExtResource("2_node")]([SubResource("Node_intro_01"), SubResource("Node_intro_02"), SubResource("Node_intro_03"), SubResource("Node_intro_04"), SubResource("Node_intro_05"), SubResource("Node_intro_06"), SubResource("Node_intro_07"), SubResource("Node_intro_08"), SubResource("Node_intro_09"), SubResource("Node_intro_10"), SubResource("Node_choice_one"), SubResource("Node_followup_01"), SubResource("Node_followup_02"), SubResource("Node_followup_03"), SubResource("Node_followup_04"), SubResource("Node_followup_05"), SubResource("Node_choice_two")])
+nodes = Array[ExtResource("2_node")]([SubResource("Node_intro_01"), SubResource("Node_intro_02"), SubResource("Node_intro_03"), SubResource("Node_intro_04"), SubResource("Node_intro_05"), SubResource("Node_intro_06"), SubResource("Node_intro_07"), SubResource("Node_intro_08"), SubResource("Node_intro_09"), SubResource("Node_intro_10"), SubResource("Node_choice_one"), SubResource("Node_followup_question"), SubResource("Node_followup_listen"), SubResource("Node_followup_02"), SubResource("Node_followup_03"), SubResource("Node_followup_04"), SubResource("Node_followup_05"), SubResource("Node_choice_two"), SubResource("Node_call_goodbye_go"), SubResource("Node_call_goodbye_wait")])

@@ -1,4 +1,4 @@
-[gd_scene load_steps=31 format=3 uid="uid://b6uelg5wsy8in"]
+[gd_scene load_steps=26 format=3 uid="uid://b6uelg5wsy8in"]
 
 [ext_resource type="Script" path="res://scripts/instances/start_game_intro.gd" id="1_intro"]
 [ext_resource type="Texture2D" path="res://images/backgrounds/intro/fullscreen_illustration_intro1.png" id="2_intro_frame_1"]
@@ -10,17 +10,11 @@
 [ext_resource type="Texture2D" uid="uid://xpexoiq73rdp" path="res://images/square_imgs/story_ilustrations_1phone 2.png" id="4_phone_answered"]
 [ext_resource type="Texture2D" uid="uid://cot6120boq7d7" path="res://images/square_imgs/story_ilustrations1.png" id="5_phone_background_a"]
 [ext_resource type="Texture2D" uid="uid://b63j5ukvu0no" path="res://images/square_imgs/story_caller_mom_clean.png" id="6_phone_caller_clean"]
-[ext_resource type="Texture2D" uid="uid://5s4md7lwc25q" path="res://images/dialog/real_mom/portrait_1_mom_Real1.png" id="7_dialogue_slide_1"]
-[ext_resource type="Texture2D" uid="uid://dtuyl2r7aek4v" path="res://images/dialog/real_mom/portrait_1_mom_Real2.png" id="8_dialogue_slide_2"]
-[ext_resource type="Texture2D" uid="uid://dxigctkhv2aq4" path="res://images/dialog/real_mom/portrait_1_mom_Real3.png" id="9_dialogue_slide_3"]
-[ext_resource type="Texture2D" uid="uid://d4jurewgf8ype" path="res://images/dialog/real_mom/portrait_1_mom_Real4.png" id="10_dialogue_slide_4"]
-[ext_resource type="Texture2D" uid="uid://b4tv4sbc2nw6f" path="res://images/dialog/real_mom/portrait_1_mom_Real5.png" id="11_dialogue_slide_5"]
 [ext_resource type="AudioStream" uid="uid://cfxnd3ecrge0l" path="res://sounds/city muffled.mp3" id="12_city"]
 [ext_resource type="AudioStream" uid="uid://bhcrv6ukvv7m8" path="res://sounds/phone ring2.mp3" id="13_ring"]
 [ext_resource type="Script" path="res://scripts/instances/intro_phone_minigame.gd" id="14_phone_minigame"]
 [ext_resource type="Texture2D" uid="uid://3580uh7rt0di" path="res://images/interactables/hand.png" id="15_hand"]
 [ext_resource type="AudioStream" uid="uid://c4066gjx0e3qs" path="res://sounds/answer_phone.mp3" id="16_answer_feedback"]
-[ext_resource type="Script" path="res://scripts/instances/intro_caller_portrait_presenter.gd" id="17_portrait_presenter"]
 [ext_resource type="Resource" path="res://data/dialogue/intro_phone_call.tres" id="18_intro_dialogue"]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_answer_handle"]
@@ -54,6 +48,19 @@ corner_radius_top_left = 16
 corner_radius_top_right = 16
 corner_radius_bottom_right = 16
 corner_radius_bottom_left = 16
+anti_aliasing = false
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_connected_call"]
+bg_color = Color(0.025, 0.035, 0.045, 0.94)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.24, 0.72, 0.36, 0.9)
+corner_radius_top_left = 18
+corner_radius_top_right = 18
+corner_radius_bottom_right = 18
+corner_radius_bottom_left = 18
 anti_aliasing = false
 
 [sub_resource type="Shader" id="Shader_phone_blur"]
@@ -132,6 +139,7 @@ mouse_filter = 2
 color = Color(0.14, 0.15, 0.17, 1)
 
 [node name="PhonePanelCenter" type="CenterContainer" parent="PhoneInteractionLayer/PhoneMinigameHost"]
+unique_name_in_owner = true
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -312,6 +320,7 @@ color = Color(0.035, 0.045, 0.06, 0.22)
 
 [node name="PortraitPresentation" type="Control" parent="DialoguePortraitLayer"]
 unique_name_in_owner = true
+visible = false
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -319,109 +328,49 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-script = ExtResource("17_portrait_presenter")
 
-[node name="CallerDialoguePortraitSlot" type="Control" parent="DialoguePortraitLayer/PortraitPresentation"]
+[node name="ConnectedCallIndicator" type="PanelContainer" parent="DialoguePortraitLayer"]
 unique_name_in_owner = true
-layout_mode = 1
-anchor_left = 1.0
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = -248.0
-offset_top = -490.0
-offset_bottom = 6.0
-grow_horizontal = 0
-grow_vertical = 0
-mouse_filter = 2
-
-[node name="DialogueSlideSprite" type="Control" parent="DialoguePortraitLayer/PortraitPresentation/CallerDialoguePortraitSlot"]
-unique_name_in_owner = true
-layout_mode = 1
-anchors_preset = 0
-offset_right = 248.0
-offset_bottom = 496.0
-mouse_filter = 2
-
-[node name="DialogueSlideFrame1" type="TextureRect" parent="DialoguePortraitLayer/PortraitPresentation/CallerDialoguePortraitSlot/DialogueSlideSprite"]
-unique_name_in_owner = true
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
+visible = false
+anchors_preset = 1
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -142.0
+offset_top = 12.0
+offset_right = 142.0
+offset_bottom = 58.0
 grow_horizontal = 2
-grow_vertical = 2
 mouse_filter = 2
-texture = ExtResource("7_dialogue_slide_1")
+theme_override_styles/panel = SubResource("StyleBox_connected_call")
+
+[node name="Margin" type="MarginContainer" parent="DialoguePortraitLayer/ConnectedCallIndicator"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 6
+
+[node name="Content" type="HBoxContainer" parent="DialoguePortraitLayer/ConnectedCallIndicator/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 9
+alignment = 1
+
+[node name="PhoneIcon" type="TextureRect" parent="DialoguePortraitLayer/ConnectedCallIndicator/Margin/Content"]
+custom_minimum_size = Vector2(30, 31)
+layout_mode = 2
+mouse_filter = 2
+texture = SubResource("AtlasTexture_answer_handle")
 expand_mode = 1
 stretch_mode = 5
 
-[node name="DialogueSlideFrame2" type="TextureRect" parent="DialoguePortraitLayer/PortraitPresentation/CallerDialoguePortraitSlot/DialogueSlideSprite"]
+[node name="ConnectedCallLabel" type="Label" parent="DialoguePortraitLayer/ConnectedCallIndicator/Margin/Content"]
 unique_name_in_owner = true
-visible = false
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-texture = ExtResource("8_dialogue_slide_2")
-expand_mode = 1
-stretch_mode = 5
-
-[node name="DialogueSlideFrame3" type="TextureRect" parent="DialoguePortraitLayer/PortraitPresentation/CallerDialoguePortraitSlot/DialogueSlideSprite"]
-unique_name_in_owner = true
-visible = false
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-texture = ExtResource("9_dialogue_slide_3")
-expand_mode = 1
-stretch_mode = 5
-
-[node name="DialogueSlideFrame4" type="TextureRect" parent="DialoguePortraitLayer/PortraitPresentation/CallerDialoguePortraitSlot/DialogueSlideSprite"]
-unique_name_in_owner = true
-visible = false
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-texture = ExtResource("10_dialogue_slide_4")
-expand_mode = 1
-stretch_mode = 5
-
-[node name="DialogueSlideFrame5" type="TextureRect" parent="DialoguePortraitLayer/PortraitPresentation/CallerDialoguePortraitSlot/DialogueSlideSprite"]
-unique_name_in_owner = true
-visible = false
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-texture = ExtResource("11_dialogue_slide_5")
-expand_mode = 1
-stretch_mode = 5
-
-[node name="PlayerDialoguePortraitSlot" type="Control" parent="DialoguePortraitLayer/PortraitPresentation"]
-unique_name_in_owner = true
-visible = false
-layout_mode = 1
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_top = -496.0
-offset_right = 248.0
-grow_vertical = 0
-mouse_filter = 2
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_colors/font_color = Color(0.72, 1, 0.78, 1)
+theme_override_font_sizes/font_size = 13
+text = "MOM  ·  CALL CONNECTED"
+vertical_alignment = 1
 
 [node name="FadeLayer" type="CanvasLayer" parent="."]
 layer = 85
@@ -460,10 +409,6 @@ one_shot = true
 
 [node name="EstablishingFrameTimer" type="Timer" parent="Timing"]
 unique_name_in_owner = true
-
-[node name="DialogueSlideTimer" type="Timer" parent="Timing"]
-unique_name_in_owner = true
-wait_time = 0.09
 
 [node name="IntroSequenceController" type="Node" parent="."]
 unique_name_in_owner = true

@@ -37,6 +37,7 @@ const PHONE_LEFT_ROTATION_RADIANS := -PI * 0.5
 @export_range(0.5, 8.0, 0.1, "suffix:s") var blur_interval_max: float = 4.0
 
 @onready var phone_panel: Control = %PhoneTransformRoot
+@onready var phone_panel_center: Control = %PhonePanelCenter
 @onready var phone_background_frame_a: TextureRect = %PhoneBackgroundFrameA
 @onready var phone_background_frame_b: TextureRect = %PhoneBackgroundFrameB
 @onready var slider_track_frame_a: TextureRect = %SliderTrackFrameA
@@ -51,6 +52,7 @@ const PHONE_LEFT_ROTATION_RADIANS := -PI * 0.5
 @onready var blur_cycle_timer: Timer = %BlurCycleTimer
 @onready var hand_reveal_timer: Timer = %PhoneHandRevealTimer
 @onready var answer_feedback: AudioStreamPlayer = %AnswerFeedback
+@onready var connected_call_indicator: Control = %ConnectedCallIndicator
 
 var _active: bool = false
 var _hand_input_enabled: bool = false
@@ -86,6 +88,8 @@ func _ready() -> void:
 
 func activate() -> void:
 	_apply_phone_panel_layout()
+	phone_panel_center.visible = true
+	connected_call_indicator.visible = false
 	caller_status_label.text = "INCOMING CALL"
 	_set_call_controls_visible(true)
 	_completed = false
@@ -117,14 +121,11 @@ func activate() -> void:
 
 func show_dialogue_background() -> void:
 	deactivate()
-	_apply_phone_panel_layout()
 	visible = true
 	_completed = true
-	caller_status_label.text = "CALL CONNECTED"
-	_show_flash_frame_a(true)
 	_set_call_controls_visible(false)
-	phone_background_frame_a.visible = true
-	phone_background_frame_b.visible = false
+	phone_panel_center.visible = false
+	connected_call_indicator.visible = true
 
 
 func deactivate() -> void:
@@ -383,6 +384,8 @@ func _apply_handle_visual(with_shake: bool) -> void:
 
 
 func _reset_visual_state() -> void:
+	phone_panel_center.visible = true
+	connected_call_indicator.visible = false
 	_hand_position = hand_start_position
 	hand_sprite.position = _hand_position.round()
 	hand_sprite.modulate.a = 0.0

@@ -7,196 +7,196 @@
 script = ExtResource("2_node")
 node_id = &"memory_01"
 speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 1 placeholder.]"
+speaker_text = "Can you hear me?"
 next_node_id = &"memory_02"
 
 [sub_resource type="Resource" id="Node_memory_02"]
 script = ExtResource("2_node")
 node_id = &"memory_02"
-speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 2 placeholder.]"
+speaker_id = &"player"
+speaker_text = "..."
 next_node_id = &"memory_03"
 
 [sub_resource type="Resource" id="Node_memory_03"]
 script = ExtResource("2_node")
 node_id = &"memory_03"
 speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 3 placeholder.]"
+speaker_text = "Don't fight the dark. Open your eyes."
 next_node_id = &"memory_04"
 
 [sub_resource type="Resource" id="Node_memory_04"]
 script = ExtResource("2_node")
 node_id = &"memory_04"
-speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 4 placeholder.]"
+speaker_id = &"player"
+speaker_text = "Where am I?"
 next_node_id = &"memory_05"
 
 [sub_resource type="Resource" id="Node_memory_05"]
 script = ExtResource("2_node")
 node_id = &"memory_05"
 speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 5 placeholder.]"
+speaker_text = "Between the life you knew and one that has not begun."
 next_node_id = &"memory_06"
 
 [sub_resource type="Resource" id="Node_memory_06"]
 script = ExtResource("2_node")
 node_id = &"memory_06"
-speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 6 placeholder.]"
+speaker_id = &"player"
+speaker_text = "The car..."
 next_node_id = &"memory_07"
 
 [sub_resource type="Resource" id="Node_memory_07"]
 script = ExtResource("2_node")
 node_id = &"memory_07"
 speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 7 placeholder.]"
+speaker_text = "It struck you."
 next_node_id = &"memory_08"
 
 [sub_resource type="Resource" id="Node_memory_08"]
 script = ExtResource("2_node")
 node_id = &"memory_08"
-speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 8 placeholder.]"
+speaker_id = &"player"
+speaker_text = "Am I dead?"
 next_node_id = &"memory_09"
 
 [sub_resource type="Resource" id="Node_memory_09"]
 script = ExtResource("2_node")
 node_id = &"memory_09"
 speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 9 placeholder.]"
+speaker_text = "Your old life is beyond my reach."
 next_node_id = &"memory_10"
 
 [sub_resource type="Resource" id="Node_memory_10"]
 script = ExtResource("2_node")
 node_id = &"memory_10"
-speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 10 placeholder.]"
+speaker_id = &"player"
+speaker_text = "Then why am I still here?"
 next_node_id = &"memory_11"
 
 [sub_resource type="Resource" id="Node_memory_11"]
 script = ExtResource("2_node")
 node_id = &"memory_11"
 speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 11 placeholder.]"
+speaker_text = "Because I caught you before you disappeared."
 next_node_id = &"memory_12"
 
 [sub_resource type="Resource" id="Node_memory_12"]
 script = ExtResource("2_node")
 node_id = &"memory_12"
-speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 12 placeholder.]"
+speaker_id = &"player"
+speaker_text = "What are you?"
 next_node_id = &"memory_13"
 
 [sub_resource type="Resource" id="Node_memory_13"]
 script = ExtResource("2_node")
 node_id = &"memory_13"
 speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 13 placeholder.]"
+speaker_text = "A keeper of a world far from yours."
 next_node_id = &"memory_14"
 
 [sub_resource type="Resource" id="Node_memory_14"]
 script = ExtResource("2_node")
 node_id = &"memory_14"
 speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 14 placeholder.]"
+speaker_text = "A world with room for one more life."
 next_node_id = &"memory_15"
 
 [sub_resource type="Resource" id="Node_memory_15"]
 script = ExtResource("2_node")
 node_id = &"memory_15"
-speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 15 placeholder.]"
+speaker_id = &"player"
+speaker_text = "You want me to save it?"
 next_node_id = &"memory_16"
 
 [sub_resource type="Resource" id="Node_memory_16"]
 script = ExtResource("2_node")
 node_id = &"memory_16"
 speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 16 placeholder.]"
+speaker_text = "No."
 next_node_id = &"memory_17"
 
 [sub_resource type="Resource" id="Node_memory_17"]
 script = ExtResource("2_node")
 node_id = &"memory_17"
 speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 17 placeholder.]"
+speaker_text = "I am offering you the chance to live."
 next_node_id = &"memory_18"
 
 [sub_resource type="Resource" id="Node_memory_18"]
 script = ExtResource("2_node")
 node_id = &"memory_18"
 speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 18 placeholder.]"
+speaker_text = "What you do with that chance will be your choice."
 next_node_id = &"memory_19"
 
 [sub_resource type="Resource" id="Node_memory_19"]
 script = ExtResource("2_node")
 node_id = &"memory_19"
-speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 19 placeholder.]"
+speaker_id = &"player"
+speaker_text = "Why me?"
 next_node_id = &"memory_20"
 
 [sub_resource type="Resource" id="Node_memory_20"]
 script = ExtResource("2_node")
 node_id = &"memory_20"
 speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 20 placeholder.]"
+speaker_text = "Because you were at its threshold."
 next_node_id = &"memory_21"
 
 [sub_resource type="Resource" id="Node_memory_21"]
 script = ExtResource("2_node")
 node_id = &"memory_21"
 speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 21 placeholder.]"
+speaker_text = "And because someone there is waiting for you."
 next_node_id = &"memory_22"
 
 [sub_resource type="Resource" id="Node_memory_22"]
 script = ExtResource("2_node")
 node_id = &"memory_22"
-speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 22 placeholder.]"
+speaker_id = &"player"
+speaker_text = "Will I remember my home?"
 next_node_id = &"memory_23"
 
 [sub_resource type="Resource" id="Node_memory_23"]
 script = ExtResource("2_node")
 node_id = &"memory_23"
 speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 23 placeholder.]"
+speaker_text = "Yes."
 next_node_id = &"memory_24"
 
 [sub_resource type="Resource" id="Node_memory_24"]
 script = ExtResource("2_node")
 node_id = &"memory_24"
 speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 24 placeholder.]"
+speaker_text = "The love, the regret, every unfinished word."
 next_node_id = &"memory_25"
 
 [sub_resource type="Resource" id="Node_memory_25"]
 script = ExtResource("2_node")
 node_id = &"memory_25"
-speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 25 placeholder.]"
+speaker_id = &"player"
+speaker_text = "Then let me live."
 next_node_id = &"memory_26"
 
 [sub_resource type="Resource" id="Node_memory_26"]
 script = ExtResource("2_node")
 node_id = &"memory_26"
 speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 26 placeholder.]"
+speaker_text = "Close your eyes."
 next_node_id = &"memory_27"
 
 [sub_resource type="Resource" id="Node_memory_27"]
 script = ExtResource("2_node")
 node_id = &"memory_27"
 speaker_id = &"memory"
-speaker_text = "[Memory dialogue beat 27 placeholder.]"
+speaker_text = "Someone is waiting to wake you."
 next_node_id = &"memory_28"
 
 [sub_resource type="Resource" id="Node_memory_28"]
 script = ExtResource("2_node")
 node_id = &"memory_28"
 speaker_id = &"memory"
-speaker_text = "[Final memory transition placeholder.]"
+speaker_text = "A distant voice calls you awake."
 terminal = true
 
 [resource]
