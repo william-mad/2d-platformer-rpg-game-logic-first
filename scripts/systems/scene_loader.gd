@@ -236,7 +236,7 @@ func _change_scene_to_cached(scene_path: String) -> void:
 	if not keep_loaded_scene_cache:
 		cached_scenes.erase(scene_path)
 
-	_wait_for_requested_scene_ready(scene_path)
+	_finish_scene_load(true, scene_path)
 
 
 func _track_preload(scene_path: String) -> void:
@@ -286,7 +286,7 @@ func _report_preload_progress(scene_path: String, progress: float) -> void:
 	pending_preload_paths[scene_path] = clamped_progress
 	_record_watchdog_marker(&"scene_loader:preload_progress", "%s %d%%" % [
 		scene_path.get_file(),
-		int(round(clamped_progress * 100.0)),
+		int(round(clampf(progress, 0.0, 1.0) * 100.0)),
 	])
 
 
@@ -299,38 +299,7 @@ func _change_scene_blocking(scene_path: String) -> void:
 		_finish_scene_load(false, scene_path)
 		return
 
-	_wait_for_requested_scene_ready(scene_path)
-
-
-func _wait_for_requested_scene_ready(scene_path: String) -> void:
-	# SceneTree.change_scene_to_* returning OK only means the replacement was
-	# accepted. The old scene is removed immediately, while the new one is added
-	# and initialized at the end of the frame. Keep the transition locks alive
-	# until scene_changed confirms the destination has actually reached the tree.
-	set_process(false)
-	var tree := get_tree()
-	if tree == null:
-		_finish_scene_load(false, scene_path)
-		return
-	var callback := Callable(self, "_on_requested_scene_changed").bind(scene_path)
-	tree.scene_changed.connect(callback, CONNECT_ONE_SHOT)
-
-
-func _on_requested_scene_changed(new_scene: Node, requested_scene_path: String) -> void:
-	if not loading_in_progress or loading_scene_path != requested_scene_path:
-		return
-	var arrived_scene_path := new_scene.scene_file_path if new_scene != null else ""
-	var success := new_scene != null and arrived_scene_path == requested_scene_path
-	_breadcrumb(
-		"scene_loader:scene_changed",
-		"%s arrived=%s" % [requested_scene_path, arrived_scene_path]
-	)
-	if not success:
-		push_warning(
-			"Scene change completed at unexpected scene: requested=%s arrived=%s"
-			% [requested_scene_path, arrived_scene_path]
-		)
-	_finish_scene_load(success, requested_scene_path)
+	_finish_scene_load(true, scene_path)
 
 
 func _finish_scene_load(success: bool, scene_path: String) -> void:
