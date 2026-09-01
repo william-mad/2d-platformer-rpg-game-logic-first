@@ -16,7 +16,10 @@ class TalkProgressRing:
 	var ring_width: float = 2.0
 
 	func set_progress_ratio(next_ratio: float) -> void:
-		progress_ratio = clampf(next_ratio, 0.0, 1.0)
+		var clamped_ratio := clampf(next_ratio, 0.0, 1.0)
+		if is_equal_approx(progress_ratio, clamped_ratio):
+			return
+		progress_ratio = clamped_ratio
 		queue_redraw()
 
 	func _draw() -> void:
@@ -226,7 +229,6 @@ func physics_process(delta: float) -> NpcState:
 	else:
 		_update_talk_movement()
 	_face_talk_partner()
-	_update_talk_progress()
 	if _talk_is_outside_active_range():
 		if static_task_talk:
 			_start_static_partner_wait()
@@ -1071,7 +1073,7 @@ func _is_valid_talk_partner(candidate) -> bool:
 
 
 func _show_talk_progress() -> void:
-	if not show_talk_limits or npc == null:
+	if not _talk_progress_is_enabled() or npc == null:
 		return
 
 	_ensure_talk_progress_ring()
@@ -1109,7 +1111,7 @@ func _ensure_talk_progress_ring() -> void:
 func _update_talk_progress() -> void:
 	if (
 		external_completion_pending
-		or not show_talk_limits
+		or not _talk_progress_is_enabled()
 		or not _is_valid_talk_partner(talk_partner)
 	):
 		_hide_talk_progress()
@@ -1123,3 +1125,13 @@ func _update_talk_progress() -> void:
 	if talk_total_duration > 0.0:
 		remaining_ratio = clampf(talk_timer / talk_total_duration, 0.0, 1.0)
 	talk_progress_ring.set_progress_ratio(remaining_ratio)
+
+
+func _talk_progress_is_enabled() -> bool:
+	return should_show_talk_progress(show_talk_limits, OS.has_feature("mobile"))
+
+
+static func should_show_talk_progress(show_limits: bool, mobile_runtime: bool) -> bool:
+	# These rings are a useful desktop diagnostic, but custom antialiased arcs on
+	# both participants are unnecessary presentation work on a phone.
+	return show_limits and not mobile_runtime

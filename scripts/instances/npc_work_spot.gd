@@ -529,9 +529,20 @@ func consume_eat_amount(requested_hunger_amount: float) -> float:
 	var simulator := get_node_or_null("/root/NpcWorldSimulation")
 	if (
 		simulator != null
+		and simulator.has_method("consume_live_spot_food_amount")
+		and _simulator_has_spot_state(simulator, eat_world_definition.spot_id)
+	):
+		actual_food_delta = -float(simulator.call(
+			"consume_live_spot_food_amount",
+			eat_world_definition.spot_id,
+			absf(requested_food_delta)
+		))
+	elif (
+		simulator != null
 		and simulator.has_method("apply_spot_value_delta")
 		and _simulator_has_spot_state(simulator, eat_world_definition.spot_id)
 	):
+		# Compatibility path for lightweight test simulators and older runtimes.
 		actual_food_delta = float(simulator.call(
 			"apply_spot_value_delta",
 			eat_world_definition.spot_id,

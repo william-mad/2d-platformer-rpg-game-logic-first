@@ -243,6 +243,14 @@ func _test_talk_overlay_does_not_replace_primary() -> void:
 
 
 func _test_talk_duration_and_progress_ring() -> void:
+	_expect_false(
+		NpcStateTalk.should_show_talk_progress(true, true),
+		"mobile autonomous Talk skips custom progress-ring drawing"
+	)
+	_expect_true(
+		NpcStateTalk.should_show_talk_progress(true, false),
+		"desktop Talk keeps its existing diagnostic progress ring"
+	)
 	var setup := _create_talk_setup(Vector2.ZERO, Vector2(8.0, 0.0))
 	var npc: CharacterBody2D = setup["npc"]
 	var machine: NpcStateMachine = setup["machine"]

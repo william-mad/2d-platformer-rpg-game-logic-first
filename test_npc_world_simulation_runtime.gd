@@ -90,6 +90,22 @@ class MockLiveEatSpot:
 		return accepts_eat
 
 
+class MockMealSyncSpot:
+	extends Node2D
+
+	var value_update_count: int = 0
+	var meal_state_update_count: int = 0
+
+	func apply_world_spot_value(_spot_id: StringName, _value: float) -> void:
+		value_update_count += 1
+
+	func apply_world_meal_cycle_state(
+		_controller_spot_id: StringName,
+		_state: Dictionary
+	) -> void:
+		meal_state_update_count += 1
+
+
 class MockMealPlayer:
 	extends Node2D
 
@@ -188,6 +204,7 @@ func _run_tests() -> void:
 	_test_cleanup_owner_filter(simulator, world_time)
 	_test_cleanup_work_is_faster_than_prep(simulator, world_time)
 	_test_shared_food_seats_and_split_cleanup(simulator, world_time)
+	_test_live_meal_food_batches_shared_seat_sync(simulator, world_time)
 	_test_split_cleanup_save_load_and_legacy_restore(simulator, world_time)
 	_test_sated_meal_owner_is_not_called_again(simulator, world_time)
 	_test_offscreen_eating_consumes_food_one_to_one(simulator, world_time)
@@ -762,6 +779,96 @@ func _test_shared_food_seats_and_split_cleanup(simulator: Node, world_time: Node
 	simulator.call("set_meal_cycle_cleanup_spot_value", TABLE_CLEANUP_SPOT_ID, 0.0)
 	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
 	_expect_equal(state.get("stage", ""), STAGE_PREP, "table can finish a counter-first cleanup")
+
+
+func _test_live_meal_food_batches_shared_seat_sync(
+	simulator: Node,
+	world_time: Node
+) -> void:
+	_reset_meal_cycle(simulator, world_time, 6.0)
+	_supply_meal_batches(simulator, 4)
+	simulator.call("set_spot_value", PREP_SPOT_ID, 0.0)
+	world_time.call("set_total_hours", 7.0)
+	simulator.call("_process_meal_cycle_schedule_until_snapshot", world_time.call("get_snapshot"))
+
+	var controller_definition = simulator.call(
+		"get_spot_definition",
+		PREP_SPOT_ID
+	) as NpcSpotDefinition
+	var probe := MockMealSyncSpot.new()
+	if controller_definition != null:
+		probe.position = controller_definition.position
+	root.add_child(probe)
+	simulator.call("register_live_spot", PREP_SPOT_ID, probe)
+
+	var supplied_total := 0.0
+	for food_spot_id in [FOOD_SPOT_ID, DAD_FOOD_SPOT_ID, MAID_FOOD_SPOT_ID]:
+		supplied_total += float(simulator.call(
+			"consume_live_spot_food_amount",
+			food_spot_id,
+			7.0
+		))
+	_expect_approx(supplied_total, 21.0, 0.001, "three live eaters reserve exact shared food")
+	_expect_approx(
+		float(simulator.call("get_spot_value", PLAYER_FOOD_SPOT_ID, 0.0)),
+		99.0,
+		0.001,
+		"all seats expose reserved food immediately"
+	)
+	var stored_food: Dictionary = simulator.spot_runtime_states[String(FOOD_SPOT_ID)]
+	_expect_approx(
+		float(stored_food.get("value", 0.0)),
+		120.0,
+		0.001,
+		"live bites wait in one short controller batch"
+	)
+	_expect_equal(probe.meal_state_update_count, 0, "live bites do not fan out full meal state")
+
+	simulator.call("_process_pending_live_meal_food", 0.05)
+	_expect_equal(probe.meal_state_update_count, 0, "meal batch remains quiet before 0.1 seconds")
+	simulator.call("_process_pending_live_meal_food", 0.06)
+	_expect_equal(probe.meal_state_update_count, 1, "one batch publishes one full meal state")
+	_expect_equal(probe.value_update_count, 1, "one batch publishes one controller value update")
+	for food_spot_id in [FOOD_SPOT_ID, DAD_FOOD_SPOT_ID, MAID_FOOD_SPOT_ID, PLAYER_FOOD_SPOT_ID]:
+		_expect_approx(
+			float(simulator.call("get_spot_value", food_spot_id, 0.0)),
+			99.0,
+			0.001,
+			"batched consumption synchronizes %s exactly" % String(food_spot_id)
+		)
+
+	_expect_approx(
+		float(simulator.call("consume_live_spot_food_amount", FOOD_SPOT_ID, 9.0)),
+		9.0,
+		0.001,
+		"a new live batch reserves food before saving"
+	)
+	var saved_during_batch: Dictionary = simulator.call("get_save_data")
+	var saved_states: Dictionary = saved_during_batch.get("spot_runtime_states", {})
+	var saved_food: Dictionary = saved_states.get(String(FOOD_SPOT_ID), {})
+	_expect_approx(
+		float(saved_food.get("value", 0.0)),
+		90.0,
+		0.001,
+		"saving commits reserved food instead of duplicating it after load"
+	)
+
+	var final_supply := float(simulator.call(
+		"consume_live_spot_food_amount",
+		PLAYER_FOOD_SPOT_ID,
+		200.0
+	))
+	_expect_approx(final_supply, 90.0, 0.001, "final eater is capped by shared remaining food")
+	var state: Dictionary = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_equal(state.get("stage", ""), STAGE_CLEANUP, "food depletion still starts cleanup immediately")
+	var pending_batches = simulator.get("_pending_live_meal_food_by_controller")
+	_expect_true(
+		pending_batches is Dictionary and pending_batches.is_empty(),
+		"depletion leaves no delayed food transaction"
+	)
+
+	simulator.call("unregister_live_spot", PREP_SPOT_ID, probe)
+	probe.free()
 
 
 func _test_split_cleanup_save_load_and_legacy_restore(simulator: Node, world_time: Node) -> void:

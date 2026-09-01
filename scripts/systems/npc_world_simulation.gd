@@ -63,6 +63,7 @@ const SCHEDULE_METADATA_KEYS := [
 ]
 
 @export var simulation_interval_seconds: float = 10.0
+@export_range(0.02, 1.0, 0.01, "suffix:s") var live_meal_food_batch_interval_seconds: float = 0.1
 @export var simulated_talk_need_drop: float = 40.0
 @export var simulated_partner_talk_need_drop: float = 25.0
 @export var simulated_talk_boredom_drop: float = 10.0
@@ -80,6 +81,8 @@ var spot_reservations: Dictionary = {}
 # Compatibility cache only. It is always rebuilt from spot_reservations.
 var spot_claim_counts: Dictionary = {}
 var spot_runtime_states: Dictionary = {}
+var _pending_live_meal_food_by_controller: Dictionary = {}
+var _live_meal_food_batch_timer: float = 0.0
 var simulation_timer: float = 0.0
 var simulation_queued: bool = false
 var simulation_dirty_while_locked: bool = false
@@ -160,6 +163,9 @@ func _ready() -> void:
 
 
 func get_save_data() -> Dictionary:
+	# NPC hunger is applied as soon as live food is reserved. Commit the matching
+	# shared-food delta before serializing so both sides of that transaction save.
+	_flush_all_pending_live_meal_food()
 	return {
 		"spot_runtime_states": spot_runtime_states.duplicate(true),
 		"spot_reservations": spot_reservations.duplicate(true),
@@ -167,6 +173,9 @@ func get_save_data() -> Dictionary:
 
 
 func apply_save_data(data: Dictionary) -> void:
+	# Loaded data is authoritative; never carry a live-scene batch across a load.
+	_pending_live_meal_food_by_controller.clear()
+	_live_meal_food_batch_timer = 0.0
 	spot_runtime_states.clear()
 	spot_reservations.clear()
 	var saved_states = data.get("spot_runtime_states", {})
@@ -227,7 +236,144 @@ func get_spot_value(spot_id: StringName, fallback: float = 0.0) -> float:
 	if not (state is Dictionary):
 		return fallback
 
-	return float(state.get("value", fallback))
+	var stored_value := float(state.get("value", fallback))
+	var definition := spot_definitions.get(spot_id, null) as NpcSpotDefinition
+	if definition == null or not _definition_is_meal_cycle_food(definition):
+		return stored_value
+
+	var controller_id := _get_meal_cycle_controller_id_for_definition(definition)
+	var pending = _pending_live_meal_food_by_controller.get(String(controller_id), {})
+	if not (pending is Dictionary) or pending.is_empty():
+		return stored_value
+
+	return clampf(
+		stored_value + float(pending.get("delta", 0.0)),
+		float(state.get("minimum", 0.0)),
+		float(state.get("maximum", 100.0))
+	)
+
+
+func consume_live_spot_food_amount(
+	food_spot_id: StringName,
+	requested_amount: float
+) -> float:
+	# Live eaters reserve their exact share immediately, but the expensive meal
+	# controller/seat notification cascade is committed once per short batch.
+	var requested_food := maxf(requested_amount, 0.0)
+	if requested_food <= 0.0:
+		return 0.0
+
+	var definition := spot_definitions.get(food_spot_id, null) as NpcSpotDefinition
+	if definition == null or not spot_runtime_states.has(String(food_spot_id)):
+		return 0.0
+	if not _definition_is_meal_cycle_food(definition):
+		var available := get_spot_value(food_spot_id, definition.spot_value_initial)
+		var supplied := minf(
+			requested_food,
+			maxf(available - definition.spot_value_done_threshold, 0.0)
+		)
+		if supplied <= 0.0:
+			return 0.0
+		return minf(absf(apply_spot_value_delta(food_spot_id, -supplied)), supplied)
+
+	var controller_id := _get_meal_cycle_controller_id_for_definition(definition)
+	var controller := spot_definitions.get(controller_id, null) as NpcSpotDefinition
+	var controller_state := _get_meal_cycle_controller_state(controller_id)
+	if (
+		controller == null
+		or controller_state.is_empty()
+		or String(controller_state.get("stage", "")) != MEAL_STAGE_FOOD
+		or not bool(controller_state.get("food_available", false))
+	):
+		return 0.0
+
+	var canonical_food_spot_id := _get_meal_cycle_food_spot_id(controller)
+	if canonical_food_spot_id == &"":
+		canonical_food_spot_id = food_spot_id
+	var canonical_definition := spot_definitions.get(
+		canonical_food_spot_id,
+		definition
+	) as NpcSpotDefinition
+	var done_threshold := (
+		canonical_definition.spot_value_done_threshold
+		if canonical_definition != null
+		else definition.spot_value_done_threshold
+	)
+	var effective_food := get_spot_value(
+		canonical_food_spot_id,
+		float(controller_state.get("food_value", 0.0))
+	)
+	var supplied_food := minf(
+		requested_food,
+		maxf(effective_food - done_threshold, 0.0)
+	)
+	if supplied_food <= 0.0:
+		return 0.0
+
+	var controller_key := String(controller_id)
+	var first_pending_batch := _pending_live_meal_food_by_controller.is_empty()
+	var pending = _pending_live_meal_food_by_controller.get(controller_key, {})
+	if not (pending is Dictionary):
+		pending = {}
+	pending["food_spot_id"] = String(canonical_food_spot_id)
+	pending["delta"] = float(pending.get("delta", 0.0)) - supplied_food
+	_pending_live_meal_food_by_controller[controller_key] = pending
+	if first_pending_batch:
+		_live_meal_food_batch_timer = maxf(live_meal_food_batch_interval_seconds, 0.0)
+
+	if (
+		live_meal_food_batch_interval_seconds <= 0.0
+		or effective_food - supplied_food <= done_threshold + MEAL_CYCLE_EPSILON
+	):
+		# Depletion remains immediate so a second eater can never reserve food after
+		# the shared pool has reached its authored floor.
+		_flush_pending_live_meal_food_controller(controller_id)
+
+	return supplied_food
+
+
+func _process_pending_live_meal_food(delta: float) -> void:
+	if _pending_live_meal_food_by_controller.is_empty():
+		return
+	_live_meal_food_batch_timer -= maxf(delta, 0.0)
+	if _live_meal_food_batch_timer > 0.0:
+		return
+	_flush_all_pending_live_meal_food()
+
+
+func _flush_pending_live_meal_food_for_spot(spot_id: StringName) -> void:
+	var controller_id := _get_meal_cycle_controller_id_for_spot(spot_id)
+	if controller_id == &"":
+		return
+	if _pending_live_meal_food_by_controller.has(String(controller_id)):
+		_flush_pending_live_meal_food_controller(controller_id)
+
+
+func _flush_pending_live_meal_food_controller(controller_id: StringName) -> float:
+	var controller_key := String(controller_id)
+	var pending = _pending_live_meal_food_by_controller.get(controller_key, {})
+	if not (pending is Dictionary) or pending.is_empty():
+		return 0.0
+
+	# Remove first so the normal immediate mutation cannot recursively flush itself.
+	_pending_live_meal_food_by_controller.erase(controller_key)
+	if _pending_live_meal_food_by_controller.is_empty():
+		_live_meal_food_batch_timer = 0.0
+
+	var food_spot_id := StringName(String(pending.get("food_spot_id", "")))
+	var pending_delta := float(pending.get("delta", 0.0))
+	if food_spot_id == &"" or is_zero_approx(pending_delta):
+		return 0.0
+	return apply_spot_value_delta(food_spot_id, pending_delta)
+
+
+func _flush_all_pending_live_meal_food() -> void:
+	if _pending_live_meal_food_by_controller.is_empty():
+		return
+	var controller_keys := _pending_live_meal_food_by_controller.keys()
+	for controller_key in controller_keys:
+		_flush_pending_live_meal_food_controller(StringName(String(controller_key)))
+	_live_meal_food_batch_timer = 0.0
 
 
 func apply_spot_value_delta(spot_id: StringName, delta: float) -> float:
@@ -257,6 +403,9 @@ func apply_spot_value_delta(spot_id: StringName, delta: float) -> float:
 
 
 func set_spot_value(spot_id: StringName, value: float, allow_cycle_transition: bool = true) -> void:
+	# Preserve ordering if an immediate system mutation touches a meal that still
+	# has reserved live consumption waiting in the short presentation batch.
+	_flush_pending_live_meal_food_for_spot(spot_id)
 	var state_key := String(spot_id)
 	var state = spot_runtime_states.get(state_key, {})
 	if not (state is Dictionary):
@@ -433,6 +582,7 @@ func _run_queued_simulation() -> void:
 
 
 func _process(delta: float) -> void:
+	_process_pending_live_meal_food(delta)
 	if _defer_simulation_while_world_progression_locked(false):
 		return
 	if _world_simulation_debug_disabled():
@@ -448,6 +598,7 @@ func _process(delta: float) -> void:
 
 
 func simulate_now() -> void:
+	_flush_all_pending_live_meal_food()
 	# Only saved records are simulated; unloaded NPC scenes never need a running state machine.
 	if _defer_simulation_while_world_progression_locked():
 		return
@@ -2515,7 +2666,29 @@ func _initialize_definition_runtime_states() -> void:
 
 
 func get_meal_cycle_state(spot_id: StringName) -> Dictionary:
-	return NpcMealCycleRuntime.get_meal_cycle_state(self, spot_id)
+	var state := NpcMealCycleRuntime.get_meal_cycle_state(self, spot_id)
+	if state.is_empty() or String(state.get("stage", "")) != MEAL_STAGE_FOOD:
+		return state
+
+	var controller_id := _get_meal_cycle_controller_id_for_spot(spot_id)
+	var controller := spot_definitions.get(controller_id, null) as NpcSpotDefinition
+	if controller == null:
+		return state
+	var food_spot_id := _get_meal_cycle_food_spot_id(controller)
+	var food_definition := spot_definitions.get(food_spot_id, null) as NpcSpotDefinition
+	if food_spot_id == &"" or food_definition == null:
+		return state
+	var effective_food := get_spot_value(
+		food_spot_id,
+		float(state.get("food_value", 0.0))
+	)
+	state["meal_batch_remaining_points"] = effective_food
+	state["food_value"] = effective_food
+	state["food_available"] = (
+		bool(state.get("food_available", false))
+		and effective_food > food_definition.spot_value_done_threshold
+	)
+	return state
 
 
 func supply_meal_cycle_recipe_batches(
@@ -2547,6 +2720,8 @@ func _initialize_meal_cycle_runtime_states() -> void:
 
 
 func _process_meal_cycle_schedule_until_snapshot(snapshot: Dictionary) -> void:
+	# Scheduled stage changes must observe all food already reserved by live eaters.
+	_flush_all_pending_live_meal_food()
 	if _meal_cycle_debug_disabled():
 		_breadcrumb("npc_world:meal_cycle_schedule_skip", "")
 		return
