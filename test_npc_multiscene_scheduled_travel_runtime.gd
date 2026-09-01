@@ -96,6 +96,13 @@ class RouteTestMachine:
 		return session_executable
 
 
+class EmergencyStateProbe:
+	extends Node
+
+	func can_be_interrupted_by_scheduled_activity(_request_priority: int) -> bool:
+		return false
+
+
 func _initialize() -> void:
 	await process_frame
 	var routes := root.get_node_or_null("NpcSceneRoutes")
@@ -123,6 +130,7 @@ func _initialize() -> void:
 	routes.call("set_enabled", true, "multiscene_transaction_test")
 
 	_test_start_and_finish_route_transactions(routes, locations, simulator)
+	_test_live_emergency_defers_pending_route(routes, locations, simulator)
 	_test_finish_replan_marker_recovery(routes, locations, simulator)
 	_test_offscreen_scheduler_routes(routes, locations, simulator)
 	_test_dad_offscreen_scheduler_routes(locations, simulator)
@@ -147,6 +155,105 @@ func _initialize() -> void:
 	routes.call("set_enabled", routes_were_enabled, "multiscene_transaction_test_restore")
 	await process_frame
 	_finish()
+
+
+func _test_live_emergency_defers_pending_route(
+	routes: Node,
+	locations: Node,
+	simulator: Node
+) -> void:
+	var schedule_session := "emergency-resume-schedule"
+	var plan := routes.call(
+		"plan_route", YARD_SCENE, BEDROOM_SCENE, StringName(MOM_ID)
+	) as Dictionary
+	_expect(bool(plan.get("accepted", false)), "emergency-resume route plans")
+	if not bool(plan.get("accepted", false)):
+		return
+	var pending := routes.call("attach_route_to_pending", {
+		"mode": "start",
+		"target_scene_path": BEDROOM_SCENE,
+		"target_position": BED_POSITION,
+		"requested_state_name": "Sleep",
+		"requested_priority": 70,
+		"activity": _sleep_activity(schedule_session),
+	}, plan) as Dictionary
+	var record := _base_record(YARD_SCENE, YARD_RETURN_POSITION)
+	record["action"] = _action_descriptor("emergency-fight-session", "Fight")
+	record["pending_travel"] = pending.duplicate(true)
+	locations.npc_records[MOM_ID] = record
+
+	var npc := _make_npc_with_machine(MOM_ID, "emergency-fight-session")
+	npc.add_to_group(&"npc")
+	locations.live_npcs[MOM_ID] = npc
+	var machine := npc.get_node("NpcStateMachine") as RouteTestMachine
+	var fight_state := EmergencyStateProbe.new()
+	fight_state.name = "Fight"
+	machine.add_child(fight_state)
+	machine.current_state = fight_state
+
+	var edge_ids = plan.get("edge_ids", [])
+	var scene_paths = plan.get("scene_paths", [])
+	if not (edge_ids is Array or edge_ids is PackedStringArray) or edge_ids.is_empty():
+		_fail("emergency-resume route has no first edge")
+		locations.live_npcs.erase(MOM_ID)
+		locations.npc_records.erase(MOM_ID)
+		npc.free()
+		return
+	var first_target_scene := HOME_SCENE
+	if (scene_paths is Array or scene_paths is PackedStringArray) and scene_paths.size() > 1:
+		first_target_scene = String(scene_paths[1])
+	var door := _make_route_door(
+		routes,
+		StringName(String(edge_ids[0])),
+		first_target_scene
+	)
+	door.add_to_group(&"npc_travel_door")
+
+	simulator.call(
+		"_resume_pending_travel",
+		StringName(MOM_ID),
+		npc,
+		pending,
+		locations,
+		YARD_SCENE
+	)
+	_expect(
+		(locations.get_record_snapshot(MOM_ID).get("pending_travel", {}) as Dictionary)
+			== pending,
+		"combat keeps the interrupted scheduled route pending"
+	)
+	_expect(
+		machine.movement_descriptors.is_empty(),
+		"combat does not restart movement before the emergency ends"
+	)
+
+	var idle_state := Node.new()
+	idle_state.name = "Idle"
+	machine.add_child(idle_state)
+	machine.current_state = idle_state
+	machine.active_session_id = ""
+	machine.session_executable = false
+	simulator.call(
+		"_resume_pending_travel",
+		StringName(MOM_ID),
+		npc,
+		pending,
+		locations,
+		YARD_SCENE
+	)
+	_expect(
+		not machine.movement_descriptors.is_empty(),
+		"the same scheduled route resumes after combat"
+	)
+	_expect(
+		machine.active_session_id == schedule_session,
+		"resumed movement restores the original schedule session"
+	)
+
+	locations.live_npcs.erase(MOM_ID)
+	locations.npc_records.erase(MOM_ID)
+	door.free()
+	npc.free()
 
 
 func _test_start_and_finish_route_transactions(

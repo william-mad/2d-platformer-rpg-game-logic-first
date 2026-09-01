@@ -158,9 +158,9 @@ static func _initialize_meal_cycle_runtime_states(runtime) -> void:
 			"last_schedule_total_hours",
 			maxf(current_total_hours - MEAL_CYCLE_EPSILON, 0.0)
 		))
-		state["prep_owner_ids"] = _string_names_to_strings(
-			controller.meal_cycle_prep_owner_ids,
-			controller.get_owner_ids()
+		state["prep_owner_ids"] = _get_meal_cycle_prep_owner_ids_for_meal(
+			controller,
+			String(state["meal"])
 		)
 		state["food_owner_ids"] = _get_meal_cycle_food_owner_ids_for_meal(
 			runtime,
@@ -418,6 +418,14 @@ static func _start_meal_cycle_prep(
 	_release_recipe_preparation_reservation(runtime, controller, state)
 	state["stage"] = MEAL_STAGE_PREP_WORK
 	state["meal"] = meal
+	state["meal_occurrence_id"] = _make_meal_cycle_occurrence_id(
+		meal,
+		event_total_hours
+	)
+	state["prep_owner_ids"] = _get_meal_cycle_prep_owner_ids_for_meal(
+		controller,
+		meal
+	)
 	state["food_owner_ids"] = _get_meal_cycle_food_owner_ids_for_meal(
 		runtime,
 		controller,
@@ -483,16 +491,31 @@ static func _start_meal_cycle_cleanup(
 	var state := _get_meal_cycle_controller_state(runtime, controller.spot_id)
 	if state.is_empty():
 		return
+	var cleanup_occurrence_id := _make_meal_cycle_occurrence_id(
+		meal,
+		event_total_hours
+	)
 	if (
 		String(state.get("stage", "")) == MEAL_STAGE_CLEANUP_WORK
 		and String(state.get("meal", "")) == meal
 	):
+		return
+	if (
+		not cleanup_occurrence_id.is_empty()
+		and String(state.get("last_completed_cleanup_occurrence_id", ""))
+			== cleanup_occurrence_id
+	):
+		CrashBreadcrumbs.mark(
+			"meal_cycle:cleanup_already_complete",
+			"%s %s" % [String(controller.spot_id), cleanup_occurrence_id]
+		)
 		return
 
 	CrashBreadcrumbs.mark("meal_cycle:cleanup", "%s %s" % [String(controller.spot_id), meal])
 	_release_recipe_preparation_reservation(runtime, controller, state)
 	state["stage"] = MEAL_STAGE_CLEANUP_WORK
 	state["meal"] = meal
+	state["meal_occurrence_id"] = cleanup_occurrence_id
 	state["value"] = _get_meal_cycle_reset_work_value(controller)
 	state["work_call_active"] = true
 	state["meal_window_open"] = false
@@ -549,8 +572,18 @@ static func _advance_meal_cycle_work_complete(runtime, controller_spot_id: Strin
 		if float(state.get("value", 0.0)) > float(state.get("done_threshold", 0.0)):
 			_set_meal_cycle_controller_state(runtime, controller, state)
 			return
+		var completed_occurrence_id := String(state.get("meal_occurrence_id", ""))
+		if completed_occurrence_id.is_empty():
+			completed_occurrence_id = _make_meal_cycle_occurrence_id(
+				String(state.get("meal", "")),
+				completed_total_hours
+			)
+		if not completed_occurrence_id.is_empty():
+			state["last_completed_cleanup_occurrence_id"] = completed_occurrence_id
+			state["last_completed_cleanup_total_hours"] = completed_total_hours
 		state["stage"] = MEAL_STAGE_PREP_WORK
 		state["meal"] = ""
+		state["meal_occurrence_id"] = ""
 		state["value"] = _get_meal_cycle_reset_work_value(controller)
 		state["work_call_active"] = false
 		state["waiting_for_ingredients"] = false
@@ -834,6 +867,11 @@ static func _deplete_meal_cycle_food(runtime, food_spot_id: StringName) -> void:
 
 	_release_recipe_preparation_reservation(runtime, controller, state)
 	state["stage"] = MEAL_STAGE_CLEANUP_WORK
+	if String(state.get("meal_occurrence_id", "")).is_empty():
+		state["meal_occurrence_id"] = _make_meal_cycle_occurrence_id(
+			String(state.get("meal", "")),
+			runtime._get_current_total_hours()
+		)
 	state["value"] = _get_meal_cycle_reset_work_value(controller)
 	state["work_call_active"] = true
 	state["meal_window_open"] = false
@@ -1862,6 +1900,35 @@ static func _get_meal_cycle_food_owner_ids_for_meal(
 		if configured_values is Array and not configured_values.is_empty():
 			return _string_names_to_strings(configured_values, fallback_values)
 	return _string_names_to_strings(fallback_values, [])
+
+
+static func _get_meal_cycle_prep_owner_ids_for_meal(
+	controller: NpcSpotDefinition,
+	meal: String
+) -> Array[String]:
+	var fallback_values: Array = controller.meal_cycle_prep_owner_ids
+	if fallback_values.is_empty():
+		fallback_values = controller.get_owner_ids()
+	for schedule_value in controller.meal_cycle_schedule:
+		if not (schedule_value is Dictionary):
+			continue
+		var schedule: Dictionary = schedule_value
+		if String(schedule.get("meal", "")) != meal:
+			continue
+		var configured_values = schedule.get("prep_owner_ids", [])
+		if configured_values is Array and not configured_values.is_empty():
+			return _string_names_to_strings(configured_values, fallback_values)
+	return _string_names_to_strings(fallback_values, [])
+
+
+static func _make_meal_cycle_occurrence_id(
+	meal: String,
+	event_total_hours: float
+) -> String:
+	var normalized_meal := meal.strip_edges().to_lower()
+	if normalized_meal.is_empty() or not is_finite(event_total_hours):
+		return ""
+	return "%s@day_%d" % [normalized_meal, int(floor(event_total_hours / 24.0))]
 
 
 static func _get_meal_cycle_reset_work_value(controller: NpcSpotDefinition) -> float:

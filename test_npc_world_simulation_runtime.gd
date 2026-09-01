@@ -194,8 +194,10 @@ func _run_tests() -> void:
 	prep_definition.meal_cycle_infinite_ingredient_storage = false
 	_test_no_ingredients_create_no_food(simulator, world_time)
 	_test_breakfast_stage_order(simulator, world_time)
+	_test_meal_specific_prep_owners(simulator, world_time)
 	_test_meal_specific_food_owners(simulator, world_time)
 	_test_late_food_calls_eaters(simulator, world_time)
+	_test_early_cleanup_is_not_scheduled_twice(simulator, world_time)
 	_test_completion_after_cleanup_does_not_reopen_meal(simulator, world_time)
 	_test_recipe_quantity_above_100_is_not_clamped(simulator, world_time)
 	_test_supply_and_reservation_safety(simulator, world_time)
@@ -451,6 +453,67 @@ func _test_meal_specific_food_owners(simulator: Node, world_time: Node) -> void:
 	_expect_true(
 		bool(simulator.call("_meal_cycle_definition_can_start", maid_food_definition, &"maid", 20.0)),
 		"dinner calls the Maid to eat"
+	)
+
+
+func _test_meal_specific_prep_owners(simulator: Node, world_time: Node) -> void:
+	var prep_definition = simulator.call("get_spot_definition", PREP_SPOT_ID)
+	_reset_meal_cycle(simulator, world_time, 6.0)
+	_supply_meal_batches(simulator, 1)
+	_expect_false(
+		bool(simulator.call("_meal_cycle_definition_can_start", prep_definition, &"maid", 6.0)),
+		"Maid is not assigned breakfast preparation"
+	)
+
+	_reset_meal_cycle(simulator, world_time, 11.0)
+	_supply_meal_batches(simulator, 1)
+	_expect_true(
+		bool(simulator.call("_meal_cycle_definition_can_start", prep_definition, &"maid", 11.0)),
+		"Maid helps prepare lunch"
+	)
+
+	_reset_meal_cycle(simulator, world_time, 19.0)
+	_supply_meal_batches(simulator, 1)
+	_expect_true(
+		bool(simulator.call("_meal_cycle_definition_can_start", prep_definition, &"maid", 19.0)),
+		"Maid helps prepare dinner"
+	)
+
+
+func _test_early_cleanup_is_not_scheduled_twice(
+	simulator: Node,
+	world_time: Node
+) -> void:
+	_reset_meal_cycle(simulator, world_time, 6.0)
+	_supply_meal_batches(simulator, 1)
+	simulator.call("set_spot_value", PREP_SPOT_ID, 0.0)
+	world_time.call("set_total_hours", 7.0)
+	simulator.call("_process_meal_cycle_schedule_until_snapshot", world_time.call("get_snapshot"))
+	simulator.call("set_spot_value", FOOD_SPOT_ID, 0.0)
+	_complete_split_cleanup(simulator)
+
+	var state: Dictionary = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_equal(state.get("stage", ""), STAGE_PREP, "early breakfast cleanup completes once")
+	_expect_true(
+		not String(state.get("last_completed_cleanup_occurrence_id", "")).is_empty(),
+		"completed cleanup records its meal occurrence"
+	)
+
+	# Scene transitions retain the autoload state; save/load exercises the stricter
+	# reconstruction path that previously made the duplicate 50/50 reset visible.
+	var saved: Dictionary = simulator.call("get_save_data")
+	simulator.call("apply_save_data", saved)
+	world_time.call("set_total_hours", 8.0)
+	simulator.call("_process_meal_cycle_schedule_until_snapshot", world_time.call("get_snapshot"))
+	state = simulator.call("get_meal_cycle_state", PREP_SPOT_ID)
+	_expect_equal(
+		state.get("stage", ""),
+		STAGE_PREP,
+		"08:00 does not reopen breakfast cleanup after it already finished"
+	)
+	_expect_true(
+		(state.get("cleanup_remaining_by_spot", {}) as Dictionary).is_empty(),
+		"completed cleanup stays empty after reconstruction"
 	)
 
 

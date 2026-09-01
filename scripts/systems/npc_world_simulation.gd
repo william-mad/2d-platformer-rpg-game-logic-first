@@ -4481,7 +4481,11 @@ func _resume_pending_travel(
 			requested_priority,
 			pending_descriptor
 		)):
-			_rollback_pending_travel(npc_id, pending_travel, locations, "npc_unavailable")
+			# Combat, fleeing, conversations, and other live interruptions are temporary.
+			# Keep the committed route so the same scheduled action can resume once the
+			# state machine becomes available; the normal schedule-window pass still
+			# cancels it if its activity expires while interrupted.
+			_breadcrumb("npc_world:pending_travel_deferred", "%s npc_unavailable" % String(npc_id))
 			return
 	if not locations.has_method("resume_pending_scheduled_travel"):
 		_rollback_pending_travel(npc_id, pending_travel, locations, "travel_resume_method_missing")

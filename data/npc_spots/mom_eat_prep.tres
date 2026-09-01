@@ -41,13 +41,15 @@ meal_cycle_schedule = Array[Dictionary]([{
 "cleanup_hour": 13.0,
 "food_owner_ids": Array[StringName]([&"mom", &"maid", &"player"]),
 "meal": "lunch",
-"prep_hour": 11.0
+"prep_hour": 11.0,
+"prep_owner_ids": Array[StringName]([&"mom", &"maid", &"player"])
 }, {
 "call_hour": 20.0,
 "cleanup_hour": 21.0,
 "food_owner_ids": Array[StringName]([&"mom", &"dad", &"maid", &"player"]),
 "meal": "dinner",
-"prep_hour": 19.0
+"prep_hour": 19.0,
+"prep_owner_ids": Array[StringName]([&"mom", &"maid", &"player"])
 }])
 meal_cycle_prep_owner_ids = Array[StringName]([&"mom", &"player"])
 meal_cycle_food_owner_ids = Array[StringName]([&"mom", &"dad", &"maid", &"player"])
