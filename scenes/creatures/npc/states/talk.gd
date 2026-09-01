@@ -224,11 +224,13 @@ func physics_process(delta: float) -> NpcState:
 		_update_talk_progress()
 		return next_state
 
+	var faced_while_moving := false
 	if static_task_talk:
 		stop_horizontal()
 	else:
-		_update_talk_movement()
-	_face_talk_partner()
+		faced_while_moving = _update_talk_movement()
+	if not faced_while_moving:
+		_face_talk_partner()
 	if _talk_is_outside_active_range():
 		if static_task_talk:
 			_start_static_partner_wait()
@@ -910,14 +912,13 @@ func _update_maximum_talk_distance_cancel(delta: float) -> bool:
 	return true
 
 
-func _update_talk_movement() -> void:
+func _update_talk_movement() -> bool:
 	if npc == null or not _is_valid_talk_partner(talk_partner):
 		stop_horizontal()
-		return
+		return false
 
 	if _talk_is_outside_active_range():
-		_reconnect_to_talk_partner()
-		return
+		return _reconnect_to_talk_partner()
 
 	var desired_range := get_talk_approach_distance()
 	var follow_resume_distance := minf(
@@ -936,12 +937,16 @@ func _update_talk_movement() -> void:
 		if following_partner and animation_name != &"":
 			play_animation(animation_name)
 		following_partner = false
-		return
+		return false
 
 	if not following_partner and follow_animation_name != &"":
 		play_animation(follow_animation_name)
 	following_partner = true
-	move_toward_position(talk_partner.global_position, _get_talk_follow_speed(), desired_range)
+	return not move_toward_position(
+		talk_partner.global_position,
+		_get_talk_follow_speed(),
+		desired_range
+	)
 
 
 func _talk_is_outside_active_range() -> bool:
@@ -951,16 +956,20 @@ func _talk_is_outside_active_range() -> bool:
 	return _get_talk_distance_to_partner() > talk_range
 
 
-func _reconnect_to_talk_partner() -> void:
+func _reconnect_to_talk_partner() -> bool:
 	var approach_speed := _get_talk_approach_speed()
 	if approach_speed <= 0.0:
 		stop_horizontal()
-		return
+		return false
 
 	if not following_partner and follow_animation_name != &"":
 		play_animation(follow_animation_name)
 	following_partner = true
-	move_toward_position(talk_partner.global_position, approach_speed, get_talk_approach_distance())
+	return not move_toward_position(
+		talk_partner.global_position,
+		approach_speed,
+		get_talk_approach_distance()
+	)
 
 
 func _needs_talk_approach() -> bool:
@@ -1019,12 +1028,13 @@ func _update_talk_approach(delta: float) -> bool:
 			_cancel_talk_action("approach_timeout")
 			return false
 
-	move_toward_position(
+	var reached_partner := move_toward_position(
 		talk_partner.global_position,
 		_get_talk_approach_speed(),
 		get_talk_approach_distance()
 	)
-	_face_talk_partner()
+	if reached_partner:
+		_face_talk_partner()
 	return false
 
 

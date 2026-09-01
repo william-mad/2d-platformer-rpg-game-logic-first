@@ -61,7 +61,10 @@ var sprite: Sprite2D
 
 var _warned_missing_animation_player: bool = false
 var _warned_missing_animations: Dictionary = {}
-var _facing_base_scales: Dictionary = {}
+var _direction_property_supported: bool = false
+var _facing_nodes: Array[Node2D] = []
+var _facing_node_base_scales: Array[Vector2] = []
+var _last_facing_direction: int = 0
 var _facing_tracks_sanitized: bool = false
 var _connected_animation_player: AnimationPlayer
 
@@ -97,7 +100,10 @@ func bind_npc(bound_npc: Node2D) -> void:
 	npc = bound_npc
 	animation_player = null
 	sprite = null
-	_facing_base_scales.clear()
+	_direction_property_supported = false
+	_facing_nodes.clear()
+	_facing_node_base_scales.clear()
+	_last_facing_direction = 0
 	_facing_tracks_sanitized = false
 	_latest_requested_animation = &""
 	_latest_resolved_animation = &""
@@ -105,6 +111,7 @@ func bind_npc(bound_npc: Node2D) -> void:
 	_locomotion_phase = LocomotionPhase.NONE
 	_clear_locomotion_clip_cache()
 	_resolve_nodes()
+	_cache_facing_targets()
 	_refresh_locomotion_clip_cache()
 
 
@@ -189,30 +196,50 @@ func face_x_direction(x_direction: float) -> bool:
 		return false
 	_resolve_nodes()
 	var direction := int(signf(x_direction))
-	var accepted := _set_property_if_present(npc, &"direction", direction)
+	var direction_changed := direction != _last_facing_direction
+	var accepted := (
+		_direction_property_supported
+		or sprite != null
+		or not _facing_nodes.is_empty()
+	)
+
+	if direction_changed and _direction_property_supported:
+		npc.set(&"direction", direction)
 
 	if sprite != null:
-		sprite.flip_h = (
+		var should_flip_h := (
 			false
 			if _current_animation_forces_unflipped()
 			else direction < 0
 		)
-		accepted = true
+		if sprite.flip_h != should_flip_h:
+			sprite.flip_h = should_flip_h
 
+	if direction_changed:
+		for index in _facing_nodes.size():
+			var facing_node := _facing_nodes[index]
+			if facing_node == null or not is_instance_valid(facing_node):
+				continue
+			var base_scale := _facing_node_base_scales[index]
+			facing_node.scale = Vector2(base_scale.x * direction, base_scale.y)
+		_last_facing_direction = direction
+	return accepted
+
+
+func _cache_facing_targets() -> void:
+	if npc == null or not is_instance_valid(npc):
+		return
+
+	_direction_property_supported = _object_has_property(npc, &"direction")
 	for facing_path in facing_scale_paths:
 		var facing_node := npc.get_node_or_null(facing_path) as Node2D
 		if facing_node == null:
 			continue
-		var path_key := String(facing_path)
-		if not _facing_base_scales.has(path_key):
-			_facing_base_scales[path_key] = Vector2(
-				absf(facing_node.scale.x),
-				facing_node.scale.y
-			)
-		var base_scale: Vector2 = _facing_base_scales[path_key]
-		facing_node.scale = Vector2(base_scale.x * direction, base_scale.y)
-		accepted = true
-	return accepted
+		_facing_nodes.append(facing_node)
+		_facing_node_base_scales.append(Vector2(
+			absf(facing_node.scale.x),
+			facing_node.scale.y
+		))
 
 
 func get_latest_requested_animation() -> StringName:
@@ -632,11 +659,10 @@ func _get_npc_label() -> String:
 	return npc.name
 
 
-func _set_property_if_present(object: Object, property_name: StringName, value) -> bool:
+func _object_has_property(object: Object, property_name: StringName) -> bool:
 	if object == null:
 		return false
 	for property in object.get_property_list():
 		if StringName(property.get("name", &"")) == property_name:
-			object.set(property_name, value)
 			return true
 	return false
