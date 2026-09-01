@@ -7,6 +7,8 @@
 [ext_resource type="Script" path="res://scripts/systems/npc_location_scene.gd" id="5_location_scene"]
 [ext_resource type="Script" path="res://scripts/instances/player_spawn.gd" id="6_player_spawn"]
 [ext_resource type="PackedScene" path="res://scenes/things/travel_return_point.tscn" id="7_return_point"]
+[ext_resource type="PackedScene" path="res://scenes/things/slime_spawner.tscn" id="8_slime_spawner"]
+[ext_resource type="PackedScene" path="res://scenes/things/npc_travel_door.tscn" id="9_return_door"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_bswci"]
 texture = ExtResource("1_bswci")
@@ -467,6 +469,17 @@ spawn_id = &"travel_route_entry"
 
 [node name="CompanionSpawn" type="Marker2D" parent="." groups=["companion_spawn"]]
 position = Vector2(20, 360)
+
+[node name="ReturnToRealtestDoor" parent="." instance=ExtResource("9_return_door")]
+position = Vector2(-180, 592)
+target_scene_path = "res://scenes/testscenes/realtest1.tscn"
+target_spawn_id = &"from_companion_route"
+traveller_groups = Array[StringName]([])
+interaction_prompt = "Return to village"
+
+[node name="DebugSlimeSpawner" parent="." instance=ExtResource("8_slime_spawner")]
+position = Vector2(500, 576)
+spawn_offset = Vector2(600, 0)
 
 [node name="TravelReturnPoint" parent="." instance=ExtResource("7_return_point")]
 position = Vector2(1280, 420)
