@@ -7,7 +7,7 @@
 [sub_resource type="Resource" id="Choice_sincere"]
 script = ExtResource("3_choice")
 choice_id = &"sincere"
-text = "Invite them to take a walk with you."
+text = "Invite {object_pronoun} to take a walk with you."
 next_node_id = &"reply_sincere"
 consequences = {
 "player_talk_opinion_delta": {
@@ -40,7 +40,7 @@ consequences = {
 [sub_resource type="Resource" id="Choice_bold"]
 script = ExtResource("3_choice")
 choice_id = &"bold"
-text = "Call it a date and ask when they are free."
+text = "Call it a date and ask when {subject_pronoun} {be_present} free."
 next_node_id = &"reply_bold"
 consequences = {
 "player_talk_opinion_delta": {

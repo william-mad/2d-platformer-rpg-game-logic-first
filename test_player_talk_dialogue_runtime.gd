@@ -179,6 +179,14 @@ func _initialize() -> void:
 	)
 	_complete_current_dialogue(controller)
 	machine._physics_process(0.01)
+	_test_insult_fight_escalation(
+		interactor,
+		controller,
+		mom,
+		player,
+		machine,
+		relationships
+	)
 
 	world.queue_free()
 	await process_frame
@@ -328,6 +336,87 @@ func _test_flirt_choice_effects(
 		)
 		machine._physics_process(0.01)
 		_expect(machine.interaction_overlay == null, "Flirt choice %d closes normal Talk" % choice_index)
+
+
+func _test_insult_fight_escalation(
+	interactor: PlayerNpcTalkInteractor,
+	controller: Node,
+	mom: SocialNpc,
+	player: CharacterBody2D,
+	machine: NpcStateMachine,
+	relationships: Node
+) -> void:
+	_force_primary_state(machine, &"Idle")
+	_clear_interaction_cooldowns(interactor, machine)
+	machine.short_term_memory.clear_all(&"player_insult_challenge_test")
+	relationships.call(
+		"set_opinion_metric",
+		mom,
+		player,
+		&"anger",
+		80.0,
+		"player_insult_challenge_test"
+	)
+	relationships.call(
+		"set_opinion_metric",
+		mom,
+		player,
+		&"favor",
+		50.0,
+		"player_insult_challenge_test"
+	)
+	_open_talk_category_menu(interactor)
+	_expect(interactor.menu_confrontation_only, "high anger opens the restricted confrontation menu")
+	_expect(
+		interactor.current_menu_option_count == 1
+		and String(interactor.menu_option_labels[0].text).contains("Insult"),
+		"restricted Talk exposes only Insult"
+	)
+	interactor.call("_handle_talk_option", 0)
+	_expect(bool(controller.call("is_dialogue_active")), "80 anger still opens the gated insult dialogue")
+	var entry := controller.get("current_node") as DialogueNode
+	var challenge_choice: DialogueChoice = null
+	if entry != null:
+		for choice in entry.choices:
+			if StringName(choice.consequences.get("player_talk_insult_action", &"")) == &"challenge_fight":
+				challenge_choice = choice
+				break
+	_expect(challenge_choice != null, "80 anger offers an explicit Fight challenge")
+	if challenge_choice != null:
+		controller.call("choose", challenge_choice.choice_id)
+		_complete_current_dialogue(controller)
+	_expect(
+		machine.is_primary_state(&"Fight"),
+		"the NPC accepts the 80+ anger Fight challenge"
+	)
+
+	_force_primary_state(machine, &"Idle")
+	_clear_interaction_cooldowns(interactor, machine)
+	machine.short_term_memory.clear_all(&"player_insult_auto_fight_test")
+	relationships.call(
+		"set_opinion_metric",
+		mom,
+		player,
+		&"anger",
+		95.0,
+		"player_insult_auto_fight_test"
+	)
+	relationships.call(
+		"set_opinion_metric",
+		mom,
+		player,
+		&"favor",
+		50.0,
+		"player_insult_auto_fight_test"
+	)
+	_open_talk_category_menu(interactor)
+	_expect(interactor.menu_confrontation_only, "95 anger keeps only the confrontation path")
+	interactor.call("_handle_talk_option", 0)
+	_expect(
+		not bool(controller.call("is_dialogue_active")),
+		"95 anger skips insult dialogue"
+	)
+	_expect(machine.is_primary_state(&"Fight"), "95 anger immediately starts Fight")
 
 
 func _test_other_npc_dialogue_profiles() -> void:

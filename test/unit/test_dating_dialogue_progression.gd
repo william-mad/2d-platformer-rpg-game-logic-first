@@ -17,6 +17,41 @@ func test_all_character_profiles_inherit_the_ten_gate_dating_ladder() -> void:
 			assert_eq(responses.size(), 1, "%s gate %d should have one dialogue" % [profile.speaker_name, gate_index])
 
 
+func test_gender_tags_drive_pronouns_and_flirt_availability() -> void:
+	var allowed_tags: Array[StringName] = [&"female", &"unspecified"]
+	assert_eq(MOM_PROFILE.dialogue_gender, "female", "Mom should carry the female tag")
+	assert_eq(MAID_PROFILE.dialogue_gender, "female", "Maid should carry the female tag")
+	assert_eq(DAD_PROFILE.dialogue_gender, "male", "Dad should carry the male tag")
+	assert_eq(BOB_PROFILE.dialogue_gender, "male", "Bob should carry the male tag")
+	assert_true(MOM_PROFILE.is_player_flirt_available(allowed_tags), "Mom should expose Flirt")
+	assert_true(MAID_PROFILE.is_player_flirt_available(allowed_tags), "Maid should expose Flirt")
+	assert_false(DAD_PROFILE.is_player_flirt_available(allowed_tags), "Dad should hide Flirt")
+	assert_false(BOB_PROFILE.is_player_flirt_available(allowed_tags), "Bob should hide Flirt")
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 91
+	var female_dialogue := MOM_PROFILE.instantiate_response(
+		NpcPlayerTalkDialogueProfile.CATEGORY_FLIRT,
+		rng,
+		&"",
+		{},
+		0.0
+	)
+	var male_dialogue := DAD_PROFILE.instantiate_response(
+		NpcPlayerTalkDialogueProfile.CATEGORY_FLIRT,
+		rng,
+		&"",
+		{},
+		0.0
+	)
+	var female_choices := _joined_choice_text(female_dialogue)
+	var male_choices := _joined_choice_text(male_dialogue)
+	assert_true(female_choices.contains("her"), "female dialogue should resolve to her")
+	assert_false(female_choices.contains("{object_pronoun}"), "female tokens should resolve")
+	assert_true(male_choices.contains("him"), "male dialogue should resolve to him")
+	assert_false(male_choices.contains("{object_pronoun}"), "male tokens should resolve")
+
+
 func test_love_boundaries_select_the_requested_successive_gates() -> void:
 	var cases := [
 		[0.0, 0], [10.99, 0], [11.0, 1], [20.99, 1],
@@ -88,3 +123,94 @@ func test_favor_modifies_flirt_love_exactly_once_at_the_boundaries() -> void:
 			float(modifier_case[2]),
 			"base %.0f at favor %.0f should resolve to %.0f" % modifier_case
 		)
+
+
+func test_insult_anger_gates_have_escalation_and_deescalation() -> void:
+	var boundary_cases := [
+		[0.0, 0], [9.99, 0], [10.0, 1], [79.99, 7],
+		[80.0, 8], [89.99, 8], [90.0, 9], [100.0, 9],
+	]
+	for gate_case in boundary_cases:
+		assert_eq(
+			NpcPlayerTalkDialogueProfile.get_insult_anger_gate_index(float(gate_case[0])),
+			int(gate_case[1]),
+			"anger %.2f should select gate %d" % [float(gate_case[0]), int(gate_case[1])]
+		)
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 730
+	for gate_index in NpcPlayerTalkDialogueProfile.INSULT_ANGER_GATE_COUNT:
+		var anger := float(gate_index * 10)
+		var definition := MOM_PROFILE.instantiate_response(
+			NpcPlayerTalkDialogueProfile.CATEGORY_INSULT,
+			rng,
+			&"",
+			{},
+			-1.0,
+			anger
+		)
+		assert_not_null(definition, "anger gate %d should instantiate" % gate_index)
+		if definition == null:
+			continue
+		var entry := definition.get_node(definition.entry_node_id)
+		assert_not_null(entry, "anger gate %d should have an entry" % gate_index)
+		if entry == null:
+			continue
+		var outcomes: Array[String] = []
+		var has_fight_challenge := false
+		for choice in entry.choices:
+			var delta: Dictionary = choice.consequences.get("player_talk_opinion_delta", {})
+			outcomes.append("%.0f/%.0f" % [
+				float(delta.get("anger", 999.0)),
+				float(delta.get("favor", 999.0)),
+			])
+			has_fight_challenge = (
+				has_fight_challenge
+				or StringName(choice.consequences.get("player_talk_insult_action", &""))
+				== &"challenge_fight"
+			)
+		outcomes.sort()
+		assert_eq(
+			outcomes,
+			["-2/-1", "-5/-1", "10/-4", "5/-3"],
+			"anger gate %d should retain +10 through -5 choices" % gate_index
+		)
+		assert_eq(
+			has_fight_challenge,
+			gate_index >= 8,
+			"Fight challenge should begin at the 80 anger gate"
+		)
+	assert_true(MOM_PROFILE.should_offer_insult_fight(80.0), "80 anger should accept a challenge")
+	assert_false(MOM_PROFILE.should_auto_start_insult_fight(94.99), "under 95 should still use dialogue")
+	assert_true(MOM_PROFILE.should_auto_start_insult_fight(95.0), "95 anger should start Fight immediately")
+	var peaceful_override := MOM_PROFILE.duplicate(true) as NpcPlayerTalkDialogueProfile
+	peaceful_override.insult_fight_enabled = false
+	var overridden_dialogue := peaceful_override.instantiate_response(
+		NpcPlayerTalkDialogueProfile.CATEGORY_INSULT,
+		rng,
+		&"",
+		{},
+		-1.0,
+		80.0
+	)
+	var overridden_entry := overridden_dialogue.get_node(overridden_dialogue.entry_node_id)
+	var overridden_has_challenge := false
+	for choice in overridden_entry.choices:
+		overridden_has_challenge = (
+			overridden_has_challenge
+			or StringName(choice.consequences.get("player_talk_insult_action", &""))
+			== &"challenge_fight"
+		)
+	assert_false(overridden_has_challenge, "an NPC profile can disable Fight escalation")
+
+
+func _joined_choice_text(definition: DialogueDefinition) -> String:
+	if definition == null:
+		return ""
+	var entry := definition.get_node(definition.entry_node_id)
+	if entry == null:
+		return ""
+	var texts := PackedStringArray()
+	for choice in entry.choices:
+		texts.append(choice.text)
+	return " | ".join(texts)

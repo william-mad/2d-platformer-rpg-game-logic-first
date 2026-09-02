@@ -7,7 +7,7 @@
 [sub_resource type="Resource" id="Choice_sincere"]
 script = ExtResource("3_choice")
 choice_id = &"sincere"
-text = "Say you want them in your everyday life."
+text = "Say you want {object_pronoun} in your everyday life."
 next_node_id = &"reply_sincere"
 consequences = {
 "player_talk_opinion_delta": {
@@ -18,7 +18,7 @@ consequences = {
 [sub_resource type="Resource" id="Choice_dismissive"]
 script = ExtResource("3_choice")
 choice_id = &"dismissive"
-text = "Say they are getting ahead of themselves."
+text = "Say {subject_pronoun} {be_present} getting ahead of {reflexive_pronoun}."
 next_node_id = &"reply_dismissive"
 consequences = {
 "player_talk_opinion_delta": {
@@ -40,7 +40,7 @@ consequences = {
 [sub_resource type="Resource" id="Choice_bold"]
 script = ExtResource("3_choice")
 choice_id = &"bold"
-text = "Say you see them beside you."
+text = "Say you see {object_pronoun} beside you."
 next_node_id = &"reply_bold"
 consequences = {
 "player_talk_opinion_delta": {

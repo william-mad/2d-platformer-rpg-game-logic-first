@@ -11,6 +11,7 @@
 script = ExtResource("1_profile")
 speaker_id = &"npc"
 speaker_name = "NPC"
+dialogue_gender = "unspecified"
 player_speaker_id = &"player"
 player_speaker_name = "Player"
 casual_responses = Array[ExtResource("2_casual")]([ExtResource("2_casual")])

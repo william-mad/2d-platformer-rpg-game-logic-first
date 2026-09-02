@@ -22,6 +22,13 @@ const FeedbackCatalog = preload(
 )
 const FLIRT_LOVE_GAIN_LIMIT: float = 100.0
 const CHOICE_OPINION_DELTA_KEY := &"player_talk_opinion_delta"
+const CHOICE_INSULT_ACTION_KEY := &"player_talk_insult_action"
+const INSULT_ACTION_CHALLENGE_FIGHT := &"challenge_fight"
+const INSULT_CONFRONTATION_SOCIAL_REASONS := {
+	"recently_talked_with_requester": true,
+	"requester_favor_too_low": true,
+	"requester_anger_too_high": true,
+}
 
 @export_group("Interaction")
 @export var interaction_action: StringName = &"charm"
@@ -59,6 +66,9 @@ const CHOICE_OPINION_DELTA_KEY := &"player_talk_opinion_delta"
 	&"insult",
 	&"gossip",
 ]
+## Checked once when the Talk menu opens. NPC profiles carry a readable
+## unspecified/male/female tag; mobile does not poll identity every frame.
+@export var player_flirt_gender_tags: Array[StringName] = [&"female", &"unspecified"]
 @export_range(1, 5, 1) var gossip_talk_option_number: int = 5
 @export var talk_option_deltas: Array[Dictionary] = [
 	{
@@ -124,6 +134,8 @@ var prompt_decline_method: StringName = &""
 var prompt_completed: bool = false
 var menu_target_can_trade: bool = false
 var interaction_menu_actions: Array[StringName] = []
+var talk_menu_source_indices: Array[int] = []
+var menu_confrontation_only: bool = false
 var menu_hold_machine: NpcStateMachine
 var _player_talk_rng := RandomNumberGenerator.new()
 var _last_player_talk_dialogue_ids: Dictionary = {}
@@ -236,11 +248,19 @@ func _try_open_interaction_menu() -> bool:
 	if target_npc == null:
 		return false
 
-	var block_reason := _get_block_reason(target_npc)
+	var authoritative_gate := _get_authoritative_interaction_gate(target_npc)
+	var block_reason := _get_block_reason_with_authoritative_gate(
+		target_npc,
+		authoritative_gate
+	)
 	if not block_reason.is_empty():
 		interaction_blocked.emit(player, target_npc, interaction_id, block_reason)
 		return false
 	menu_target_npc = target_npc
+	menu_confrontation_only = bool(authoritative_gate.get(
+		"confrontation_only",
+		false
+	))
 	active_menu = MENU_INTERACTION
 	_show_interaction_menu("")
 	cooldown = cooldown_seconds
@@ -327,6 +347,15 @@ func show_magic_lesson_invite(mom: Node2D, lesson_spot: Node) -> bool:
 
 func _show_interaction_menu(feedback: String = "") -> void:
 	var npc_label := _get_npc_label(menu_target_npc)
+	if menu_confrontation_only:
+		menu_target_can_trade = false
+		interaction_menu_actions = [&"talk", &"cancel"]
+		_show_menu(
+			"Confront: %s" % npc_label,
+			PackedStringArray(["Talk", "Cancel"]),
+			feedback
+		)
+		return
 	menu_target_can_trade = (
 		menu_target_npc != null
 		and menu_target_npc.has_method("can_trade_with_player")
@@ -351,7 +380,26 @@ func _show_interaction_menu(feedback: String = "") -> void:
 
 func _show_talk_menu(feedback: String = "") -> void:
 	var npc_label := _get_npc_label(menu_target_npc)
-	_show_menu("Talk: %s" % npc_label, talk_option_texts, feedback)
+	var profile := _get_player_talk_dialogue_profile(menu_target_npc)
+	var options := PackedStringArray()
+	talk_menu_source_indices.clear()
+	var configured_count := mini(talk_option_texts.size(), talk_option_ids.size())
+	for source_index in configured_count:
+		var category := _get_talk_option_id(source_index)
+		if (
+			menu_confrontation_only
+			and category != NpcPlayerTalkDialogueProfile.CATEGORY_INSULT
+		):
+			continue
+		if (
+			category == NpcPlayerTalkDialogueProfile.CATEGORY_FLIRT
+			and profile != null
+			and not profile.is_player_flirt_available(player_flirt_gender_tags)
+		):
+			continue
+		options.append(talk_option_texts[source_index])
+		talk_menu_source_indices.append(source_index)
+	_show_menu("Talk: %s" % npc_label, options, feedback)
 
 
 func _show_gossip_menu(feedback: String = "") -> void:
@@ -516,15 +564,27 @@ func _handle_talk_option(selected_index: int) -> void:
 		_close_menu()
 		return
 
-	if selected_index == _get_gossip_talk_option_index():
+	var source_index := _get_talk_menu_source_index(selected_index)
+	if source_index < 0:
+		return
+
+	if source_index == _get_gossip_talk_option_index():
 		_open_gossip_menu()
 		return
 
-	var category := _get_talk_option_id(selected_index)
+	var category := _get_talk_option_id(source_index)
 	var selected_interaction_id := StringName("talk_%s" % String(category))
+	if (
+		category == NpcPlayerTalkDialogueProfile.CATEGORY_INSULT
+		and _try_start_immediate_insult_fight(
+			source_index,
+			selected_interaction_id
+		)
+	):
+		return
 	_begin_player_talk_response(
 		category,
-		_get_talk_option_delta(selected_index),
+		_get_talk_option_delta(source_index),
 		selected_interaction_id
 	)
 
@@ -574,6 +634,12 @@ func _get_talk_option_id(selected_index: int) -> StringName:
 	return StringName("option_%d" % [selected_index + 1])
 
 
+func _get_talk_menu_source_index(visible_index: int) -> int:
+	if visible_index < 0 or visible_index >= talk_menu_source_indices.size():
+		return -1
+	return talk_menu_source_indices[visible_index]
+
+
 func _begin_player_talk_response(
 	category: StringName,
 	effect_delta: Dictionary,
@@ -604,14 +670,18 @@ func _begin_player_talk_response(
 	var repeat_key := "%s|%s" % [String(_get_npc_id(target_npc)), String(category)]
 	var previous_dialogue_id := StringName(_last_player_talk_dialogue_ids.get(repeat_key, &""))
 	var current_love := -1.0
+	var current_anger := -1.0
 	if category == NpcPlayerTalkDialogueProfile.CATEGORY_FLIRT:
 		current_love = _get_relationship_opinion_metric(target_npc, &"love", 0.0)
+	elif category == NpcPlayerTalkDialogueProfile.CATEGORY_INSULT:
+		current_anger = _get_relationship_opinion_metric(target_npc, &"anger", 0.0)
 	var definition := profile.instantiate_response(
 		category,
 		_player_talk_rng,
 		previous_dialogue_id,
 		context,
-		current_love
+		current_love,
+		current_anger
 	)
 	if definition == null:
 		interaction_blocked.emit(
@@ -649,9 +719,19 @@ func _begin_player_talk_response(
 		"target_ref": weakref(target_npc),
 		"dialogue_session_id": &"",
 		"choice_opinion_metrics": {},
+		"insult_action": &"",
+		"bypass_social_talk_refusal": (
+			menu_confrontation_only
+			and category == NpcPlayerTalkDialogueProfile.CATEGORY_INSULT
+		),
 		"love_gate": (
 			NpcPlayerTalkDialogueProfile.get_flirt_love_gate_index(current_love)
 			if current_love >= 0.0
+			else -1
+		),
+		"anger_gate": (
+			NpcPlayerTalkDialogueProfile.get_insult_anger_gate_index(current_anger)
+			if current_anger >= 0.0
 			else -1
 		),
 	}
@@ -753,8 +833,16 @@ func _on_player_talk_choice_committed(
 		_active_player_talk.is_empty()
 		or choice_data == null
 		or session_id != StringName(_active_player_talk.get("dialogue_session_id", &""))
-		or not choice_data.consequences.has(CHOICE_OPINION_DELTA_KEY)
 	):
+		return
+	if (
+		StringName(_active_player_talk.get("interaction_id", &"")) == &"talk_insult"
+		and choice_data.consequences.has(CHOICE_INSULT_ACTION_KEY)
+	):
+		_active_player_talk["insult_action"] = StringName(String(
+			choice_data.consequences.get(CHOICE_INSULT_ACTION_KEY, &"")
+		))
+	if not choice_data.consequences.has(CHOICE_OPINION_DELTA_KEY):
 		return
 	var raw_delta = choice_data.consequences.get(CHOICE_OPINION_DELTA_KEY, {})
 	if not (raw_delta is Dictionary):
@@ -822,6 +910,8 @@ func _on_player_talk_dialogue_finished(result: Dictionary) -> void:
 	var target_npc := _get_active_player_talk_target()
 	var talk_session_id := String(_active_player_talk.get("talk_session_id", ""))
 	var interaction_id := StringName(_active_player_talk.get("interaction_id", &"talk"))
+	var profile := _active_player_talk.get("profile") as NpcPlayerTalkDialogueProfile
+	var insult_action := StringName(_active_player_talk.get("insult_action", &""))
 	var effect_delta: Dictionary = _active_player_talk.get("effect_delta", {}).duplicate(true)
 	var choice_opinion_metrics: Dictionary = _active_player_talk.get(
 		"choice_opinion_metrics", {}
@@ -850,7 +940,27 @@ func _on_player_talk_dialogue_finished(result: Dictionary) -> void:
 		)
 		if not gossip_subject.is_empty():
 			_call_gossip_hook(target_npc, gossip_subject, effect_delta)
-		talk_state.complete_talk_with(player, "player_dialogue_completed")
+		var insult_fight_trigger := _get_completed_insult_fight_trigger(
+			target_npc,
+			profile,
+			interaction_id,
+			insult_action
+		)
+		if insult_fight_trigger != &"":
+			talk_state.cancel_talk_session("player_insult_%s" % String(insult_fight_trigger))
+			if not _request_insult_fight(
+				target_npc,
+				profile,
+				insult_fight_trigger
+			):
+				interaction_blocked.emit(
+					player,
+					target_npc,
+					interaction_id,
+					"player_insult_fight_unavailable"
+				)
+		else:
+			talk_state.complete_talk_with(player, "player_dialogue_completed")
 		interaction_applied.emit(player, target_npc, interaction_id)
 	elif talk_is_current:
 		talk_state.cancel_talk_session(
@@ -1229,6 +1339,127 @@ func _get_relationship_opinion_metric(
 	))
 
 
+func _try_start_immediate_insult_fight(
+	source_option_index: int,
+	selected_interaction_id: StringName
+) -> bool:
+	var target_npc := menu_target_npc
+	if target_npc == null or not is_instance_valid(target_npc):
+		return false
+	var profile := _get_player_talk_dialogue_profile(target_npc)
+	if profile == null:
+		return false
+	var current_anger := _get_relationship_opinion_metric(
+		target_npc,
+		&"anger",
+		0.0
+	)
+	if not profile.should_auto_start_insult_fight(current_anger):
+		return false
+
+	var effect_delta := _get_talk_option_delta(source_option_index)
+	# The skipped high-anger response behaves like the ladder's full-escalation
+	# answer, while preserving any other authored Insult consequences.
+	effect_delta["anger"] = 10.0
+	effect_delta["favor"] = -4.0
+	_end_target_menu_hold(target_npc)
+	_close_menu(false)
+	interaction_started.emit(player, target_npc, selected_interaction_id)
+	_apply_interaction_effects(
+		target_npc,
+		effect_delta,
+		set_values.duplicate(true),
+		selected_interaction_id
+	)
+	var fight_started := _request_insult_fight(
+		target_npc,
+		profile,
+		&"auto_fight"
+	)
+	interaction_applied.emit(player, target_npc, selected_interaction_id)
+	if not fight_started:
+		interaction_blocked.emit(
+			player,
+			target_npc,
+			selected_interaction_id,
+			"player_insult_fight_unavailable"
+		)
+	_start_target_interaction_cooldown(target_npc)
+	cooldown = cooldown_seconds
+	return true
+
+
+func _get_completed_insult_fight_trigger(
+	target_npc: Node2D,
+	profile: NpcPlayerTalkDialogueProfile,
+	interaction_id_value: StringName,
+	insult_action: StringName
+) -> StringName:
+	if (
+		interaction_id_value != &"talk_insult"
+		or target_npc == null
+		or profile == null
+	):
+		return &""
+	var current_anger := _get_relationship_opinion_metric(
+		target_npc,
+		&"anger",
+		0.0
+	)
+	if profile.should_auto_start_insult_fight(current_anger):
+		return &"auto_fight"
+	if (
+		insult_action == INSULT_ACTION_CHALLENGE_FIGHT
+		and profile.should_offer_insult_fight(current_anger)
+	):
+		return &"challenge_fight"
+	return &""
+
+
+func _request_insult_fight(
+	target_npc: Node2D,
+	profile: NpcPlayerTalkDialogueProfile,
+	trigger: StringName
+) -> bool:
+	if (
+		target_npc == null
+		or not is_instance_valid(target_npc)
+		or player == null
+		or not is_instance_valid(player)
+		or profile == null
+	):
+		return false
+	var context := {
+		"source": "player_talk_insult",
+		"trigger": String(trigger),
+		"anger": _get_relationship_opinion_metric(target_npc, &"anger", 0.0),
+		"profile": profile,
+	}
+	# A custom NPC script can fully replace the default transition by implementing
+	# this method. Returning false deliberately refuses/redirects the Fight.
+	if target_npc.has_method("handle_player_insult_fight_request"):
+		return bool(target_npc.call(
+			"handle_player_insult_fight_request",
+			player,
+			trigger,
+			context
+		))
+
+	var machine := _get_machine(target_npc)
+	if machine == null:
+		return false
+	if machine.is_primary_state(&"Fight"):
+		return true
+	if not machine.can_start_fight_with(player):
+		return false
+	return machine.request_state(
+		&"Fight",
+		player,
+		"player_insult_%s" % String(trigger),
+		profile.insult_fight_priority
+	)
+
+
 func _request_social_interaction_acceptance(
 	target_npc: Node2D,
 	prepay_talk_reward: bool = skip_requested_talk_state_need_payout
@@ -1249,7 +1480,23 @@ func _request_social_interaction_acceptance(
 		# Legacy SocialNpc receivers without a state machine keep their existing direct-effect behavior.
 		return {"accepted": true, "reason": ""}
 
-	if not machine.request_talk(player):
+	var bypass_social_talk_refusal := bool(_active_player_talk.get(
+		"bypass_social_talk_refusal",
+		false
+	))
+	var talk_context := {}
+	if bypass_social_talk_refusal:
+		talk_context = {
+			"purpose": &"player_insult_confrontation",
+			"bypass_social_talk_refusal": true,
+		}
+	if not machine.request_talk(
+		player,
+		-1,
+		true,
+		&"player",
+		talk_context
+	):
 		var rejection_reason := "talk_request_rejected"
 		if machine.has_method("get_last_state_request_failure_reason"):
 			var machine_reason := String(machine.call("get_last_state_request_failure_reason"))
@@ -1418,6 +1665,8 @@ func _close_menu(release_target_hold: bool = true) -> void:
 	active_menu = MENU_CLOSED
 	menu_timer = 0.0
 	current_menu_option_count = 0
+	talk_menu_source_indices.clear()
+	menu_confrontation_only = false
 	menu_target_npc = null
 	_clear_prompt_state()
 	if menu_layer != null and is_instance_valid(menu_layer):
@@ -1527,7 +1776,12 @@ func _begin_target_menu_hold(target_npc: Node2D, hold_seconds: float = -1.0) -> 
 
 	var machine := _get_machine(target_npc)
 	if machine != null and machine.has_method("begin_player_interaction_hold"):
-		if not bool(machine.call("begin_player_interaction_hold", player, hold_duration)):
+		if not bool(machine.call(
+			"begin_player_interaction_hold",
+			player,
+			hold_duration,
+			bool(gate.get("confrontation_only", false))
+		)):
 			var retry_gate := _get_authoritative_interaction_gate(target_npc)
 			if not bool(retry_gate.get("accepted", false)):
 				return retry_gate
@@ -1672,6 +1926,13 @@ func _is_valid_npc_candidate(candidate: Node2D) -> bool:
 func _get_block_reason(target_npc: Node2D) -> String:
 	# Central place for future gates like NPC id, tags, schedule, or custom methods.
 	var authoritative_gate := _get_authoritative_interaction_gate(target_npc)
+	return _get_block_reason_with_authoritative_gate(target_npc, authoritative_gate)
+
+
+func _get_block_reason_with_authoritative_gate(
+	target_npc: Node2D,
+	authoritative_gate: Dictionary
+) -> String:
 	if not bool(authoritative_gate.get("accepted", false)):
 		return String(authoritative_gate.get("reason", "npc_gate_rejected"))
 	var favor_bypass := StringName(authoritative_gate.get(
@@ -1707,10 +1968,48 @@ func _get_authoritative_interaction_gate(target_npc: Node2D) -> Dictionary:
 	var machine := _get_machine(target_npc)
 	if machine == null or not machine.has_method("can_begin_player_interaction"):
 		return {"accepted": true, "reason": ""}
+	if menu_confrontation_only and target_npc == menu_target_npc:
+		var active_confrontation_result = machine.call(
+			"can_begin_player_interaction",
+			player,
+			true
+		)
+		if active_confrontation_result is Dictionary:
+			var typed_confrontation: Dictionary = active_confrontation_result
+			if bool(typed_confrontation.get("accepted", false)):
+				typed_confrontation = typed_confrontation.duplicate(true)
+				typed_confrontation["confrontation_only"] = true
+				typed_confrontation["favor_bypass"] = &"confrontation"
+			return typed_confrontation
+		return {"accepted": bool(active_confrontation_result), "reason": ""}
 
 	var result = machine.call("can_begin_player_interaction", player)
 	if result is Dictionary:
-		return result
+		var typed_result: Dictionary = result
+		if bool(typed_result.get("accepted", false)):
+			return typed_result
+		var refusal_reason := String(typed_result.get("reason", ""))
+		var profile := _get_player_talk_dialogue_profile(target_npc)
+		if (
+			INSULT_CONFRONTATION_SOCIAL_REASONS.has(refusal_reason)
+			and profile != null
+			and profile.insult_escalation_enabled
+		):
+			var confrontation_result = machine.call(
+				"can_begin_player_interaction",
+				player,
+				true
+			)
+			if (
+				confrontation_result is Dictionary
+				and bool(confrontation_result.get("accepted", false))
+			):
+				var accepted_confrontation: Dictionary = confrontation_result.duplicate(true)
+				accepted_confrontation["confrontation_only"] = true
+				accepted_confrontation["social_refusal_reason"] = refusal_reason
+				accepted_confrontation["favor_bypass"] = &"confrontation"
+				return accepted_confrontation
+		return typed_result
 	if bool(result):
 		return {"accepted": true, "reason": ""}
 

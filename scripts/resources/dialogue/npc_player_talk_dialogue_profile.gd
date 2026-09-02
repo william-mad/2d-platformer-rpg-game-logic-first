@@ -6,6 +6,16 @@ const CATEGORY_COMPLIMENT := &"compliment"
 const CATEGORY_FLIRT := &"flirt"
 const CATEGORY_INSULT := &"insult"
 const CATEGORY_GOSSIP := &"gossip"
+const CHOICE_INSULT_ACTION_KEY := &"player_talk_insult_action"
+const INSULT_ACTION_CHALLENGE_FIGHT := &"challenge_fight"
+const DIALOGUE_GENDER_UNSPECIFIED := "unspecified"
+const DIALOGUE_GENDER_MALE := "male"
+const DIALOGUE_GENDER_FEMALE := "female"
+const VALID_DIALOGUE_GENDERS: PackedStringArray = [
+	DIALOGUE_GENDER_UNSPECIFIED,
+	DIALOGUE_GENDER_MALE,
+	DIALOGUE_GENDER_FEMALE,
+]
 const FLIRT_LOVE_GATE_COUNT := 10
 const DEFAULT_FLIRT_LOVE_GATE_RESPONSES: Array[DialogueDefinition] = [
 	preload("res://data/dialogue/dating_flirt_gate_00_10.tres"),
@@ -19,6 +29,19 @@ const DEFAULT_FLIRT_LOVE_GATE_RESPONSES: Array[DialogueDefinition] = [
 	preload("res://data/dialogue/dating_flirt_gate_81_90.tres"),
 	preload("res://data/dialogue/dating_flirt_gate_91_100.tres"),
 ]
+const INSULT_ANGER_GATE_COUNT := 10
+const DEFAULT_INSULT_ANGER_GATE_RESPONSES: Array[DialogueDefinition] = [
+	preload("res://data/dialogue/insult_anger_gate_00_09.tres"),
+	preload("res://data/dialogue/insult_anger_gate_10_19.tres"),
+	preload("res://data/dialogue/insult_anger_gate_20_29.tres"),
+	preload("res://data/dialogue/insult_anger_gate_30_39.tres"),
+	preload("res://data/dialogue/insult_anger_gate_40_49.tres"),
+	preload("res://data/dialogue/insult_anger_gate_50_59.tres"),
+	preload("res://data/dialogue/insult_anger_gate_60_69.tres"),
+	preload("res://data/dialogue/insult_anger_gate_70_79.tres"),
+	preload("res://data/dialogue/insult_anger_gate_80_89.tres"),
+	preload("res://data/dialogue/insult_anger_gate_90_100.tres"),
+]
 const REQUIRED_CATEGORIES: Array[StringName] = [
 	CATEGORY_CASUAL,
 	CATEGORY_COMPLIMENT,
@@ -29,6 +52,11 @@ const REQUIRED_CATEGORIES: Array[StringName] = [
 
 @export var speaker_id: StringName = &"npc"
 @export var speaker_name: String = "NPC"
+## Stable, editor-visible identity used when dialogue text is instantiated.
+## This is read only when opening a menu/response; it is never polled per frame.
+@export_enum("unspecified", "male", "female") var dialogue_gender: String = (
+	DIALOGUE_GENDER_UNSPECIFIED
+)
 @export var player_speaker_id: StringName = &"player"
 @export var player_speaker_name: String = "Player"
 @export var portrait: Texture2D
@@ -41,6 +69,14 @@ const REQUIRED_CATEGORIES: Array[StringName] = [
 ## receives gated Flirt dialogue without duplicating the same resources.
 @export var flirt_love_gate_responses: Array[DialogueDefinition] = []
 @export var insult_responses: Array[DialogueDefinition] = []
+## Empty arrays inherit the shared ten-step ladder. A character can replace the
+## complete array, disable escalation, or tune either Fight threshold here.
+@export var insult_escalation_enabled: bool = true
+@export var insult_anger_gate_responses: Array[DialogueDefinition] = []
+@export var insult_fight_enabled: bool = true
+@export_range(0.0, 100.0, 1.0) var insult_fight_challenge_anger: float = 80.0
+@export_range(0.0, 100.0, 1.0) var insult_auto_fight_anger: float = 95.0
+@export_range(0, 1000, 1) var insult_fight_priority: int = 94
 @export var gossip_responses: Array[DialogueDefinition] = []
 ## Optional Talk-owned dialogue grouped by contextual purpose/reason. Reprimands
 ## currently use reason keys such as attacked_me, attacked_friend, and
@@ -54,12 +90,19 @@ func choose_response(
 	category: StringName,
 	rng: RandomNumberGenerator,
 	previous_dialogue_id: StringName = &"",
-	current_love: float = -1.0
+	current_love: float = -1.0,
+	current_anger: float = -1.0
 ) -> DialogueDefinition:
 	var valid_responses: Array[DialogueDefinition] = []
 	var response_pool := get_responses(category)
 	if category == CATEGORY_FLIRT and current_love >= 0.0:
 		response_pool = get_flirt_love_gate_responses(current_love)
+	elif (
+		category == CATEGORY_INSULT
+		and insult_escalation_enabled
+		and current_anger >= 0.0
+	):
+		response_pool = get_insult_anger_gate_responses(current_anger)
 	for definition in response_pool:
 		if definition == null or not definition.get_validation_error().is_empty():
 			continue
@@ -88,19 +131,36 @@ func instantiate_response(
 	rng: RandomNumberGenerator,
 	previous_dialogue_id: StringName = &"",
 	context: Dictionary = {},
-	current_love: float = -1.0
+	current_love: float = -1.0,
+	current_anger: float = -1.0
 ) -> DialogueDefinition:
 	var template := choose_response(
 		category,
 		rng,
 		previous_dialogue_id,
-		current_love
+		current_love,
+		current_anger
 	)
 	if template == null:
 		return null
-	var instance := template.instantiate_with_context(context)
+	var resolved_context := get_dialogue_identity_context()
+	resolved_context.merge(context, true)
+	var instance := template.instantiate_with_context(resolved_context)
 	_rebind_generic_speaker_ids(instance)
-	if category == CATEGORY_FLIRT and current_love >= 0.0:
+	if (
+		category == CATEGORY_INSULT
+		and insult_escalation_enabled
+		and current_anger >= 0.0
+	):
+		_remove_unavailable_insult_fight_choices(instance, current_anger)
+	if (
+		(category == CATEGORY_FLIRT and current_love >= 0.0)
+		or (
+			category == CATEGORY_INSULT
+			and insult_escalation_enabled
+			and current_anger >= 0.0
+		)
+	):
 		_shuffle_entry_choices(instance, rng)
 	return instance
 
@@ -123,6 +183,101 @@ static func get_flirt_love_gate_index(current_love: float) -> int:
 	if whole_love <= 10:
 		return 0
 	return clampi(int(float(whole_love - 1) / 10.0), 1, FLIRT_LOVE_GATE_COUNT - 1)
+
+
+func get_insult_anger_gate_responses(current_anger: float) -> Array[DialogueDefinition]:
+	var gates := (
+		insult_anger_gate_responses
+		if not insult_anger_gate_responses.is_empty()
+		else DEFAULT_INSULT_ANGER_GATE_RESPONSES
+	)
+	var gate_index := get_insult_anger_gate_index(current_anger)
+	if gate_index < 0 or gate_index >= gates.size():
+		return []
+	return [gates[gate_index]]
+
+
+static func get_insult_anger_gate_index(current_anger: float) -> int:
+	return clampi(
+		floori(clampf(current_anger, 0.0, 100.0) / 10.0),
+		0,
+		INSULT_ANGER_GATE_COUNT - 1
+	)
+
+
+func is_player_flirt_available(allowed_gender_tags: Array[StringName]) -> bool:
+	return allowed_gender_tags.has(StringName(dialogue_gender))
+
+
+func should_offer_insult_fight(current_anger: float) -> bool:
+	return (
+		insult_escalation_enabled
+		and insult_fight_enabled
+		and current_anger >= insult_fight_challenge_anger
+	)
+
+
+func should_auto_start_insult_fight(current_anger: float) -> bool:
+	return (
+		insult_escalation_enabled
+		and insult_fight_enabled
+		and current_anger >= insult_auto_fight_anger
+	)
+
+
+func get_dialogue_identity_context() -> Dictionary:
+	match dialogue_gender:
+		DIALOGUE_GENDER_FEMALE:
+			return {
+				"subject_pronoun": "she",
+				"object_pronoun": "her",
+				"possessive_adjective": "her",
+				"possessive_pronoun": "hers",
+				"reflexive_pronoun": "herself",
+				"be_present": "is",
+				"matter_present": "matters",
+			}
+		DIALOGUE_GENDER_MALE:
+			return {
+				"subject_pronoun": "he",
+				"object_pronoun": "him",
+				"possessive_adjective": "his",
+				"possessive_pronoun": "his",
+				"reflexive_pronoun": "himself",
+				"be_present": "is",
+				"matter_present": "matters",
+			}
+		_:
+			return {
+				"subject_pronoun": "they",
+				"object_pronoun": "them",
+				"possessive_adjective": "their",
+				"possessive_pronoun": "theirs",
+				"reflexive_pronoun": "themselves",
+				"be_present": "are",
+				"matter_present": "matter",
+			}
+
+
+func _remove_unavailable_insult_fight_choices(
+	definition: DialogueDefinition,
+	current_anger: float
+) -> void:
+	if definition == null or should_offer_insult_fight(current_anger):
+		return
+	var entry := definition.get_node(definition.entry_node_id)
+	if entry == null:
+		return
+	for index in range(entry.choices.size() - 1, -1, -1):
+		var choice := entry.choices[index]
+		if (
+			choice != null
+			and StringName(String(choice.consequences.get(
+				CHOICE_INSULT_ACTION_KEY,
+				&""
+			))) == INSULT_ACTION_CHALLENGE_FIGHT
+		):
+			entry.choices.remove_at(index)
 
 
 func _rebind_generic_speaker_ids(definition: DialogueDefinition) -> void:
@@ -194,7 +349,11 @@ func instantiate_reprimand_response(
 	context: Dictionary = {}
 ) -> DialogueDefinition:
 	var template := choose_reprimand_response(reason, rng, previous_dialogue_id)
-	return template.instantiate_with_context(context) if template != null else null
+	if template == null:
+		return null
+	var resolved_context := get_dialogue_identity_context()
+	resolved_context.merge(context, true)
+	return template.instantiate_with_context(resolved_context)
 
 
 func get_reprimand_responses(reason: StringName) -> Array:
@@ -252,6 +411,8 @@ func get_validation_error() -> String:
 		return "player_talk_speaker_id_empty"
 	if speaker_name.strip_edges().is_empty():
 		return "player_talk_speaker_name_empty"
+	if not VALID_DIALOGUE_GENDERS.has(dialogue_gender):
+		return "player_talk_dialogue_gender_invalid"
 	if String(player_speaker_id).strip_edges().is_empty():
 		return "player_talk_player_speaker_id_empty"
 	if player_speaker_name.strip_edges().is_empty():
@@ -291,6 +452,24 @@ func get_validation_error() -> String:
 		if dialogue_ids.has(gate_definition.dialogue_id):
 			return "player_talk_dialogue_id_duplicate"
 		dialogue_ids[gate_definition.dialogue_id] = true
+	var insult_gates := (
+		insult_anger_gate_responses
+		if not insult_anger_gate_responses.is_empty()
+		else DEFAULT_INSULT_ANGER_GATE_RESPONSES
+	)
+	if insult_gates.size() != INSULT_ANGER_GATE_COUNT:
+		return "player_talk_insult_anger_gate_count_invalid"
+	for gate_definition in insult_gates:
+		if gate_definition == null:
+			return "player_talk_insult_anger_gate_missing"
+		var gate_error := gate_definition.get_validation_error()
+		if not gate_error.is_empty():
+			return gate_error
+		if dialogue_ids.has(gate_definition.dialogue_id):
+			return "player_talk_dialogue_id_duplicate"
+		dialogue_ids[gate_definition.dialogue_id] = true
+	if insult_fight_challenge_anger > insult_auto_fight_anger:
+		return "player_talk_insult_fight_threshold_order_invalid"
 	for reason_value in reprimand_responses.keys():
 		var reason := String(reason_value).strip_edges()
 		if reason.is_empty():

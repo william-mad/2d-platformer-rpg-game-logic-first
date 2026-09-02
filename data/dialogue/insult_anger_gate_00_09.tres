@@ -1,0 +1,94 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_escalate"]
+script = ExtResource("3_choice")
+choice_id = &"escalate"
+text = "Tell {object_pronoun} it was exactly what you meant."
+next_node_id = &"reply_escalate"
+consequences = {
+"player_talk_opinion_delta": {
+"anger": 10.0,
+"favor": -4.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_provoke"]
+script = ExtResource("3_choice")
+choice_id = &"provoke"
+text = "Add a smaller jab about {possessive_adjective} attitude."
+next_node_id = &"reply_provoke"
+consequences = {
+"player_talk_opinion_delta": {
+"anger": 5.0,
+"favor": -3.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_soften"]
+script = ExtResource("3_choice")
+choice_id = &"soften"
+text = "Say it came out harsher than you intended."
+next_node_id = &"reply_soften"
+consequences = {
+"player_talk_opinion_delta": {
+"anger": -2.0,
+"favor": -1.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_deescalate"]
+script = ExtResource("3_choice")
+choice_id = &"deescalate"
+text = "Apologize and take it back."
+next_node_id = &"reply_deescalate"
+consequences = {
+"player_talk_opinion_delta": {
+"anger": -5.0,
+"favor": -1.0
+}
+}
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"npc"
+speaker_text = "Was that supposed to be an insult?"
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_escalate"), SubResource("Choice_provoke"), SubResource("Choice_soften"), SubResource("Choice_deescalate")])
+
+[sub_resource type="Resource" id="Node_reply_escalate"]
+script = ExtResource("2_node")
+node_id = &"reply_escalate"
+speaker_id = &"npc"
+speaker_text = "Then you chose your words badly. Do it again and I won't stay patient."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_provoke"]
+script = ExtResource("2_node")
+node_id = &"reply_provoke"
+speaker_id = &"npc"
+speaker_text = "Keep picking at me and see where that gets you."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_soften"]
+script = ExtResource("2_node")
+node_id = &"reply_soften"
+speaker_id = &"npc"
+speaker_text = "It did. Think before you speak next time."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_deescalate"]
+script = ExtResource("2_node")
+node_id = &"reply_deescalate"
+speaker_id = &"npc"
+speaker_text = "Fine. I heard the apology. Don't repeat it."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"insult_anger_gate_00_09"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_reply_escalate"), SubResource("Node_reply_provoke"), SubResource("Node_reply_soften"), SubResource("Node_reply_deescalate")])

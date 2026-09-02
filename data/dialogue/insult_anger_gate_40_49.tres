@@ -1,0 +1,94 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_escalate"]
+script = ExtResource("3_choice")
+choice_id = &"escalate"
+text = "Say you never meant them to be harmless."
+next_node_id = &"reply_escalate"
+consequences = {
+"player_talk_opinion_delta": {
+"anger": 10.0,
+"favor": -4.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_provoke"]
+script = ExtResource("3_choice")
+choice_id = &"provoke"
+text = "Dare {object_pronoun} to do something about it."
+next_node_id = &"reply_provoke"
+consequences = {
+"player_talk_opinion_delta": {
+"anger": 5.0,
+"favor": -3.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_soften"]
+script = ExtResource("3_choice")
+choice_id = &"soften"
+text = "Say you are upset but do not want this to become worse."
+next_node_id = &"reply_soften"
+consequences = {
+"player_talk_opinion_delta": {
+"anger": -2.0,
+"favor": -1.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_deescalate"]
+script = ExtResource("3_choice")
+choice_id = &"deescalate"
+text = "Apologize without making excuses."
+next_node_id = &"reply_deescalate"
+consequences = {
+"player_talk_opinion_delta": {
+"anger": -5.0,
+"favor": -1.0
+}
+}
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"npc"
+speaker_text = "I am done pretending your insults are harmless."
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_escalate"), SubResource("Choice_provoke"), SubResource("Choice_soften"), SubResource("Choice_deescalate")])
+
+[sub_resource type="Resource" id="Node_reply_escalate"]
+script = ExtResource("2_node")
+node_id = &"reply_escalate"
+speaker_id = &"npc"
+speaker_text = "Then do not expect me to stay calm."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_provoke"]
+script = ExtResource("2_node")
+node_id = &"reply_provoke"
+speaker_id = &"npc"
+speaker_text = "Be careful what you ask for."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_soften"]
+script = ExtResource("2_node")
+node_id = &"reply_soften"
+speaker_id = &"npc"
+speaker_text = "Then stop feeding it."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_deescalate"]
+script = ExtResource("2_node")
+node_id = &"reply_deescalate"
+speaker_id = &"npc"
+speaker_text = "That is the first useful thing you have said."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"insult_anger_gate_40_49"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_reply_escalate"), SubResource("Node_reply_provoke"), SubResource("Node_reply_soften"), SubResource("Node_reply_deescalate")])

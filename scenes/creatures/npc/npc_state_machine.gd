@@ -3794,8 +3794,12 @@ func request_talk(
 	)
 
 
-func begin_player_interaction_hold(actor: Node2D, hold_seconds: float = -1.0) -> bool:
-	var gate := can_begin_player_interaction(actor)
+func begin_player_interaction_hold(
+	actor: Node2D,
+	hold_seconds: float = -1.0,
+	bypass_social_refusal: bool = false
+) -> bool:
+	var gate := can_begin_player_interaction(actor, bypass_social_refusal)
 	if not bool(gate.get("accepted", false)):
 		return false
 
@@ -3807,7 +3811,10 @@ func begin_player_interaction_hold(actor: Node2D, hold_seconds: float = -1.0) ->
 	return true
 
 
-func can_begin_player_interaction(actor: Node2D = null) -> Dictionary:
+func can_begin_player_interaction(
+	actor: Node2D = null,
+	bypass_social_refusal: bool = false
+) -> Dictionary:
 	_last_player_interaction_memory_policy = {}
 	if actor != null and not _is_player_interaction_actor(actor):
 		return {"accepted": false, "reason": "invalid_player"}
@@ -3869,22 +3876,25 @@ func can_begin_player_interaction(actor: Node2D = null) -> Dictionary:
 			"memory_policy": memory_decision.duplicate(true),
 		}
 
-	var social_decision := _evaluate_player_interaction_social_acceptance(
-		actor,
-		StringName(actor_id),
-		StringName(remembering_npc_id)
-	)
-	if not bool(social_decision.get("accepted", true)):
-		return {
-			"accepted": false,
-			"reason": String(social_decision.get(
-				"reason_code",
-				&"player_social_request_rejected"
-			)),
-			"social_acceptance": social_decision.duplicate(true),
-		}
+	if not bypass_social_refusal:
+		var social_decision := _evaluate_player_interaction_social_acceptance(
+			actor,
+			StringName(actor_id),
+			StringName(remembering_npc_id)
+		)
+		if not bool(social_decision.get("accepted", true)):
+			return {
+				"accepted": false,
+				"reason": String(social_decision.get(
+					"reason_code",
+					&"player_social_request_rejected"
+				)),
+				"social_acceptance": social_decision.duplicate(true),
+			}
 
 	var accepted_result := {"accepted": true, "reason": ""}
+	if bypass_social_refusal:
+		accepted_result["social_refusal_bypassed"] = true
 	if (
 		directed_favor
 		>= player_interaction_repeat_bypass_minimum_favor

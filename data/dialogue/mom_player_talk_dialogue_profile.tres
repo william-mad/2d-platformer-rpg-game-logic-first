@@ -24,6 +24,7 @@
 script = ExtResource("1_profile")
 speaker_id = &"mom"
 speaker_name = "Mom"
+dialogue_gender = "female"
 player_speaker_id = &"player"
 player_speaker_name = "Player"
 portrait = ExtResource("2_portrait")

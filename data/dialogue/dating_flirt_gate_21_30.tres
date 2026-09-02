@@ -7,7 +7,7 @@
 [sub_resource type="Resource" id="Choice_sincere"]
 script = ExtResource("3_choice")
 choice_id = &"sincere"
-text = "Say you want to know them better."
+text = "Say you want to know {object_pronoun} better."
 next_node_id = &"reply_sincere"
 consequences = {
 "player_talk_opinion_delta": {

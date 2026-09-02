@@ -18,7 +18,7 @@ consequences = {
 [sub_resource type="Resource" id="Choice_dismissive"]
 script = ExtResource("3_choice")
 choice_id = &"dismissive"
-text = "Say they are imagining things."
+text = "Say {subject_pronoun} {be_present} imagining things."
 next_node_id = &"reply_dismissive"
 consequences = {
 "player_talk_opinion_delta": {
@@ -40,7 +40,7 @@ consequences = {
 [sub_resource type="Resource" id="Choice_bold"]
 script = ExtResource("3_choice")
 choice_id = &"bold"
-text = "Ask them on a real date."
+text = "Ask {object_pronoun} on a real date."
 next_node_id = &"reply_bold"
 consequences = {
 "player_talk_opinion_delta": {
