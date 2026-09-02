@@ -20,7 +20,7 @@ const SocialStateSchema = preload(
 const FeedbackCatalog = preload(
 	"res://scripts/systems/npc_behavior/feedback/npc_feedback_catalog.gd"
 )
-const FLIRT_LOVE_GAIN_LIMIT: float = 60.0
+const FLIRT_LOVE_GAIN_LIMIT: float = 100.0
 const CHOICE_OPINION_DELTA_KEY := &"player_talk_opinion_delta"
 
 @export_group("Interaction")
@@ -597,21 +597,29 @@ func _begin_player_talk_response(
 		_show_talk_menu("No responses are configured for this NPC.")
 		return
 
+	var context := {
+		"npc_name": _get_npc_label(target_npc),
+		"target_name": String(gossip_subject.get("label", "someone")),
+	}
 	var repeat_key := "%s|%s" % [String(_get_npc_id(target_npc)), String(category)]
 	var previous_dialogue_id := StringName(_last_player_talk_dialogue_ids.get(repeat_key, &""))
-	var template := profile.choose_response(category, _player_talk_rng, previous_dialogue_id)
-	if template == null:
+	var current_love := -1.0
+	if category == NpcPlayerTalkDialogueProfile.CATEGORY_FLIRT:
+		current_love = _get_relationship_opinion_metric(target_npc, &"love", 0.0)
+	var definition := profile.instantiate_response(
+		category,
+		_player_talk_rng,
+		previous_dialogue_id,
+		context,
+		current_love
+	)
+	if definition == null:
 		interaction_blocked.emit(
 			player, target_npc, selected_interaction_id, "player_talk_response_missing"
 		)
 		_show_talk_menu("That kind of conversation is unavailable.")
 		return
-	var context := {
-		"npc_name": _get_npc_label(target_npc),
-		"target_name": String(gossip_subject.get("label", "someone")),
-	}
-	var definition := template.instantiate_with_context(context)
-	if definition == null or not definition.get_validation_error().is_empty():
+	if not definition.get_validation_error().is_empty():
 		interaction_blocked.emit(
 			player, target_npc, selected_interaction_id, "player_talk_response_invalid"
 		)
@@ -641,6 +649,11 @@ func _begin_player_talk_response(
 		"target_ref": weakref(target_npc),
 		"dialogue_session_id": &"",
 		"choice_opinion_metrics": {},
+		"love_gate": (
+			NpcPlayerTalkDialogueProfile.get_flirt_love_gate_index(current_love)
+			if current_love >= 0.0
+			else -1
+		),
 	}
 	if not talk_state.talk_started.is_connected(_on_player_talk_started):
 		talk_state.talk_started.connect(_on_player_talk_started)
@@ -758,7 +771,11 @@ func _on_player_talk_choice_committed(
 		if not is_finite(amount):
 			continue
 		resolved_metrics[String(metric)] = true
-		if not is_zero_approx(amount):
+		var is_flirt_love := (
+			StringName(_active_player_talk.get("interaction_id", &"")) == &"talk_flirt"
+			and metric == &"love"
+		)
+		if not is_zero_approx(amount) or is_flirt_love:
 			opinion_delta[String(metric)] = amount
 	_active_player_talk["choice_opinion_metrics"] = resolved_metrics
 	if opinion_delta.is_empty():
@@ -768,6 +785,7 @@ func _on_player_talk_choice_committed(
 	if target_npc == null:
 		return
 	if StringName(_active_player_talk.get("interaction_id", &"")) == &"talk_flirt":
+		opinion_delta = _apply_flirt_favor_modifier(target_npc, opinion_delta)
 		opinion_delta = _limit_flirt_love_gain(
 			target_npc,
 			opinion_delta,
@@ -1055,6 +1073,8 @@ func _apply_interaction_effects(
 	effect_interaction_id: StringName
 ) -> void:
 	_mark_player_npc_met(target_npc, effect_interaction_id)
+	if effect_interaction_id == &"talk_flirt":
+		effect_delta = _apply_flirt_favor_modifier(target_npc, effect_delta)
 	effect_delta = _limit_flirt_love_gain(
 		target_npc,
 		effect_delta,
@@ -1156,6 +1176,57 @@ func _limit_flirt_love_gain(
 	if is_zero_approx(float(limited_delta["love"])):
 		limited_delta.erase("love")
 	return limited_delta
+
+
+func _apply_flirt_favor_modifier(
+	target_npc: Node2D,
+	opinion_delta: Dictionary
+) -> Dictionary:
+	var modified_delta := opinion_delta.duplicate(true)
+	if not modified_delta.has("love"):
+		return modified_delta
+	var current_favor := _get_relationship_opinion_metric(
+		target_npc,
+		&"favor",
+		50.0
+	)
+	var resolved_love_delta := resolve_flirt_love_delta(
+		float(modified_delta["love"]),
+		current_favor
+	)
+	if is_zero_approx(resolved_love_delta):
+		modified_delta.erase("love")
+	else:
+		modified_delta["love"] = resolved_love_delta
+	return modified_delta
+
+
+static func resolve_flirt_love_delta(authored_delta: float, favor: float) -> float:
+	var safe_favor := clampf(favor, 0.0, 100.0)
+	if safe_favor <= 10.0:
+		return authored_delta - 2.0
+	if safe_favor < 40.0:
+		return authored_delta - 1.0
+	if safe_favor > 70.0 and authored_delta > 0.0:
+		return authored_delta * 2.0
+	return authored_delta
+
+
+func _get_relationship_opinion_metric(
+	target_npc: Node2D,
+	metric_id: StringName,
+	fallback: float
+) -> float:
+	var relationships := _get_relationship_system()
+	if relationships == null or not relationships.has_method("get_opinion_metric"):
+		return fallback
+	return float(relationships.call(
+		"get_opinion_metric",
+		target_npc,
+		player,
+		metric_id,
+		fallback
+	))
 
 
 func _request_social_interaction_acceptance(

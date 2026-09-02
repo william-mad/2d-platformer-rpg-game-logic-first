@@ -1,0 +1,90 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_sincere"]
+script = ExtResource("3_choice")
+choice_id = &"sincere"
+text = "Tell them you meant the compliment."
+next_node_id = &"reply_sincere"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 1.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_dismissive"]
+script = ExtResource("3_choice")
+choice_id = &"dismissive"
+text = "Say they are reading too much into it."
+next_node_id = &"reply_dismissive"
+consequences = {
+"player_talk_opinion_delta": {
+"love": -1.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_cautious"]
+script = ExtResource("3_choice")
+choice_id = &"cautious"
+text = "Admit you are not sure yet."
+next_node_id = &"reply_cautious"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 0.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_bold"]
+script = ExtResource("3_choice")
+choice_id = &"bold"
+text = "Say you wanted them to notice you."
+next_node_id = &"reply_bold"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 2.0
+}
+}
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"npc"
+speaker_text = "That sounded almost like flirting. Were you serious?"
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_sincere"), SubResource("Choice_dismissive"), SubResource("Choice_cautious"), SubResource("Choice_bold")])
+
+[sub_resource type="Resource" id="Node_reply_sincere"]
+script = ExtResource("2_node")
+node_id = &"reply_sincere"
+speaker_id = &"npc"
+speaker_text = "Then thank you. I wasn't sure how to take it, but I'm glad you said it."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_dismissive"]
+script = ExtResource("2_node")
+node_id = &"reply_dismissive"
+speaker_id = &"npc"
+speaker_text = "Right. I won't make that mistake again."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_cautious"]
+script = ExtResource("2_node")
+node_id = &"reply_cautious"
+speaker_id = &"npc"
+speaker_text = "Fair enough. We can leave it there for now."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_bold"]
+script = ExtResource("2_node")
+node_id = &"reply_bold"
+speaker_id = &"npc"
+speaker_text = "I noticed. Just don't rush me."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"dating_flirt_gate_00_10"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_reply_sincere"), SubResource("Node_reply_dismissive"), SubResource("Node_reply_cautious"), SubResource("Node_reply_bold")])

@@ -6,6 +6,19 @@ const CATEGORY_COMPLIMENT := &"compliment"
 const CATEGORY_FLIRT := &"flirt"
 const CATEGORY_INSULT := &"insult"
 const CATEGORY_GOSSIP := &"gossip"
+const FLIRT_LOVE_GATE_COUNT := 10
+const DEFAULT_FLIRT_LOVE_GATE_RESPONSES: Array[DialogueDefinition] = [
+	preload("res://data/dialogue/dating_flirt_gate_00_10.tres"),
+	preload("res://data/dialogue/dating_flirt_gate_11_20.tres"),
+	preload("res://data/dialogue/dating_flirt_gate_21_30.tres"),
+	preload("res://data/dialogue/dating_flirt_gate_31_40.tres"),
+	preload("res://data/dialogue/dating_flirt_gate_41_50.tres"),
+	preload("res://data/dialogue/dating_flirt_gate_51_60.tres"),
+	preload("res://data/dialogue/dating_flirt_gate_61_70.tres"),
+	preload("res://data/dialogue/dating_flirt_gate_71_80.tres"),
+	preload("res://data/dialogue/dating_flirt_gate_81_90.tres"),
+	preload("res://data/dialogue/dating_flirt_gate_91_100.tres"),
+]
 const REQUIRED_CATEGORIES: Array[StringName] = [
 	CATEGORY_CASUAL,
 	CATEGORY_COMPLIMENT,
@@ -23,6 +36,10 @@ const REQUIRED_CATEGORIES: Array[StringName] = [
 @export var casual_responses: Array[DialogueDefinition] = []
 @export var compliment_responses: Array[DialogueDefinition] = []
 @export var flirt_responses: Array[DialogueDefinition] = []
+## Optional character-specific replacements for the ten default dating gates.
+## Empty profiles inherit the shared ladder, so every current and future NPC
+## receives gated Flirt dialogue without duplicating the same resources.
+@export var flirt_love_gate_responses: Array[DialogueDefinition] = []
 @export var insult_responses: Array[DialogueDefinition] = []
 @export var gossip_responses: Array[DialogueDefinition] = []
 ## Optional Talk-owned dialogue grouped by contextual purpose/reason. Reprimands
@@ -36,10 +53,14 @@ const REQUIRED_CATEGORIES: Array[StringName] = [
 func choose_response(
 	category: StringName,
 	rng: RandomNumberGenerator,
-	previous_dialogue_id: StringName = &""
+	previous_dialogue_id: StringName = &"",
+	current_love: float = -1.0
 ) -> DialogueDefinition:
 	var valid_responses: Array[DialogueDefinition] = []
-	for definition in get_responses(category):
+	var response_pool := get_responses(category)
+	if category == CATEGORY_FLIRT and current_love >= 0.0:
+		response_pool = get_flirt_love_gate_responses(current_love)
+	for definition in response_pool:
 		if definition == null or not definition.get_validation_error().is_empty():
 			continue
 		valid_responses.append(definition)
@@ -66,10 +87,74 @@ func instantiate_response(
 	category: StringName,
 	rng: RandomNumberGenerator,
 	previous_dialogue_id: StringName = &"",
-	context: Dictionary = {}
+	context: Dictionary = {},
+	current_love: float = -1.0
 ) -> DialogueDefinition:
-	var template := choose_response(category, rng, previous_dialogue_id)
-	return template.instantiate_with_context(context) if template != null else null
+	var template := choose_response(
+		category,
+		rng,
+		previous_dialogue_id,
+		current_love
+	)
+	if template == null:
+		return null
+	var instance := template.instantiate_with_context(context)
+	_rebind_generic_speaker_ids(instance)
+	if category == CATEGORY_FLIRT and current_love >= 0.0:
+		_shuffle_entry_choices(instance, rng)
+	return instance
+
+
+func get_flirt_love_gate_responses(current_love: float) -> Array[DialogueDefinition]:
+	var gates := (
+		flirt_love_gate_responses
+		if not flirt_love_gate_responses.is_empty()
+		else DEFAULT_FLIRT_LOVE_GATE_RESPONSES
+	)
+	var gate_index := get_flirt_love_gate_index(current_love)
+	if gate_index < 0 or gate_index >= gates.size():
+		return []
+	return [gates[gate_index]]
+
+
+static func get_flirt_love_gate_index(current_love: float) -> int:
+	var safe_love := clampf(current_love, 0.0, 100.0)
+	var whole_love := floori(safe_love)
+	if whole_love <= 10:
+		return 0
+	return clampi(int(float(whole_love - 1) / 10.0), 1, FLIRT_LOVE_GATE_COUNT - 1)
+
+
+func _rebind_generic_speaker_ids(definition: DialogueDefinition) -> void:
+	if definition == null:
+		return
+	for dialogue_node in definition.nodes:
+		if dialogue_node == null:
+			continue
+		if dialogue_node.speaker_id == &"npc":
+			dialogue_node.speaker_id = speaker_id
+		elif dialogue_node.speaker_id == &"player":
+			dialogue_node.speaker_id = player_speaker_id
+
+
+func _shuffle_entry_choices(
+	definition: DialogueDefinition,
+	rng: RandomNumberGenerator
+) -> void:
+	if definition == null:
+		return
+	var entry := definition.get_node(definition.entry_node_id)
+	if entry == null or entry.choices.size() < 2:
+		return
+	var selection_rng := rng
+	if selection_rng == null:
+		selection_rng = RandomNumberGenerator.new()
+		selection_rng.randomize()
+	for index in range(entry.choices.size() - 1, 0, -1):
+		var swap_index := selection_rng.randi_range(0, index)
+		var held_choice := entry.choices[index]
+		entry.choices[index] = entry.choices[swap_index]
+		entry.choices[swap_index] = held_choice
 
 
 func choose_reprimand_response(
@@ -190,6 +275,22 @@ func get_validation_error() -> String:
 			if dialogue_ids.has(definition.dialogue_id):
 				return "player_talk_dialogue_id_duplicate"
 			dialogue_ids[definition.dialogue_id] = true
+	var dating_gates := (
+		flirt_love_gate_responses
+		if not flirt_love_gate_responses.is_empty()
+		else DEFAULT_FLIRT_LOVE_GATE_RESPONSES
+	)
+	if dating_gates.size() != FLIRT_LOVE_GATE_COUNT:
+		return "player_talk_flirt_love_gate_count_invalid"
+	for gate_definition in dating_gates:
+		if gate_definition == null:
+			return "player_talk_flirt_love_gate_missing"
+		var gate_error := gate_definition.get_validation_error()
+		if not gate_error.is_empty():
+			return gate_error
+		if dialogue_ids.has(gate_definition.dialogue_id):
+			return "player_talk_dialogue_id_duplicate"
+		dialogue_ids[gate_definition.dialogue_id] = true
 	for reason_value in reprimand_responses.keys():
 		var reason := String(reason_value).strip_edges()
 		if reason.is_empty():

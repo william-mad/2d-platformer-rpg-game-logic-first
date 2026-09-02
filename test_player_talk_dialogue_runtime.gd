@@ -255,6 +255,7 @@ func _test_flirt_choice_effects(
 	relationships.call(
 		"set_opinion_metric", mom, player, &"love", 57.0, "flirt_choice_test_setup"
 	)
+	var choice_ids: Array[StringName] = [&"sincere", &"dismissive", &"cautious", &"bold"]
 	var expected_after_choice := [58.0, 57.0, 57.0, 59.0]
 	var expected_cue_text := ["+1", "-1", "", "+2"]
 	for choice_index in 4:
@@ -268,12 +269,16 @@ func _test_flirt_choice_effects(
 		_expect(bool(controller.call("is_dialogue_active")), "Flirt choice case %d opens dialogue" % choice_index)
 		var entry := controller.get("current_node") as DialogueNode
 		_expect(entry != null and entry.choices.size() == 4, "Flirt choice case %d exposes all outcomes" % choice_index)
-		if entry == null or entry.choices.size() <= choice_index:
+		if entry == null:
+			continue
+		var selected_choice := entry.get_choice(choice_ids[choice_index])
+		_expect(selected_choice != null, "Flirt choice case %d remains available after shuffling" % choice_index)
+		if selected_choice == null:
 			continue
 		var love_before := float(relationships.call(
 			"get_opinion_metric", mom, player, &"love", 0.0
 		))
-		controller.call("choose", entry.choices[choice_index].choice_id)
+		controller.call("choose", selected_choice.choice_id)
 		_expect_close(
 			float(relationships.call("get_opinion_metric", mom, player, &"love", 0.0)),
 			expected_after_choice[choice_index],
