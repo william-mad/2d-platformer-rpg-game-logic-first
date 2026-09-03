@@ -729,11 +729,13 @@ func _begin_player_talk_response(
 			if current_love >= 0.0
 			else -1
 		),
+		"portrait_love": current_love,
 		"anger_gate": (
 			NpcPlayerTalkDialogueProfile.get_insult_anger_gate_index(current_anger)
 			if current_anger >= 0.0
 			else -1
 		),
+		"portrait_anger": current_anger,
 	}
 	if not talk_state.talk_started.is_connected(_on_player_talk_started):
 		talk_state.talk_started.connect(_on_player_talk_started)
@@ -799,7 +801,13 @@ func _on_player_talk_started(_talker: Node2D, partner: Node2D) -> void:
 		target_npc,
 		definition,
 		speaker_names,
-		_get_player_talk_portrait_presentation(target_npc, profile)
+		_get_player_talk_portrait_presentation(
+			target_npc,
+			profile,
+			StringName(_active_player_talk.get("category", &"")),
+			float(_active_player_talk.get("portrait_love", -1.0)),
+			float(_active_player_talk.get("portrait_anger", -1.0))
+		)
 	)
 	if not bool(result.get("accepted", false)):
 		_fail_active_player_talk(
@@ -1058,9 +1066,16 @@ func _get_player_talk_dialogue_profile(
 
 func _get_player_talk_portrait_presentation(
 	target_npc: Node,
-	profile: NpcPlayerTalkDialogueProfile
+	profile: NpcPlayerTalkDialogueProfile,
+	category: StringName = &"",
+	current_love: float = -1.0,
+	current_anger: float = -1.0
 ) -> Dictionary:
-	var presentation := profile.get_portrait_presentation()
+	var presentation := profile.get_portrait_presentation(
+		category,
+		current_love,
+		current_anger
+	)
 	if presentation.get("portrait", null) is Texture2D:
 		return presentation
 

@@ -61,6 +61,13 @@ const REQUIRED_CATEGORIES: Array[StringName] = [
 @export var player_speaker_name: String = "Player"
 @export var portrait: Texture2D
 @export var portrait_animation: DialoguePortraitAnimationProfile
+## Optional expression ladders selected once when a player-owned dialogue opens.
+## Thresholds are ascending opinion values and must pair one-for-one with the
+## textures. Empty ladders preserve the profile's normal portrait/animation.
+@export var flirt_portrait_thresholds: PackedFloat32Array = PackedFloat32Array()
+@export var flirt_portraits: Array[Texture2D] = []
+@export var insult_portrait_thresholds: PackedFloat32Array = PackedFloat32Array()
+@export var insult_portraits: Array[Texture2D] = []
 @export var casual_responses: Array[DialogueDefinition] = []
 @export var compliment_responses: Array[DialogueDefinition] = []
 @export var flirt_responses: Array[DialogueDefinition] = []
@@ -397,13 +404,72 @@ func get_speaker_names() -> Dictionary:
 	}
 
 
-func get_portrait_presentation() -> Dictionary:
+func get_portrait_presentation(
+	category: StringName = &"",
+	current_love: float = -1.0,
+	current_anger: float = -1.0
+) -> Dictionary:
+	var selected_portrait := portrait
+	var selected_animation := portrait_animation
+	var expression_portrait: Texture2D = null
+	if category == CATEGORY_FLIRT and current_love >= 0.0:
+		expression_portrait = _get_escalating_portrait(
+			flirt_portrait_thresholds,
+			flirt_portraits,
+			current_love
+		)
+	elif category == CATEGORY_INSULT and current_anger >= 0.0:
+		expression_portrait = _get_escalating_portrait(
+			insult_portrait_thresholds,
+			insult_portraits,
+			current_anger
+		)
+	if expression_portrait != null:
+		selected_portrait = expression_portrait
+		# Base blink/talk overlays are pose-specific. A mismatched overlay is worse
+		# than a static expressive portrait, so variants deliberately disable it.
+		selected_animation = null
 	return {
-		"portrait": portrait,
-		"portrait_animation": portrait_animation,
+		"portrait": selected_portrait,
+		"portrait_animation": selected_animation,
 		"speaker_id": speaker_id,
 		"player_speaker_id": player_speaker_id,
 	}
+
+
+func _get_escalating_portrait(
+	thresholds: PackedFloat32Array,
+	textures: Array[Texture2D],
+	metric_value: float
+) -> Texture2D:
+	if thresholds.is_empty() or thresholds.size() != textures.size():
+		return null
+	var selected: Texture2D = null
+	for index in thresholds.size():
+		if metric_value < float(thresholds[index]):
+			break
+		selected = textures[index]
+	return selected
+
+
+func _get_portrait_ladder_validation_error(
+	label: String,
+	thresholds: PackedFloat32Array,
+	textures: Array[Texture2D]
+) -> String:
+	if thresholds.is_empty() and textures.is_empty():
+		return ""
+	if thresholds.size() != textures.size() or textures.is_empty():
+		return "player_talk_%s_portrait_ladder_size_invalid" % label
+	for index in thresholds.size():
+		var threshold := float(thresholds[index])
+		if threshold < 0.0 or threshold > 100.0:
+			return "player_talk_%s_portrait_threshold_invalid" % label
+		if index > 0 and threshold <= float(thresholds[index - 1]):
+			return "player_talk_%s_portrait_threshold_order_invalid" % label
+		if textures[index] == null:
+			return "player_talk_%s_portrait_missing" % label
+	return ""
 
 
 func get_validation_error() -> String:
@@ -421,6 +487,20 @@ func get_validation_error() -> String:
 		var animation_error := portrait_animation.get_validation_error()
 		if not animation_error.is_empty():
 			return animation_error
+	var flirt_portrait_error := _get_portrait_ladder_validation_error(
+		"flirt",
+		flirt_portrait_thresholds,
+		flirt_portraits
+	)
+	if not flirt_portrait_error.is_empty():
+		return flirt_portrait_error
+	var insult_portrait_error := _get_portrait_ladder_validation_error(
+		"insult",
+		insult_portrait_thresholds,
+		insult_portraits
+	)
+	if not insult_portrait_error.is_empty():
+		return insult_portrait_error
 
 	var dialogue_ids: Dictionary = {}
 	for category in REQUIRED_CATEGORIES:

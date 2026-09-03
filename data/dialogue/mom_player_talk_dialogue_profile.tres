@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="NpcPlayerTalkDialogueProfile" load_steps=20 format=3]
+[gd_resource type="Resource" script_class="NpcPlayerTalkDialogueProfile" load_steps=31 format=3]
 
 [ext_resource type="Script" path="res://scripts/resources/dialogue/npc_player_talk_dialogue_profile.gd" id="1_profile"]
 [ext_resource type="Texture2D" path="res://images/dialog/mom/portrait_2_mom.png" id="2_portrait"]
@@ -19,6 +19,17 @@
 [ext_resource type="Resource" path="res://data/dialogue/mom_reprimand_false_monster_alarm_running.tres" id="17_false_alarm_a"]
 [ext_resource type="Resource" path="res://data/dialogue/mom_reprimand_false_monster_alarm_empty.tres" id="18_false_alarm_b"]
 [ext_resource type="Resource" path="res://data/dialogue/mom_dialogue_portrait_animation.tres" id="19_portrait_animation"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/escalation/mom_love_00_20.png" id="20_love_00_20"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/escalation/mom_love_21_40.png" id="21_love_21_40"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/escalation/mom_love_41_60.png" id="22_love_41_60"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/escalation/mom_love_61_80.png" id="23_love_61_80"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/escalation/mom_love_81_100.png" id="24_love_81_100"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/escalation/mom_anger_00_19.png" id="25_anger_00_19"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/escalation/mom_anger_20_39.png" id="26_anger_20_39"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/escalation/mom_anger_40_59.png" id="27_anger_40_59"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/escalation/mom_anger_60_79.png" id="28_anger_60_79"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/escalation/mom_anger_80_89.png" id="29_anger_80_89"]
+[ext_resource type="Texture2D" path="res://images/dialog/mom/escalation/mom_anger_90_100.png" id="30_anger_90_100"]
 
 [resource]
 script = ExtResource("1_profile")
@@ -29,6 +40,10 @@ player_speaker_id = &"player"
 player_speaker_name = "Player"
 portrait = ExtResource("2_portrait")
 portrait_animation = ExtResource("19_portrait_animation")
+flirt_portrait_thresholds = PackedFloat32Array(0, 21, 41, 61, 81)
+flirt_portraits = Array[Texture2D]([ExtResource("20_love_00_20"), ExtResource("21_love_21_40"), ExtResource("22_love_41_60"), ExtResource("23_love_61_80"), ExtResource("24_love_81_100")])
+insult_portrait_thresholds = PackedFloat32Array(0, 20, 40, 60, 80, 90)
+insult_portraits = Array[Texture2D]([ExtResource("25_anger_00_19"), ExtResource("26_anger_20_39"), ExtResource("27_anger_40_59"), ExtResource("28_anger_60_79"), ExtResource("29_anger_80_89"), ExtResource("30_anger_90_100")])
 casual_responses = Array[ExtResource("3_casual_a")]([ExtResource("3_casual_a"), ExtResource("4_casual_b")])
 compliment_responses = Array[ExtResource("5_compliment_a")]([ExtResource("5_compliment_a"), ExtResource("6_compliment_b")])
 flirt_responses = Array[ExtResource("7_flirt_a")]([ExtResource("7_flirt_a"), ExtResource("8_flirt_b")])

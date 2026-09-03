@@ -68,6 +68,71 @@ func test_love_boundaries_select_the_requested_successive_gates() -> void:
 		)
 
 
+func test_mom_expression_portraits_follow_love_and_anger_once_per_dialogue() -> void:
+	var neutral := MOM_PROFILE.get_portrait_presentation()
+	assert_eq(neutral.get("portrait"), MOM_PROFILE.portrait, "normal Talk keeps Mom's base portrait")
+	assert_eq(
+		neutral.get("portrait_animation"),
+		MOM_PROFILE.portrait_animation,
+		"normal Talk keeps Mom's blink and mouth animation"
+	)
+
+	var love_cases := [
+		[0.0, "mom_love_00_20.png"],
+		[20.99, "mom_love_00_20.png"],
+		[21.0, "mom_love_21_40.png"],
+		[41.0, "mom_love_41_60.png"],
+		[61.0, "mom_love_61_80.png"],
+		[81.0, "mom_love_81_100.png"],
+		[100.0, "mom_love_81_100.png"],
+	]
+	for portrait_case in love_cases:
+		var presentation := MOM_PROFILE.get_portrait_presentation(
+			NpcPlayerTalkDialogueProfile.CATEGORY_FLIRT,
+			float(portrait_case[0]),
+			-1.0
+		)
+		var texture := presentation.get("portrait") as Texture2D
+		assert_not_null(texture, "love %.2f should have a Mom portrait" % float(portrait_case[0]))
+		if texture != null:
+			assert_true(
+				texture.resource_path.ends_with(String(portrait_case[1])),
+				"love %.2f should select %s" % portrait_case
+			)
+		assert_null(
+			presentation.get("portrait_animation"),
+			"expression portraits should not reuse misaligned base overlays"
+		)
+
+	var anger_cases := [
+		[0.0, "mom_anger_00_19.png"],
+		[19.99, "mom_anger_00_19.png"],
+		[20.0, "mom_anger_20_39.png"],
+		[40.0, "mom_anger_40_59.png"],
+		[60.0, "mom_anger_60_79.png"],
+		[80.0, "mom_anger_80_89.png"],
+		[90.0, "mom_anger_90_100.png"],
+		[94.99, "mom_anger_90_100.png"],
+	]
+	for portrait_case in anger_cases:
+		var presentation := MOM_PROFILE.get_portrait_presentation(
+			NpcPlayerTalkDialogueProfile.CATEGORY_INSULT,
+			-1.0,
+			float(portrait_case[0])
+		)
+		var texture := presentation.get("portrait") as Texture2D
+		assert_not_null(texture, "anger %.2f should have a Mom portrait" % float(portrait_case[0]))
+		if texture != null:
+			assert_true(
+				texture.resource_path.ends_with(String(portrait_case[1])),
+				"anger %.2f should select %s" % portrait_case
+			)
+		assert_null(
+			presentation.get("portrait_animation"),
+			"anger portraits should not reuse misaligned base overlays"
+		)
+
+
 func test_each_gate_builds_four_shuffled_answers_with_all_outcomes() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 81723

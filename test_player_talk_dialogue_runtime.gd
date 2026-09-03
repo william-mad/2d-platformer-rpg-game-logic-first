@@ -275,6 +275,23 @@ func _test_flirt_choice_effects(
 		_open_talk_category_menu(interactor)
 		interactor.call("_handle_talk_option", 2)
 		_expect(bool(controller.call("is_dialogue_active")), "Flirt choice case %d opens dialogue" % choice_index)
+		if choice_index == 0:
+			var profile := mom.player_talk_dialogue_profile as NpcPlayerTalkDialogueProfile
+			var expected_portrait := profile.get_portrait_presentation(
+				NpcPlayerTalkDialogueProfile.CATEGORY_FLIRT,
+				57.0,
+				-1.0
+			)
+			_expect(
+				dialogue_ui.portrait_texture.texture == expected_portrait.get("portrait"),
+				"Flirt opens with Mom's love-stage portrait"
+			)
+			_expect(
+				not bool(dialogue_ui.portrait_presenter.get_portrait_animation_report().get(
+					"configured", true
+				)),
+				"pose variants disable the base portrait's misaligned overlays"
+			)
 		var entry := controller.get("current_node") as DialogueNode
 		_expect(entry != null and entry.choices.size() == 4, "Flirt choice case %d exposes all outcomes" % choice_index)
 		if entry == null:
