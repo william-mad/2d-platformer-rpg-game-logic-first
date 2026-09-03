@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="NpcPlayerTalkDialogueProfile" load_steps=8 format=3]
+[gd_resource type="Resource" script_class="NpcPlayerTalkDialogueProfile" load_steps=19 format=3]
 
 [ext_resource type="Script" path="res://scripts/resources/dialogue/npc_player_talk_dialogue_profile.gd" id="1_profile"]
 [ext_resource type="Resource" path="res://data/dialogue/maid_player_talk_casual.tres" id="2_casual"]
@@ -6,6 +6,17 @@
 [ext_resource type="Resource" path="res://data/dialogue/maid_player_talk_flirt.tres" id="4_flirt"]
 [ext_resource type="Resource" path="res://data/dialogue/generic_player_talk_insult.tres" id="5_insult"]
 [ext_resource type="Resource" path="res://data/dialogue/generic_player_talk_gossip.tres" id="6_gossip"]
+[ext_resource type="Texture2D" path="res://images/dialog/maid/escalation/maid_love_00_10.png" id="7_love_00_10"]
+[ext_resource type="Texture2D" path="res://images/dialog/maid/escalation/maid_love_11_20.png" id="8_love_11_20"]
+[ext_resource type="Texture2D" path="res://images/dialog/maid/escalation/maid_love_21_40.png" id="9_love_21_40"]
+[ext_resource type="Texture2D" path="res://images/dialog/maid/escalation/maid_love_41_60.png" id="10_love_41_60"]
+[ext_resource type="Texture2D" path="res://images/dialog/maid/escalation/maid_love_61_80.png" id="11_love_61_80"]
+[ext_resource type="Texture2D" path="res://images/dialog/maid/escalation/maid_love_81_90.png" id="12_love_81_90"]
+[ext_resource type="Texture2D" path="res://images/dialog/maid/escalation/maid_love_91_100.png" id="13_love_91_100"]
+[ext_resource type="Texture2D" path="res://images/dialog/maid/escalation/maid_anger_00_29.png" id="14_anger_00_29"]
+[ext_resource type="Texture2D" path="res://images/dialog/maid/escalation/maid_anger_30_59.png" id="15_anger_30_59"]
+[ext_resource type="Texture2D" path="res://images/dialog/maid/escalation/maid_anger_60_79.png" id="16_anger_60_79"]
+[ext_resource type="Texture2D" path="res://images/dialog/maid/escalation/maid_anger_80_100.png" id="17_anger_80_100"]
 
 [resource]
 script = ExtResource("1_profile")
@@ -14,6 +25,10 @@ speaker_name = "Maid"
 dialogue_gender = "female"
 player_speaker_id = &"player"
 player_speaker_name = "Player"
+flirt_portrait_thresholds = PackedFloat32Array(0, 11, 21, 41, 61, 81, 91)
+flirt_portraits = Array[Texture2D]([ExtResource("7_love_00_10"), ExtResource("8_love_11_20"), ExtResource("9_love_21_40"), ExtResource("10_love_41_60"), ExtResource("11_love_61_80"), ExtResource("12_love_81_90"), ExtResource("13_love_91_100")])
+insult_portrait_thresholds = PackedFloat32Array(0, 30, 60, 80)
+insult_portraits = Array[Texture2D]([ExtResource("14_anger_00_29"), ExtResource("15_anger_30_59"), ExtResource("16_anger_60_79"), ExtResource("17_anger_80_100")])
 casual_responses = Array[ExtResource("2_casual")]([ExtResource("2_casual")])
 compliment_responses = Array[ExtResource("3_compliment")]([ExtResource("3_compliment")])
 flirt_responses = Array[ExtResource("4_flirt")]([ExtResource("4_flirt")])
