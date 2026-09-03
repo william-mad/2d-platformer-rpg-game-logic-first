@@ -1,0 +1,97 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_best"]
+script = ExtResource("3_choice")
+choice_id = &"best"
+text = "Say the new knot sits a little softer against her collar."
+next_node_id = &"reply_best"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 2.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_warm"]
+script = ExtResource("3_choice")
+choice_id = &"warm"
+text = "Say she seems more at ease today."
+next_node_id = &"reply_warm"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 1.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_neutral"]
+script = ExtResource("3_choice")
+choice_id = &"neutral"
+text = "Say the whole outfit looked different somehow."
+next_node_id = &"reply_neutral"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 0.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_bad"]
+script = ExtResource("3_choice")
+choice_id = &"bad"
+text = "Admit you never noticed the ribbon at all."
+next_node_id = &"reply_bad"
+consequences = {
+"player_talk_opinion_delta": {
+"love": -1.0
+}
+}
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"mom"
+speaker_text = "You noticed I changed the white ribbon at my neck."
+next_node_id = &"question"
+
+[sub_resource type="Resource" id="Node_question"]
+script = ExtResource("2_node")
+node_id = &"question"
+speaker_id = &"mom"
+speaker_text = "Most people look at me without seeing details. What did you actually notice?"
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_best"), SubResource("Choice_warm"), SubResource("Choice_neutral"), SubResource("Choice_bad")])
+
+[sub_resource type="Resource" id="Node_reply_best"]
+script = ExtResource("2_node")
+node_id = &"reply_best"
+speaker_id = &"mom"
+speaker_text = "You really did notice. That is dangerously effective."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_warm"]
+script = ExtResource("2_node")
+node_id = &"reply_warm"
+speaker_id = &"mom"
+speaker_text = "That is not the ribbon, but it may be the better answer."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_neutral"]
+script = ExtResource("2_node")
+node_id = &"reply_neutral"
+speaker_id = &"mom"
+speaker_text = "Vague, but not entirely hopeless."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_bad"]
+script = ExtResource("2_node")
+node_id = &"reply_bad"
+speaker_id = &"mom"
+speaker_text = "Then next time, look with a little more care."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"mom_flirt_11_20_v4"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_question"), SubResource("Node_reply_best"), SubResource("Node_reply_warm"), SubResource("Node_reply_neutral"), SubResource("Node_reply_bad")])

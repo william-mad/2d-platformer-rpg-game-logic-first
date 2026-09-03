@@ -1,0 +1,104 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_best"]
+script = ExtResource("3_choice")
+choice_id = &"best"
+text = "Take it gently and let her set the pace."
+next_node_id = &"reply_best"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 2.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_warm"]
+script = ExtResource("3_choice")
+choice_id = &"warm"
+text = "Ask her for one slow dance."
+next_node_id = &"reply_warm"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 1.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_neutral"]
+script = ExtResource("3_choice")
+choice_id = &"neutral"
+text = "Sit nearby and listen with her."
+next_node_id = &"reply_neutral"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 0.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_bad"]
+script = ExtResource("3_choice")
+choice_id = &"bad"
+text = "Pull her into the fastest song without asking."
+next_node_id = &"reply_bad"
+consequences = {
+"player_talk_opinion_delta": {
+"love": -1.0
+}
+}
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"mom"
+speaker_text = "After dinner, when everyone settles down, I like slow piano music."
+next_node_id = &"setup_2"
+
+[sub_resource type="Resource" id="Node_setup_2"]
+script = ExtResource("2_node")
+node_id = &"setup_2"
+speaker_id = &"mom"
+speaker_text = "Not dancing. Not usually."
+next_node_id = &"question"
+
+[sub_resource type="Resource" id="Node_question"]
+script = ExtResource("2_node")
+node_id = &"question"
+speaker_id = &"mom"
+speaker_text = "What would you do if I held out my hand?"
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_best"), SubResource("Choice_warm"), SubResource("Choice_neutral"), SubResource("Choice_bad")])
+
+[sub_resource type="Resource" id="Node_reply_best"]
+script = ExtResource("2_node")
+node_id = &"reply_best"
+speaker_id = &"mom"
+speaker_text = "Then perhaps 'not usually' can make an exception."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_warm"]
+script = ExtResource("2_node")
+node_id = &"reply_warm"
+speaker_id = &"mom"
+speaker_text = "One. And you are not allowed to step on me."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_neutral"]
+script = ExtResource("2_node")
+node_id = &"reply_neutral"
+speaker_id = &"mom"
+speaker_text = "Quiet company still counts."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_bad"]
+script = ExtResource("2_node")
+node_id = &"reply_bad"
+speaker_id = &"mom"
+speaker_text = "And that is how you lose the dance before it begins."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"mom_flirt_31_40_v3"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_setup_2"), SubResource("Node_question"), SubResource("Node_reply_best"), SubResource("Node_reply_warm"), SubResource("Node_reply_neutral"), SubResource("Node_reply_bad")])

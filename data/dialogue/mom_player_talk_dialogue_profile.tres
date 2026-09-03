@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="NpcPlayerTalkDialogueProfile" load_steps=31 format=3]
+[gd_resource type="Resource" script_class="NpcPlayerTalkDialogueProfile" load_steps=71 format=3]
 
 [ext_resource type="Script" path="res://scripts/resources/dialogue/npc_player_talk_dialogue_profile.gd" id="1_profile"]
 [ext_resource type="Texture2D" path="res://images/dialog/mom/portrait_2_mom.png" id="2_portrait"]
@@ -30,6 +30,46 @@
 [ext_resource type="Texture2D" path="res://images/dialog/mom/escalation/mom_anger_60_79.png" id="28_anger_60_79"]
 [ext_resource type="Texture2D" path="res://images/dialog/mom/escalation/mom_anger_80_89.png" id="29_anger_80_89"]
 [ext_resource type="Texture2D" path="res://images/dialog/mom/escalation/mom_anger_90_100.png" id="30_anger_90_100"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_00_10_variant_1.tres" id="31_mom_flirt_00_10_v1"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_00_10_variant_2.tres" id="32_mom_flirt_00_10_v2"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_00_10_variant_3.tres" id="33_mom_flirt_00_10_v3"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_00_10_variant_4.tres" id="34_mom_flirt_00_10_v4"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_11_20_variant_1.tres" id="35_mom_flirt_11_20_v1"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_11_20_variant_2.tres" id="36_mom_flirt_11_20_v2"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_11_20_variant_3.tres" id="37_mom_flirt_11_20_v3"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_11_20_variant_4.tres" id="38_mom_flirt_11_20_v4"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_21_30_variant_1.tres" id="39_mom_flirt_21_30_v1"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_21_30_variant_2.tres" id="40_mom_flirt_21_30_v2"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_21_30_variant_3.tres" id="41_mom_flirt_21_30_v3"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_21_30_variant_4.tres" id="42_mom_flirt_21_30_v4"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_31_40_variant_1.tres" id="43_mom_flirt_31_40_v1"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_31_40_variant_2.tres" id="44_mom_flirt_31_40_v2"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_31_40_variant_3.tres" id="45_mom_flirt_31_40_v3"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_31_40_variant_4.tres" id="46_mom_flirt_31_40_v4"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_41_50_variant_1.tres" id="47_mom_flirt_41_50_v1"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_41_50_variant_2.tres" id="48_mom_flirt_41_50_v2"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_41_50_variant_3.tres" id="49_mom_flirt_41_50_v3"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_41_50_variant_4.tres" id="50_mom_flirt_41_50_v4"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_51_60_variant_1.tres" id="51_mom_flirt_51_60_v1"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_51_60_variant_2.tres" id="52_mom_flirt_51_60_v2"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_51_60_variant_3.tres" id="53_mom_flirt_51_60_v3"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_51_60_variant_4.tres" id="54_mom_flirt_51_60_v4"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_61_70_variant_1.tres" id="55_mom_flirt_61_70_v1"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_61_70_variant_2.tres" id="56_mom_flirt_61_70_v2"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_61_70_variant_3.tres" id="57_mom_flirt_61_70_v3"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_61_70_variant_4.tres" id="58_mom_flirt_61_70_v4"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_71_80_variant_1.tres" id="59_mom_flirt_71_80_v1"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_71_80_variant_2.tres" id="60_mom_flirt_71_80_v2"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_71_80_variant_3.tres" id="61_mom_flirt_71_80_v3"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_71_80_variant_4.tres" id="62_mom_flirt_71_80_v4"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_81_90_variant_1.tres" id="63_mom_flirt_81_90_v1"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_81_90_variant_2.tres" id="64_mom_flirt_81_90_v2"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_81_90_variant_3.tres" id="65_mom_flirt_81_90_v3"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_81_90_variant_4.tres" id="66_mom_flirt_81_90_v4"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_91_100_variant_1.tres" id="67_mom_flirt_91_100_v1"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_91_100_variant_2.tres" id="68_mom_flirt_91_100_v2"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_91_100_variant_3.tres" id="69_mom_flirt_91_100_v3"]
+[ext_resource type="Resource" path="res://data/dialogue/mom_flirt/gate_91_100_variant_4.tres" id="70_mom_flirt_91_100_v4"]
 
 [resource]
 script = ExtResource("1_profile")
@@ -42,6 +82,8 @@ portrait = ExtResource("2_portrait")
 portrait_animation = ExtResource("19_portrait_animation")
 flirt_portrait_thresholds = PackedFloat32Array(0, 21, 41, 61, 81)
 flirt_portraits = Array[Texture2D]([ExtResource("20_love_00_20"), ExtResource("21_love_21_40"), ExtResource("22_love_41_60"), ExtResource("23_love_61_80"), ExtResource("24_love_81_100")])
+flirt_love_variants_per_gate = 4
+flirt_love_gate_responses = Array[ExtResource("31_mom_flirt_00_10_v1")]([ExtResource("31_mom_flirt_00_10_v1"), ExtResource("32_mom_flirt_00_10_v2"), ExtResource("33_mom_flirt_00_10_v3"), ExtResource("34_mom_flirt_00_10_v4"), ExtResource("35_mom_flirt_11_20_v1"), ExtResource("36_mom_flirt_11_20_v2"), ExtResource("37_mom_flirt_11_20_v3"), ExtResource("38_mom_flirt_11_20_v4"), ExtResource("39_mom_flirt_21_30_v1"), ExtResource("40_mom_flirt_21_30_v2"), ExtResource("41_mom_flirt_21_30_v3"), ExtResource("42_mom_flirt_21_30_v4"), ExtResource("43_mom_flirt_31_40_v1"), ExtResource("44_mom_flirt_31_40_v2"), ExtResource("45_mom_flirt_31_40_v3"), ExtResource("46_mom_flirt_31_40_v4"), ExtResource("47_mom_flirt_41_50_v1"), ExtResource("48_mom_flirt_41_50_v2"), ExtResource("49_mom_flirt_41_50_v3"), ExtResource("50_mom_flirt_41_50_v4"), ExtResource("51_mom_flirt_51_60_v1"), ExtResource("52_mom_flirt_51_60_v2"), ExtResource("53_mom_flirt_51_60_v3"), ExtResource("54_mom_flirt_51_60_v4"), ExtResource("55_mom_flirt_61_70_v1"), ExtResource("56_mom_flirt_61_70_v2"), ExtResource("57_mom_flirt_61_70_v3"), ExtResource("58_mom_flirt_61_70_v4"), ExtResource("59_mom_flirt_71_80_v1"), ExtResource("60_mom_flirt_71_80_v2"), ExtResource("61_mom_flirt_71_80_v3"), ExtResource("62_mom_flirt_71_80_v4"), ExtResource("63_mom_flirt_81_90_v1"), ExtResource("64_mom_flirt_81_90_v2"), ExtResource("65_mom_flirt_81_90_v3"), ExtResource("66_mom_flirt_81_90_v4"), ExtResource("67_mom_flirt_91_100_v1"), ExtResource("68_mom_flirt_91_100_v2"), ExtResource("69_mom_flirt_91_100_v3"), ExtResource("70_mom_flirt_91_100_v4")])
 insult_portrait_thresholds = PackedFloat32Array(0, 20, 40, 60, 80, 90)
 insult_portraits = Array[Texture2D]([ExtResource("25_anger_00_19"), ExtResource("26_anger_20_39"), ExtResource("27_anger_40_59"), ExtResource("28_anger_60_79"), ExtResource("29_anger_80_89"), ExtResource("30_anger_90_100")])
 casual_responses = Array[ExtResource("3_casual_a")]([ExtResource("3_casual_a"), ExtResource("4_casual_b")])

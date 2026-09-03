@@ -74,6 +74,10 @@ const REQUIRED_CATEGORIES: Array[StringName] = [
 ## Optional character-specific replacements for the ten default dating gates.
 ## Empty profiles inherit the shared ladder, so every current and future NPC
 ## receives gated Flirt dialogue without duplicating the same resources.
+## Custom responses are stored gate-by-gate. Set variants_per_gate above one to
+## let a character randomly choose among several authored conversations at the
+## same love level; selection happens only when dialogue opens.
+@export_range(1, 8, 1) var flirt_love_variants_per_gate: int = 1
 @export var flirt_love_gate_responses: Array[DialogueDefinition] = []
 @export var insult_responses: Array[DialogueDefinition] = []
 ## Empty arrays inherit the shared ten-step ladder. A character can replace the
@@ -168,20 +172,27 @@ func instantiate_response(
 			and current_anger >= 0.0
 		)
 	):
-		_shuffle_entry_choices(instance, rng)
+		_shuffle_first_choice_node(instance, rng)
 	return instance
 
 
 func get_flirt_love_gate_responses(current_love: float) -> Array[DialogueDefinition]:
-	var gates := (
-		flirt_love_gate_responses
-		if not flirt_love_gate_responses.is_empty()
-		else DEFAULT_FLIRT_LOVE_GATE_RESPONSES
-	)
 	var gate_index := get_flirt_love_gate_index(current_love)
-	if gate_index < 0 or gate_index >= gates.size():
+	if gate_index < 0:
 		return []
-	return [gates[gate_index]]
+	if flirt_love_gate_responses.is_empty():
+		if gate_index >= DEFAULT_FLIRT_LOVE_GATE_RESPONSES.size():
+			return []
+		return [DEFAULT_FLIRT_LOVE_GATE_RESPONSES[gate_index]]
+
+	var variants_per_gate := maxi(flirt_love_variants_per_gate, 1)
+	var first_index := gate_index * variants_per_gate
+	if first_index < 0 or first_index + variants_per_gate > flirt_love_gate_responses.size():
+		return []
+	var responses: Array[DialogueDefinition] = []
+	for offset in variants_per_gate:
+		responses.append(flirt_love_gate_responses[first_index + offset])
+	return responses
 
 
 static func get_flirt_love_gate_index(current_love: float) -> int:
@@ -299,24 +310,30 @@ func _rebind_generic_speaker_ids(definition: DialogueDefinition) -> void:
 			dialogue_node.speaker_id = player_speaker_id
 
 
-func _shuffle_entry_choices(
+func _shuffle_first_choice_node(
 	definition: DialogueDefinition,
 	rng: RandomNumberGenerator
 ) -> void:
 	if definition == null:
 		return
-	var entry := definition.get_node(definition.entry_node_id)
-	if entry == null or entry.choices.size() < 2:
+	var choice_node := definition.get_node(definition.entry_node_id)
+	var visited: Dictionary = {}
+	while choice_node != null and choice_node.choices.is_empty():
+		if choice_node.terminal or visited.has(choice_node.node_id):
+			return
+		visited[choice_node.node_id] = true
+		choice_node = definition.get_node(choice_node.next_node_id)
+	if choice_node == null or choice_node.choices.size() < 2:
 		return
 	var selection_rng := rng
 	if selection_rng == null:
 		selection_rng = RandomNumberGenerator.new()
 		selection_rng.randomize()
-	for index in range(entry.choices.size() - 1, 0, -1):
+	for index in range(choice_node.choices.size() - 1, 0, -1):
 		var swap_index := selection_rng.randi_range(0, index)
-		var held_choice := entry.choices[index]
-		entry.choices[index] = entry.choices[swap_index]
-		entry.choices[swap_index] = held_choice
+		var held_choice := choice_node.choices[index]
+		choice_node.choices[index] = choice_node.choices[swap_index]
+		choice_node.choices[swap_index] = held_choice
 
 
 func choose_reprimand_response(
@@ -521,7 +538,12 @@ func get_validation_error() -> String:
 		if not flirt_love_gate_responses.is_empty()
 		else DEFAULT_FLIRT_LOVE_GATE_RESPONSES
 	)
-	if dating_gates.size() != FLIRT_LOVE_GATE_COUNT:
+	if flirt_love_variants_per_gate < 1:
+		return "player_talk_flirt_love_variants_per_gate_invalid"
+	var expected_dating_response_count := FLIRT_LOVE_GATE_COUNT
+	if not flirt_love_gate_responses.is_empty():
+		expected_dating_response_count *= flirt_love_variants_per_gate
+	if dating_gates.size() != expected_dating_response_count:
 		return "player_talk_flirt_love_gate_count_invalid"
 	for gate_definition in dating_gates:
 		if gate_definition == null:

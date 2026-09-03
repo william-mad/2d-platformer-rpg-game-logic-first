@@ -1,0 +1,97 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_best"]
+script = ExtResource("3_choice")
+choice_id = &"best"
+text = "Say her brows soften just before her genuine smile appears."
+next_node_id = &"reply_best"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 2.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_warm"]
+script = ExtResource("3_choice")
+choice_id = &"warm"
+text = "Say her golden hair brightens when she stands near the window."
+next_node_id = &"reply_warm"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 1.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_neutral"]
+script = ExtResource("3_choice")
+choice_id = &"neutral"
+text = "Say she looks nice today."
+next_node_id = &"reply_neutral"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 0.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_bad"]
+script = ExtResource("3_choice")
+choice_id = &"bad"
+text = "Call her generically pretty and wait for applause."
+next_node_id = &"reply_bad"
+consequences = {
+"player_talk_opinion_delta": {
+"love": -1.0
+}
+}
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"mom"
+speaker_text = "You know what embarrasses me? Empty praise."
+next_node_id = &"question"
+
+[sub_resource type="Resource" id="Node_question"]
+script = ExtResource("2_node")
+node_id = &"question"
+speaker_id = &"mom"
+speaker_text = "Tell me something real, or say nothing."
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_best"), SubResource("Choice_warm"), SubResource("Choice_neutral"), SubResource("Choice_bad")])
+
+[sub_resource type="Resource" id="Node_reply_best"]
+script = ExtResource("2_node")
+node_id = &"reply_best"
+speaker_id = &"mom"
+speaker_text = "That is so specific I cannot hide behind modesty. You really see me."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_warm"]
+script = ExtResource("2_node")
+node_id = &"reply_warm"
+speaker_id = &"mom"
+speaker_text = "You make observation sound unfairly charming."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_neutral"]
+script = ExtResource("2_node")
+node_id = &"reply_neutral"
+speaker_id = &"mom"
+speaker_text = "Safe, vague, and almost meaningless."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_bad"]
+script = ExtResource("2_node")
+node_id = &"reply_bad"
+speaker_id = &"mom"
+speaker_text = "I asked for something real, not something convenient."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"mom_flirt_41_50_v2"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_question"), SubResource("Node_reply_best"), SubResource("Node_reply_warm"), SubResource("Node_reply_neutral"), SubResource("Node_reply_bad")])

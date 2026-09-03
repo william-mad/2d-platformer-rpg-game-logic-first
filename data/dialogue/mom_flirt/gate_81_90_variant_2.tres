@@ -1,0 +1,104 @@
+[gd_resource type="Resource" script_class="DialogueDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_definition.gd" id="1_definition"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_node.gd" id="2_node"]
+[ext_resource type="Script" path="res://scripts/resources/dialogue/dialogue_choice.gd" id="3_choice"]
+
+[sub_resource type="Resource" id="Choice_best"]
+script = ExtResource("3_choice")
+choice_id = &"best"
+text = "Apologize softly, then ask whether she wants you to stop looking."
+next_node_id = &"reply_best"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 2.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_warm"]
+script = ExtResource("3_choice")
+choice_id = &"warm"
+text = "Say she has become more interesting than the mystery."
+next_node_id = &"reply_warm"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 1.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_neutral"]
+script = ExtResource("3_choice")
+choice_id = &"neutral"
+text = "Offer to leave her alone with the book."
+next_node_id = &"reply_neutral"
+consequences = {
+"player_talk_opinion_delta": {
+"love": 0.0
+}
+}
+
+[sub_resource type="Resource" id="Choice_bad"]
+script = ExtResource("3_choice")
+choice_id = &"bad"
+text = "Tell her she secretly loves the attention."
+next_node_id = &"reply_bad"
+consequences = {
+"player_talk_opinion_delta": {
+"love": -1.0
+}
+}
+
+[sub_resource type="Resource" id="Node_entry"]
+script = ExtResource("2_node")
+node_id = &"entry"
+speaker_id = &"mom"
+speaker_text = "Your eyes keep making me lose my place."
+next_node_id = &"setup_2"
+
+[sub_resource type="Resource" id="Node_setup_2"]
+script = ExtResource("2_node")
+node_id = &"setup_2"
+speaker_id = &"mom"
+speaker_text = "I have read the same line three times."
+next_node_id = &"question"
+
+[sub_resource type="Resource" id="Node_question"]
+script = ExtResource("2_node")
+node_id = &"question"
+speaker_id = &"mom"
+speaker_text = "Are you going to apologize?"
+choices = Array[ExtResource("3_choice")]([SubResource("Choice_best"), SubResource("Choice_warm"), SubResource("Choice_neutral"), SubResource("Choice_bad")])
+
+[sub_resource type="Resource" id="Node_reply_best"]
+script = ExtResource("2_node")
+node_id = &"reply_best"
+speaker_id = &"mom"
+speaker_text = "No. Do not stop. I only wanted to hear you ask."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_warm"]
+script = ExtResource("2_node")
+node_id = &"reply_warm"
+speaker_id = &"mom"
+speaker_text = "That line should not work as well as it does."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_neutral"]
+script = ExtResource("2_node")
+node_id = &"reply_neutral"
+speaker_id = &"mom"
+speaker_text = "Considerate. Stay until I finish this page."
+terminal = true
+
+[sub_resource type="Resource" id="Node_reply_bad"]
+script = ExtResource("2_node")
+node_id = &"reply_bad"
+speaker_id = &"mom"
+speaker_text = "Do not tell me what I feel. Ask."
+terminal = true
+
+[resource]
+script = ExtResource("1_definition")
+dialogue_id = &"mom_flirt_81_90_v2"
+entry_node_id = &"entry"
+nodes = Array[ExtResource("2_node")]([SubResource("Node_entry"), SubResource("Node_setup_2"), SubResource("Node_question"), SubResource("Node_reply_best"), SubResource("Node_reply_warm"), SubResource("Node_reply_neutral"), SubResource("Node_reply_bad")])
